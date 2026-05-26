@@ -1,0 +1,53 @@
+name: wawa-note
+
+options:
+  bundleIdPrefix: com.wawa-note
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "26.5"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  defaultConfig: Debug
+
+configs:
+  Debug: debug
+  Release: release
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+
+targets:
+  wawa-note:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: wawa-note
+        excludes:
+          - "**/.DS_Store"
+    settings:
+      base:
+        INFOPLIST_FILE: wawa-note/Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: "NO"
+        PRODUCT_BUNDLE_IDENTIFIER: com.wawa-note
+        PRODUCT_NAME: "Wawa Note"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_PREVIEWS: "YES"
+        TARGETED_DEVICE_FAMILY: "1"
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: "NO"
+        SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: "NO"
+
+  wawa-noteTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: wawa-noteTests
+        optional: true
+    dependencies:
+      - target: wawa-note
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: "YES"
+        PRODUCT_BUNDLE_IDENTIFIER: com.wawa-note.tests

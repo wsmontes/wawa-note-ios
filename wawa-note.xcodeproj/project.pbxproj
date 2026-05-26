@@ -1,0 +1,516 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		07A99EC0F9960AA5B7C99E4E /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CF0F37BF2684ED2F9B58CC3 /* SettingsView.swift */; };
+		4859FF5D6289B629A3A7DBA5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7394D93A2BF19F119E4FB10E /* Assets.xcassets */; };
+		5C1098429C228635F15A2FE5 /* RecordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F15EECBF6224A79D93FC663 /* RecordView.swift */; };
+		759958D2135BA30D6A018747 /* ChatListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7F0332D5BD6BCE55D563C18 /* ChatListView.swift */; };
+		7715B5E135494D3EC8EA58D2 /* MeetingsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EC40048BF49E458C5338A49 /* MeetingsListView.swift */; };
+		90DEA0A2D3C9D43AC2C1D0B0 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBBF1F833C2C6268366B6671 /* HomeView.swift */; };
+		9B353D551EE9E92ACD1247EE /* WawaNoteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76CCCBF0094EADF2DA0FC9AB /* WawaNoteApp.swift */; };
+		C3F9BD71B219914B8AAE0ABE /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0C9AB5D2E877D2F0F3FC93A /* ContentView.swift */; };
+		E8243E4CB1A366F27379D5B5 /* Logging.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE8DBE8C0AA1D37C4D3C63DC /* Logging.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		FEFE1F576BAA07A8EA4C9BCE /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C0D8C6BD9DC27C691D7F4D40 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FBF603A45B7E98AB42328908;
+			remoteInfo = "wawa-note";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		2CF0F37BF2684ED2F9B58CC3 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		364C4442AE4FFEA777573BDF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		399953D1B0F721773F328253 /* wawa-note.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "wawa-note.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7394D93A2BF19F119E4FB10E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		76CCCBF0094EADF2DA0FC9AB /* WawaNoteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WawaNoteApp.swift; sourceTree = "<group>"; };
+		8EC40048BF49E458C5338A49 /* MeetingsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingsListView.swift; sourceTree = "<group>"; };
+		8F15EECBF6224A79D93FC663 /* RecordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordView.swift; sourceTree = "<group>"; };
+		B7F0332D5BD6BCE55D563C18 /* ChatListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatListView.swift; sourceTree = "<group>"; };
+		BE8DBE8C0AA1D37C4D3C63DC /* Logging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logging.swift; sourceTree = "<group>"; };
+		CBF6ECE4B370149D2C8C5E51 /* wawa-noteTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = "wawa-noteTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		E0C9AB5D2E877D2F0F3FC93A /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		FBBF1F833C2C6268366B6671 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		00664374D3E8FC0BF8D33C6D /* Home */ = {
+			isa = PBXGroup;
+			children = (
+				FBBF1F833C2C6268366B6671 /* HomeView.swift */,
+			);
+			path = Home;
+			sourceTree = "<group>";
+		};
+		0BE5951123F661B22DF3E61C /* Meetings */ = {
+			isa = PBXGroup;
+			children = (
+				8EC40048BF49E458C5338A49 /* MeetingsListView.swift */,
+			);
+			path = Meetings;
+			sourceTree = "<group>";
+		};
+		26FD2DBE03C74ABED0CE2688 /* Recording */ = {
+			isa = PBXGroup;
+			children = (
+				8F15EECBF6224A79D93FC663 /* RecordView.swift */,
+			);
+			path = Recording;
+			sourceTree = "<group>";
+		};
+		2B5D7523644179A163AD8512 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				76CCCBF0094EADF2DA0FC9AB /* WawaNoteApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		3E34D58229EA199914EC8A56 /* wawa-note */ = {
+			isa = PBXGroup;
+			children = (
+				2B5D7523644179A163AD8512 /* App */,
+				E204C1AD0939BB2A350B5D28 /* Domain */,
+				5FC72988FCA772736CA66764 /* Resources */,
+				A68D67E0D26E03A2CCC68044 /* UI */,
+				AB10E964F4B1F450B05263A2 /* Utilities */,
+			);
+			path = "wawa-note";
+			sourceTree = "<group>";
+		};
+		4AD091DD57E7D5B9A2FE4F65 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				2CF0F37BF2684ED2F9B58CC3 /* SettingsView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		52539A30F619B06F5508CD61 /* Chat */ = {
+			isa = PBXGroup;
+			children = (
+				B7F0332D5BD6BCE55D563C18 /* ChatListView.swift */,
+			);
+			path = Chat;
+			sourceTree = "<group>";
+		};
+		5FC72988FCA772736CA66764 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				7394D93A2BF19F119E4FB10E /* Assets.xcassets */,
+				364C4442AE4FFEA777573BDF /* Info.plist */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		74EC1214520DB951ADFBEEFB /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				399953D1B0F721773F328253 /* wawa-note.app */,
+				CBF6ECE4B370149D2C8C5E51 /* wawa-noteTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A68D67E0D26E03A2CCC68044 /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				52539A30F619B06F5508CD61 /* Chat */,
+				DCA887627EB6B42A71E62B77 /* Components */,
+				00664374D3E8FC0BF8D33C6D /* Home */,
+				0BE5951123F661B22DF3E61C /* Meetings */,
+				26FD2DBE03C74ABED0CE2688 /* Recording */,
+				4AD091DD57E7D5B9A2FE4F65 /* Settings */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		AB10E964F4B1F450B05263A2 /* Utilities */ = {
+			isa = PBXGroup;
+			children = (
+				BE8DBE8C0AA1D37C4D3C63DC /* Logging.swift */,
+			);
+			path = Utilities;
+			sourceTree = "<group>";
+		};
+		B0A4FA3CD8C9B3602C6B4C63 = {
+			isa = PBXGroup;
+			children = (
+				3E34D58229EA199914EC8A56 /* wawa-note */,
+				74EC1214520DB951ADFBEEFB /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		DCA887627EB6B42A71E62B77 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				E0C9AB5D2E877D2F0F3FC93A /* ContentView.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		E204C1AD0939BB2A350B5D28 /* Domain */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Domain;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		B96C7082C5E86A010A279726 /* wawa-noteTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 49384C3C1AE2EC11139B54EB /* Build configuration list for PBXNativeTarget "wawa-noteTests" */;
+			buildPhases = (
+				1A9CC40FA0E5B348D4A187A2 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				00B9577A2F7EA3CAB56F2405 /* PBXTargetDependency */,
+			);
+			name = "wawa-noteTests";
+			packageProductDependencies = (
+			);
+			productName = "wawa-noteTests";
+			productReference = CBF6ECE4B370149D2C8C5E51 /* wawa-noteTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		FBF603A45B7E98AB42328908 /* wawa-note */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D93B00A7E849073EA948C29B /* Build configuration list for PBXNativeTarget "wawa-note" */;
+			buildPhases = (
+				925FDD3F1A1346C6720D64A2 /* Sources */,
+				F1B74605C0F11543E6C7409B /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "wawa-note";
+			packageProductDependencies = (
+			);
+			productName = "wawa-note";
+			productReference = 399953D1B0F721773F328253 /* wawa-note.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		C0D8C6BD9DC27C691D7F4D40 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 2650;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = 02FCF301593EFCABBDDF02D0 /* Build configuration list for PBXProject "wawa-note" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = B0A4FA3CD8C9B3602C6B4C63;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 74EC1214520DB951ADFBEEFB /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				FBF603A45B7E98AB42328908 /* wawa-note */,
+				B96C7082C5E86A010A279726 /* wawa-noteTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		F1B74605C0F11543E6C7409B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4859FF5D6289B629A3A7DBA5 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1A9CC40FA0E5B348D4A187A2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		925FDD3F1A1346C6720D64A2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				759958D2135BA30D6A018747 /* ChatListView.swift in Sources */,
+				C3F9BD71B219914B8AAE0ABE /* ContentView.swift in Sources */,
+				90DEA0A2D3C9D43AC2C1D0B0 /* HomeView.swift in Sources */,
+				E8243E4CB1A366F27379D5B5 /* Logging.swift in Sources */,
+				7715B5E135494D3EC8EA58D2 /* MeetingsListView.swift in Sources */,
+				5C1098429C228635F15A2FE5 /* RecordView.swift in Sources */,
+				07A99EC0F9960AA5B7C99E4E /* SettingsView.swift in Sources */,
+				9B353D551EE9E92ACD1247EE /* WawaNoteApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		00B9577A2F7EA3CAB56F2405 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FBF603A45B7E98AB42328908 /* wawa-note */;
+			targetProxy = FEFE1F576BAA07A8EA4C9BCE /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		11CC3B1EE5FCFAADF2F443D0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.wawa-note.tests";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/wawa-note.app/wawa-note";
+			};
+			name = Debug;
+		};
+		50DBBB4D4418D4D70D055D98 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		67D57EC58ABE338417678B81 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.wawa-note.tests";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/wawa-note.app/wawa-note";
+			};
+			name = Release;
+		};
+		AFE5DF076B2686F7F68D041F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		C663DB99B6EBE03E55C9C0E5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "wawa-note/Resources/Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.wawa-note";
+				PRODUCT_NAME = "Wawa Note";
+				SDKROOT = iphoneos;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		F4BDFA9AB8E0F2108DB00B35 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "wawa-note/Resources/Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.wawa-note";
+				PRODUCT_NAME = "Wawa Note";
+				SDKROOT = iphoneos;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		02FCF301593EFCABBDDF02D0 /* Build configuration list for PBXProject "wawa-note" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				50DBBB4D4418D4D70D055D98 /* Debug */,
+				AFE5DF076B2686F7F68D041F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		49384C3C1AE2EC11139B54EB /* Build configuration list for PBXNativeTarget "wawa-noteTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				11CC3B1EE5FCFAADF2F443D0 /* Debug */,
+				67D57EC58ABE338417678B81 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D93B00A7E849073EA948C29B /* Build configuration list for PBXNativeTarget "wawa-note" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C663DB99B6EBE03E55C9C0E5 /* Debug */,
+				F4BDFA9AB8E0F2108DB00B35 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = C0D8C6BD9DC27C691D7F4D40 /* Project object */;
+}

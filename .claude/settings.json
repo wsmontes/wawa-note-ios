@@ -1,0 +1,18 @@
+{
+  "project": "wawa-note-ios",
+  "displayName": "Wawa Note",
+  "description": "AI Meeting Companion / Universal AI Client for iPhone",
+  "language": "swift",
+  "framework": "SwiftUI",
+  "platform": "iOS",
+  "minimumiOS": "17.0",
+  "targetDevice": "iPhone 14 Plus",
+  "architecture": "MVVM + Protocol-first",
+  "storage": {
+    "metadata": "SwiftData",
+    "artifacts": "FileManager",
+    "secrets": "Keychain"
+  },
+  "dependencies": "Swift Package Manager",
+  "testDevice": "iPhone 14 Plus"
+}
