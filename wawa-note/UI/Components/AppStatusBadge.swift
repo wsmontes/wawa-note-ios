@@ -10,12 +10,12 @@ enum BadgeTone {
 
     var color: Color {
         switch self {
-        case .neutral: .secondary
-        case .success: .green
-        case .warning: .orange
-        case .error: .red
-        case .privacy: .blue
-        case .recording: .red
+        case .neutral: AppColor.neutral
+        case .success: AppColor.success
+        case .warning: AppColor.warning
+        case .error: AppColor.error
+        case .privacy: AppColor.privacy
+        case .recording: AppColor.recording
         }
     }
 }

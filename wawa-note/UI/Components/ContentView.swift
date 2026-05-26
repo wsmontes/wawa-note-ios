@@ -13,11 +13,6 @@ struct ContentView: View {
                     Label("Meetings", systemImage: "list.bullet.rectangle")
                 }
 
-            ChatListView()
-                .tabItem {
-                    Label("Chat", systemImage: "message")
-                }
-
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape")

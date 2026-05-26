@@ -33,5 +33,9 @@
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Wawa Note uses the microphone to record meetings you choose to capture. Audio is saved on this iPhone.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Speech recognition is used to turn your recorded meetings into a searchable transcript.</string>
 </dict>
 </plist>

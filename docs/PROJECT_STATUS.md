@@ -2,46 +2,61 @@
 
 ## Current phase
 
-Phase 0 — Project setup (nearly complete, build pending simulator)
+Phase 7.5 — Data Flow Stabilization complete. Next: Phase 8.
 
-## Current objective
+## Honest assessment
 
-Create the native iOS SwiftUI project foundation and verify it builds.
+Phases 0-7 implemented. Phase 7.5 stabilization applied.
 
-## Current MVP target
+The MVP loop code exists and builds. The critical data flow issues (meeting ID
+propagation, artifact folder structure, source evidence mapping, raw response
+preservation, deletion cleanup) have been fixed.
+
+**However, the app has NOT been validated on a real iPhone 14 Plus.** Phase 8
+is still required before the MVP can be considered verified.
+
+## MVP target
 
 ```text
 record -> transcribe -> analyze -> save -> review -> export
 ```
 
-## Phase 0 completion
+Code complete: ✓ | Real-device validated: ○
 
-| Task | Status |
+## Phase 7.5 — Data Flow Stabilization
+
+| Fix | Status |
 |---|---|
-| SwiftUI iOS app target | Done (xcodegen + project.yml) |
-| Bundle name / display name | Done (com.wawa-note / "Wawa Note") |
-| Minimum iOS target | Done (17.0) |
-| Main app navigation shell | Done (TabView: Home, Meetings, Chat, Settings) |
-| Basic placeholder screens | Done (all 5 views) |
-| Project logging utility | Done (OSLog, 5 categories) |
-| Confirm app builds | Blocked (waiting for iOS simulator download) |
+| Meeting created at recording start | Done |
+| Audio saved to Meetings/{id}/audio.m4a | Done |
+| Legacy audio fallback removed | Done |
+| Transcript.meetingId = meeting.id | Done |
+| TranscriptSegment.meetingId = meeting.id | Done |
+| Analysis.meetingId from transcript | Done |
+| Full UUIDs in analysis prompt | Done |
+| source_segment_ids mapped (not discarded) | Done |
+| Raw provider response saved to file | Done |
+| Delete meeting removes file artifacts | Done |
+| Delete provider removes Keychain secret | Done |
+| Fallback analysis doesn't show raw text in UI | Done |
 
-## Reusable components created
+## Phase 8 — Still required
 
-- PrimaryActionButton
-- EmptyStateView
-- AppStatusBadge
-
-## Next recommended Claude Code action
-
-Once the simulator download completes:
-1. Run `xcodebuild` to verify the project builds.
-2. Update `docs/TASKS.md` build status to `[x]`.
-3. Proceed to Phase 1 — Data and settings skeleton.
+- [ ] Test on iPhone 14 Plus (5/15/60 minute recordings)
+- [ ] Screen lock behavior
+- [ ] Audio interruption handling
+- [ ] No-network behavior
+- [ ] Provider failure modes
+- [ ] Export verification
+- [ ] Battery/thermal profiling
+- [ ] Update TEST_PLAN.md with results
 
 ## Known constraints
 
 - First physical test device: iPhone 14 Plus.
 - Apple Foundation Models / Apple Intelligence is not baseline.
 - No backend in MVP.
-- No WhisperKit in MVP 1 unless explicitly moved forward.
+- No WhisperKit in MVP 1.
+- Streaming not yet implemented.
+- No unit tests yet.
+- import audio button is TODO.

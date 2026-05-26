@@ -2,30 +2,32 @@ import SwiftUI
 
 struct HomeView: View {
     @State private var showRecording = false
+    @State private var navigateToMeeting: MeetingModel?
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 24) {
                 Spacer()
 
-                VStack(spacing: 8) {
-                    Image(systemName: "mic.circle.fill")
-                        .font(.system(size: 64))
-                        .foregroundStyle(.tint)
+                // Brand symbol — subtle, per design guide §9.1
+                Image(.wawaSymbolGradient)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 80, height: 80)
 
-                    Text("Capture meetings, turn them into\nsummaries, and ask questions\nabout what was said.")
-                        .font(.body)
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(.secondary)
-                }
+                Text(AppCopy.homeValueProp)
+                    .font(.body)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
 
                 PrimaryActionButton(
-                    title: "Start Meeting",
-                    systemImage: "mic.circle.fill"
+                    title: AppCopy.startRecordingButton,
+                    systemImage: "record.circle.fill"
                 ) {
                     showRecording = true
                 }
                 .padding(.horizontal, 32)
+                .tint(.red)
 
                 Button {
                     // TODO: Import audio
@@ -39,9 +41,14 @@ struct HomeView: View {
 
                 Spacer()
             }
-            .navigationTitle("Wawa Note")
             .fullScreenCover(isPresented: $showRecording) {
-                RecordView()
+                RecordView { meeting in
+                    showRecording = false
+                    navigateToMeeting = meeting
+                }
+            }
+            .navigationDestination(item: $navigateToMeeting) { meeting in
+                MeetingDetailView(meeting: meeting)
             }
         }
     }

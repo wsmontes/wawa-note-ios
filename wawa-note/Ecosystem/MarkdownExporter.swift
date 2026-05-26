@@ -1,0 +1,90 @@
+import Foundation
+
+struct MarkdownExporter: Sendable {
+
+    func export(
+        meeting: MeetingModel,
+        transcript: Transcript?,
+        analysis: MeetingAnalysis?
+    ) -> String {
+        var md = ""
+
+        md += "# \(meeting.title.isEmpty ? "Meeting" : meeting.title)\n\n"
+        md += "**Date:** \(meeting.createdAt.formatted(date: .long, time: .shortened))\n"
+        if let duration = meeting.durationSeconds {
+            md += "**Duration:** \(formatDuration(duration))\n"
+        }
+        md += "**Status:** \(meeting.status.rawValue.capitalized)\n"
+        md += "\n---\n\n"
+
+        if let analysis {
+            if !analysis.shortSummary.isEmpty {
+                md += "## Summary\n\n\(analysis.shortSummary)\n\n"
+            }
+
+            if !analysis.actionItems.isEmpty {
+                md += "## Action Items\n\n"
+                for item in analysis.actionItems {
+                    md += "- [ ] **\(item.task)**"
+                    if let owner = item.owner { md += " — \(owner)" }
+                    md += "\n"
+                }
+                md += "\n"
+            }
+
+            if !analysis.decisions.isEmpty {
+                md += "## Decisions\n\n"
+                for decision in analysis.decisions {
+                    md += "- **\(decision.title)**\n"
+                    if !decision.details.isEmpty { md += "  \(decision.details)\n" }
+                }
+                md += "\n"
+            }
+
+            if !analysis.risks.isEmpty {
+                md += "## Risks\n\n"
+                for risk in analysis.risks {
+                    md += "- **\(risk.risk)**\n"
+                    if !risk.details.isEmpty { md += "  \(risk.details)\n" }
+                }
+                md += "\n"
+            }
+
+            if !analysis.openQuestions.isEmpty {
+                md += "## Open Questions\n\n"
+                for q in analysis.openQuestions {
+                    md += "- \(q.question)\n"
+                }
+                md += "\n"
+            }
+
+            if !analysis.detailedSummary.isEmpty && analysis.detailedSummary != analysis.shortSummary {
+                md += "## Detailed Summary\n\n\(analysis.detailedSummary)\n\n"
+            }
+        }
+
+        if let transcript {
+            md += "## Transcript\n\n"
+            for segment in transcript.segments {
+                let time = formatTime(segment.startTime)
+                md += "**[\(time)]** \(segment.text)\n\n"
+            }
+        }
+
+        md += "\n---\n*Exported by Wawa Note*\n"
+
+        return md
+    }
+
+    private func formatTime(_ seconds: Double) -> String {
+        let m = Int(seconds) / 60
+        let s = Int(seconds) % 60
+        return String(format: "%02d:%02d", m, s)
+    }
+
+    private func formatDuration(_ seconds: Double) -> String {
+        let m = Int(seconds) / 60
+        if m >= 60 { return "\(m / 60)h \(m % 60)m" }
+        return "\(m)m"
+    }
+}

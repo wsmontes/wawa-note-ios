@@ -20,97 +20,110 @@ Use these statuses:
 - [x] Add tabs/sections: Home, Meetings, Chat, Settings.
 - [x] Add basic placeholder screens.
 - [x] Add project logging utility.
-- [!] Confirm app builds.
+- [x] Confirm app builds.
 
 ## Phase 1 — Data and settings skeleton
 
-- [ ] Create domain models:
-  - [ ] Meeting
-  - [ ] TranscriptSegment
-  - [ ] MeetingAnalysis
-  - [ ] AIProviderConfig
-  - [ ] ChatConversation
-  - [ ] ChatMessage
-- [ ] Configure SwiftData or selected persistence.
-- [ ] Implement `FileArtifactStore`.
-- [ ] Implement `SecureKeyStore`.
-- [ ] Add provider settings screen.
-- [ ] Save provider metadata.
-- [ ] Save API key to Keychain.
-- [ ] Verify no secrets are stored in plain text.
+- [x] Create domain models:
+  - [x] Meeting
+  - [x] TranscriptSegment
+  - [x] MeetingAnalysis
+  - [x] AIProviderConfig
+  - [x] ChatConversation
+  - [x] ChatMessage
+- [x] Configure SwiftData or selected persistence.
+- [x] Implement `FileArtifactStore`.
+- [x] Implement `SecureKeyStore`.
+- [x] Add provider settings screen.
+- [x] Save provider metadata.
+- [x] Save API key to Keychain.
+- [x] Verify no secrets are stored in plain text.
 
 ## Phase 2 — Audio recording MVP
 
-- [ ] Add microphone permission text in Info.plist.
-- [ ] Implement `AudioSessionManager`.
-- [ ] Implement `AudioCaptureService`.
-- [ ] Implement audio file writing to Application Support.
-- [ ] Add Record UI:
-  - [ ] Start button
-  - [ ] Stop button
-  - [ ] timer
-  - [ ] status label
-- [ ] Save meeting metadata after recording.
-- [ ] Verify saved audio file exists.
-- [ ] Add simple playback or debug verification.
+- [x] Add microphone permission text in Info.plist.
+- [x] Implement `AudioSessionManager`.
+- [x] Implement `AudioCaptureService`.
+- [x] Implement audio file writing to Application Support.
+- [x] Add Record UI:
+  - [x] Start button
+  - [x] Stop button
+  - [x] timer
+  - [x] status label
+- [x] Save meeting metadata after recording.
+- [x] Verify saved audio file exists.
+- [x] Add simple playback or debug verification.
 
 ## Phase 3 — Apple transcription MVP
 
-- [ ] Add speech recognition permission text in Info.plist.
-- [ ] Define `TranscriptionEngine`.
-- [ ] Implement `AppleSpeechTranscriptionEngine`.
-- [ ] Request speech recognition authorization.
-- [ ] Transcribe saved audio file.
-- [ ] Convert result to transcript data.
-- [ ] Save transcript.
-- [ ] Display transcript in Meeting detail screen.
-- [ ] Add retry transcription action.
+- [x] Add speech recognition permission text in Info.plist.
+- [x] Define `TranscriptionEngine`.
+- [x] Implement `AppleSpeechTranscriptionEngine`.
+- [x] Request speech recognition authorization.
+- [x] Transcribe saved audio file.
+- [x] Convert result to transcript data.
+- [x] Save transcript.
+- [x] Display transcript in Meeting detail screen.
+- [x] Add retry transcription action.
 
 ## Phase 4 — OpenAI-compatible provider MVP
 
-- [ ] Define `AIProvider`.
-- [ ] Define `AIRequest`, `AIResponse`, and `AIChunk`.
-- [ ] Implement `OpenAICompatibleProvider`.
-- [ ] Load provider config.
-- [ ] Retrieve API key from Keychain.
-- [ ] Send transcript to provider.
-- [ ] Parse provider response into internal type.
-- [ ] Hide provider-specific JSON from UI.
-- [ ] Add provider test action in Settings.
+- [x] Define `AIProvider`.
+- [x] Define `AIRequest`, `AIResponse`, and `AIChunk`.
+- [x] Implement `OpenAICompatibleProvider`.
+- [x] Load provider config.
+- [x] Retrieve API key from Keychain.
+- [x] Send transcript to provider.
+- [x] Parse provider response into internal type.
+- [x] Hide provider-specific JSON from UI.
+- [x] Add provider test action in Settings.
 
 ## Phase 5 — Meeting analysis MVP
 
-- [ ] Create `AnalysisService`.
-- [ ] Add structured meeting summary prompt.
-- [ ] Generate short summary.
-- [ ] Generate detailed summary.
-- [ ] Extract action items.
-- [ ] Extract decisions.
-- [ ] Extract open questions.
-- [ ] Extract risks/blockers.
-- [ ] Save `MeetingAnalysis`.
-- [ ] Display analysis sections in UI.
-- [ ] Preserve raw response when parse fails.
+- [x] Create `AnalysisService`.
+- [x] Add structured meeting summary prompt.
+- [x] Generate short summary.
+- [x] Generate detailed summary.
+- [x] Extract action items.
+- [x] Extract decisions.
+- [x] Extract open questions.
+- [x] Extract risks/blockers.
+- [x] Save `MeetingAnalysis`.
+- [x] Display analysis sections in UI.
+- [x] Preserve raw response when parse fails.
 
 ## Phase 6 — Export MVP
 
-- [ ] Implement Markdown exporter.
-- [ ] Implement JSON exporter.
-- [ ] Add ShareLink/share sheet.
-- [ ] Export meeting metadata.
-- [ ] Export transcript.
-- [ ] Export summary and action items.
-- [ ] Verify exported files open outside app.
+- [x] Implement Markdown exporter.
+- [x] Implement JSON exporter.
+- [x] Add ShareLink/share sheet.
+- [x] Export meeting metadata.
+- [x] Export transcript.
+- [x] Export summary and action items.
+- [x] Verify exported files open outside app.
 
 ## Phase 7 — Chat MVP
 
-- [ ] Add chat conversation model.
-- [ ] Add chat message model.
-- [ ] Add Chat UI.
-- [ ] Send message through selected `AIProvider`.
-- [ ] Save chat history.
-- [ ] Display response.
-- [ ] Add basic error handling.
+- [x] Add chat conversation model.
+- [x] Add chat message model.
+- [x] Add Chat UI.
+- [x] Send message through selected `AIProvider`.
+- [x] Save chat history.
+- [x] Display response.
+- [x] Add basic error handling.
+
+## Phase 7.5 — Data Flow Stabilization
+
+- [x] Create MeetingModel at recording start (not after stop).
+- [x] Store audio in per-meeting folder as `audio.m4a`.
+- [x] Remove legacy audio path fallback.
+- [x] Fix transcript meetingId and segment meetingIds.
+- [x] Fix analysis meetingId from transcript.
+- [x] Use full UUIDs in analysis prompt for traceability.
+- [x] Map source_segment_ids from provider response into domain objects.
+- [x] Preserve raw provider response to file when parsing fails.
+- [x] Clean up meeting artifacts on delete.
+- [x] Clean up Keychain secrets on provider delete.
 
 ## Phase 8 — iPhone 14 Plus validation
 
