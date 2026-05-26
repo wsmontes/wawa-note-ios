@@ -153,3 +153,58 @@ Consequences:
 - No WhisperKit in first implementation unless explicitly moved forward.
 - No diarization, Calendar, Reminders, CloudKit, widgets, or Apple Foundation Models in MVP 1.
 - Faster path to a working app on real iPhone.
+
+---
+
+## ADR-0007 — Use xcodegen for project generation
+
+Date: 2026-05-25
+Status: Accepted
+
+Context:
+
+The project needed an `.xcodeproj` to build. Manually constructing a
+`project.pbxproj` is error-prone (~500+ lines of opaque plist). The
+project had no existing Xcode project file.
+
+Decision:
+
+Use xcodegen (installed via Homebrew) with a `project.yml` spec at the
+repo root. The generated `.xcodeproj` is committed to git. Developers
+only need xcodegen when the project structure changes (new files,
+new targets, new build settings).
+
+Consequences:
+
+- `project.yml` is the human-readable source of truth (~50 lines).
+- `.xcodeproj` is committed for convenience (openable without xcodegen).
+- Adding new files requires running `xcodegen generate` to update the
+  pbxproj, or adding them manually in Xcode.
+- CI can regenerate the project from `project.yml` for reproducibility.
+
+---
+
+## ADR-0008 — Home tab instead of Record as top-level tab
+
+Date: 2026-05-25
+Status: Accepted
+
+Context:
+
+The initial CLAUDE.md draft listed tabs as Meetings, Record, Chat,
+Settings. The UX/UI manual (`docs/ux_ui_manual_ai_meeting_companion.md`)
+specifies Home, Meetings, Chat, Settings with recording accessed from
+Home via a "Start Meeting" button.
+
+Decision:
+
+Use Home as the first tab. Recording is a destination (full-screen cover
+or navigation push from Home), not a tab. The Home tab can grow to
+include setup status, recent meetings, and quick actions.
+
+Consequences:
+
+- Better matches the UX/UI manual and iOS navigation conventions.
+- RecordView is a called screen, not a fixed tab.
+- "Record" as a tab would waste a slot on something used only during
+  active meetings; Home provides more utility.

@@ -117,8 +117,8 @@ If the app is empty, start with:
 
 1. Xcode SwiftUI iOS app structure.
 2. Basic tab/navigation shell:
+   - Home
    - Meetings
-   - Record
    - Chat
    - Settings
 3. Domain models.

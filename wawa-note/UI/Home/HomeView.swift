@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct HomeView: View {
+    @State private var showRecording = false
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 24) {
@@ -17,14 +19,12 @@ struct HomeView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Button {
-                    // TODO: Navigate to recording
-                } label: {
-                    Label("Start Meeting", systemImage: "mic.circle.fill")
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 50)
+                PrimaryActionButton(
+                    title: "Start Meeting",
+                    systemImage: "mic.circle.fill"
+                ) {
+                    showRecording = true
                 }
-                .buttonStyle(.borderedProminent)
                 .padding(.horizontal, 32)
 
                 Button {
@@ -40,6 +40,9 @@ struct HomeView: View {
                 Spacer()
             }
             .navigationTitle("Wawa Note")
+            .fullScreenCover(isPresented: $showRecording) {
+                RecordView()
+            }
         }
     }
 }

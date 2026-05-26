@@ -13,14 +13,14 @@ Use these statuses:
 
 ## Phase 0 — Project setup
 
-- [ ] Create or inspect SwiftUI iOS app target.
-- [ ] Confirm bundle name and app display name.
-- [ ] Confirm minimum iOS target.
-- [ ] Add main app navigation shell.
-- [ ] Add tabs/sections: Meetings, Record, Chat, Settings.
-- [ ] Add basic placeholder screens.
-- [ ] Add project logging utility.
-- [ ] Confirm app builds.
+- [x] Create or inspect SwiftUI iOS app target.
+- [x] Confirm bundle name and app display name.
+- [x] Confirm minimum iOS target.
+- [x] Add main app navigation shell.
+- [x] Add tabs/sections: Home, Meetings, Chat, Settings.
+- [x] Add basic placeholder screens.
+- [x] Add project logging utility.
+- [!] Confirm app builds.
 
 ## Phase 1 — Data and settings skeleton
 

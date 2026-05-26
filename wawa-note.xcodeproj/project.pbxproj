@@ -8,10 +8,13 @@
 
 /* Begin PBXBuildFile section */
 		07A99EC0F9960AA5B7C99E4E /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CF0F37BF2684ED2F9B58CC3 /* SettingsView.swift */; };
+		0A484AC39EFFBEF58EE76E12 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B757114323F71B2AD03A5586 /* EmptyStateView.swift */; };
 		4859FF5D6289B629A3A7DBA5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7394D93A2BF19F119E4FB10E /* Assets.xcassets */; };
 		5C1098429C228635F15A2FE5 /* RecordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F15EECBF6224A79D93FC663 /* RecordView.swift */; };
+		6EA4032C7498B05715111A9D /* AppStatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83D7DD93B7943C9055C6DA48 /* AppStatusBadge.swift */; };
 		759958D2135BA30D6A018747 /* ChatListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7F0332D5BD6BCE55D563C18 /* ChatListView.swift */; };
 		7715B5E135494D3EC8EA58D2 /* MeetingsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EC40048BF49E458C5338A49 /* MeetingsListView.swift */; };
+		7A1BCFA48364326BFB818D1E /* PrimaryActionButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B7C43279EE74EA698E4284D /* PrimaryActionButton.swift */; };
 		90DEA0A2D3C9D43AC2C1D0B0 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBBF1F833C2C6268366B6671 /* HomeView.swift */; };
 		9B353D551EE9E92ACD1247EE /* WawaNoteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76CCCBF0094EADF2DA0FC9AB /* WawaNoteApp.swift */; };
 		C3F9BD71B219914B8AAE0ABE /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0C9AB5D2E877D2F0F3FC93A /* ContentView.swift */; };
@@ -32,10 +35,13 @@
 		2CF0F37BF2684ED2F9B58CC3 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		364C4442AE4FFEA777573BDF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		399953D1B0F721773F328253 /* wawa-note.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "wawa-note.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		4B7C43279EE74EA698E4284D /* PrimaryActionButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrimaryActionButton.swift; sourceTree = "<group>"; };
 		7394D93A2BF19F119E4FB10E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		76CCCBF0094EADF2DA0FC9AB /* WawaNoteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WawaNoteApp.swift; sourceTree = "<group>"; };
+		83D7DD93B7943C9055C6DA48 /* AppStatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStatusBadge.swift; sourceTree = "<group>"; };
 		8EC40048BF49E458C5338A49 /* MeetingsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingsListView.swift; sourceTree = "<group>"; };
 		8F15EECBF6224A79D93FC663 /* RecordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordView.swift; sourceTree = "<group>"; };
+		B757114323F71B2AD03A5586 /* EmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
 		B7F0332D5BD6BCE55D563C18 /* ChatListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatListView.swift; sourceTree = "<group>"; };
 		BE8DBE8C0AA1D37C4D3C63DC /* Logging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logging.swift; sourceTree = "<group>"; };
 		CBF6ECE4B370149D2C8C5E51 /* wawa-noteTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = "wawa-noteTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -154,7 +160,10 @@
 		DCA887627EB6B42A71E62B77 /* Components */ = {
 			isa = PBXGroup;
 			children = (
+				83D7DD93B7943C9055C6DA48 /* AppStatusBadge.swift */,
 				E0C9AB5D2E877D2F0F3FC93A /* ContentView.swift */,
+				B757114323F71B2AD03A5586 /* EmptyStateView.swift */,
+				4B7C43279EE74EA698E4284D /* PrimaryActionButton.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -259,11 +268,14 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6EA4032C7498B05715111A9D /* AppStatusBadge.swift in Sources */,
 				759958D2135BA30D6A018747 /* ChatListView.swift in Sources */,
 				C3F9BD71B219914B8AAE0ABE /* ContentView.swift in Sources */,
+				0A484AC39EFFBEF58EE76E12 /* EmptyStateView.swift in Sources */,
 				90DEA0A2D3C9D43AC2C1D0B0 /* HomeView.swift in Sources */,
 				E8243E4CB1A366F27379D5B5 /* Logging.swift in Sources */,
 				7715B5E135494D3EC8EA58D2 /* MeetingsListView.swift in Sources */,
+				7A1BCFA48364326BFB818D1E /* PrimaryActionButton.swift in Sources */,
 				5C1098429C228635F15A2FE5 /* RecordView.swift in Sources */,
 				07A99EC0F9960AA5B7C99E4E /* SettingsView.swift in Sources */,
 				9B353D551EE9E92ACD1247EE /* WawaNoteApp.swift in Sources */,

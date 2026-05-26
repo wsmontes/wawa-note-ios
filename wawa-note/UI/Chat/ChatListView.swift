@@ -3,8 +3,12 @@ import SwiftUI
 struct ChatListView: View {
     var body: some View {
         NavigationStack {
-            Text("No conversations yet")
-                .navigationTitle("Chat")
+            EmptyStateView(
+                systemImage: "message",
+                title: "No conversations yet",
+                message: "Connect a provider to start chatting."
+            )
+            .navigationTitle("Chat")
         }
     }
 }
