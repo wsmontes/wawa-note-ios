@@ -5,16 +5,16 @@ struct RecordView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @StateObject private var viewModel: RecordingViewModel
-    var onMeetingSaved: ((MeetingModel) -> Void)?
+    var onItemSaved: ((KnowledgeItem) -> Void)?
     private let prefillEvent: CalendarEvent?
 
     init(
         coordinator: RecordingCoordinator,
-        onMeetingSaved: ((MeetingModel) -> Void)? = nil,
+        onItemSaved: ((KnowledgeItem) -> Void)? = nil,
         prefillEvent: CalendarEvent? = nil
     ) {
         _viewModel = StateObject(wrappedValue: RecordingViewModel(coordinator: coordinator))
-        self.onMeetingSaved = onMeetingSaved
+        self.onItemSaved = onItemSaved
         self.prefillEvent = prefillEvent
     }
 
@@ -49,7 +49,7 @@ struct RecordView: View {
                         .padding(.horizontal, 32)
                 }
 
-                if viewModel.savedMeetingId != nil && viewModel.state == .stopped {
+                if viewModel.savedItemId != nil && viewModel.state == .stopped {
                     VStack(spacing: 8) {
                         AppStatusBadge(title: "Saved", systemImage: "checkmark", tone: .success)
                         Text("Meeting saved. Audio recorded.")
@@ -73,16 +73,19 @@ struct RecordView: View {
                 }
             }
             .onAppear {
-                // Only auto-start if no prefillEvent (free recording)
                 if viewModel.state == .idle && prefillEvent == nil {
-                    viewModel.startRecording()
+                    // Brief delay to let fullScreenCover transition complete
+                    // before triggering microphone permission dialog (iOS 18)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        viewModel.startRecording()
+                    }
                 }
             }
             .onChange(of: viewModel.state) { _, newState in
-                if newState == .stopped, let meetingId = viewModel.savedMeetingId {
-                    let descriptor = FetchDescriptor<MeetingModel>(predicate: #Predicate { $0.id == meetingId })
-                    if let meeting = try? modelContext.fetch(descriptor).first {
-                        onMeetingSaved?(meeting)
+                if newState == .stopped, let itemId = viewModel.savedItemId {
+                    let descriptor = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.id == itemId })
+                    if let item = try? modelContext.fetch(descriptor).first {
+                        onItemSaved?(item)
                     }
                 }
             }

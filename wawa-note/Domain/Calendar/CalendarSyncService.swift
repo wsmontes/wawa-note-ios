@@ -1,6 +1,7 @@
 import EventKit
 import OSLog
 import Foundation
+import SwiftData
 
 @MainActor
 final class CalendarSyncService: ObservableObject {
@@ -61,10 +62,9 @@ final class CalendarSyncService: ObservableObject {
 
     // MARK: - Month events (for dot indicators)
 
-    func eventDatesForMonth(containing date: Date, meetings: [MeetingModel]) -> Set<Date> {
+    func eventDatesForMonth(containing date: Date, items: [KnowledgeItem]) -> Set<Date> {
         let cal = Calendar.current
-        guard let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: date)),
-              let firstOfMonth = cal.date(from: cal.dateComponents([.year, .month], from: date)),
+        guard let firstOfMonth = cal.date(from: cal.dateComponents([.year, .month], from: date)),
               let lastOfMonth = cal.date(byAdding: DateComponents(month: 1, day: -1), to: firstOfMonth) else {
             return []
         }
@@ -72,9 +72,9 @@ final class CalendarSyncService: ObservableObject {
         var dates: Set<Date> = []
         let monthInterval = DateInterval(start: firstOfMonth, end: lastOfMonth)
 
-        // Wawa Note meetings
-        for meeting in meetings {
-            let meetingDate = meeting.scheduledDate ?? meeting.createdAt
+        // Wawa Note items (meetings only)
+        for item in items where item.type == .meeting {
+            let meetingDate = item.scheduledDate ?? item.createdAt
             if monthInterval.contains(meetingDate) {
                 dates.insert(cal.startOfDay(for: meetingDate))
             }
@@ -95,7 +95,7 @@ final class CalendarSyncService: ObservableObject {
 
     // MARK: - Unified events for a day
 
-    func unifiedEvents(for date: Date, meetings: [MeetingModel]) -> [CalendarEvent] {
+    func unifiedEvents(for date: Date, items: [KnowledgeItem]) -> [CalendarEvent] {
         let cal = Calendar.current
         let dayStart = cal.startOfDay(for: date)
         guard let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) else { return [] }
@@ -103,10 +103,10 @@ final class CalendarSyncService: ObservableObject {
         var events: [CalendarEvent] = []
 
         // Wawa Note meetings that fall on this day
-        for meeting in meetings {
-            let meetingDate = meeting.scheduledDate ?? meeting.createdAt
+        for item in items where item.type == .meeting {
+            let meetingDate = item.scheduledDate ?? item.createdAt
             if meetingDate >= dayStart && meetingDate < dayEnd {
-                events.append(CalendarEvent(meeting: meeting))
+                events.append(CalendarEvent(item: item))
             }
         }
 
@@ -114,9 +114,8 @@ final class CalendarSyncService: ObservableObject {
         if hasPermission {
             let ekEvents = fetchEvents(for: DateInterval(start: dayStart, end: dayEnd))
             for ekEvent in ekEvents {
-                // Avoid duplicate with Wawa Note meetings (linked by calendarEventIdentifier)
                 if let calID = ekEvent.eventIdentifier,
-                   meetings.contains(where: { $0.calendarEventIdentifier == calID }) {
+                   items.contains(where: { $0.calendarEventIdentifier == calID }) {
                     continue
                 }
                 events.append(CalendarEvent(ekEvent: ekEvent))

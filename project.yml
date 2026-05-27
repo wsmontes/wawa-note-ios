@@ -1,5 +1,10 @@
 name: wawa-note
 
+packages:
+  Yams:
+    url: https://github.com/jpsim/Yams
+    from: 5.1.0
+
 options:
   bundleIdPrefix: com.wawa-note
   deploymentTarget:
@@ -16,6 +21,19 @@ configs:
 settings:
   base:
     SWIFT_VERSION: "6.0"
+
+schemes:
+  wawa-note:
+    build:
+      targets:
+        wawa-note: all
+        wawa-noteTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - wawa-noteTests
 
 targets:
   wawa-note:
@@ -34,12 +52,15 @@ targets:
     dependencies:
       - target: wawa-note-watch
       - target: wawa-note-share
+      - package: Yams
     settings:
       base:
         INFOPLIST_FILE: wawa-note/Resources/Info.plist
         GENERATE_INFOPLIST_FILE: "NO"
         PRODUCT_BUNDLE_IDENTIFIER: com.wawa-note
         PRODUCT_NAME: "Wawa Note"
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
         DEVELOPMENT_TEAM: 955573A4YH
         CODE_SIGN_STYLE: Automatic
         ENABLE_PREVIEWS: "YES"
@@ -54,7 +75,6 @@ targets:
     deploymentTarget: "17.0"
     sources:
       - path: wawa-noteTests
-        optional: true
     dependencies:
       - target: wawa-note
     settings:
@@ -77,6 +97,8 @@ targets:
         GENERATE_INFOPLIST_FILE: "NO"
         PRODUCT_BUNDLE_IDENTIFIER: com.wawa-note.share
         PRODUCT_NAME: "Wawa Note Share"
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
         DEVELOPMENT_TEAM: 955573A4YH
         CODE_SIGN_STYLE: Automatic
         SWIFT_VERSION: "6.0"

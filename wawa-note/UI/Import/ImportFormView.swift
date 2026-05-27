@@ -7,7 +7,7 @@ struct ImportFormView: View {
 
     let sourceURL: URL
     let metadata: ImportMetadata
-    let onComplete: (MeetingModel) -> Void
+    let onComplete: (KnowledgeItem) -> Void
     let isFromShareExtension: Bool
 
     @State private var title: String
@@ -20,7 +20,7 @@ struct ImportFormView: View {
     private let importService = AudioImportService()
     private let artifactStore = FileArtifactStore()
 
-    init(sourceURL: URL, metadata: ImportMetadata, isFromShareExtension: Bool = false, onComplete: @escaping (MeetingModel) -> Void) {
+    init(sourceURL: URL, metadata: ImportMetadata, isFromShareExtension: Bool = false, onComplete: @escaping (KnowledgeItem) -> Void) {
         self.sourceURL = sourceURL
         self.metadata = metadata
         self.isFromShareExtension = isFromShareExtension
@@ -118,27 +118,26 @@ struct ImportFormView: View {
         errorMessage = nil
         conversionPhase = "Preparing file..."
 
-        // Create meeting on main actor (SwiftData requires it)
-        guard let meeting = coordinator.createMeetingFromImport(
+        // Create item on main actor (SwiftData requires it)
+        guard let item = coordinator.createItemFromImport(
             title: title,
             date: date,
             duration: metadata.duration
         ) else {
-            errorMessage = "Could not create meeting."
+            errorMessage = "Could not create item."
             isConverting = false
             return
         }
 
-        let meetingId = meeting.id
-        let destURL = artifactStore.audioFileURL(for: meetingId)
+        let itemId = item.id
+        let destURL = artifactStore.audioFileURL(for: itemId)
 
-        Task {
+        Task { @MainActor in
             do {
                 if importService.isNativeM4ACompatible(sourceURL) {
-                    try artifactStore.copyAudioToMeeting(sourceURL: sourceURL, meetingId: meetingId)
+                    try artifactStore.copyAudioToMeeting(sourceURL: sourceURL, meetingId: itemId)
                 } else {
                     conversionPhase = "Converting to app format..."
-                    // Offload heavy conversion to a detached task
                     try await Task.detached {
                         try await importService.convertToAAC(inputURL: sourceURL, outputURL: destURL)
                     }.value
@@ -148,10 +147,10 @@ struct ImportFormView: View {
 
                 isConverting = false
                 conversionPhase = nil
-                onComplete(meeting)
+                onComplete(item)
                 dismiss()
             } catch {
-                coordinator.deleteMeeting(meeting)
+                coordinator.deleteItem(itemId)
                 errorMessage = error.localizedDescription
                 isConverting = false
                 conversionPhase = nil

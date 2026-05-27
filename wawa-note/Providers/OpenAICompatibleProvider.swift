@@ -186,4 +186,28 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
         AppLog.provider.info("Received response: \(response.content.prefix(100))...")
         return response
     }
+
+    func embed(_ text: String, model: String) async throws -> [Float] {
+        guard capabilities.supportsEmbeddings else {
+            throw ProviderError.embeddingNotSupported
+        }
+        let endpoint = baseURL.appendingPathComponent("embeddings")
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        let body: [String: Any] = ["model": model, "input": text]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw ProviderError.requestFailed(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let dataArr = json["data"] as? [[String: Any]],
+              let embedding = dataArr.first?["embedding"] as? [Double] else {
+            throw ProviderError.decodingFailed
+        }
+        return embedding.map { Float($0) }
+    }
 }

@@ -141,6 +141,8 @@ enum EntityType: String, Codable {
     case organization
     case system
     case tool
+    case repository
+    case location
     case project
     case other
 }

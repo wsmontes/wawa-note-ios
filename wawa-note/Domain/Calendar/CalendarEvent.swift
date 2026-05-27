@@ -2,7 +2,7 @@ import Foundation
 import EventKit
 
 enum EventSource {
-    case wawaNote(MeetingModel)
+    case wawaNote(KnowledgeItem)
     case iphoneCalendar
 }
 
@@ -17,8 +17,8 @@ struct CalendarEvent: Identifiable {
     let notes: String?
     let attendees: [String]?
 
-    var meeting: MeetingModel? {
-        if case .wawaNote(let m) = source { return m }
+    var item: KnowledgeItem? {
+        if case .wawaNote(let i) = source { return i }
         return nil
     }
 
@@ -27,14 +27,14 @@ struct CalendarEvent: Identifiable {
         return false
     }
 
-    init(meeting: MeetingModel) {
-        self.id = meeting.id.uuidString
-        self.title = meeting.title.isEmpty ? "Untitled" : meeting.title
-        self.startDate = meeting.scheduledDate ?? meeting.createdAt
-        self.endDate = meeting.scheduledDate.map { $0.addingTimeInterval(meeting.durationSeconds ?? 0) }
-            ?? meeting.createdAt.addingTimeInterval(meeting.durationSeconds ?? 0)
+    init(item: KnowledgeItem) {
+        self.id = item.id.uuidString
+        self.title = item.title.isEmpty ? "Untitled" : item.title
+        self.startDate = item.scheduledDate ?? item.createdAt
+        self.endDate = item.scheduledDate.map { $0.addingTimeInterval(item.durationSeconds ?? 0) }
+            ?? item.createdAt.addingTimeInterval(item.durationSeconds ?? 0)
         self.isAllDay = false
-        self.source = .wawaNote(meeting)
+        self.source = .wawaNote(item)
         self.location = nil
         self.notes = nil
         self.attendees = nil

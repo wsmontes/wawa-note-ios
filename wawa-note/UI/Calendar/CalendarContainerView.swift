@@ -3,7 +3,7 @@ import SwiftData
 
 struct CalendarContainerView: View {
     @EnvironmentObject private var calendarSync: CalendarSyncService
-    @Query(sort: \MeetingModel.createdAt, order: .reverse) private var meetings: [MeetingModel]
+    @Query(filter: #Predicate<KnowledgeItem> { $0.typeRaw == "meeting" }, sort: \KnowledgeItem.createdAt, order: .reverse) private var items: [KnowledgeItem]
 
     @State private var displayedMonth: Date
 
@@ -18,11 +18,11 @@ struct CalendarContainerView: View {
                 dayOfWeekHeader
                 MonthGridView(
                     month: displayedMonth,
-                    eventDates: calendarSync.eventDatesForMonth(containing: displayedMonth, meetings: meetings)
+                    eventDates: calendarSync.eventDatesForMonth(containing: displayedMonth, items: items)
                 )
             }
             .navigationDestination(for: Date.self) { day in
-                DayTimelineView(date: day, meetings: meetings)
+                DayTimelineView(date: day, items: items)
             }
             .task {
                 if !calendarSync.hasPermission {

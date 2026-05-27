@@ -25,20 +25,30 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
     var onCheckpoint: ((Transcript, Int) -> Void)?
     private(set) var isCancelled = false
 
-    init() {
+    init(preferredLocale: String? = nil) {
         var locales: [Locale] = []
 
-        for lang in Locale.preferredLanguages {
-            locales.append(Locale(identifier: lang))
+        // User-selected locale first (from UI picker)
+        if let pref = preferredLocale {
+            locales.append(Locale(identifier: pref))
         }
 
+        // Configured locales from ai_config.json
         let cfg = AIConfigService.shared.featureConfig(for: "transcription")
         if let supported = cfg?.supportedLocales {
             for id in supported {
                 let locale = Locale(identifier: id)
-                if !locales.contains(where: { $0.language == locale.language }) {
+                if !locales.contains(where: { $0.identifier == locale.identifier }) {
                     locales.append(locale)
                 }
+            }
+        }
+
+        // Device preferred languages as fallback
+        for lang in Locale.preferredLanguages {
+            let locale = Locale(identifier: lang)
+            if !locales.contains(where: { $0.identifier == locale.identifier }) {
+                locales.append(locale)
             }
         }
 
@@ -154,6 +164,10 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         let request = SFSpeechURLRecognitionRequest(url: url)
         request.shouldReportPartialResults = false
         request.addsPunctuation = true
+        // SFSpeechRecognizer handles language from its locale. Audio auto-detection
+        // can override this — if Portuguese is being transcribed as English, the
+        // pt-BR recognizer locale may not be available yet (language pack download
+        // happens on first use; ensure device has internet).
 
         return try await withCheckedThrowingContinuation { continuation in
             recognizer.recognitionTask(with: request) { result, error in

@@ -1,7 +1,6 @@
 {
   "version": "1.0",
   "description": "Centralized AI configuration for wawa-note. Edit this file to change models, prompts, and parameters across all features.",
-
   "providers": {
     "openai": {
       "id": "openai",
@@ -103,13 +102,11 @@
       }
     }
   },
-
   "defaultModels": {
     "analysis": "gpt-5.5",
     "chat": "gpt-5.5",
     "transcription": "whisper-1"
   },
-
   "modelPresets": {
     "gpt-5.5": {
       "supportsTemperature": false,
@@ -152,7 +149,6 @@
       "usesMaxCompletionTokens": false
     }
   },
-
   "features": {
     "analysis": {
       "provider": "openai",
@@ -160,7 +156,7 @@
       "temperature": null,
       "maxCompletionTokens": 4000,
       "systemPrompt": "You are a meeting analysis assistant. Return only valid JSON without markdown formatting or code blocks. Do not wrap the JSON in ``` fences.",
-      "userPrompt": "You are analyzing a meeting transcript.\n\nReturn structured JSON with these fields (use null for empty arrays):\n- short_summary: string\n- detailed_summary: string\n- decisions: array of {title, details, source_segment_ids, confidence}\n- action_items: array of {task, owner, due_date, source_segment_ids, confidence}\n- open_questions: array of {question, source_segment_ids, confidence}\n- risks: array of {risk, details, source_segment_ids, confidence}\n- important_dates: array of {date, meaning, source_segment_ids}\n- mentioned_people: array of strings\n- mentioned_systems: array of strings\n- follow_up_email_draft: string\n\nDo not invent information. If something is unclear, mark it as uncertain.\nEvery extracted item should include evidence from transcript segment IDs when available.\nUse the exact segment IDs shown in brackets.\n\nMeeting transcript:\n{transcript}\n"
+      "userPrompt": "You are analyzing a meeting transcript.\n\nReturn structured JSON with these fields (use null for empty arrays):\n- short_summary: string\n- detailed_summary: string\n- decisions: array of {title, details, source_segment_ids, confidence}\n- action_items: array of {task, owner, due_date, source_segment_ids, confidence}\n- open_questions: array of {question, source_segment_ids, confidence}\n- risks: array of {risk, details, source_segment_ids, confidence}\n- important_dates: array of {date, meaning, source_segment_ids}\n- mentioned_people: array of strings\n- mentioned_systems: array of strings\n- mentioned_organizations: array of strings\n- mentioned_repositories: array of strings\n- mentioned_locations: array of strings\n- follow_up_email_draft: string\n\nDo not invent information. If something is unclear, mark it as uncertain.\nEvery extracted item should include evidence from transcript segment IDs when available.\nUse the exact segment IDs shown in brackets.\n\nMeeting transcript:\n{transcript}\n"
     },
     "chat": {
       "provider": "openai",
@@ -174,7 +170,70 @@
       "fallbackEngine": "remote-whisper",
       "provider": "openai",
       "model": "whisper-1",
-      "supportedLocales": ["pt-BR", "pt-PT", "en-US", "es-ES", "fr-FR", "de-DE", "it-IT", "ja-JP", "zh-CN"]
+      "supportedLocales": [
+        "pt-BR",
+        "pt-PT",
+        "en-US",
+        "es-ES",
+        "fr-FR",
+        "de-DE",
+        "it-IT",
+        "ja-JP",
+        "zh-CN"
+      ]
+    },
+    "cross_reference": {
+      "provider": "openai",
+      "model": "gpt-5.5",
+      "temperature": 0.3,
+      "maxCompletionTokens": 4000,
+      "systemPrompt": "You are analyzing a knowledge workspace. Identify connections, patterns, and contradictions across multiple items. Reference specific item IDs when making claims. Do not invent information not present in the context.",
+      "userPrompt": "User question: {question}\n\nRelevant items from the knowledge workspace:\n{context}\n\nReturn structured JSON (no markdown):\n- answer: string (direct answer to the question)\n- connections: array of {from_item_id, to_item_id, relationship, explanation, strength (0.0-1.0)}\n- insights: array of {text, source_item_ids, confidence (0.0-1.0)}\n- contradictions: array of {description, item_a_id, item_b_id, resolution (or null)}"
+    },
+    "co_creation": {
+      "provider": "openai",
+      "model": "gpt-5.5",
+      "temperature": 0.7,
+      "maxCompletionTokens": 2000,
+      "systemPrompt": "You are a collaborative AI writing partner. Help the user expand, refine, and connect their ideas. Suggest connections to other items in their workspace when relevant. Be concise.",
+      "userPrompt": "The user has written or selected the following content:\n\n{content}\n\nWorkspace context (relevant items):\n{context}\n\nUser instruction: {instruction}\n\nReturn your contribution as JSON:\n- expanded_text: string (your contribution, ready to merge)\n- suggestions: array of strings (2-3 concrete next steps or connections)\n- related_items: array of item IDs that connect to this content"
+    }
+  },
+  "lenses": {
+    "executive_summary": {
+      "name": "Executive Summary",
+      "description": "High-level overview for leadership. Focus on decisions, risks, and next steps.",
+      "icon": "briefcase",
+      "systemPrompt": "You are an executive assistant. Summarize the content for a busy leader. Be concise and direct.",
+      "userPrompt": "Analyze the following content and provide an executive summary.\n\nContent:\n{content}\n\nReturn JSON:\n- one_liner: string (one sentence)\n- key_decisions: array of strings\n- critical_risks: array of strings\n- next_steps: array of strings\n- bottom_line: string (should we be worried?)"
+    },
+    "risk_analysis": {
+      "name": "Risk Analysis",
+      "description": "Identify risks, blockers, and failure modes.",
+      "icon": "exclamationmark.triangle",
+      "systemPrompt": "You are a risk analyst. Identify every possible risk, blocker, dependency, and failure mode. Be thorough. Rate severity.",
+      "userPrompt": "Analyze the following content for risks.\n\nContent:\n{content}\n\nReturn JSON:\n- risks: array of {description, severity (low/medium/high/critical), likelihood, mitigation, affected_areas}"
+    },
+    "design_critique": {
+      "name": "Design Critique",
+      "description": "Evaluate product/UX decisions from a design perspective.",
+      "icon": "paintpalette",
+      "systemPrompt": "You are a design critic. Evaluate the content from a user experience and product design perspective.",
+      "userPrompt": "Analyze the following for design implications.\n\nContent:\n{content}\n\nReturn JSON:\n- observations: array of strings\n- concerns: array of strings\n- opportunities: array of strings\n- design_principles_violated: array of strings"
+    },
+    "action_items_extractor": {
+      "name": "Action Items Extractor",
+      "description": "Extract only concrete action items and commitments.",
+      "icon": "checklist",
+      "systemPrompt": "You are a project manager. Extract concrete action items, commitments, and deadlines from the content.",
+      "userPrompt": "Extract action items from:\n\n{content}\n\nReturn JSON:\n- action_items: array of {task, owner (or null), deadline (or null), mentioned_in (item id), confidence}"
+    },
+    "timeline_reconstructor": {
+      "name": "Timeline Reconstructor",
+      "description": "Build a chronological timeline from multiple items.",
+      "icon": "chart.xyaxis.line",
+      "systemPrompt": "You are a chronologist. Build a coherent timeline from the provided items.",
+      "userPrompt": "Build a timeline from:\n\n{content}\n\nReturn JSON:\n- timeline: array of {date, event, source_items, significance (low/medium/high)}\n- gaps: array of strings (missing periods or unclear sequences)"
     }
   }
 }

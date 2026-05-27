@@ -43,6 +43,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     // MARK: - Recording lifecycle
 
     func startRecording(meetingId: UUID) async throws {
+        guard state == .idle else { return }
         let granted = await sessionManager.requestPermission()
         guard granted else { throw AudioCaptureError.permissionDenied }
 
