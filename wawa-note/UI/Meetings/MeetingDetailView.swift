@@ -1,15 +1,18 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 @MainActor
 final class MeetingDetailViewModel: ObservableObject {
     @Published var transcript: Transcript?
     @Published var isTranscribing = false
     @Published var transcriptionError: String?
+    @Published var transcriptionProgress: String?
 
     @Published var analysis: MeetingAnalysis?
     @Published var isAnalyzing = false
     @Published var analysisError: String?
+    @Published var analysisProgress: String?
 
     private let localEngine: TranscriptionEngine
     private let analysisService: AnalysisService
@@ -18,17 +21,8 @@ final class MeetingDetailViewModel: ObservableObject {
     private let markdownExporter = MarkdownExporter()
     private let jsonExporter = JSONExporter()
     private var modelContext: ModelContext?
-
-    private var transcriptionEngine: TranscriptionEngine {
-        if useRemoteTranscription, let engine = remoteEngine {
-            return engine
-        }
-        return localEngine
-    }
-    private var remoteEngine: RemoteTranscriptionEngine?
-    private var useRemoteTranscription: Bool {
-        UserDefaults.standard.bool(forKey: "use_remote_transcription")
-    }
+    private var transcriptionTask: Task<Void, Never>?
+    private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
     init(
         localEngine: TranscriptionEngine = AppleSpeechTranscriptionEngine(),
@@ -42,20 +36,19 @@ final class MeetingDetailViewModel: ObservableObject {
         self.router = router
     }
 
+    func cancelTranscription() {
+        transcriptionTask?.cancel()
+        (localEngine as? AppleSpeechTranscriptionEngine)?.cancel()
+    }
+
+    func retryTranscription(meeting: MeetingModel) {
+        transcriptionError = nil
+        transcriptionProgress = nil
+        transcriptionTask = Task { await transcribe(meeting: meeting) }
+    }
+
     func setModelContext(_ context: ModelContext) {
         self.modelContext = context
-
-        // Prepare remote engine if a provider is configured
-        let descriptor = FetchDescriptor<AIProviderConfigModel>()
-        if let config = try? context.fetch(descriptor).first,
-           let baseURL = config.baseURL {
-            var apiKey = ""
-            if let keyId = config.apiKeyKeychainIdentifier {
-                apiKey = (try? SecureKeyStore().loadAPIKey(for: keyId)) ?? ""
-            }
-            let url = baseURL
-            remoteEngine = RemoteTranscriptionEngine(baseURL: url, apiKey: apiKey)
-        }
     }
 
     // MARK: - Transcript
@@ -87,31 +80,154 @@ final class MeetingDetailViewModel: ObservableObject {
 
         isTranscribing = true
         transcriptionError = nil
+        transcriptionProgress = nil
+
+        backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "transcription") { [weak self] in
+            AppLog.general.warning("Background task expiring, cancelling transcription")
+            self?.cancelTranscription()
+        }
+
+        defer {
+            if backgroundTaskID != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                backgroundTaskID = .invalid
+            }
+            isTranscribing = false
+            transcriptionProgress = nil
+        }
+
+        // Check for partial transcript (resume from checkpoint)
+        let meetingId = meeting.id
+        var resumeSegments: [TranscriptSegment] = []
+        var resumeLanguage: String?
+        var resumeChunkIndex = 0
+        if let checkpoint = try? fileStore.readPartialCheckpoint(meetingId: meetingId),
+           let partial = try? fileStore.readPartialTranscript(meetingId: meetingId) {
+            resumeSegments = partial.segments
+            resumeLanguage = partial.languageCode
+            resumeChunkIndex = checkpoint.completedChunks
+            AppLog.transcription.info("Resuming from checkpoint: \(resumeChunkIndex) chunks, \(resumeSegments.count) segments")
+        }
+
+        // Resolve engine
+        let engine: TranscriptionEngine
+        if let context = modelContext,
+           let config = ActiveProviderManager.shared.getActiveProvider(context: context),
+           config.supportsAudio,
+           let baseURL = config.baseURL {
+            var apiKey = ""
+            if let keyId = config.apiKeyKeychainIdentifier {
+                apiKey = (try? SecureKeyStore().loadAPIKey(for: keyId)) ?? ""
+            }
+            let remote = RemoteTranscriptionEngine(baseURL: baseURL, apiKey: apiKey)
+            remote.onProgress = { [weak self] progress in
+                Task { @MainActor in
+                    switch progress {
+                    case .chunking(let completed, let total):
+                        self?.transcriptionProgress = "Splitting audio... (\(completed)/\(total))"
+                    case .transcribing(let chunk, let totalChunks):
+                        self?.transcriptionProgress = "Transcribing part \(chunk) of \(totalChunks)..."
+                    }
+                }
+            }
+            remote.onCheckpoint = { [weak self] partial, completed in
+                let checkpoint = TranscriptionCheckpoint(
+                    completedChunks: completed,
+                    segments: partial.segments,
+                    languageCode: partial.languageCode,
+                    sourceEngineId: partial.sourceEngineId,
+                    savedAt: Date()
+                )
+                try? self?.fileStore.writePartialTranscript(partial, checkpoint: checkpoint, meetingId: meetingId)
+            }
+            engine = remote
+        } else {
+            let local = localEngine as? AppleSpeechTranscriptionEngine ?? AppleSpeechTranscriptionEngine()
+            local.onProgress = { [weak self] progress in
+                Task { @MainActor in
+                    switch progress {
+                    case .chunking(let completed, let total):
+                        self?.transcriptionProgress = "Splitting audio... (\(completed)/\(total))"
+                    case .transcribing(let chunk, let totalChunks):
+                        self?.transcriptionProgress = "Transcribing part \(chunk) of \(totalChunks)..."
+                    }
+                }
+            }
+            local.onCheckpoint = { [weak self] partial, completed in
+                let checkpoint = TranscriptionCheckpoint(
+                    completedChunks: completed,
+                    segments: partial.segments,
+                    languageCode: partial.languageCode,
+                    sourceEngineId: partial.sourceEngineId,
+                    savedAt: Date()
+                )
+                try? self?.fileStore.writePartialTranscript(partial, checkpoint: checkpoint, meetingId: meetingId)
+            }
+            engine = local
+        }
 
         do {
-            var result = try await transcriptionEngine.transcribeFile(audioURL)
+            var result = try await engine.transcribeFile(audioURL)
             result.meetingId = meeting.id
 
-            // Fix segment meetingIds
             result.segments = result.segments.map { segment in
                 var fixed = segment
                 fixed.meetingId = meeting.id
                 return fixed
             }
 
+            // Merge with resumed segments if any
+            if !resumeSegments.isEmpty {
+                result.segments = resumeSegments + result.segments
+                result.languageCode = result.languageCode ?? resumeLanguage
+            }
+
             transcript = result
 
             try fileStore.createMeetingDirectory(for: meeting.id)
+            try fileStore.commitPartialTranscript(meetingId: meeting.id)
             try fileStore.writeArtifact(result, fileName: "transcript.json", meetingId: meeting.id)
 
             meeting.status = .transcribed
-            meeting.transcriptionEngineId = transcriptionEngine.id
+            meeting.transcriptionEngineId = engine.id
 
+        } catch let error as TranscriptionError {
+            switch error {
+            case .cancelled:
+                transcriptionError = nil
+                transcriptionProgress = "Paused. Tap Retry to continue."
+            case .notAuthorized:
+                transcriptionError = "Speech recognition not authorized. Enable it in Settings."
+            case .noSupportedLocale:
+                transcriptionError = "Your device does not support speech recognition for your language."
+            case .fileTooLarge:
+                transcriptionError = "Audio chunk too large for remote API. Split the file or use a smaller recording."
+            case .fileTooLongForLocal(let seconds):
+                let mins = Int(seconds / 60)
+                transcriptionError = "This recording is \(mins) min. On-device transcription supports up to 60 min. Connect a remote transcription provider in Settings for longer files."
+            default:
+                transcriptionError = "Transcription failed. You can retry."
+            }
         } catch {
-            transcriptionError = "Transcription failed. You can retry."
+            transcriptionError = "Transcription failed: \(error.localizedDescription)"
         }
+    }
 
-        isTranscribing = false
+    // MARK: - Auto pipeline
+
+    func autoStartPipeline(for meeting: MeetingModel) {
+        guard meeting.audioFileRelativePath != nil else { return }
+
+        if transcript == nil && !isTranscribing {
+            transcriptionTask = Task {
+                await transcribe(meeting: meeting)
+                if transcript != nil, transcriptionError == nil {
+                    await analyze(meeting: meeting)
+                }
+            }
+        } else if transcript != nil && analysis == nil && !isAnalyzing {
+            Task { await analyze(meeting: meeting) }
+        }
     }
 
     // MARK: - Analysis
@@ -125,17 +241,22 @@ final class MeetingDetailViewModel: ObservableObject {
 
         isAnalyzing = true
         analysisError = nil
+        analysisProgress = nil
 
-        let descriptor = FetchDescriptor<AIProviderConfigModel>()
-        let configs: [AIProviderConfigModel]
-        do {
-            configs = try context.fetch(descriptor)
-        } catch {
-            analysisError = "Could not load configuration. Please restart the app."
-            isAnalyzing = false
-            return
+        analysisService.onProgress = { [weak self] progress in
+            Task { @MainActor in
+                switch progress {
+                case .mapping(let current, let total):
+                    self?.analysisProgress = "Summarizing part \(current) of \(total)..."
+                case .reducing:
+                    self?.analysisProgress = "Consolidating..."
+                case .done:
+                    self?.analysisProgress = nil
+                }
+            }
         }
-        guard let config = configs.first else {
+
+        guard let config = ActiveProviderManager.shared.getActiveProvider(context: context) else {
             analysisError = "No AI service connected. Go to Settings > AI Services to connect one."
             isAnalyzing = false
             return
@@ -155,7 +276,7 @@ final class MeetingDetailViewModel: ObservableObject {
         }
 
         do {
-            let (result, rawContent) = try await analysisService.analyze(
+            let result = try await analysisService.analyze(
                 transcript: transcript,
                 using: provider,
                 model: config.defaultModel
@@ -165,10 +286,6 @@ final class MeetingDetailViewModel: ObservableObject {
 
             try fileStore.createMeetingDirectory(for: meeting.id)
             try fileStore.writeArtifact(result, fileName: "analysis.json", meetingId: meeting.id)
-
-            if let raw = rawContent {
-                analysisService.saveRawResponse(raw, meetingId: meeting.id, fileStore: fileStore)
-            }
 
             meeting.status = .analyzed
             meeting.analysisProviderId = provider.id
@@ -225,6 +342,9 @@ struct MeetingDetailView: View {
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 16)
 
+                // Processing pipeline — always visible
+                processingPipeline
+
                 if selectedSection == 0 {
                     analysisSection
                 } else {
@@ -252,6 +372,59 @@ struct MeetingDetailView: View {
             viewModel.setModelContext(modelContext)
             viewModel.loadTranscript(for: meeting)
             viewModel.loadAnalysis(for: meeting)
+            viewModel.autoStartPipeline(for: meeting)
+        }
+    }
+
+    // MARK: - Processing pipeline
+
+    private var processingPipeline: some View {
+        VStack(spacing: 8) {
+            pipelineStep(
+                icon: "mic.circle.fill",
+                label: "Audio recorded",
+                isComplete: true
+            )
+            Divider()
+            pipelineStep(
+                icon: "text.alignleft",
+                label: viewModel.isTranscribing ? "Transcribing..." : "Transcript",
+                isComplete: viewModel.transcript != nil,
+                isActive: viewModel.isTranscribing
+            )
+            Divider()
+            pipelineStep(
+                icon: "sparkles",
+                label: viewModel.isAnalyzing ? "Creating summary..." : "Summary",
+                isComplete: viewModel.analysis != nil,
+                isActive: viewModel.isAnalyzing
+            )
+        }
+        .padding(12)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 16)
+    }
+
+    private func pipelineStep(icon: String, label: String, isComplete: Bool, isActive: Bool = false) -> some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Image(systemName: icon)
+                    .font(.subheadline)
+                    .foregroundStyle(isComplete ? .green : isActive ? .blue : .secondary)
+            }
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(isComplete || isActive ? .primary : .secondary)
+            Spacer()
+            if isActive {
+                ProgressView()
+                    .controlSize(.small)
+            } else if isComplete {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            }
         }
     }
 
@@ -306,9 +479,9 @@ struct MeetingDetailView: View {
             }
 
             if viewModel.isAnalyzing {
-                HStack {
+                VStack(spacing: 6) {
                     ProgressView()
-                    Text("Analyzing meeting...")
+                    Text(viewModel.analysisProgress ?? "Analyzing meeting...")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -450,7 +623,7 @@ struct MeetingDetailView: View {
                         .font(.subheadline)
                         .foregroundStyle(.red)
                     Button("Retry") {
-                        Task { await viewModel.transcribe(meeting: meeting) }
+                        viewModel.retryTranscription(meeting: meeting)
                     }
                     .buttonStyle(.bordered)
                 }
@@ -458,11 +631,20 @@ struct MeetingDetailView: View {
             }
 
             if viewModel.isTranscribing {
-                HStack {
+                VStack(spacing: 8) {
+                    if let progress = viewModel.transcriptionProgress {
+                        Text(progress)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
                     ProgressView()
-                    Text("Transcribing...")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .tint(.blue)
+                    Button("Cancel") {
+                        viewModel.cancelTranscription()
+                    }
+                    .font(.caption)
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.red)
                 }
                 .padding(.horizontal, 16)
             }
@@ -474,12 +656,18 @@ struct MeetingDetailView: View {
                 }
             } else if viewModel.transcriptionError == nil && !viewModel.isTranscribing {
                 VStack(spacing: 12) {
-                    Text("Transcript not ready.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    if viewModel.transcriptionProgress != nil {
+                        Text(viewModel.transcriptionProgress!)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Transcript not ready.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
 
                     Button {
-                        Task { await viewModel.transcribe(meeting: meeting) }
+                        viewModel.retryTranscription(meeting: meeting)
                     } label: {
                         Label("Transcribe Meeting", systemImage: "text.alignleft")
                             .frame(maxWidth: .infinity)

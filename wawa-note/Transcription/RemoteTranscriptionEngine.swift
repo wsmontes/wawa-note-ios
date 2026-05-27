@@ -1,4 +1,4 @@
-import Foundation
+import AVFoundation
 import OSLog
 
 final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable {
@@ -8,86 +8,235 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
     private let baseURL: URL
     private let apiKey: String
     private let session: URLSession
+    private let chunker = AudioChunker(chunkDuration: 600, overlap: 0)
+
+    var onProgress: ((TranscriptionProgress) -> Void)?
+    var onCheckpoint: ((Transcript, Int) -> Void)?
+    private(set) var isCancelled = false
 
     init(baseURL: URL, apiKey: String = "", session: URLSession = .shared) {
         self.baseURL = baseURL
         self.apiKey = apiKey
-        self.session = session
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 180
+        config.timeoutIntervalForResource = 300
+        self.session = URLSession(configuration: config)
     }
 
+    func cancel() {
+        isCancelled = true
+    }
+
+    // MARK: - Duration
+
+    private func getDuration(_ url: URL) -> Float64 {
+        var fileID: AudioFileID?
+        guard AudioFileOpenURL(url as CFURL, .readPermission, 0, &fileID) == noErr, let fileID else { return 0 }
+        defer { AudioFileClose(fileID) }
+        var duration: Float64 = 0
+        var size = UInt32(MemoryLayout<Float64>.size)
+        AudioFileGetProperty(fileID, kAudioFilePropertyEstimatedDuration, &size, &duration)
+        return duration
+    }
+
+    private func fileSizeMB(_ url: URL) -> Double {
+        let values = try? url.resourceValues(forKeys: [.fileSizeKey])
+        return Double(values?.fileSize ?? 0) / 1_000_000
+    }
+
+    // MARK: - Transcribe
+
     func transcribeFile(_ audioFileURL: URL) async throws -> Transcript {
-        let url = baseURL.appendingPathComponent("audio/transcriptions")
+        isCancelled = false
 
-        let audioData = try Data(contentsOf: audioFileURL)
+        let durationSeconds = getDuration(audioFileURL)
+        let mb = fileSizeMB(audioFileURL)
+
+        AppLog.transcription.info("Transcribing file: \(String(format: "%.1f", durationSeconds))s, \(String(format: "%.1f", mb))MB")
+
+        if durationSeconds <= chunker.chunkDuration && mb < 25 {
+            onProgress?(.transcribing(chunk: 1, totalChunks: 1))
+            return try await transcribeSingle(url: audioFileURL, prompt: nil)
+        }
+
+        let total = Int(ceil(durationSeconds / chunker.chunkDuration))
+        AppLog.transcription.info("Splitting into ~\(total) chunks...")
+        chunker.onProgress = { [weak self] completed, total in
+            self?.onProgress?(.chunking(completed: completed, total: total))
+        }
+        onProgress?(.chunking(completed: 0, total: total))
+
+        let chunks = try await chunker.splitAudio(url: audioFileURL)
+        defer { chunker.cleanup() }
+
+        var previousText = ""
+        var allSegments: [TranscriptSegment] = []
+        var languageCode: String?
+
+        for (i, chunk) in chunks.enumerated() {
+            try Task.checkCancellation()
+            if isCancelled { throw TranscriptionError.cancelled }
+
+            onProgress?(.transcribing(chunk: i + 1, totalChunks: chunks.count))
+            let prompt = i > 0 ? String(previousText.suffix(500)) : nil
+            AppLog.transcription.info("Chunk \(i+1)/\(chunks.count)")
+
+            let transcript = try await transcribeSingle(url: chunk.url, prompt: prompt)
+            languageCode = transcript.languageCode ?? languageCode
+
+            let chunkText = transcript.segments.map(\.text).joined(separator: " ")
+
+            for segment in transcript.segments {
+                let adjustedStart = segment.startTime + chunk.startTime
+                let adjustedEnd = segment.endTime.map { $0 + chunk.startTime }
+                var text = segment.text
+                if i > 0 { text = deduplicateStart(text, against: previousText) }
+
+                allSegments.append(TranscriptSegment(
+                    meetingId: segment.meetingId,
+                    startTime: adjustedStart,
+                    endTime: adjustedEnd,
+                    speakerId: segment.speakerId,
+                    text: text,
+                    originalText: segment.originalText,
+                    confidence: segment.confidence,
+                    languageCode: segment.languageCode,
+                    sourceEngineId: segment.sourceEngineId
+                ))
+            }
+            previousText = chunkText
+
+            // Checkpoint after each chunk
+            let partial = Transcript(
+                meetingId: allSegments.first?.meetingId,
+                languageCode: languageCode,
+                segments: allSegments,
+                sourceEngineId: id
+            )
+            onCheckpoint?(partial, i + 1)
+        }
+
+        allSegments = allSegments.filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
+
+        AppLog.transcription.info("Remote transcription complete: \(allSegments.count) segments")
+        return Transcript(
+            meetingId: allSegments.first?.meetingId,
+            languageCode: languageCode,
+            segments: allSegments,
+            sourceEngineId: id
+        )
+    }
+
+    // MARK: - Single chunk
+
+    private func transcribeSingle(url: URL, prompt: String?) async throws -> Transcript {
+        let endpoint = baseURL.appendingPathComponent("audio/transcriptions")
         let boundary = UUID().uuidString
+        let model = AIConfigService.shared.modelFor(feature: "transcription")
 
-        var request = URLRequest(url: url)
+        // Build multipart body to temp file (memory-efficient)
+        let tempDir = FileManager.default.temporaryDirectory
+        let bodyURL = tempDir.appendingPathComponent("transcription_\(UUID().uuidString).body")
+        defer { try? FileManager.default.removeItem(at: bodyURL) }
+
+        try buildBodyFile(audioURL: url, prompt: prompt, model: model, boundary: boundary, outputURL: bodyURL)
+
+        var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
+        request.timeoutInterval = 120
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         if !apiKey.isEmpty {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
 
-        request.httpBody = buildMultipartBody(
-            audioData: audioData,
-            fileName: audioFileURL.lastPathComponent,
-            model: "whisper-1",
-            boundary: boundary
-        )
-
-        AppLog.transcription.info("Sending audio to Whisper API: \(audioFileURL.lastPathComponent) (\(audioData.count) bytes)")
-
-        let (data, response) = try await session.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw TranscriptionError.recognitionFailed
-        }
-        guard (200...299).contains(httpResponse.statusCode) else {
-            AppLog.transcription.error("Whisper API returned status \(httpResponse.statusCode)")
+        let (resData, response) = try await session.upload(for: request, fromFile: bodyURL)
+        guard let http = response as? HTTPURLResponse else {
             throw TranscriptionError.recognitionFailed
         }
 
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+        guard (200...299).contains(http.statusCode) else {
+            let body = String(data: resData, encoding: .utf8) ?? "<no body>"
+            AppLog.transcription.error("Transcription API returned \(http.statusCode): \(body.prefix(300))")
+            if http.statusCode == 413 {
+                throw TranscriptionError.fileTooLarge
+            }
+            throw TranscriptionError.recognitionFailed
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: resData) as? [String: Any],
               let text = json["text"] as? String else {
+            let body = String(data: resData, encoding: .utf8) ?? "<no body>"
+            AppLog.transcription.error("Transcription response parse error: \(body.prefix(300))")
             throw TranscriptionError.recognitionFailed
         }
-
-        let segment = TranscriptSegment(
-            meetingId: UUID(),
-            startTime: 0,
-            text: text.trimmingCharacters(in: .whitespacesAndNewlines),
-            sourceEngineId: id
-        )
-
-        AppLog.transcription.info("Whisper transcription complete: \(text.prefix(100))...")
 
         return Transcript(
             languageCode: json["language"] as? String,
-            segments: [segment],
+            segments: [TranscriptSegment(
+                meetingId: UUID(), startTime: 0,
+                text: text.trimmingCharacters(in: .whitespacesAndNewlines),
+                sourceEngineId: id
+            )],
             sourceEngineId: id
         )
     }
 
-    private func buildMultipartBody(audioData: Data, fileName: String, model: String, boundary: String) -> Data {
-        var body = Data()
-        let lineBreak = "\r\n"
+    // MARK: - Multipart to temp file
 
-        func append(_ string: String) {
-            if let data = string.data(using: .utf8) { body.append(data) }
+    private func buildBodyFile(audioURL: URL, prompt: String?, model: String, boundary: String, outputURL: URL) throws {
+        guard let output = OutputStream(url: outputURL, append: false) else {
+            throw NSError(domain: "body", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot create output stream"])
+        }
+        output.open()
+        defer { output.close() }
+
+        let lb = "\r\n"
+        func write(_ s: String) {
+            if let d = s.data(using: .utf8) {
+                _ = d.withUnsafeBytes { output.write($0.bindMemory(to: UInt8.self).baseAddress!, maxLength: d.count) }
+            }
+        }
+        func writeData(_ d: Data) {
+            _ = d.withUnsafeBytes { output.write($0.bindMemory(to: UInt8.self).baseAddress!, maxLength: d.count) }
         }
 
-        append("--\(boundary)\(lineBreak)")
-        append("Content-Disposition: form-data; name=\"model\"\(lineBreak)\(lineBreak)")
-        append("\(model)\(lineBreak)")
+        write("--\(boundary)\(lb)")
+        write("Content-Disposition: form-data; name=\"model\"\(lb)\(lb)")
+        write("\(model)\(lb)")
 
-        append("--\(boundary)\(lineBreak)")
-        append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\(lineBreak)")
-        append("Content-Type: audio/mp4\(lineBreak)\(lineBreak)")
-        body.append(audioData)
-        append("\(lineBreak)")
+        if let prompt, !prompt.isEmpty {
+            write("--\(boundary)\(lb)")
+            write("Content-Disposition: form-data; name=\"prompt\"\(lb)\(lb)")
+            write("\(prompt)\(lb)")
+        }
 
-        append("--\(boundary)--\(lineBreak)")
+        let filename = audioURL.lastPathComponent
+        write("--\(boundary)\(lb)")
+        write("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\(lb)")
+        write("Content-Type: audio/mp4\(lb)\(lb)")
 
-        return body
+        // Stream audio file data into the body
+        let audioData = try Data(contentsOf: audioURL)
+        writeData(audioData)
+        write("\(lb)")
+        write("--\(boundary)--\(lb)")
+    }
+
+    // MARK: - Dedup
+
+    private func deduplicateStart(_ text: String, against previous: String) -> String {
+        let prevWords = previous.lowercased().split(separator: " ")
+        let currWords = text.lowercased().split(separator: " ")
+        let original = text.split(separator: " ").map(String.init)
+        guard !prevWords.isEmpty, !currWords.isEmpty else { return text }
+
+        var maxMatch = 0
+        for j in 1...min(10, prevWords.count, currWords.count) {
+            if prevWords.suffix(j) == currWords.prefix(j) { maxMatch = j }
+        }
+        if maxMatch > 0, maxMatch < original.count {
+            return original.dropFirst(maxMatch).joined(separator: " ")
+        }
+        return text
     }
 }

@@ -1,0 +1,180 @@
+{
+  "version": "1.0",
+  "description": "Centralized AI configuration for wawa-note. Edit this file to change models, prompts, and parameters across all features.",
+
+  "providers": {
+    "openai": {
+      "id": "openai",
+      "displayName": "ChatGPT by OpenAI",
+      "type": "openAI",
+      "baseURL": "https://api.openai.com/v1",
+      "authType": "api_key",
+      "helpURL": "https://platform.openai.com/api-keys",
+      "iconName": "brain.head.profile",
+      "category": "cloud",
+      "description": "Cloud AI. Requires an API key.",
+      "defaultModel": "gpt-5.5",
+      "endpoints": {
+        "chat": "/chat/completions",
+        "models": "/models",
+        "audioTranscription": "/audio/transcriptions"
+      }
+    },
+    "anthropic": {
+      "id": "anthropic",
+      "displayName": "Claude by Anthropic",
+      "type": "anthropic",
+      "baseURL": "https://api.anthropic.com/v1",
+      "authType": "api_key",
+      "helpURL": "https://console.anthropic.com/keys",
+      "iconName": "sparkles",
+      "category": "cloud",
+      "description": "Cloud AI. Requires an API key.",
+      "defaultModel": "claude-sonnet-4-6",
+      "endpoints": {
+        "chat": "/messages",
+        "models": "/models"
+      }
+    },
+    "gemini": {
+      "id": "gemini",
+      "displayName": "Google Gemini",
+      "type": "gemini",
+      "baseURL": "https://generativelanguage.googleapis.com/v1beta",
+      "authType": "api_key",
+      "helpURL": "https://aistudio.google.com/apikey",
+      "iconName": "circle.hexagongrid",
+      "category": "cloud",
+      "description": "Cloud AI. Requires an API key.",
+      "defaultModel": "gemini-2.0-flash",
+      "endpoints": {
+        "chat": "/models/{model}:generateContent",
+        "models": "/models"
+      }
+    },
+    "deepseek": {
+      "id": "deepseek",
+      "displayName": "DeepSeek",
+      "type": "openAICompatible",
+      "baseURL": "https://api.deepseek.com/v1",
+      "authType": "api_key",
+      "helpURL": "https://platform.deepseek.com/api_keys",
+      "iconName": "bolt.circle",
+      "category": "cloud",
+      "description": "Cloud AI. DeepSeek V4. Requires an API key.",
+      "defaultModel": "deepseek-v4-pro",
+      "endpoints": {
+        "chat": "/chat/completions",
+        "models": "/models"
+      }
+    },
+    "lmstudio": {
+      "id": "lmstudio",
+      "displayName": "LM Studio",
+      "type": "openAICompatible",
+      "baseURL": "http://localhost:1234/v1",
+      "authType": "none",
+      "helpURL": null,
+      "iconName": "desktopcomputer",
+      "category": "local",
+      "description": "Runs on your Mac. No API key needed. Free.",
+      "scanPort": 1234,
+      "scanPath": "/v1/models",
+      "endpoints": {
+        "chat": "/chat/completions",
+        "models": "/models"
+      }
+    },
+    "ollama": {
+      "id": "ollama",
+      "displayName": "Ollama",
+      "type": "openAICompatible",
+      "baseURL": "http://localhost:11434",
+      "authType": "none",
+      "helpURL": null,
+      "iconName": "shippingbox",
+      "category": "local",
+      "description": "Runs on your Mac. No API key needed. Free.",
+      "scanPort": 11434,
+      "scanPath": "/api/tags",
+      "endpoints": {
+        "chat": "/v1/chat/completions",
+        "models": "/api/tags"
+      }
+    }
+  },
+
+  "defaultModels": {
+    "analysis": "gpt-5.5",
+    "chat": "gpt-5.5",
+    "transcription": "whisper-1"
+  },
+
+  "modelPresets": {
+    "gpt-5.5": {
+      "supportsTemperature": false,
+      "supportsMaxTokens": true,
+      "usesMaxCompletionTokens": true
+    },
+    "gpt-4o": {
+      "supportsTemperature": true,
+      "supportsMaxTokens": true,
+      "usesMaxCompletionTokens": true
+    },
+    "gpt-4o-mini": {
+      "supportsTemperature": true,
+      "supportsMaxTokens": true,
+      "usesMaxCompletionTokens": true
+    },
+    "o3-mini": {
+      "supportsTemperature": false,
+      "supportsMaxTokens": true,
+      "usesMaxCompletionTokens": true
+    },
+    "o3": {
+      "supportsTemperature": false,
+      "supportsMaxTokens": true,
+      "usesMaxCompletionTokens": true
+    },
+    "deepseek-v4-pro": {
+      "supportsTemperature": true,
+      "supportsMaxTokens": true,
+      "usesMaxCompletionTokens": false
+    },
+    "deepseek-v4-flash": {
+      "supportsTemperature": true,
+      "supportsMaxTokens": true,
+      "usesMaxCompletionTokens": false
+    },
+    "whisper-1": {
+      "supportsTemperature": false,
+      "supportsMaxTokens": false,
+      "usesMaxCompletionTokens": false
+    }
+  },
+
+  "features": {
+    "analysis": {
+      "provider": "openai",
+      "model": "gpt-5.5",
+      "temperature": null,
+      "maxCompletionTokens": 4000,
+      "systemPrompt": "You are a meeting analysis assistant. Return only valid JSON without markdown formatting or code blocks. Do not wrap the JSON in ``` fences.",
+      "userPrompt": "You are analyzing a meeting transcript.\n\nReturn structured JSON with these fields (use null for empty arrays):\n- short_summary: string\n- detailed_summary: string\n- decisions: array of {title, details, source_segment_ids, confidence}\n- action_items: array of {task, owner, due_date, source_segment_ids, confidence}\n- open_questions: array of {question, source_segment_ids, confidence}\n- risks: array of {risk, details, source_segment_ids, confidence}\n- important_dates: array of {date, meaning, source_segment_ids}\n- mentioned_people: array of strings\n- mentioned_systems: array of strings\n- follow_up_email_draft: string\n\nDo not invent information. If something is unclear, mark it as uncertain.\nEvery extracted item should include evidence from transcript segment IDs when available.\nUse the exact segment IDs shown in brackets.\n\nMeeting transcript:\n{transcript}\n"
+    },
+    "chat": {
+      "provider": "openai",
+      "model": "gpt-5.5",
+      "temperature": null,
+      "maxCompletionTokens": null,
+      "systemPrompt": "You are a helpful AI assistant. Be concise and accurate."
+    },
+    "transcription": {
+      "engine": "apple-speech",
+      "fallbackEngine": "remote-whisper",
+      "provider": "openai",
+      "model": "whisper-1",
+      "supportedLocales": ["pt-BR", "pt-PT", "en-US", "es-ES", "fr-FR", "de-DE", "it-IT", "ja-JP", "zh-CN"]
+    }
+  }
+}

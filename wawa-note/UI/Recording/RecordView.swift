@@ -4,21 +4,36 @@ import SwiftData
 struct RecordView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @StateObject private var viewModel = RecordingViewModel()
+    @StateObject private var viewModel: RecordingViewModel
     var onMeetingSaved: ((MeetingModel) -> Void)?
+    private let prefillEvent: CalendarEvent?
+
+    init(
+        coordinator: RecordingCoordinator,
+        onMeetingSaved: ((MeetingModel) -> Void)? = nil,
+        prefillEvent: CalendarEvent? = nil
+    ) {
+        _viewModel = StateObject(wrappedValue: RecordingViewModel(coordinator: coordinator))
+        self.onMeetingSaved = onMeetingSaved
+        self.prefillEvent = prefillEvent
+    }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 32) {
                 Spacer()
 
-                statusBadge
+                if let event = prefillEvent, viewModel.state == .idle {
+                    scheduledInfoView(event: event)
+                } else {
+                    statusBadge
+                }
 
                 timerView
 
                 if viewModel.state == .stopped {
                     playbackControls
-                } else {
+                } else if viewModel.state != .idle {
                     audioLevelMeter
                 }
 
@@ -58,7 +73,42 @@ struct RecordView: View {
                 }
             }
             .onAppear {
-                viewModel.setModelContext(modelContext)
+                // Only auto-start if no prefillEvent (free recording)
+                if viewModel.state == .idle && prefillEvent == nil {
+                    viewModel.startRecording()
+                }
+            }
+            .onChange(of: viewModel.state) { _, newState in
+                if newState == .stopped, let meetingId = viewModel.savedMeetingId {
+                    let descriptor = FetchDescriptor<MeetingModel>(predicate: #Predicate { $0.id == meetingId })
+                    if let meeting = try? modelContext.fetch(descriptor).first {
+                        onMeetingSaved?(meeting)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Scheduled meeting info
+
+    private func scheduledInfoView(event: CalendarEvent) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: "calendar.badge.clock")
+                .font(.title)
+                .foregroundStyle(.blue)
+
+            Text(event.title)
+                .font(.headline)
+                .multilineTextAlignment(.center)
+
+            Text(event.startDate.formatted(date: .long, time: .shortened))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            if let location = event.location, !location.isEmpty {
+                Label(location, systemImage: "location")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -185,7 +235,15 @@ struct RecordView: View {
                 title: "Start Recording",
                 systemImage: "record.circle.fill"
             ) {
-                viewModel.startRecording()
+                if let event = prefillEvent {
+                    viewModel.startRecording(
+                        title: event.title,
+                        scheduledDate: event.startDate,
+                        calendarEventIdentifier: event.id
+                    )
+                } else {
+                    viewModel.startRecording()
+                }
             }
             .padding(.horizontal, 32)
             .tint(.red)
@@ -232,23 +290,12 @@ struct RecordView: View {
 
         case .stopped:
             VStack(spacing: 12) {
-                if let meetingId = viewModel.savedMeetingId {
-                    PrimaryActionButton(
-                        title: "View Meeting",
-                        systemImage: "arrow.right"
-                    ) {
-                        let descriptor = FetchDescriptor<MeetingModel>(predicate: #Predicate { $0.id == meetingId })
-                        if let meeting = try? modelContext.fetch(descriptor).first {
-                            onMeetingSaved?(meeting)
-                        }
-                    }
-                    .padding(.horizontal, 32)
-                }
+                ProgressView()
+                Text("Opening meeting...")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
         }
     }
 }
 
-#Preview {
-    RecordView()
-}

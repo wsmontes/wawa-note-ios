@@ -8,13 +8,22 @@ final class ProviderConnectViewModel: ObservableObject {
     let template: ProviderTemplate
 
     @Published var apiKey = ""
+    @Published var modelName = ""
     @Published var connectionPhase: ConnectionPhase = .idle
     @Published var availableModels: [String] = []
     @Published var selectedModel: String = ""
+    @Published var isFetchingModels = false
+    @Published var modelFetchError: String?
 
     private let keychain = SecureKeyStore()
     private let router = ProviderRouter()
     private var savedProvider: AIProviderConfigModel?
+
+    var effectiveModel: String {
+        if !selectedModel.isEmpty { return selectedModel }
+        let m = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return m.isEmpty ? template.defaultModel : m
+    }
 
     enum ConnectionPhase: Equatable {
         case idle
@@ -29,6 +38,7 @@ final class ProviderConnectViewModel: ObservableObject {
     init(template: ProviderTemplate) {
         self.template = template
         self.selectedModel = template.defaultModel
+        self.modelName = template.defaultModel
     }
 
     // MARK: - Auto-scan (local only)
@@ -70,6 +80,43 @@ final class ProviderConnectViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Fetch models
+
+    func fetchModels() async {
+        guard let baseURL = URL(string: template.baseURL) else {
+            modelFetchError = "Invalid server address."
+            return
+        }
+        isFetchingModels = true
+        modelFetchError = nil
+
+        let url = URL(string: baseURL.absoluteString + "/models") ?? baseURL
+        var request = URLRequest(url: url)
+        if !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+        request.timeoutInterval = 10
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (200...299).contains((response as? HTTPURLResponse)?.statusCode ?? 500) else {
+                modelFetchError = "Could not fetch models. Check your API key."
+                isFetchingModels = false
+                return
+            }
+            let decoded = try JSONDecoder().decode(ModelsResponse.self, from: data)
+            availableModels = decoded.data.map(\.id).sorted()
+            if availableModels.isEmpty {
+                modelFetchError = "No models available."
+            } else if selectedModel.isEmpty {
+                selectedModel = availableModels.first!
+            }
+        } catch {
+            modelFetchError = "Could not fetch models."
+        }
+        isFetchingModels = false
+    }
+
     // MARK: - Connect
 
     func connect(context: ModelContext) async {
@@ -98,7 +145,7 @@ final class ProviderConnectViewModel: ObservableObject {
             name: template.displayName,
             type: template.providerType,
             baseURL: baseURL,
-            defaultModel: template.defaultModel,
+            defaultModel: effectiveModel,
             supportsStreaming: true,
             supportsAudio: false,
             supportsTools: true,
@@ -109,11 +156,11 @@ final class ProviderConnectViewModel: ObservableObject {
         do {
             let provider = try router.provider(for: testConfig)
             let request = AIRequest(
-                model: template.defaultModel,
+                model: effectiveModel,
                 messages: [
-                    AIMessage(role: .user, content: [.text("Hello")])
+                    AIMessage(role: .user, content: [.text("Say hi")])
                 ],
-                maxTokens: 20
+                maxTokens: nil
             )
             let response = try await provider.send(request)
 
@@ -126,12 +173,23 @@ final class ProviderConnectViewModel: ObservableObject {
                 return
             }
 
-            // Connection successful. Persist the provider.
+            // Connection successful. Remove old configs for the same provider before saving.
+            let existingDescriptor = FetchDescriptor<AIProviderConfigModel>()
+            if let existing = try? context.fetch(existingDescriptor) {
+                for old in existing where old.type == template.providerType && old.baseURLString == template.baseURL {
+                    if let oldKeyId = old.apiKeyKeychainIdentifier {
+                        try? keychain.deleteAPIKey(for: oldKeyId)
+                    }
+                    context.delete(old)
+                }
+            }
+
+            // Persist the new provider.
             let savedProvider = AIProviderConfigModel(
                 name: template.displayName,
                 type: template.providerType,
                 baseURL: baseURL,
-                defaultModel: template.defaultModel,
+                defaultModel: effectiveModel,
                 supportsStreaming: true,
                 supportsAudio: false,
                 supportsTools: true,
@@ -147,6 +205,7 @@ final class ProviderConnectViewModel: ObservableObject {
                 return
             }
             self.savedProvider = savedProvider
+            ActiveProviderManager.shared.setActiveProviderID(savedProvider.id)
 
             // Attempt model discovery.
             let models = await discoverModels(baseURL: baseURL, apiKeyId: keychainId)
@@ -203,6 +262,11 @@ final class ProviderConnectViewModel: ObservableObject {
 }
 
 // MARK: - Models list response
+
+private struct ModelsResponse: Decodable {
+    let data: [ModelItem]
+    struct ModelItem: Decodable { let id: String }
+}
 
 private struct ModelsListResponse: Decodable {
     let data: [ModelEntry]
@@ -329,6 +393,8 @@ struct ProviderConnectView: View {
         } else {
             VStack(spacing: AppSpacing.lg) {
                 apiKeyField
+                modelField
+                modelPickerSection
                 apiKeyLink
                 connectButton
             }
@@ -348,6 +414,47 @@ struct ProviderConnectView: View {
                 .autocapitalization(.none)
                 .disableAutocorrection(true)
                 .disabled(viewModel.connectionPhase == .testing)
+        }
+    }
+
+    @ViewBuilder
+    private var modelPickerSection: some View {
+        if let error = viewModel.modelFetchError {
+            Text(error).font(.caption).foregroundStyle(.red)
+        }
+        if !viewModel.availableModels.isEmpty {
+            Picker("Model", selection: $viewModel.selectedModel) {
+                ForEach(viewModel.availableModels, id: \.self) { m in
+                    Text(m).tag(m)
+                }
+            }
+            .pickerStyle(.menu)
+        }
+    }
+
+    private var modelField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Model")
+                .font(.caption)
+                .fontWeight(.medium)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                TextField("Model name", text: $viewModel.modelName)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.body)
+                    .autocapitalization(.none)
+                    .disableAutocorrection(true)
+                    .disabled(viewModel.connectionPhase == .testing)
+
+                Button {
+                    Task { await viewModel.fetchModels() }
+                } label: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.body)
+                }
+                .disabled(viewModel.apiKey.isEmpty || viewModel.isFetchingModels)
+            }
         }
     }
 
@@ -521,7 +628,7 @@ struct ProviderConnectView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                Text("Using \(template.defaultModel).")
+                Text("Using \(viewModel.effectiveModel).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

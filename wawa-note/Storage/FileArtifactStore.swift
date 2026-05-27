@@ -47,6 +47,15 @@ final class FileArtifactStore: @unchecked Sendable {
         fileManager.fileExists(atPath: audioFileURL(for: meetingId).path)
     }
 
+    func copyAudioToMeeting(sourceURL: URL, meetingId: UUID) throws {
+        try createMeetingDirectory(for: meetingId)
+        let destURL = audioFileURL(for: meetingId)
+        if fileManager.fileExists(atPath: destURL.path) {
+            try fileManager.removeItem(at: destURL)
+        }
+        try fileManager.copyItem(at: sourceURL, to: destURL)
+    }
+
     func deleteAudio(for meetingId: UUID) throws {
         let url = audioFileURL(for: meetingId)
         guard fileManager.fileExists(atPath: url.path) else { return }
@@ -85,6 +94,56 @@ final class FileArtifactStore: @unchecked Sendable {
     func artifactExists(fileName: String, meetingId: UUID) -> Bool {
         let url = meetingDirectoryURL(for: meetingId).appendingPathComponent(fileName)
         return fileManager.fileExists(atPath: url.path)
+    }
+
+    // MARK: - Partial transcript (checkpointing)
+
+    private func partialTranscriptURL(for meetingId: UUID) -> URL {
+        meetingDirectoryURL(for: meetingId).appendingPathComponent("transcript_partial.json")
+    }
+
+    private func partialCheckpointURL(for meetingId: UUID) -> URL {
+        meetingDirectoryURL(for: meetingId).appendingPathComponent("checkpoint.json")
+    }
+
+    func writePartialTranscript(_ transcript: Transcript, checkpoint: TranscriptionCheckpoint, meetingId: UUID) throws {
+        try createMeetingDirectory(for: meetingId)
+
+        let tURL = partialTranscriptURL(for: meetingId)
+        let tData = try JSONEncoder().encode(transcript)
+        try tData.write(to: tURL, options: .atomic)
+
+        let cURL = partialCheckpointURL(for: meetingId)
+        let cData = try JSONEncoder().encode(checkpoint)
+        try cData.write(to: cURL, options: .atomic)
+    }
+
+    func readPartialCheckpoint(meetingId: UUID) throws -> TranscriptionCheckpoint? {
+        let url = partialCheckpointURL(for: meetingId)
+        guard fileManager.fileExists(atPath: url.path) else { return nil }
+        let data = try Data(contentsOf: url)
+        return try JSONDecoder().decode(TranscriptionCheckpoint.self, from: data)
+    }
+
+    func readPartialTranscript(meetingId: UUID) throws -> Transcript? {
+        let url = partialTranscriptURL(for: meetingId)
+        guard fileManager.fileExists(atPath: url.path) else { return nil }
+        let data = try Data(contentsOf: url)
+        return try JSONDecoder().decode(Transcript.self, from: data)
+    }
+
+    func commitPartialTranscript(meetingId: UUID) throws {
+        let partialURL = partialTranscriptURL(for: meetingId)
+        let finalURL = meetingDirectoryURL(for: meetingId).appendingPathComponent("transcript.json")
+        guard fileManager.fileExists(atPath: partialURL.path) else { return }
+        try? fileManager.removeItem(at: finalURL)
+        try fileManager.moveItem(at: partialURL, to: finalURL)
+        try? fileManager.removeItem(at: partialCheckpointURL(for: meetingId))
+    }
+
+    func deletePartialTranscript(meetingId: UUID) {
+        try? fileManager.removeItem(at: partialTranscriptURL(for: meetingId))
+        try? fileManager.removeItem(at: partialCheckpointURL(for: meetingId))
     }
 
     // MARK: - Export

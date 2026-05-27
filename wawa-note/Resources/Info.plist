@@ -33,6 +33,22 @@
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+		<string>processing</string>
+	</array>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Wawa Note shows your calendar events so you can start recordings with the right meeting context.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>wawanote</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Wawa Note uses the microphone to record meetings you choose to capture. Audio is saved on this iPhone.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

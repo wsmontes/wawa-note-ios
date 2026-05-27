@@ -76,6 +76,7 @@ enum ProviderError: Error {
     case missingAPIKey
     case invalidBaseURL
     case requestFailed(statusCode: Int)
+    case apiError(statusCode: Int, body: String)
     case decodingFailed
     case providerNotFound
     case networkUnavailable
@@ -94,6 +95,8 @@ enum ProviderError: Error {
             code == 429 ? "You've made too many requests. Wait a moment, then try again." :
             code >= 500 ? "The AI service is having trouble. This is on their end — try again in a few minutes." :
             "Something went wrong (error \(code)). Check your connection in Settings."
+        case .apiError(let code, let body):
+            "Error \(code): \(extractErrorBody(body))"
         case .decodingFailed:
             "The AI service sent back a response we couldn't read. Your data is safe. Try again or check that you picked the right service type."
         case .providerNotFound:
@@ -106,4 +109,14 @@ enum ProviderError: Error {
             "The request took too long. The AI service may be busy. Try again in a moment."
         }
     }
+}
+
+private func extractErrorBody(_ body: String) -> String {
+    guard let data = body.data(using: .utf8),
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let error = json["error"] as? [String: Any],
+          let message = error["message"] as? String else {
+        return String(body.prefix(200))
+    }
+    return message
 }

@@ -9,16 +9,32 @@ private struct ChatCompletionRequest: Encodable {
     let temperature: Double?
     let maxTokens: Int?
     let responseFormat: ResponseFormat?
+    let usesMaxTokens: Bool // true = use "max_tokens", false = use "max_completion_tokens"
 
     enum CodingKeys: String, CodingKey {
         case model, messages, temperature
-        case maxTokens = "max_tokens"
+        case maxTokensAlt = "max_tokens"
+        case maxCompletionTokens = "max_completion_tokens"
         case responseFormat = "response_format"
     }
 
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(model, forKey: .model)
+        try container.encode(messages, forKey: .messages)
+        try container.encodeIfPresent(temperature, forKey: .temperature)
+        if let tokens = maxTokens {
+            if usesMaxTokens {
+                try container.encode(tokens, forKey: .maxTokensAlt)
+            } else {
+                try container.encode(tokens, forKey: .maxCompletionTokens)
+            }
+        }
+        try container.encodeIfPresent(responseFormat, forKey: .responseFormat)
+    }
+
     struct RequestMessage: Encodable {
-        let role: String
-        let content: String
+        let role: String; let content: String
     }
 
     struct ResponseFormat: Encodable {
@@ -34,16 +50,11 @@ private struct ChatCompletionResponse: Decodable {
 
     struct Choice: Decodable {
         let message: Message
-        struct Message: Decodable {
-            let content: String
-        }
+        struct Message: Decodable { let content: String }
     }
 
     struct Usage: Decodable {
-        let promptTokens: Int?
-        let completionTokens: Int?
-        let totalTokens: Int?
-
+        let promptTokens: Int?; let completionTokens: Int?; let totalTokens: Int?
         enum CodingKeys: String, CodingKey {
             case promptTokens = "prompt_tokens"
             case completionTokens = "completion_tokens"
@@ -65,16 +76,10 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
     private let session: URLSession
 
     init(
-        id: String,
-        displayName: String,
-        baseURL: URL,
-        apiKey: String,
-        model: String,
+        id: String, displayName: String, baseURL: URL, apiKey: String, model: String,
         capabilities: AIProviderCapabilities = AIProviderCapabilities(
-            supportsStreaming: true,
-            supportsAudioInput: false,
-            supportsStructuredOutput: true,
-            supportsToolCalling: false,
+            supportsStreaming: true, supportsAudioInput: false,
+            supportsStructuredOutput: true, supportsToolCalling: false,
             supportsEmbeddings: false
         ),
         session: URLSession = .shared
@@ -89,7 +94,9 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
     }
 
     func send(_ request: AIRequest) async throws -> AIResponse {
-        let url = baseURL.appendingPathComponent("chat/completions")
+        guard let url = URL(string: baseURL.absoluteString + "/chat/completions") else {
+            throw ProviderError.invalidBaseURL
+        }
 
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
@@ -97,9 +104,11 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
         urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
 
         let body = buildRequestBody(from: request)
-        urlRequest.httpBody = try JSONEncoder().encode(body)
+        let bodyData = try JSONEncoder().encode(body)
+        urlRequest.httpBody = bodyData
 
-        AppLog.provider.info("Sending request to \(self.baseURL.host ?? "unknown") with model \(self.model)")
+        AppLog.provider.info("POST \(url.absoluteString)")
+        AppLog.provider.info("Request body: \(String(data: bodyData, encoding: .utf8) ?? "<err>")")
 
         let (data, response) = try await session.data(for: urlRequest)
 
@@ -108,8 +117,9 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
         }
 
         guard (200...299).contains(httpResponse.statusCode) else {
-            AppLog.provider.error("Provider returned status \(httpResponse.statusCode)")
-            throw ProviderError.requestFailed(statusCode: httpResponse.statusCode)
+            let bodyStr = String(data: data, encoding: .utf8) ?? "<no body>"
+            AppLog.provider.error("Provider returned \(httpResponse.statusCode). Body: \(bodyStr.prefix(500))")
+            throw ProviderError.apiError(statusCode: httpResponse.statusCode, body: bodyStr)
         }
 
         return try parseResponse(data: data)
@@ -127,11 +137,12 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
                 }
             }.joined(separator: "\n")
 
-            return ChatCompletionRequest.RequestMessage(
-                role: msg.role.rawValue,
-                content: content
-            )
+            return ChatCompletionRequest.RequestMessage(role: msg.role.rawValue, content: content)
         }
+
+        let effectiveModel = request.model.isEmpty ? model : request.model
+        let preset = AIConfigService.shared.presetFor(model: effectiveModel)
+        let usesMaxTokens = preset?.usesMaxCompletionTokens == false
 
         let responseFormat: ChatCompletionRequest.ResponseFormat? = {
             if request.responseFormat == .json {
@@ -141,11 +152,12 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
         }()
 
         return ChatCompletionRequest(
-            model: request.model.isEmpty ? model : request.model,
+            model: effectiveModel,
             messages: messages,
-            temperature: request.temperature,
-            maxTokens: request.maxTokens,
-            responseFormat: responseFormat
+            temperature: (preset?.supportsTemperature == false) ? nil : request.temperature,
+            maxTokens: (preset?.supportsMaxTokens == false) ? nil : request.maxTokens,
+            responseFormat: responseFormat,
+            usesMaxTokens: usesMaxTokens
         )
     }
 
@@ -171,7 +183,6 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
             content: decoded.choices.first?.message.content ?? "",
             usage: usage
         )
-
         AppLog.provider.info("Received response: \(response.content.prefix(100))...")
         return response
     }

@@ -15,6 +15,10 @@ final class MeetingModel {
     var languageCode: String?
     var tags: [String]
     var statusRaw: String
+    var scheduledDate: Date?
+    var calendarEventIdentifier: String?
+    var isImported: Bool?
+    var importSourceURL: String?
 
     var status: MeetingStatus {
         get { MeetingStatus(rawValue: statusRaw) ?? .draft }
@@ -33,7 +37,11 @@ final class MeetingModel {
         analysisProviderId: String? = nil,
         languageCode: String? = nil,
         tags: [String] = [],
-        status: MeetingStatus = .draft
+        status: MeetingStatus = .draft,
+        scheduledDate: Date? = nil,
+        calendarEventIdentifier: String? = nil,
+        isImported: Bool = false,
+        importSourceURL: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -47,6 +55,10 @@ final class MeetingModel {
         self.languageCode = languageCode
         self.tags = tags
         self.statusRaw = status.rawValue
+        self.scheduledDate = scheduledDate
+        self.calendarEventIdentifier = calendarEventIdentifier
+        self.isImported = isImported
+        self.importSourceURL = importSourceURL
     }
 }
 

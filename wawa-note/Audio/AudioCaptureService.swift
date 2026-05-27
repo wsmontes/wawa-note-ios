@@ -52,11 +52,16 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         let hardwareFormat = inputNode.outputFormat(forBus: 0)
         try fileWriter.startRecording(format: hardwareFormat, meetingId: meetingId)
 
-        // Use nil format to receive buffers in the hardware native format.
-        // AVAudioFile handles any necessary conversion to AAC internally.
+        // Only write to file when actively recording; skip during pause.
+        // The engine must keep running (iOS forbids engine.start() in the
+        // background), so the tap stays installed for the lifetime of the
+        // recording.
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buffer, _ in
-            self?.fileWriter.write(buffer: buffer)
-            self?.updateAudioLevel(from: buffer)
+            guard let self else { return }
+            self.updateAudioLevel(from: buffer)
+            if self.state == .recording {
+                self.fileWriter.write(buffer: buffer)
+            }
         }
 
         do {
@@ -74,15 +79,16 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     func pauseRecording() {
         guard state == .recording else { return }
-        engine.pause()
+        // Keep the engine running — iOS forbids engine.start() from the
+        // background, so we never stop the engine mid-recording. The tap
+        // callback skips file writes while state is .paused.
         state = .paused
         timerTask?.cancel()
-        AppLog.audio.info("Recording paused")
+        AppLog.audio.info("Recording paused (engine kept alive)")
     }
 
-    func resumeRecording() throws {
+    func resumeRecording() {
         guard state == .paused else { return }
-        try engine.start()
         state = .recording
         startTimer()
         AppLog.audio.info("Recording resumed")

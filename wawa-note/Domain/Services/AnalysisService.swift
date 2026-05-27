@@ -1,6 +1,8 @@
 import Foundation
 import OSLog
 
+// MARK: - Response DTOs
+
 private struct AnalysisResponse: Decodable {
     let shortSummary: String?
     let detailedSummary: String?
@@ -14,211 +16,214 @@ private struct AnalysisResponse: Decodable {
     let followUpEmailDraft: String?
 
     enum CodingKeys: String, CodingKey {
-        case shortSummary = "short_summary"
-        case detailedSummary = "detailed_summary"
-        case decisions
-        case actionItems = "action_items"
-        case openQuestions = "open_questions"
-        case risks
-        case importantDates = "important_dates"
-        case mentionedPeople = "mentioned_people"
-        case mentionedSystems = "mentioned_systems"
-        case followUpEmailDraft = "follow_up_email_draft"
+        case shortSummary = "short_summary", detailedSummary = "detailed_summary"
+        case decisions, actionItems = "action_items", openQuestions = "open_questions"
+        case risks, importantDates = "important_dates", mentionedPeople = "mentioned_people"
+        case mentionedSystems = "mentioned_systems", followUpEmailDraft = "follow_up_email_draft"
     }
 
     struct DecisionItem: Decodable {
-        let title: String
-        let details: String?
-        let sourceSegmentIds: [String]?
-        let confidence: Double?
-        enum CodingKeys: String, CodingKey {
-            case title, details
-            case sourceSegmentIds = "source_segment_ids"
-            case confidence
-        }
+        let title: String; let details: String?
+        let sourceSegmentIds: [String]?; let confidence: Double?
+        enum CodingKeys: String, CodingKey { case title, details, sourceSegmentIds = "source_segment_ids", confidence }
     }
-
     struct ActionItemDTO: Decodable {
-        let task: String
-        let owner: String?
-        let dueDate: String?
-        let sourceSegmentIds: [String]?
-        let confidence: Double?
-        enum CodingKeys: String, CodingKey {
-            case task, owner
-            case dueDate = "due_date"
-            case sourceSegmentIds = "source_segment_ids"
-            case confidence
-        }
+        let task: String; let owner: String?; let dueDate: String?
+        let sourceSegmentIds: [String]?; let confidence: Double?
+        enum CodingKeys: String, CodingKey { case task, owner, dueDate = "due_date", sourceSegmentIds = "source_segment_ids", confidence }
     }
-
     struct QuestionItem: Decodable {
-        let question: String
-        let sourceSegmentIds: [String]?
-        let confidence: Double?
-        enum CodingKeys: String, CodingKey {
-            case question
-            case sourceSegmentIds = "source_segment_ids"
-            case confidence
-        }
+        let question: String; let sourceSegmentIds: [String]?; let confidence: Double?
+        enum CodingKeys: String, CodingKey { case question, sourceSegmentIds = "source_segment_ids", confidence }
     }
-
     struct RiskItem: Decodable {
-        let risk: String
-        let details: String?
-        let sourceSegmentIds: [String]?
-        let confidence: Double?
-        enum CodingKeys: String, CodingKey {
-            case risk, details
-            case sourceSegmentIds = "source_segment_ids"
-            case confidence
-        }
+        let risk: String; let details: String?
+        let sourceSegmentIds: [String]?; let confidence: Double?
+        enum CodingKeys: String, CodingKey { case risk, details, sourceSegmentIds = "source_segment_ids", confidence }
     }
-
     struct DateItem: Decodable {
-        let date: String
-        let meaning: String?
-        let sourceSegmentIds: [String]?
-        enum CodingKeys: String, CodingKey {
-            case date, meaning
-            case sourceSegmentIds = "source_segment_ids"
-        }
+        let date: String; let meaning: String?; let sourceSegmentIds: [String]?
+        enum CodingKeys: String, CodingKey { case date, meaning, sourceSegmentIds = "source_segment_ids" }
     }
+}
+
+// MARK: - Progress
+
+enum AnalysisProgress: Sendable {
+    case mapping(Int, Int)    // current chunk, total chunks
+    case reducing
+    case done
 }
 
 // MARK: - Service
 
-final class AnalysisService: Sendable {
-    private let promptTemplate: String
+final class AnalysisService: @unchecked Sendable {
+    private let configService = AIConfigService.shared
+    private let chunker = TranscriptChunker()
 
-    init() {
-        self.promptTemplate = """
-        You are analyzing a meeting transcript.
+    nonisolated(unsafe) var onProgress: (@Sendable (AnalysisProgress) -> Void)?
 
-        Return structured JSON with these fields (use null for empty arrays):
-        - short_summary: string
-        - detailed_summary: string
-        - decisions: array of {title, details, source_segment_ids, confidence}
-        - action_items: array of {task, owner, due_date, source_segment_ids, confidence}
-        - open_questions: array of {question, source_segment_ids, confidence}
-        - risks: array of {risk, details, source_segment_ids, confidence}
-        - important_dates: array of {date, meaning, source_segment_ids}
-        - mentioned_people: array of strings
-        - mentioned_systems: array of strings
-        - follow_up_email_draft: string
+    func analyze(transcript: Transcript, using provider: any AIProvider, model: String) async throws -> MeetingAnalysis {
+        let cfg = configService.featureConfig(for: "analysis")
+        let systemPrompt = cfg?.systemPrompt ?? "You are a meeting analysis assistant. Return only valid JSON."
+        let segmentsText = transcript.segments.map { seg in
+            "[\(seg.id.uuidString)|\(formatTime(seg.startTime))] \(seg.text)"
+        }
 
-        Do not invent information. If something is unclear, mark it as uncertain.
-        Every extracted item should include evidence from transcript segment IDs when available.
-        Use the exact segment IDs shown in brackets.
+        // Check if chunking is needed
+        let totalChars = segmentsText.reduce(0) { $0 + $1.count }
+        if totalChars <= chunker.maxCharsPerChunk {
+            // Direct path — transcript fits in one request
+            let userPrompt = configService.renderPrompt(for: "analysis", variables: ["transcript": segmentsText.joined(separator: "\n")])
+            return try await singleAnalysis(provider: provider, model: model, systemPrompt: systemPrompt, userPrompt: userPrompt)
+        }
 
-        Meeting transcript:
-        \(TRANSCRIPT_PLACEHOLDER)
-        """
+        // Map-Reduce path
+        AppLog.provider.info("Transcript is \(totalChars) chars, using map-reduce")
+        let chunks = chunker.chunkTranscript(transcript)
+        return try await mapReduceAnalysis(chunks: chunks, provider: provider, model: model, systemPrompt: systemPrompt)
     }
 
-    func analyze(transcript: Transcript, using provider: any AIProvider, model: String) async throws -> (analysis: MeetingAnalysis, rawContent: String?) {
-        let segmentsText = transcript.segments.map { segment in
-            "[\(segment.id.uuidString)|\(formatTime(segment.startTime))] \(segment.text)"
-        }.joined(separator: "\n")
+    // MARK: - Direct (single request)
 
-        let prompt = promptTemplate.replacingOccurrences(of: "\(TRANSCRIPT_PLACEHOLDER)", with: segmentsText)
+    private func singleAnalysis(provider: any AIProvider, model: String, systemPrompt: String, userPrompt: String) async throws -> MeetingAnalysis {
+        let request = AIRequest(
+            model: model,
+            messages: [
+                AIMessage(role: .system, content: [.text(systemPrompt)]),
+                AIMessage(role: .user, content: [.text(userPrompt)])
+            ]
+        )
+        let response = try await provider.send(request)
+        return parseResponse(response.content, meetingId: UUID(), providerId: provider.id, model: model)
+    }
+
+    // MARK: - Map-Reduce
+
+    private func mapReduceAnalysis(chunks: [TextChunk], provider: any AIProvider, model: String, systemPrompt: String) async throws -> MeetingAnalysis {
+        // MAP: Summarize each chunk in parallel
+        let chunkSummaries: [String] = try await withThrowingTaskGroup(of: (Int, String).self) { group in
+            for (i, chunk) in chunks.enumerated() {
+                group.addTask {
+                    let summary = try await self.summarizeChunk(chunk, index: i, total: chunks.count, provider: provider, model: model)
+                    return (i, summary)
+                }
+            }
+            var results: [(Int, String)] = []
+            for try await result in group { results.append(result) }
+            return results.sorted { $0.0 < $1.0 }.map { $0.1 }
+        }
+
+        AppLog.provider.info("Map phase done: \(chunkSummaries.count) summaries")
+
+        // REDUCE: Consolidate summaries into final analysis
+        await MainActor.run { onProgress?(.reducing) }
+
+        let combined = chunkSummaries.enumerated().map { idx, summary in
+            "--- Part \(idx + 1) of \(chunkSummaries.count) ---\n\(summary)"
+        }.joined(separator: "\n\n")
+
+        let reducePrompt = """
+        Below are summaries from different parts of a long meeting. Synthesize them into a complete meeting analysis.
+        Extract: short_summary, detailed_summary, decisions (title, details), action_items (task, owner, due_date), open_questions, risks (risk, details), important_dates (date, meaning), mentioned_people, mentioned_systems.
+
+        \(combined)
+
+        Return only valid JSON with these keys: short_summary, detailed_summary, decisions, action_items, open_questions, risks, important_dates, mentioned_people, mentioned_systems.
+        """
 
         let request = AIRequest(
             model: model,
             messages: [
-                AIMessage(role: .system, content: [.text("You are a meeting analysis assistant. Return only valid JSON.")]),
-                AIMessage(role: .user, content: [.text(prompt)])
-            ],
-            temperature: 0.3,
-            responseFormat: .json
+                AIMessage(role: .system, content: [.text(systemPrompt)]),
+                AIMessage(role: .user, content: [.text(reducePrompt)])
+            ]
         )
-
         let response = try await provider.send(request)
-        let meetingId = transcript.meetingId ?? UUID()
-
-        guard let data = response.content.data(using: .utf8) else {
-            throw ProviderError.decodingFailed
-        }
-
-        let decoder = JSONDecoder()
-        do {
-            let parsed = try decoder.decode(AnalysisResponse.self, from: data)
-            return (buildAnalysis(from: parsed, meetingId: meetingId, providerId: provider.id, model: model), nil)
-        } catch {
-            AppLog.provider.error("Failed to parse analysis JSON: \(error.localizedDescription)")
-            return (buildFallback(rawContent: response.content, meetingId: meetingId, providerId: provider.id, model: model), response.content)
-        }
+        return parseResponse(response.content, meetingId: UUID(), providerId: provider.id, model: model)
     }
 
-    // MARK: - Private
+    private func summarizeChunk(_ chunk: TextChunk, index: Int, total: Int, provider: any AIProvider, model: String) async throws -> String {
+        await MainActor.run { onProgress?(.mapping(index + 1, total)) }
 
-    private func parseSegmentIds(_ strings: [String]?) -> [UUID] {
-        strings?.compactMap(UUID.init(uuidString:)) ?? []
+        let prompt = """
+        You are a meeting note taker. Summarize this meeting excerpt concisely.
+        Focus on: key decisions, action items, risks, open questions, important dates, people mentioned, systems mentioned.
+
+        Meeting excerpt (part \(index + 1) of \(total)):
+        \(chunk.text)
+        """
+
+        let request = AIRequest(
+            model: model,
+            messages: [
+                AIMessage(role: .system, content: [.text("You are a concise meeting summarizer. Return only the summary text, no JSON.")]),
+                AIMessage(role: .user, content: [.text(prompt)])
+            ]
+        )
+        let response = try await provider.send(request)
+        return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - Parse
+
+    private func parseResponse(_ content: String, meetingId: UUID, providerId: String, model: String) -> MeetingAnalysis {
+        guard let data = content.data(using: .utf8) else {
+            return buildFallback(rawContent: content, meetingId: meetingId, providerId: providerId, model: model)
+        }
+
+        do {
+            let parsed = try JSONDecoder().decode(AnalysisResponse.self, from: data)
+            return buildAnalysis(from: parsed, meetingId: meetingId, providerId: providerId, model: model)
+        } catch {
+            AppLog.provider.error("Failed to parse analysis JSON: \(error.localizedDescription)")
+            return buildFallback(rawContent: content, meetingId: meetingId, providerId: providerId, model: model)
+        }
     }
 
     private func buildAnalysis(from parsed: AnalysisResponse, meetingId: UUID, providerId: String, model: String) -> MeetingAnalysis {
         MeetingAnalysis(
-            meetingId: meetingId,
-            providerId: providerId,
-            model: model,
+            meetingId: meetingId, providerId: providerId, model: model,
             shortSummary: parsed.shortSummary ?? "",
             detailedSummary: parsed.detailedSummary ?? "",
-            decisions: parsed.decisions?.map {
-                Decision(title: $0.title, details: $0.details ?? "", sourceSegmentIds: parseSegmentIds($0.sourceSegmentIds), confidence: $0.confidence)
-            } ?? [],
-            actionItems: parsed.actionItems?.map {
-                ActionItem(task: $0.task, owner: $0.owner, dueDate: parseDate($0.dueDate), sourceSegmentIds: parseSegmentIds($0.sourceSegmentIds), confidence: $0.confidence)
-            } ?? [],
-            risks: parsed.risks?.map {
-                Risk(risk: $0.risk, details: $0.details ?? "", sourceSegmentIds: parseSegmentIds($0.sourceSegmentIds), confidence: $0.confidence)
-            } ?? [],
-            openQuestions: parsed.openQuestions?.map {
-                OpenQuestion(question: $0.question, sourceSegmentIds: parseSegmentIds($0.sourceSegmentIds), confidence: $0.confidence)
-            } ?? [],
-            importantDates: parsed.importantDates?.map {
-                ImportantDate(date: $0.date, meaning: $0.meaning ?? "", sourceSegmentIds: parseSegmentIds($0.sourceSegmentIds))
-            } ?? [],
+            decisions: parsed.decisions?.map { Decision(title: $0.title, details: $0.details ?? "", sourceSegmentIds: parseIDs($0.sourceSegmentIds), confidence: $0.confidence) } ?? [],
+            actionItems: parsed.actionItems?.map { ActionItem(task: $0.task, owner: $0.owner, dueDate: parseDate($0.dueDate), sourceSegmentIds: parseIDs($0.sourceSegmentIds), confidence: $0.confidence) } ?? [],
+            risks: parsed.risks?.map { Risk(risk: $0.risk, details: $0.details ?? "", sourceSegmentIds: parseIDs($0.sourceSegmentIds), confidence: $0.confidence) } ?? [],
+            openQuestions: parsed.openQuestions?.map { OpenQuestion(question: $0.question, sourceSegmentIds: parseIDs($0.sourceSegmentIds), confidence: $0.confidence) } ?? [],
+            importantDates: parsed.importantDates?.map { ImportantDate(date: $0.date, meaning: $0.meaning ?? "", sourceSegmentIds: parseIDs($0.sourceSegmentIds)) } ?? [],
             entities: buildEntities(people: parsed.mentionedPeople, systems: parsed.mentionedSystems),
             topicTimeline: []
         )
     }
 
-    private func buildEntities(people: [String]?, systems: [String]?) -> [EntityMention] {
-        var entities: [EntityMention] = []
-        people?.forEach { entities.append(EntityMention(name: $0, type: .person)) }
-        systems?.forEach { entities.append(EntityMention(name: $0, type: .system)) }
-        return entities
-    }
-
     private func buildFallback(rawContent: String, meetingId: UUID, providerId: String, model: String) -> MeetingAnalysis {
         MeetingAnalysis(
-            meetingId: meetingId,
-            providerId: providerId,
-            model: model,
+            meetingId: meetingId, providerId: providerId, model: model,
             shortSummary: "Analysis could not be parsed.",
-            detailedSummary: "See provider.response.raw.txt for the full response.",
+            detailedSummary: "See raw response for details.",
             rawProviderResponsePath: "provider.response.raw.txt"
         )
     }
 
     func saveRawResponse(_ content: String, meetingId: UUID, fileStore: FileArtifactStore = FileArtifactStore()) {
-        guard let data = content.data(using: .utf8) else { return }
         let url = fileStore.meetingDirectoryURL(for: meetingId).appendingPathComponent("provider.response.raw.txt")
-        try? data.write(to: url, options: .atomic)
+        try? content.data(using: .utf8)?.write(to: url, options: .atomic)
     }
 
-    private func parseDate(_ string: String?) -> Date? {
-        guard let string else { return nil }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        return formatter.date(from: string)
+    private func parseIDs(_ strings: [String]?) -> [UUID] {
+        strings?.compactMap(UUID.init(uuidString:)) ?? []
     }
-
-    private func formatTime(_ seconds: Double) -> String {
-        let m = Int(seconds) / 60
-        let s = Int(seconds) % 60
-        return String(format: "%02d:%02d", m, s)
+    private func parseDate(_ s: String?) -> Date? {
+        guard let s else { return nil }
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withFullDate]; return f.date(from: s)
+    }
+    private func buildEntities(people: [String]?, systems: [String]?) -> [EntityMention] {
+        var e: [EntityMention] = []
+        people?.forEach { e.append(EntityMention(name: $0, type: .person)) }
+        systems?.forEach { e.append(EntityMention(name: $0, type: .system)) }
+        return e
+    }
+    private func formatTime(_ s: Double) -> String {
+        let m = Int(s)/60, sec = Int(s)%60; return String(format: "%02d:%02d", m, sec)
     }
 }
-
-private let TRANSCRIPT_PLACEHOLDER = "TRANSCRIPT_PLACEHOLDER"

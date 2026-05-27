@@ -4,6 +4,9 @@ import SwiftData
 @main
 struct WawaNoteApp: App {
     private let modelContainer: ModelContainer
+    private let recordingCoordinator: RecordingCoordinator
+    private let watchSessionManager: iOSWatchSessionManager
+    private let calendarSyncService: CalendarSyncService
 
     init() {
         do {
@@ -14,6 +17,14 @@ struct WawaNoteApp: App {
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
+
+        let coordinator = RecordingCoordinator(modelContainer: modelContainer)
+        recordingCoordinator = coordinator
+
+        watchSessionManager = iOSWatchSessionManager(coordinator: coordinator)
+        watchSessionManager.activate()
+
+        calendarSyncService = CalendarSyncService()
     }
 
     var body: some Scene {
@@ -21,5 +32,7 @@ struct WawaNoteApp: App {
             ContentView()
         }
         .modelContainer(modelContainer)
+        .environmentObject(recordingCoordinator)
+        .environmentObject(calendarSyncService)
     }
 }

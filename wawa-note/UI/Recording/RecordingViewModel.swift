@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import SwiftData
 
@@ -10,28 +11,22 @@ enum RecordingUIState {
 
 @MainActor
 final class RecordingViewModel: ObservableObject {
-    @Published var state: RecordingUIState = .idle
-    @Published var elapsedTime: TimeInterval = 0
-    @Published var audioLevel: Float = 0
-    @Published var errorMessage: String?
-    @Published var savedMeetingId: UUID?
-
     @Published var isPlaying = false
     @Published var playbackCurrentTime: TimeInterval = 0
 
-    private let captureService: AudioCaptureService
+    private let coordinator: RecordingCoordinator
     private let playbackService: AudioPlaybackService
-    private var modelContext: ModelContext?
-    private var recordingStartDate: Date?
-    private var pausedDuration: TimeInterval = 0
-    private var pauseStartDate: Date?
+    private var playbackObservationTask: Task<Void, Never>?
+    private var cancellables: Set<AnyCancellable> = []
 
-    var elapsedTimeFormatted: String {
-        let effective = elapsedTime - pausedDuration
-        let m = Int(effective) / 60
-        let s = Int(effective) % 60
-        return String(format: "%02d:%02d", m, s)
-    }
+    // Forwarded from coordinator — RecordView observes these via the VM.
+    var state: RecordingUIState { coordinator.state }
+    var elapsedTime: TimeInterval { coordinator.elapsedTime }
+    var audioLevel: Float { coordinator.audioLevel }
+    var errorMessage: String? { coordinator.errorMessage }
+    var savedMeetingId: UUID? { coordinator.savedMeetingId }
+
+    var elapsedTimeFormatted: String { coordinator.elapsedTimeFormatted }
 
     var playbackTimeFormatted: String {
         let minutes = Int(playbackCurrentTime) / 60
@@ -40,83 +35,34 @@ final class RecordingViewModel: ObservableObject {
     }
 
     init(
-        captureService: AudioCaptureService = AudioCaptureService(),
+        coordinator: RecordingCoordinator,
         playbackService: AudioPlaybackService = AudioPlaybackService()
     ) {
-        self.captureService = captureService
+        self.coordinator = coordinator
         self.playbackService = playbackService
-    }
 
-    func setModelContext(_ context: ModelContext) {
-        self.modelContext = context
+        // Forward coordinator changes so RecordView re-renders.
+        coordinator.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
     }
 
     // MARK: - Recording
 
-    func startRecording() {
-        guard let context = modelContext else { return }
-        errorMessage = nil
-        savedMeetingId = nil
-
-        let meeting = MeetingModel(
-            title: "Meeting \(Date().formatted(date: .abbreviated, time: .shortened))"
+    func startRecording(
+        title: String? = nil,
+        scheduledDate: Date? = nil,
+        calendarEventIdentifier: String? = nil
+    ) {
+        coordinator.startRecording(
+            title: title,
+            scheduledDate: scheduledDate,
+            calendarEventIdentifier: calendarEventIdentifier
         )
-        meeting.status = .recording
-        context.insert(meeting)
-        try? context.save()
-
-        let meetingId = meeting.id
-        savedMeetingId = meetingId
-
-        Task {
-            do {
-                try await captureService.startRecording(meetingId: meetingId)
-                recordingStartDate = Date()
-                state = .recording
-                observeCaptureState()
-            } catch AudioCaptureError.permissionDenied {
-                errorMessage = "Microphone access is off. Turn it on in Settings to record meetings."
-                context.delete(meeting)
-                try? context.save()
-            } catch {
-                errorMessage = "Could not start recording."
-                context.delete(meeting)
-                try? context.save()
-                AppLog.audio.error("Recording start failed: \(error.localizedDescription)")
-            }
-        }
     }
-
-    func pauseRecording() {
-        captureService.pauseRecording()
-        state = .paused
-        pauseStartDate = Date()
-        observationTimer?.invalidate()
-    }
-
-    func resumeRecording() {
-        do {
-            try captureService.resumeRecording()
-            state = .recording
-            if let pauseStart = pauseStartDate {
-                pausedDuration += Date().timeIntervalSince(pauseStart)
-            }
-            pauseStartDate = nil
-            observeCaptureState()
-        } catch {
-            errorMessage = "Could not resume recording."
-        }
-    }
-
-    func stopRecording() {
-        captureService.stopRecording()
-        state = .stopped
-
-        if let pauseStart = pauseStartDate {
-            pausedDuration += Date().timeIntervalSince(pauseStart)
-        }
-        updateMeetingOnStop()
-    }
+    func pauseRecording() { coordinator.pauseRecording() }
+    func resumeRecording() { coordinator.resumeRecording() }
+    func stopRecording() { coordinator.stopRecording() }
 
     // MARK: - Markers
 
@@ -127,14 +73,15 @@ final class RecordingViewModel: ObservableObject {
     // MARK: - Playback
 
     func startPlayback() {
-        guard let url = captureService.outputFileURL else { return }
+        guard let url = coordinator.outputFileURL else { return }
         do {
             try playbackService.load(url: url)
             playbackService.play()
             isPlaying = true
             observePlayback()
         } catch {
-            errorMessage = "Could not play audio file."
+            // Playback errors are non-critical; log and move on.
+            AppLog.audio.error("Playback start failed: \(error.localizedDescription)")
         }
     }
 
@@ -152,30 +99,10 @@ final class RecordingViewModel: ObservableObject {
         playbackService.stop()
         isPlaying = false
         playbackCurrentTime = 0
+        playbackObservationTask?.cancel()
     }
 
-    // MARK: - Observation
-
-    private var observationTimer: Timer?
-    private var playbackObservationTask: Task<Void, Never>?
-
-    private func observeCaptureState() {
-        observationTimer?.invalidate()
-        observationTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            MainActor.assumeIsolated {
-                if let start = self.recordingStartDate {
-                    self.elapsedTime = Date().timeIntervalSince(start)
-                }
-                self.audioLevel = self.captureService.audioLevel
-                if self.captureService.state == .stopped {
-                    self.state = .stopped
-                    self.observationTimer?.invalidate()
-                    self.observationTimer = nil
-                }
-            }
-        }
-    }
+    // MARK: - Playback observation
 
     private func observePlayback() {
         playbackObservationTask?.cancel()
@@ -198,22 +125,5 @@ final class RecordingViewModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 100_000_000)
             }
         }
-    }
-
-    // MARK: - Save
-
-    private func updateMeetingOnStop() {
-        guard let context = modelContext else { return }
-        guard let meetingId = savedMeetingId else { return }
-
-        let descriptor = FetchDescriptor<MeetingModel>(predicate: #Predicate { $0.id == meetingId })
-        guard let meeting = try? context.fetch(descriptor).first else { return }
-
-        meeting.status = .recorded
-        meeting.durationSeconds = elapsedTime - pausedDuration
-        meeting.audioFileRelativePath = "audio.m4a"
-
-        try? context.save()
-        AppLog.audio.info("Meeting updated: \(meeting.id)")
     }
 }

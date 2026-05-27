@@ -8,7 +8,7 @@ struct ContentView: View {
                     Label("Home", systemImage: "house")
                 }
 
-            MeetingsListView()
+            MeetingsTabView()
                 .tabItem {
                     Label("Meetings", systemImage: "list.bullet.rectangle")
                 }

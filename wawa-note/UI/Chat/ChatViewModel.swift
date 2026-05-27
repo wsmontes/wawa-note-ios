@@ -54,10 +54,8 @@ final class ChatViewModel: ObservableObject {
             conversation.title = String(text.prefix(40))
         }
 
-        // Get provider
-        let descriptor = FetchDescriptor<AIProviderConfigModel>()
-        guard let config = try? context.fetch(descriptor).first else {
-            errorMessage = "No AI provider configured. Add one in Settings."
+        guard let config = ActiveProviderManager.shared.getActiveProvider(context: context) else {
+            errorMessage = "No AI service connected. Go to Settings > AI Services to connect one."
             return
         }
 
@@ -79,10 +77,21 @@ final class ChatViewModel: ObservableObject {
             AIMessage(role: msg.role, content: [.text(msg.content)])
         }
 
+        let cfg = AIConfigService.shared
+        let chatCfg = cfg.featureConfig(for: "chat")
+        let model = cfg.modelFor(feature: "chat")
+        let systemPrompt = cfg.systemPrompt(for: "chat")
+
+        var allMessages = chatMessages
+        if let sys = systemPrompt {
+            allMessages.insert(AIMessage(role: .system, content: [.text(sys)]), at: 0)
+        }
+
         let request = AIRequest(
-            model: config.defaultModel,
-            messages: chatMessages,
-            temperature: 0.7
+            model: model,
+            messages: allMessages,
+            temperature: chatCfg?.temperature,
+            maxTokens: chatCfg?.maxCompletionTokens ?? chatCfg?.maxTokens
         )
 
         Task {
