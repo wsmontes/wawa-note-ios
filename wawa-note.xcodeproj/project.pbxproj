@@ -41,6 +41,7 @@
 		429AE22F042435A69E94BA2B /* BatterySensor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71A66EC5D577923E40459AA /* BatterySensor.swift */; };
 		43D28AC291895A7C8BB99BEE /* ProjectGraphView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 446C28973B9F54B2DDB9BE5D /* ProjectGraphView.swift */; };
 		445AA0F12B8209D6F11A6A4E /* ProviderConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CCF082E9AB120A1FFC9563A /* ProviderConnectView.swift */; };
+		448403830A8A820662F1D8F4 /* TrashService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38BC875D2BBF6802C5400F2A /* TrashService.swift */; };
 		46F74F9267740AE41DDFD437 /* ProviderCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76B40EFCCC4BDCA3C1C5D165 /* ProviderCard.swift */; };
 		47CF22D2DEC34E96F12FC31A /* ActiveProviderManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A69437BBD4F377B7558207C9 /* ActiveProviderManager.swift */; };
 		4859FF5D6289B629A3A7DBA5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7394D93A2BF19F119E4FB10E /* Assets.xcassets */; };
@@ -234,6 +235,7 @@
 		32B6F2474E6404EC4A78F658 /* WatchRecordingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRecordingView.swift; sourceTree = "<group>"; };
 		3381E273EE8165E6F7510686 /* Meeting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Meeting.swift; sourceTree = "<group>"; };
 		364C4442AE4FFEA777573BDF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		38BC875D2BBF6802C5400F2A /* TrashService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashService.swift; sourceTree = "<group>"; };
 		399953D1B0F721773F328253 /* wawa-note.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "wawa-note.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		3A5E154EAB77859CDA836F7B /* LocationContextSensor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationContextSensor.swift; sourceTree = "<group>"; };
 		3CF3AA241D3247E275A0325C /* TaskRemindersService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskRemindersService.swift; sourceTree = "<group>"; };
@@ -766,6 +768,7 @@
 				BA35513D7F4FC858E0D6621E /* TaskService.swift */,
 				B5595AB150527FB6459E1EA8 /* TemplateService.swift */,
 				CA5DF0351C3B5F4530AECE40 /* TranscriptChunker.swift */,
+				38BC875D2BBF6802C5400F2A /* TrashService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -1068,6 +1071,7 @@
 				4D4AE8AD999F1574278682CA /* TranscriptChunker.swift in Sources */,
 				F402AF399C306FCF8A3B03F7 /* TranscriptSegment.swift in Sources */,
 				0F94E1288165FAAB4DC3A1CA /* TranscriptionEngine.swift in Sources */,
+				448403830A8A820662F1D8F4 /* TrashService.swift in Sources */,
 				DB37FBE9B7A5E595C28D12F9 /* WatchMessageTypes.swift in Sources */,
 				9B353D551EE9E92ACD1247EE /* WawaNoteApp.swift in Sources */,
 				92850D4DA17B1D0DDB0B52EB /* iOSWatchSessionManager.swift in Sources */,

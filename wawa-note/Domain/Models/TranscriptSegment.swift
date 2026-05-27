@@ -79,4 +79,63 @@ struct Transcript: Codable {
         self.sourceEngineId = sourceEngineId
         self.createdAt = createdAt
     }
+
+    /// Groups raw Apple Speech segments into sentence-like subtitle blocks.
+    /// A new group starts when the pause between segments exceeds `pauseThreshold`
+    /// seconds, or when the group text exceeds `maxChars`.
+    func groupedSegments(pauseThreshold: Double = 0.4, maxChars: Int = 250) -> [TranscriptGroup] {
+        guard !segments.isEmpty else { return [] }
+
+        var groups: [TranscriptGroup] = []
+        var currentTexts: [String] = []
+        var currentStart = segments[0].startTime
+        var currentEnd = segments[0].endTime ?? segments[0].startTime
+        var currentConfs: [Double] = []
+
+        for (i, seg) in segments.enumerated() {
+            let segEnd = seg.endTime ?? (seg.startTime + 1.0)
+
+            if i > 0 {
+                let gap = seg.startTime - currentEnd
+                let currentLen = currentTexts.joined(separator: " ").count
+
+                if gap > pauseThreshold || currentLen > maxChars {
+                    groups.append(TranscriptGroup(
+                        text: currentTexts.joined(separator: " "),
+                        startTime: currentStart,
+                        endTime: currentEnd,
+                        confidence: currentConfs.isEmpty ? nil : currentConfs.reduce(0, +) / Double(currentConfs.count)
+                    ))
+                    currentTexts = []
+                    currentStart = seg.startTime
+                    currentConfs = []
+                }
+            }
+
+            currentTexts.append(seg.text)
+            currentEnd = segEnd
+            if let c = seg.confidence { currentConfs.append(c) }
+        }
+
+        // Flush last group
+        if !currentTexts.isEmpty {
+            groups.append(TranscriptGroup(
+                text: currentTexts.joined(separator: " "),
+                startTime: currentStart,
+                endTime: currentEnd,
+                confidence: currentConfs.isEmpty ? nil : currentConfs.reduce(0, +) / Double(currentConfs.count)
+            ))
+        }
+
+        return groups
+    }
+}
+
+/// A subtitle-like block of merged transcript segments.
+struct TranscriptGroup: Identifiable {
+    let id = UUID()
+    let text: String
+    let startTime: Double
+    let endTime: Double
+    let confidence: Double?
 }

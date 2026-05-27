@@ -188,27 +188,31 @@ struct KnowledgeDetailView: View {
         }
 
         if let transcript {
+            let groups = transcript.groupedSegments()
+
             VStack(alignment: .leading, spacing: 0) {
                 sectionHeader("Transcript", icon: "text.alignleft")
                     .padding(.horizontal, 16)
 
                 VStack(spacing: 0) {
-                    ForEach(Array(transcript.segments.enumerated()), id: \.element.id) { idx, segment in
+                    ForEach(Array(groups.enumerated()), id: \.element.id) { idx, group in
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
-                                Text("[\(formatTime(segment.startTime))]")
+                                Text("[\(formatTime(group.startTime))]")
                                     .font(.caption).foregroundStyle(.secondary).monospacedDigit()
                                 Spacer()
-                                if let conf = segment.confidence {
+                                if let conf = group.confidence {
                                     Text("\(Int(conf * 100))%")
                                         .font(.caption2).foregroundStyle(.tertiary)
                                 }
                             }
-                            Text(segment.text).font(.body)
+                            Text(group.text)
+                                .font(.body)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         .padding(12)
 
-                        if idx < transcript.segments.count - 1 {
+                        if idx < groups.count - 1 {
                             Divider().padding(.leading, 12)
                         }
                     }

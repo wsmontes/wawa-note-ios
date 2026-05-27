@@ -17,6 +17,7 @@ struct KnowledgeListView: View {
     @State private var filterThisWeek = false
     @State private var filterFlagged = false
     @State private var filterHasAudio = false
+    @State private var trashFolderID: UUID?
 
     var body: some View {
         Group {
@@ -102,7 +103,20 @@ struct KnowledgeListView: View {
             }
 
             // Items
-            Section(sectionHeader) {
+            Section {
+                if isViewingTrash && !filteredItems.isEmpty {
+                    Button(role: .destructive) {
+                        let trash = TrashService(context: modelContext)
+                        try? trash.deleteAllInTrash()
+                    } label: {
+                        Label("Delete All", systemImage: "trash.slash")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .padding(.vertical, 8)
+                }
+
                 if filteredItems.isEmpty {
                     Text("No items")
                         .font(.caption)
@@ -114,13 +128,44 @@ struct KnowledgeListView: View {
                     } label: {
                         KnowledgeItemRow(item: item)
                     }
+                    .swipeActions(edge: .trailing) {
+                        if isViewingTrash {
+                            Button {
+                                let trash = TrashService(context: modelContext)
+                                try? trash.restore(item)
+                            } label: {
+                                Label("Restore", systemImage: "arrow.uturn.backward")
+                            }
+                            .tint(.blue)
+
+                            Button(role: .destructive) {
+                                let svc = KnowledgeItemService(context: modelContext)
+                                try? svc.deleteItem(item)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        } else {
+                            Button(role: .destructive) {
+                                let trash = TrashService(context: modelContext)
+                                try? trash.moveToTrash(item)
+                            } label: {
+                                Label("Trash", systemImage: "trash")
+                            }
+                        }
+                    }
                 }
+            } header: {
+                Text(sectionHeader)
             }
         }
         } // end if-else
         } // end Group
         .navigationTitle("Knowledge")
         .searchable(text: $searchText)
+        .onAppear {
+            let trash = try? TrashService(context: modelContext).trashFolder()
+            trashFolderID = trash?.id
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 12) {
@@ -156,7 +201,16 @@ struct KnowledgeListView: View {
     }
 
     private var rootFolders: [Folder] {
-        folders.filter { $0.parentFolderID == nil }
+        let roots = folders.filter { $0.parentFolderID == nil }
+        // Trash always last
+        let trash = roots.filter { $0.name == "Trash" && $0.iconName == "trash" }
+        let others = roots.filter { !($0.name == "Trash" && $0.iconName == "trash") }
+        return others + trash
+    }
+
+    private var isViewingTrash: Bool {
+        guard let fid = selectedFolderID, let f = folders.first(where: { $0.id == fid }) else { return false }
+        return f.name == "Trash" && f.iconName == "trash"
     }
 
     private var sectionHeader: String {
@@ -172,6 +226,9 @@ struct KnowledgeListView: View {
         }
         if let folderID = selectedFolderID {
             result = result.filter { $0.folderID == folderID }
+        } else if let trashID = trashFolderID {
+            // "All Items" — hide items in trash
+            result = result.filter { $0.folderID != trashID }
         }
         if filterToday {
             let cal = Calendar.current
@@ -243,12 +300,14 @@ private struct FolderRow: View {
         allFolders.filter { $0.parentFolderID == folder.id }
     }
 
+    private var isTrash: Bool { folder.name == "Trash" && folder.iconName == "trash" }
+
     var body: some View {
         if children.isEmpty {
             Button { selectedID = folder.id } label: {
                 Label(folder.name, systemImage: folder.iconName ?? "folder")
             }
-            .foregroundStyle(.primary)
+            .foregroundStyle(isTrash ? .red : .primary)
         } else {
             DisclosureGroup {
                 ForEach(children) { child in
@@ -258,7 +317,7 @@ private struct FolderRow: View {
                 Button { selectedID = folder.id } label: {
                     Label(folder.name, systemImage: folder.iconName ?? "folder")
                 }
-                .foregroundStyle(.primary)
+                .foregroundStyle(isTrash ? .red : .primary)
             }
         }
     }

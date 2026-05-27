@@ -14,11 +14,12 @@ final class ExportService {
 
     func exportSRT(transcript: Transcript) -> String {
         var srt = ""
-        for (i, seg) in transcript.segments.enumerated()
-        where !seg.text.trimmingCharacters(in: .whitespaces).isEmpty {
+        let groups = transcript.groupedSegments(pauseThreshold: 0.5, maxChars: 80)
+        for (i, group) in groups.enumerated()
+        where !group.text.trimmingCharacters(in: .whitespaces).isEmpty {
             srt += "\(i + 1)\n"
-            srt += "\(formatSRTTime(seg.startTime)) --> \(formatSRTTime(seg.endTime ?? seg.startTime + 5.0))\n"
-            srt += "\(seg.text)\n\n"
+            srt += "\(formatSRTTime(group.startTime)) --> \(formatSRTTime(group.endTime))\n"
+            srt += "\(group.text)\n\n"
         }
         return srt
     }

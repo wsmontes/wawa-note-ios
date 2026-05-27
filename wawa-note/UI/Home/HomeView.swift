@@ -18,6 +18,7 @@ struct HomeView: View {
     @State private var showNewFolder = false
     @State private var newFolderName = ""
     @State private var navigateToCalendar = false
+    @State private var trashFolderID: UUID?
 
     private let importService = AudioImportService()
 
@@ -33,6 +34,8 @@ struct HomeView: View {
             }
             .background(Color(.systemGroupedBackground))
             .task {
+                let trash = try? TrashService(context: modelContext).trashFolder()
+                trashFolderID = trash?.id
                 await backfillEmbeddingsIfNeeded()
             }
             .fullScreenCover(isPresented: $showRecording) {
@@ -186,7 +189,10 @@ struct HomeView: View {
 
     private var recentSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            let displayable = recentItems.filter { !$0.title.isEmpty || $0.audioFileRelativePath != nil || $0.bodyText != nil }
+            let displayable = recentItems.filter { item in
+                (!item.title.isEmpty || item.audioFileRelativePath != nil || item.bodyText != nil)
+                && item.folderID != trashFolderID
+            }
 
             if !displayable.isEmpty {
                 sectionLabel("Recent")
@@ -200,6 +206,14 @@ struct HomeView: View {
                             recentRow(item)
                         }
                         .buttonStyle(.plain)
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                let trash = TrashService(context: modelContext)
+                                try? trash.moveToTrash(item)
+                            } label: {
+                                Label("Trash", systemImage: "trash")
+                            }
+                        }
 
                         if idx < min(displayable.count, 8) - 1 {
                             Divider().padding(.leading, 56)

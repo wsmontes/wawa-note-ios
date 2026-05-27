@@ -76,9 +76,9 @@ struct MarkdownExporter: Sendable {
 
         if let transcript {
             md += "## Transcript\n\n"
-            for segment in transcript.segments {
-                let time = formatTime(segment.startTime)
-                md += "**[\(time)]** \(segment.text)\n\n"
+            for group in transcript.groupedSegments() {
+                let time = formatTime(group.startTime)
+                md += "**[\(time)]** \(group.text)\n\n"
             }
         }
 
