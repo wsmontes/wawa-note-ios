@@ -8,9 +8,23 @@ struct ContentView: View {
                     Label("Home", systemImage: "house")
                 }
 
-            MeetingsTabView()
+            NavigationStack {
+                KnowledgeListView()
+            }
+            .tabItem {
+                Label("Knowledge", systemImage: "list.bullet.rectangle")
+            }
+
+            NavigationStack {
+                ProjectListView()
+            }
+            .tabItem {
+                Label("Projects", systemImage: "folder")
+            }
+
+            KnowledgeQueryView()
                 .tabItem {
-                    Label("Meetings", systemImage: "list.bullet.rectangle")
+                    Label("Ask", systemImage: "sparkle.magnifyingglass")
                 }
 
             SettingsView()

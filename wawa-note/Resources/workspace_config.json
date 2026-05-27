@@ -1,0 +1,49 @@
+{
+  "version": "1.0",
+  "defaultProject": {
+    "name": "Inbox",
+    "icon": "tray"
+  },
+  "itemTypes": {
+    "meeting": {
+      "label": "Meeting",
+      "icon": "recordingtape",
+      "defaultStatus": "recorded",
+      "fileName": "audio.m4a",
+      "artifacts": ["transcript.json", "analysis.json"]
+    },
+    "note": {
+      "label": "Note",
+      "icon": "note.text",
+      "defaultStatus": "draft",
+      "fileName": "content.md",
+      "artifacts": []
+    },
+    "journalEntry": {
+      "label": "Journal Entry",
+      "icon": "book",
+      "defaultStatus": "draft",
+      "fileName": "content.md",
+      "artifacts": []
+    },
+    "webBookmark": {
+      "label": "Bookmark",
+      "icon": "bookmark",
+      "defaultStatus": "draft",
+      "fileName": "bookmark.json",
+      "artifacts": []
+    },
+    "image": {
+      "label": "Image",
+      "icon": "photo",
+      "defaultStatus": "draft",
+      "fileName": "original",
+      "artifacts": ["preview.jpg"]
+    }
+  },
+  "contextSensors": {
+    "tier1": ["calendar_context", "audio_route"],
+    "tier2": ["location_context", "focus_mode"],
+    "tier3": ["motion_activity", "battery_state"]
+  }
+}

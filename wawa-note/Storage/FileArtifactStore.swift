@@ -7,6 +7,15 @@ enum FileArtifactStoreError: Error {
     case encodingFailed
 }
 
+enum AppFileConstants {
+    static let audioFileName = "audio.m4a"
+    static let transcriptFileName = "transcript.json"
+    static let analysisFileName = "analysis.json"
+    static let partialTranscriptFileName = "transcript_partial.json"
+    static let checkpointFileName = "checkpoint.json"
+    static let embeddingFileName = "embedding.json"
+}
+
 final class FileArtifactStore: @unchecked Sendable {
     private let fileManager: FileManager
     private let baseURL: URL
@@ -22,7 +31,23 @@ final class FileArtifactStore: @unchecked Sendable {
     // MARK: - Directory management
 
     func meetingDirectoryURL(for meetingId: UUID) -> URL {
-        baseURL.appendingPathComponent(meetingId.uuidString, isDirectory: true)
+        itemDirectoryURL(for: meetingId)
+    }
+
+    // MARK: - New knowledge workspace paths
+
+    func itemDirectoryURL(for itemId: UUID) -> URL {
+        baseURL.appendingPathComponent("items", isDirectory: true)
+            .appendingPathComponent(itemId.uuidString, isDirectory: true)
+    }
+
+    func mediaURL(for contentHash: String, ext: String) -> URL {
+        baseURL.appendingPathComponent("media", isDirectory: true)
+            .appendingPathComponent("\(contentHash).\(ext)")
+    }
+
+    func configsDirectoryURL() -> URL {
+        baseURL.appendingPathComponent("configs", isDirectory: true)
     }
 
     func createMeetingDirectory(for meetingId: UUID) throws {

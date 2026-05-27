@@ -24,7 +24,7 @@ final class RecordingViewModel: ObservableObject {
     var elapsedTime: TimeInterval { coordinator.elapsedTime }
     var audioLevel: Float { coordinator.audioLevel }
     var errorMessage: String? { coordinator.errorMessage }
-    var savedMeetingId: UUID? { coordinator.savedMeetingId }
+    var savedItemId: UUID? { coordinator.savedItemId }
 
     var elapsedTimeFormatted: String { coordinator.elapsedTimeFormatted }
 

@@ -1,0 +1,249 @@
+import Foundation
+import SwiftData
+
+// MARK: - Project
+
+@Model
+final class Project {
+    @Attribute(.unique) var id: UUID
+    var name: String
+    var slug: String
+    var summary: String?
+    var statusRaw: String
+    var colorHex: String?
+    var iconName: String?
+    var createdAt: Date
+    var updatedAt: Date
+
+    var status: ProjectStatus {
+        get { ProjectStatus(rawValue: statusRaw) ?? .active }
+        set { statusRaw = newValue.rawValue }
+    }
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        slug: String? = nil,
+        summary: String? = nil,
+        status: ProjectStatus = .active,
+        colorHex: String? = nil,
+        iconName: String? = "folder.fill",
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.name = name
+        self.slug = slug ?? name.lowercased().replacingOccurrences(of: " ", with: "-")
+        self.summary = summary
+        self.statusRaw = status.rawValue
+        self.colorHex = colorHex
+        self.iconName = iconName
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+enum ProjectStatus: String, Codable, CaseIterable {
+    case active
+    case archived
+    case completed
+}
+
+// MARK: - TaskItem
+
+@Model
+final class TaskItem {
+    @Attribute(.unique) var id: UUID
+    var projectID: UUID?
+    var title: String
+    var statusRaw: String
+    var priorityRaw: String
+    var ownerName: String?
+    var dueAt: Date?
+    var sourceItemID: UUID?
+    var sourceSegmentIDs: String?
+    var confidence: Double?
+    var createdAt: Date
+    var updatedAt: Date
+
+    var status: TaskStatus {
+        get { TaskStatus(rawValue: statusRaw) ?? .todo }
+        set { statusRaw = newValue.rawValue }
+    }
+
+    var priority: TaskPriority {
+        get { TaskPriority(rawValue: priorityRaw) ?? .medium }
+        set { priorityRaw = newValue.rawValue }
+    }
+
+    var sourceSegmentIDList: [String] {
+        guard let json = sourceSegmentIDs, let data = json.data(using: .utf8),
+              let list = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+        return list
+    }
+
+    init(
+        id: UUID = UUID(),
+        projectID: UUID? = nil,
+        title: String,
+        status: TaskStatus = .todo,
+        priority: TaskPriority = .medium,
+        ownerName: String? = nil,
+        dueAt: Date? = nil,
+        sourceItemID: UUID? = nil,
+        sourceSegmentIDs: [String] = [],
+        confidence: Double? = nil,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.projectID = projectID
+        self.title = title
+        self.statusRaw = status.rawValue
+        self.priorityRaw = priority.rawValue
+        self.ownerName = ownerName
+        self.dueAt = dueAt
+        self.sourceItemID = sourceItemID
+        self.sourceSegmentIDs = sourceSegmentIDs.isEmpty ? nil : (try? JSONEncoder().encode(sourceSegmentIDs)).flatMap { String(data: $0, encoding: .utf8) }
+        self.confidence = confidence
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+enum TaskStatus: String, Codable, CaseIterable {
+    case todo
+    case inProgress
+    case done
+    case cancelled
+}
+
+enum TaskPriority: String, Codable, CaseIterable {
+    case low
+    case medium
+    case high
+    case critical
+}
+
+// MARK: - Person
+
+@Model
+final class Person {
+    @Attribute(.unique) var id: UUID
+    var displayName: String
+    @Attribute(.unique) var canonicalKey: String
+    var email: String?
+    var role: String?
+    var createdAt: Date
+
+    init(
+        id: UUID = UUID(),
+        displayName: String,
+        canonicalKey: String? = nil,
+        email: String? = nil,
+        role: String? = nil,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.canonicalKey = canonicalKey ?? displayName.lowercased().trimmingCharacters(in: .whitespaces)
+        self.email = email
+        self.role = role
+        self.createdAt = createdAt
+    }
+}
+
+// MARK: - GraphEdge
+
+@Model
+final class GraphEdge {
+    @Attribute(.unique) var id: UUID
+    var fromID: UUID
+    var toID: UUID
+    var edgeTypeRaw: String
+    var weight: Double
+    var provenanceItemID: UUID?
+    var provenanceSegmentIDs: String?
+    var createdAt: Date
+
+    var edgeType: EdgeType {
+        get { EdgeType(rawValue: edgeTypeRaw) ?? .relatesTo }
+        set { edgeTypeRaw = newValue.rawValue }
+    }
+
+    var provenanceSegmentIDList: [String] {
+        guard let json = provenanceSegmentIDs, let data = json.data(using: .utf8),
+              let list = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+        return list
+    }
+
+    init(
+        id: UUID = UUID(),
+        fromID: UUID,
+        toID: UUID,
+        edgeType: EdgeType,
+        weight: Double = 1.0,
+        provenanceItemID: UUID? = nil,
+        provenanceSegmentIDs: [String] = [],
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.fromID = fromID
+        self.toID = toID
+        self.edgeTypeRaw = edgeType.rawValue
+        self.weight = weight
+        self.provenanceItemID = provenanceItemID
+        self.provenanceSegmentIDs = provenanceSegmentIDs.isEmpty ? nil : (try? JSONEncoder().encode(provenanceSegmentIDs)).flatMap { String(data: $0, encoding: .utf8) }
+        self.createdAt = createdAt
+    }
+}
+
+enum EdgeType: String, Codable, CaseIterable {
+    case relatesTo
+    case mentions
+    case supports
+    case assignedTo
+    case blockedBy
+    case belongsTo
+    case produced
+    case precedes
+    case references
+    case contradicts
+}
+
+// MARK: - Entity
+
+@Model
+final class Entity {
+    @Attribute(.unique) var id: UUID
+    var kindRaw: String
+    var displayName: String
+    @Attribute(.unique) var canonicalKey: String
+
+    var kind: EntityKind {
+        get { EntityKind(rawValue: kindRaw) ?? .other }
+        set { kindRaw = newValue.rawValue }
+    }
+
+    init(
+        id: UUID = UUID(),
+        kind: EntityKind,
+        displayName: String,
+        canonicalKey: String? = nil
+    ) {
+        self.id = id
+        self.kindRaw = kind.rawValue
+        self.displayName = displayName
+        self.canonicalKey = canonicalKey ?? "\(kind.rawValue):\(displayName.lowercased().trimmingCharacters(in: .whitespaces))"
+    }
+}
+
+enum EntityKind: String, Codable, CaseIterable {
+    case person
+    case organization
+    case system
+    case repository
+    case ticket
+    case location
+    case other
+}

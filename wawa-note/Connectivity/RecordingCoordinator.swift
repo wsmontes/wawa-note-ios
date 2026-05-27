@@ -7,12 +7,14 @@ final class RecordingCoordinator: ObservableObject {
     @Published private(set) var elapsedTime: TimeInterval = 0
     @Published private(set) var audioLevel: Float = 0
     @Published private(set) var errorMessage: String?
-    @Published private(set) var savedMeetingId: UUID?
+    @Published private(set) var savedItemId: UUID?
 
     private let captureService: AudioCaptureService
     private let nowPlayingController: NowPlayingController
     private let modelContainer: ModelContainer
-    private var modelContext: ModelContext?
+    private var modelContext: ModelContext
+    private let contextCaptureService = ContextCaptureService()
+    private var annotationService: AnnotationService
 
     private var recordingStartDate: Date?
     private var pausedDuration: TimeInterval = 0
@@ -40,7 +42,9 @@ final class RecordingCoordinator: ObservableObject {
         self.modelContainer = modelContainer
         self.captureService = captureService
         self.nowPlayingController = nowPlayingController
-        self.modelContext = ModelContext(modelContainer)
+        let context = ModelContext(modelContainer)
+        self.modelContext = context
+        self.annotationService = AnnotationService(context: context)
     }
 
     // MARK: - Recording lifecycle
@@ -55,75 +59,81 @@ final class RecordingCoordinator: ObservableObject {
             return
         }
 
-        guard let context = modelContext else { return }
+        let context = modelContext
         errorMessage = nil
-        savedMeetingId = nil
+        savedItemId = nil
 
         let meetingTitle = title ?? "Meeting \(Date().formatted(date: .abbreviated, time: .shortened))"
         self.meetingTitle = meetingTitle
 
-        let meeting = MeetingModel(title: meetingTitle)
-        meeting.status = .recording
-        meeting.scheduledDate = scheduledDate
-        meeting.calendarEventIdentifier = calendarEventIdentifier
-        context.insert(meeting)
-        try? context.save()
+        let item = KnowledgeItem(type: .meeting, title: meetingTitle, status: .recording)
+        item.scheduledDate = scheduledDate
+        item.calendarEventIdentifier = calendarEventIdentifier
+        context.insert(item)
 
-        let meetingId = meeting.id
-        savedMeetingId = meetingId
+        do {
+            try context.save()
+        } catch {
+            AppLog.audio.error("Failed to save knowledge item: \(error)")
+            errorMessage = "Could not save meeting. Try again."
+            notifyStatusChange()
+            return
+        }
 
-        Task {
+        let itemId = item.id
+        savedItemId = itemId
+
+        Task { @MainActor in
             do {
-                try await captureService.startRecording(meetingId: meetingId)
+                try await captureService.startRecording(meetingId: itemId)
                 recordingStartDate = Date()
                 state = .recording
-                activateLockScreenControls()
                 startObservation()
+                activateLockScreenControls()
                 notifyStatusChange()
+                captureContextSafely(for: itemId)
             } catch AudioCaptureError.permissionDenied {
                 errorMessage = "Microphone access is off. Turn it on in Settings to record meetings."
-                context.delete(meeting)
-                try? context.save()
-                notifyStatusChange()
+                rollbackItem(item, context: context)
             } catch {
                 errorMessage = "Could not start recording."
-                context.delete(meeting)
-                try? context.save()
+                rollbackItem(item, context: context)
                 AppLog.audio.error("Recording start failed: \(error.localizedDescription)")
-                notifyStatusChange()
             }
         }
     }
 
-    func deleteMeeting(_ meeting: MeetingModel) {
-        guard let context = modelContext else { return }
-        context.delete(meeting)
-        try? context.save()
-        // Clean up artifacts
+    func deleteItem(_ itemId: UUID) {
+        let context = modelContext
+        let descriptor = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.id == itemId })
+        if let item = try? context.fetch(descriptor).first {
+            // Cascade delete annotations
+            let annPred = FetchDescriptor<Annotation>(predicate: #Predicate { $0.itemID == itemId })
+            if let anns = try? context.fetch(annPred) {
+                for ann in anns { context.delete(ann) }
+            }
+            context.delete(item)
+            try? context.save()
+        }
         let store = FileArtifactStore()
-        try? store.deleteMeetingDirectory(for: meeting.id)
+        try? store.deleteMeetingDirectory(for: itemId)
     }
 
-    func createMeetingFromImport(
+    func createItemFromImport(
         title: String,
         date: Date,
         duration: TimeInterval
-    ) -> MeetingModel? {
-        guard let context = modelContext else { return nil }
+    ) -> KnowledgeItem? {
+        let context = modelContext
 
-        let meeting = MeetingModel(
-            title: title,
-            createdAt: date,
-            updatedAt: date,
-            durationSeconds: duration,
-            status: .recorded,
-            isImported: true
-        )
-        meeting.audioFileRelativePath = "audio.m4a"
-        context.insert(meeting)
+        let item = KnowledgeItem(type: .meeting, title: title, createdAt: date, updatedAt: date,
+                                  status: .recorded, durationSeconds: duration)
+        item.audioFileRelativePath = AppFileConstants.audioFileName
+        item.isImported = true
+        context.insert(item)
+
         try? context.save()
-
-        return meeting
+        return item
     }
 
     func pauseRecording() {
@@ -164,7 +174,7 @@ final class RecordingCoordinator: ObservableObject {
             pausedDuration += Date().timeIntervalSince(pauseStart)
         }
 
-        updateMeetingOnStop()
+        updateItemOnStop()
         notifyStatusChange()
     }
 
@@ -193,7 +203,6 @@ final class RecordingCoordinator: ObservableObject {
     private func notifyStatusChange() {
         let status = currentStatus()
         onStatusChange?(status)
-        // Also write to App Group for watch complication
         if let shared = UserDefaults(suiteName: "group.com.wawa-note") {
             shared.set(status.state, forKey: "recordingState")
             shared.set(status.elapsedTime, forKey: "elapsedTime")
@@ -234,7 +243,7 @@ final class RecordingCoordinator: ObservableObject {
         observationTimer?.invalidate()
         observationTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             guard let self else { return }
-            MainActor.assumeIsolated {
+            DispatchQueue.main.async {
                 if let start = self.recordingStartDate {
                     self.elapsedTime = Date().timeIntervalSince(start)
                 }
@@ -253,7 +262,7 @@ final class RecordingCoordinator: ObservableObject {
         nowPlayingTimer?.invalidate()
         nowPlayingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self else { return }
-            MainActor.assumeIsolated {
+            DispatchQueue.main.async {
                 guard self.state == .recording || self.state == .paused else { return }
                 let effective = self.elapsedTime - self.pausedDuration
                 self.nowPlayingController.update(
@@ -265,20 +274,53 @@ final class RecordingCoordinator: ObservableObject {
         }
     }
 
+    // MARK: - Context capture
+
+    private func captureContextSafely(for itemId: UUID) {
+        let sensors = contextCaptureService
+        let annotSvc = annotationService
+        Task.detached {
+            let captured = await sensors.captureAll()
+            guard !captured.isEmpty else { return }
+            await MainActor.run {
+                do {
+                    try annotSvc.upsert(captured, itemID: itemId, source: "recording_context")
+                    AppLog.general.info("Context: \(captured.count) annotations for item \(itemId)")
+                } catch {
+                    AppLog.general.error("Context capture save failed: \(error)")
+                }
+            }
+        }
+    }
+
+    private func rollbackItem(_ item: KnowledgeItem, context: ModelContext) {
+        context.delete(item)
+        do {
+            try context.save()
+        } catch {
+            AppLog.audio.error("Failed to rollback item: \(error)")
+        }
+    }
+
     // MARK: - Save
 
-    private func updateMeetingOnStop() {
-        guard let context = modelContext else { return }
-        guard let meetingId = savedMeetingId else { return }
+    private func updateItemOnStop() {
+        let context = modelContext
+        guard let itemId = savedItemId else { return }
 
-        let descriptor = FetchDescriptor<MeetingModel>(predicate: #Predicate { $0.id == meetingId })
-        guard let meeting = try? context.fetch(descriptor).first else { return }
+        let descriptor = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.id == itemId })
+        guard let item = try? context.fetch(descriptor).first else { return }
 
-        meeting.status = .recorded
-        meeting.durationSeconds = elapsedTime - pausedDuration
-        meeting.audioFileRelativePath = "audio.m4a"
+        let effectiveDuration = elapsedTime - pausedDuration
+        item.status = .recorded
+        item.durationSeconds = effectiveDuration
+        item.audioFileRelativePath = AppFileConstants.audioFileName
 
-        try? context.save()
-        AppLog.audio.info("Meeting updated: \(meeting.id)")
+        do {
+            try context.save()
+            AppLog.audio.info("Item updated: \(item.id)")
+        } catch {
+            AppLog.audio.error("Failed to save item update: \(error)")
+        }
     }
 }

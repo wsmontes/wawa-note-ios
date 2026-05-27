@@ -10,6 +10,8 @@ struct AIConfig: Codable, Sendable {
     let defaultModels: DefaultModels?
     let modelPresets: [String: ModelPreset]?
     let features: [String: FeatureConfig]?
+    let lenses: [String: LensJSON]?
+
 
     struct ProviderConfig: Codable, Sendable {
         let id: String; let displayName: String; let type: String
@@ -39,6 +41,16 @@ struct AIConfig: Codable, Sendable {
         let maxTokens: Int?
         let systemPrompt: String?; let userPrompt: String?
         let supportedLocales: [String]?
+    }
+
+    struct LensJSON: Codable, Sendable {
+        let name: String?
+        let description: String?
+        let icon: String?
+        let systemPrompt: String?
+        let userPrompt: String?
+        let temperature: Double?
+        let model: String?
     }
 }
 

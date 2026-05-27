@@ -1,0 +1,55 @@
+{
+  "version": "1.0",
+  "sidebar": {
+    "sections": [
+      {
+        "id": "folders",
+        "label": "Folders",
+        "type": "folder_tree"
+      },
+      {
+        "id": "smart_filters",
+        "label": "Smart Filters",
+        "type": "smart_filters"
+      },
+      {
+        "id": "by_type",
+        "label": "By Type",
+        "type": "by_type"
+      }
+    ]
+  },
+  "smartFilters": [
+    {
+      "id": "today",
+      "label": "Today",
+      "icon": "calendar",
+      "predicate": "createdAt == today"
+    },
+    {
+      "id": "this_week",
+      "label": "This Week",
+      "icon": "calendar.badge.clock",
+      "predicate": "createdAt >= weekStart"
+    },
+    {
+      "id": "flagged",
+      "label": "Flagged",
+      "icon": "flag",
+      "predicate": "isFlagged == true"
+    },
+    {
+      "id": "has_audio",
+      "label": "With Audio",
+      "icon": "mic",
+      "predicate": "audioFileRelativePath != nil"
+    }
+  ],
+  "detailSections": {
+    "meeting": ["summary", "transcript", "action_items", "context", "annotations"],
+    "note": ["content", "backlinks", "context", "annotations"],
+    "journalEntry": ["content", "mood", "context", "annotations"],
+    "webBookmark": ["url_preview", "notes", "annotations"],
+    "image": ["image_viewer", "ocr_text", "notes", "annotations"]
+  }
+}

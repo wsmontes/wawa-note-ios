@@ -5,13 +5,13 @@ struct DayTimelineView: View {
     @EnvironmentObject private var calendarSync: CalendarSyncService
 
     let date: Date
-    let meetings: [MeetingModel]
+    let items: [KnowledgeItem]
 
     private let cal = Calendar.current
     private let hourRange = 0..<24
 
     var body: some View {
-        let events = calendarSync.unifiedEvents(for: date, meetings: meetings)
+        let events = calendarSync.unifiedEvents(for: date, items: items)
         let timedEvents = events.filter { !$0.isAllDay }
         let layout = computeLayout(for: timedEvents)
         let allDayEvents = events.filter { $0.isAllDay }
@@ -238,9 +238,9 @@ private struct EventCard: View {
         }
         .buttonStyle(.plain)
         .sheet(isPresented: $showPreview) {
-            if event.isFromWawaNote, let meeting = event.meeting {
+            if event.isFromWawaNote, let item = event.item {
                 NavigationStack {
-                    MeetingDetailView(meeting: meeting)
+                    KnowledgeDetailView(item: item)
                 }
             } else {
                 EventPreviewSheet(event: event)

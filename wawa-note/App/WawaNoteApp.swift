@@ -11,8 +11,15 @@ struct WawaNoteApp: App {
     init() {
         do {
             modelContainer = try ModelContainer(
-                for: MeetingModel.self, AIProviderConfigModel.self,
-                ChatConversationModel.self, ChatMessageModel.self
+                for: AIProviderConfigModel.self,
+                KnowledgeItem.self,
+                Folder.self,
+                Annotation.self,
+                Project.self,
+                TaskItem.self,
+                Person.self,
+                GraphEdge.self,
+                Entity.self
             )
         } catch {
             fatalError("Could not create ModelContainer: \(error)")

@@ -13,13 +13,18 @@ private struct AnalysisResponse: Decodable {
     let importantDates: [DateItem]?
     let mentionedPeople: [String]?
     let mentionedSystems: [String]?
+    let mentionedOrganizations: [String]?
+    let mentionedRepositories: [String]?
+    let mentionedLocations: [String]?
     let followUpEmailDraft: String?
 
     enum CodingKeys: String, CodingKey {
         case shortSummary = "short_summary", detailedSummary = "detailed_summary"
         case decisions, actionItems = "action_items", openQuestions = "open_questions"
         case risks, importantDates = "important_dates", mentionedPeople = "mentioned_people"
-        case mentionedSystems = "mentioned_systems", followUpEmailDraft = "follow_up_email_draft"
+        case mentionedSystems = "mentioned_systems", mentionedOrganizations = "mentioned_organizations"
+        case mentionedRepositories = "mentioned_repositories", mentionedLocations = "mentioned_locations"
+        case followUpEmailDraft = "follow_up_email_draft"
     }
 
     struct DecisionItem: Decodable {
@@ -125,11 +130,11 @@ final class AnalysisService: @unchecked Sendable {
 
         let reducePrompt = """
         Below are summaries from different parts of a long meeting. Synthesize them into a complete meeting analysis.
-        Extract: short_summary, detailed_summary, decisions (title, details), action_items (task, owner, due_date), open_questions, risks (risk, details), important_dates (date, meaning), mentioned_people, mentioned_systems.
+        Extract: short_summary, detailed_summary, decisions (title, details), action_items (task, owner, due_date), open_questions, risks (risk, details), important_dates (date, meaning), mentioned_people, mentioned_systems, mentioned_organizations, mentioned_repositories, mentioned_locations.
 
         \(combined)
 
-        Return only valid JSON with these keys: short_summary, detailed_summary, decisions, action_items, open_questions, risks, important_dates, mentioned_people, mentioned_systems.
+        Return only valid JSON with these keys: short_summary, detailed_summary, decisions, action_items, open_questions, risks, important_dates, mentioned_people, mentioned_systems, mentioned_organizations, mentioned_repositories, mentioned_locations.
         """
 
         let request = AIRequest(
@@ -191,7 +196,11 @@ final class AnalysisService: @unchecked Sendable {
             risks: parsed.risks?.map { Risk(risk: $0.risk, details: $0.details ?? "", sourceSegmentIds: parseIDs($0.sourceSegmentIds), confidence: $0.confidence) } ?? [],
             openQuestions: parsed.openQuestions?.map { OpenQuestion(question: $0.question, sourceSegmentIds: parseIDs($0.sourceSegmentIds), confidence: $0.confidence) } ?? [],
             importantDates: parsed.importantDates?.map { ImportantDate(date: $0.date, meaning: $0.meaning ?? "", sourceSegmentIds: parseIDs($0.sourceSegmentIds)) } ?? [],
-            entities: buildEntities(people: parsed.mentionedPeople, systems: parsed.mentionedSystems),
+            entities: buildEntities(
+                people: parsed.mentionedPeople, systems: parsed.mentionedSystems,
+                organizations: parsed.mentionedOrganizations, repositories: parsed.mentionedRepositories,
+                locations: parsed.mentionedLocations
+            ),
             topicTimeline: []
         )
     }
@@ -217,10 +226,17 @@ final class AnalysisService: @unchecked Sendable {
         guard let s else { return nil }
         let f = ISO8601DateFormatter(); f.formatOptions = [.withFullDate]; return f.date(from: s)
     }
-    private func buildEntities(people: [String]?, systems: [String]?) -> [EntityMention] {
+    private func buildEntities(
+        people: [String]?, systems: [String]?,
+        organizations: [String]?, repositories: [String]?,
+        locations: [String]?
+    ) -> [EntityMention] {
         var e: [EntityMention] = []
         people?.forEach { e.append(EntityMention(name: $0, type: .person)) }
         systems?.forEach { e.append(EntityMention(name: $0, type: .system)) }
+        organizations?.forEach { e.append(EntityMention(name: $0, type: .organization)) }
+        repositories?.forEach { e.append(EntityMention(name: $0, type: .repository)) }
+        locations?.forEach { e.append(EntityMention(name: $0, type: .location)) }
         return e
     }
     private func formatTime(_ s: Double) -> String {

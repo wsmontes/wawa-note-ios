@@ -3,18 +3,29 @@ import Foundation
 struct MarkdownExporter: Sendable {
 
     func export(
-        meeting: MeetingModel,
+        item: KnowledgeItem,
         transcript: Transcript?,
         analysis: MeetingAnalysis?
     ) -> String {
         var md = ""
 
-        md += "# \(meeting.title.isEmpty ? "Meeting" : meeting.title)\n\n"
-        md += "**Date:** \(meeting.createdAt.formatted(date: .long, time: .shortened))\n"
-        if let duration = meeting.durationSeconds {
+        // YAML frontmatter
+        md += "---\n"
+        md += "title: \"\(item.title)\"\n"
+        md += "date: \(ISO8601DateFormatter().string(from: item.createdAt))\n"
+        md += "type: \(item.type.rawValue)\n"
+        if let duration = item.durationSeconds { md += "duration: \(Int(duration))\n" }
+        if !item.tags.isEmpty { md += "tags: [\(item.tags.joined(separator: ", "))]\n" }
+        md += "status: \(item.status.rawValue)\n"
+        md += "---\n\n"
+
+        md += "# \(item.title.isEmpty ? "Untitled" : item.title)\n\n"
+        md += "**Date:** \(item.createdAt.formatted(date: .long, time: .shortened))\n"
+        if let duration = item.durationSeconds {
             md += "**Duration:** \(formatDuration(duration))\n"
         }
-        md += "**Status:** \(meeting.status.rawValue.capitalized)\n"
+        md += "**Type:** \(item.type.rawValue.capitalized)\n"
+        md += "**Status:** \(item.status.rawValue.capitalized)\n"
         md += "\n---\n\n"
 
         if let analysis {
@@ -24,9 +35,9 @@ struct MarkdownExporter: Sendable {
 
             if !analysis.actionItems.isEmpty {
                 md += "## Action Items\n\n"
-                for item in analysis.actionItems {
-                    md += "- [ ] **\(item.task)**"
-                    if let owner = item.owner { md += " — \(owner)" }
+                for action in analysis.actionItems {
+                    md += "- [ ] **\(action.task)**"
+                    if let owner = action.owner { md += " — \(owner)" }
                     md += "\n"
                 }
                 md += "\n"
@@ -65,14 +76,13 @@ struct MarkdownExporter: Sendable {
 
         if let transcript {
             md += "## Transcript\n\n"
-            for segment in transcript.segments {
-                let time = formatTime(segment.startTime)
-                md += "**[\(time)]** \(segment.text)\n\n"
+            for group in transcript.groupedSegments() {
+                let time = formatTime(group.startTime)
+                md += "**[\(time)]** \(group.text)\n\n"
             }
         }
 
         md += "\n---\n*Exported by Wawa Note*\n"
-
         return md
     }
 

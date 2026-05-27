@@ -8,6 +8,14 @@ protocol AIProvider: Sendable {
     var capabilities: AIProviderCapabilities { get }
 
     func send(_ request: AIRequest) async throws -> AIResponse
+    func embed(_ text: String, model: String) async throws -> [Float]
+}
+
+// Default no-op for providers without embedding support
+extension AIProvider {
+    func embed(_ text: String, model: String) async throws -> [Float] {
+        throw ProviderError.embeddingNotSupported
+    }
 }
 
 // MARK: - Capabilities
@@ -72,7 +80,7 @@ struct AIUsage: Codable, Sendable {
 
 // MARK: - Errors
 
-enum ProviderError: Error {
+enum ProviderError: LocalizedError {
     case missingAPIKey
     case invalidBaseURL
     case requestFailed(statusCode: Int)
@@ -82,6 +90,9 @@ enum ProviderError: Error {
     case networkUnavailable
     case unauthorized
     case timeout
+    case embeddingNotSupported
+
+    var errorDescription: String? { userMessage }
 
     var userMessage: String {
         switch self {
@@ -107,6 +118,8 @@ enum ProviderError: Error {
             "Your API key was rejected. Check that it's correct in Settings > AI Services."
         case .timeout:
             "The request took too long. The AI service may be busy. Try again in a moment."
+        case .embeddingNotSupported:
+            "This provider does not support embeddings. Choose a provider that supports embeddings (OpenAI, etc.) in Settings."
         }
     }
 }
