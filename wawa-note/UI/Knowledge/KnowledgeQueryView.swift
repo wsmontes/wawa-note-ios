@@ -9,6 +9,7 @@ struct KnowledgeQueryView: View {
     @State private var isQuerying = false
     @State private var error: String?
     @State private var selectedTemplateID = "ask"
+    @State private var selectedModel: String = ""
     @State private var relevantItemIDs: [UUID] = []
     @State private var relevantScores: [UUID: Float] = [:]
 
@@ -111,6 +112,9 @@ struct KnowledgeQueryView: View {
                     .padding(.horizontal, 16)
                 }
             }
+
+            ActiveModelPicker(selectedModel: $selectedModel, label: "Model")
+                .padding(.horizontal, 16)
 
             HStack {
                 if isQuerying && !relevantItemIDs.isEmpty {
@@ -326,7 +330,7 @@ struct KnowledgeQueryView: View {
     private func performQuery() {
         guard !question.isEmpty else { return }
         guard let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext),
-              let provider = try? ProviderRouter().provider(for: config) else {
+              let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
             error = "No AI provider configured. Go to Settings."
             return
         }
@@ -350,11 +354,11 @@ struct KnowledgeQueryView: View {
                         connections: [], insights: [], contradictions: []
                     )
                 } else if templateID == "ask" {
-                    finalResult = try await performAskQuery(q: q, itemIDs: itemIDs, provider: provider, model: config.defaultModel)
+                    finalResult = try await performAskQuery(q: q, itemIDs: itemIDs, provider: provider, model: selectedModel.isEmpty ? config.defaultModel : selectedModel)
                 } else {
                     finalResult = try await performTemplateQuery(
                         templateID: templateID, question: q, itemIDs: itemIDs,
-                        provider: provider, model: config.defaultModel
+                        provider: provider, model: selectedModel.isEmpty ? config.defaultModel : selectedModel
                     )
                 }
 

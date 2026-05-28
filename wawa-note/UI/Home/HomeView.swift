@@ -327,8 +327,7 @@ struct HomeView: View {
         let backfillKey = "embedding_backfill_completed"
         guard !UserDefaults.standard.bool(forKey: backfillKey) else { return }
 
-        guard let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext),
-              let provider = try? ProviderRouter().provider(for: config) else { return }
+        guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else { return }
 
         let allItems = (try? modelContext.fetch(FetchDescriptor<KnowledgeItem>())) ?? []
         let pipeline = EmbeddingPipelineService()

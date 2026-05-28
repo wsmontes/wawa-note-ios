@@ -46,8 +46,7 @@ struct SettingsView: View {
                     HStack {
                         Label("Storage", systemImage: "lock.shield")
                         Spacer()
-                        Text("All data stored locally on this iPhone")
-                            .font(.caption)
+                        Text("On this iPhone")
                             .foregroundStyle(.secondary)
                     }
                     HStack {
@@ -87,11 +86,8 @@ struct SettingsView: View {
         let all = SFSpeechRecognizer.supportedLocales()
         let configured = Set(["pt-BR", "pt-PT", "en-US", "es-ES", "fr-FR", "de-DE", "it-IT", "ja-JP", "zh-CN"])
         var available = all.filter { configured.contains($0.identifier) }
-        // Also check which are actually usable (language pack downloaded)
         let usable = available.filter { SFSpeechRecognizer(locale: $0)?.isAvailable == true }
-        if usable.isEmpty {
-            available = [Locale(identifier: "en-US")] // fallback
-        }
+        if usable.isEmpty { available = [Locale(identifier: "en-US")] }
         return usable.map { "\($0.identifier)✓" } + available.filter { !usable.contains($0) }.map { "\($0.identifier)⬇" }
     }
 }

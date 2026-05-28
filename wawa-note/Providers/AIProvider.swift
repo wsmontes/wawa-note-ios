@@ -5,16 +5,44 @@ import Foundation
 protocol AIProvider: Sendable {
     var id: String { get }
     var displayName: String { get }
+    var providerType: ProviderType { get }
     var capabilities: AIProviderCapabilities { get }
 
     func send(_ request: AIRequest) async throws -> AIResponse
     func embed(_ text: String, model: String) async throws -> [Float]
+    func fetchModels() async throws -> [String]
 }
 
-// Default no-op for providers without embedding support
 extension AIProvider {
     func embed(_ text: String, model: String) async throws -> [Float] {
         throw ProviderError.embeddingNotSupported
+    }
+    func fetchModels() async throws -> [String] { [] }
+}
+
+// MARK: - Unified model list response (handles OpenAI, Anthropic, Ollama, Gemini formats)
+
+struct UnifiedModelsResponse: Decodable {
+    let modelIDs: [String]
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: DynamicKeys.self)
+        if let data = try? container.decode([DataItem].self, forKey: DynamicKeys(stringValue: "data")!) {
+            self.modelIDs = data.map(\.id)
+        } else if let models = try? container.decode([OllamaItem].self, forKey: DynamicKeys(stringValue: "models")!) {
+            self.modelIDs = models.map { $0.name.hasPrefix("models/") ? String($0.name.dropFirst(7)) : $0.name }
+        } else {
+            self.modelIDs = []
+        }
+    }
+
+    private struct DataItem: Decodable { let id: String }
+    private struct OllamaItem: Decodable { let name: String }
+
+    private struct DynamicKeys: CodingKey {
+        var stringValue: String; var intValue: Int? = nil
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { self.stringValue = "\(intValue)"; self.intValue = intValue }
     }
 }
 
@@ -30,15 +58,16 @@ struct AIProviderCapabilities: Codable, Equatable, Sendable {
 
 // MARK: - Request
 
-struct AIRequest: Codable, Sendable {
+struct AIRequest: Sendable {
     var model: String
     var messages: [AIMessage]
     var temperature: Double?
     var maxTokens: Int?
     var responseFormat: AIResponseFormat?
 
-    enum AIResponseFormat: String, Codable, Sendable {
-        case json
+    enum AIResponseFormat: Sendable {
+        case jsonObject
+        case jsonSchema(name: String, schema: String)
     }
 }
 

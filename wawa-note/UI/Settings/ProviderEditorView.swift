@@ -11,6 +11,7 @@ final class ProviderEditorViewModel: ObservableObject {
     @Published var supportsStreaming = true
     @Published var supportsAudio = false
     @Published var supportsTools = false
+    @Published var supportsEmbeddings = false
     @Published var notes = ""
 
     @Published var connectionStatus: ConnectionStatus = .notTested
@@ -41,6 +42,7 @@ final class ProviderEditorViewModel: ObservableObject {
         supportsStreaming = provider.supportsStreaming
         supportsAudio = provider.supportsAudio
         supportsTools = provider.supportsTools
+        supportsEmbeddings = provider.supportsEmbeddings
         notes = provider.notes ?? ""
 
         if let keyId = provider.apiKeyKeychainIdentifier {
@@ -71,6 +73,7 @@ final class ProviderEditorViewModel: ObservableObject {
         provider.supportsStreaming = supportsStreaming
         provider.supportsAudio = supportsAudio
         provider.supportsTools = supportsTools
+        provider.supportsEmbeddings = supportsEmbeddings
         provider.notes = notes.nilIfEmpty
         provider.apiKeyKeychainIdentifier = keychainIdentifier
 
@@ -101,6 +104,7 @@ final class ProviderEditorViewModel: ObservableObject {
             supportsStreaming: supportsStreaming,
             supportsAudio: supportsAudio,
             supportsTools: supportsTools,
+            supportsEmbeddings: supportsEmbeddings,
             apiKeyKeychainIdentifier: keychainIdentifier
         )
 
@@ -174,6 +178,7 @@ struct ProviderEditorView: View {
                     Toggle("Streaming", isOn: $viewModel.supportsStreaming)
                     Toggle("Audio", isOn: $viewModel.supportsAudio)
                     Toggle("Tools / Function calling", isOn: $viewModel.supportsTools)
+                    Toggle("Embeddings", isOn: $viewModel.supportsEmbeddings)
                 }
 
                 Section {

@@ -19,6 +19,7 @@ struct AIConfig: Codable, Sendable {
         let helpURL: String?; let iconName: String
         let category: String; let description: String?
         let defaultModel: String?
+        let availableModels: [String]?
         let scanPort: Int?; let scanPath: String?
         let endpoints: [String: String]?
     }
@@ -28,9 +29,13 @@ struct AIConfig: Codable, Sendable {
     }
 
     struct ModelPreset: Codable, Sendable {
+        let contextWindowTokens: Int?
+        let maxOutputTokens: Int?
         let supportsTemperature: Bool?
         let supportsMaxTokens: Bool?
         let usesMaxCompletionTokens: Bool?
+        let reasoningModel: Bool?
+        let deprecated: String?
     }
 
     struct FeatureConfig: Codable, Sendable {
@@ -128,5 +133,33 @@ final class AIConfigService: @unchecked Sendable {
             template = template.replacingOccurrences(of: "{\(key)}", with: value)
         }
         return template
+    }
+
+    // MARK: - Model capabilities
+
+    func contextWindowTokens(for model: String) -> Int {
+        presetFor(model: model)?.contextWindowTokens ?? 128000
+    }
+
+    func maxOutputTokens(for model: String) -> Int {
+        presetFor(model: model)?.maxOutputTokens ?? 16384
+    }
+
+    func isReasoningModel(_ model: String) -> Bool {
+        presetFor(model: model)?.reasoningModel ?? false
+    }
+
+    func availableModels(for providerId: String) -> [String] {
+        config.providers[providerId]?.availableModels ?? []
+    }
+
+    /// Calculate the maximum characters per chunk for a given model.
+    /// Uses ~75% of context window minus output budget, ≈4 chars/token.
+    func maxChunkChars(for model: String) -> Int {
+        let context = contextWindowTokens(for: model)
+        let output = maxOutputTokens(for: model)
+        let usableTokens = Int(Double(context) * 0.75) - output
+        let safeTokens = max(1000, usableTokens)
+        return safeTokens * 4
     }
 }

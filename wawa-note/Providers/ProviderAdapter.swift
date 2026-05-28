@@ -33,19 +33,18 @@ struct NormalizedResponse {
 final class ProviderAdapter: @unchecked Sendable {
 
     static func hint(for provider: any AIProvider) -> ProviderHint {
-        let id = provider.id.lowercased()
-        if id.contains("openai") || id == "openai" {
+        switch provider.providerType {
+        case .openAI, .openAICompatible, .localNetwork, .appleLocal:
             return ProviderHint(tactic: .nativeJSON, supportsJSONSchema: true, supportsSystemPrompt: true)
-        }
-        if id.contains("anthropic") || id == "anthropic" {
+        case .anthropic:
             return ProviderHint(tactic: .promptedJSON, supportsJSONSchema: false, supportsSystemPrompt: true)
+        case .gemini:
+            return ProviderHint(tactic: .bestEffort, supportsJSONSchema: false, supportsSystemPrompt: true)
         }
-        return ProviderHint(tactic: .bestEffort, supportsJSONSchema: false, supportsSystemPrompt: true)
     }
 
     static func buildRequest(template: AITemplate, variables: [String: String], provider: any AIProvider) -> NormalizedRequest {
         let hint = Self.hint(for: provider)
-        let id = provider.id.lowercased()
 
         var system = template.systemPrompt
         var user = template.userPrompt
@@ -70,10 +69,17 @@ final class ProviderAdapter: @unchecked Sendable {
             }
         }
 
-        // Multi-model routing based on provider
-        var model = template.model ?? (id.contains("anthropic") ? "claude-sonnet-4-6" : "gpt-5.5")
-        if id.contains("deepseek") { model = "deepseek-v4-pro" }
-        if id.contains("gemini") { model = "gemini-2.0-flash" }
+        // Multi-model routing based on provider type
+        let model: String = {
+            switch provider.providerType {
+            case .anthropic:
+                return template.model ?? "claude-sonnet-4-6"
+            case .gemini:
+                return template.model ?? "gemini-2.5-flash"
+            case .openAI, .openAICompatible, .localNetwork, .appleLocal:
+                return template.model ?? "gpt-5.5"
+            }
+        }()
 
         return NormalizedRequest(
             systemPrompt: system,
@@ -83,6 +89,51 @@ final class ProviderAdapter: @unchecked Sendable {
             maxTokens: template.maxTokens,
             model: model
         )
+    }
+
+    /// Parse an AI response into a typed Decodable value.
+    /// Handles: markdown fence removal, JSON extraction from within text,
+    /// snake_case → camelCase conversion, and DecodingError wrapping.
+    static func decode<T: Decodable>(_ type: T.Type, from response: String) throws -> T {
+        let normalized = normalizeJSON(response)
+        AppLog.provider.info("Decoding \(T.self), raw: \(response.prefix(200))")
+        guard let data = normalized.data(using: .utf8) else {
+            AppLog.provider.error("normalizeJSON produced invalid UTF-8")
+            throw ProviderError.decodingFailed
+        }
+        let decoder = JSONDecoder()
+        do {
+            return try decoder.decode(type, from: data)
+        } catch let decodingError as DecodingError {
+            AppLog.provider.error("Decode failed for \(T.self): \(decodingError)")
+            AppLog.provider.error("Normalized JSON: \(normalized.prefix(500))")
+            throw ProviderError.decodingFailed
+        } catch {
+            AppLog.provider.error("Decode failed for \(T.self): \(error)")
+            throw ProviderError.decodingFailed
+        }
+    }
+
+    /// Clean and extract JSON from a raw AI response string.
+    /// Strips markdown fences, then tries: direct parse, extraction between { },
+    /// fallback to raw text wrapped as {"raw_text": "..."}.
+    static func normalizeJSON(_ text: String) -> String {
+        let cleaned = stripMarkdownFences(text)
+
+        // Already valid JSON?
+        if let data = cleaned.data(using: .utf8),
+           (try? JSONSerialization.jsonObject(with: data)) != nil {
+            return cleaned
+        }
+
+        // Try extracting JSON from within text
+        if let firstBrace = cleaned.firstIndex(of: "{"),
+           let lastBrace = cleaned.lastIndex(of: "}") {
+            return String(cleaned[firstBrace...lastBrace])
+        }
+
+        // Fallback: wrap raw text
+        return "{\"raw_text\": \"\(cleaned.replacingOccurrences(of: "\"", with: "\\\""))\"}"
     }
 
     static func normalizeResponse(_ text: String, tactic: ProviderTactic) -> NormalizedResponse {

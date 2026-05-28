@@ -50,15 +50,15 @@ final class LensAnalysisService: @unchecked Sendable {
             model: model,
             messages: messages,
             temperature: lens.temperature,
-            responseFormat: .json
+            responseFormat: .jsonObject
         )
 
         let response = try await provider.send(request)
 
-        // Try to parse as JSON for structured output
-        let rawData = response.content.data(using: .utf8)
+        let cleaned = ProviderAdapter.normalizeJSON(response.content)
+        let rawData = cleaned.data(using: .utf8)
 
-        return LensResult(lensId: lensId, lensName: lens.name, content: response.content, parsed: rawData)
+        return LensResult(lensId: lensId, lensName: lens.name, content: cleaned, parsed: rawData)
     }
 
     func compare(

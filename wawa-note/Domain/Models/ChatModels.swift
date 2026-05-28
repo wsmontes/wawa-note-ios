@@ -5,6 +5,15 @@ enum AIRole: String, Codable {
     case user
     case assistant
     case tool
+
+    var apiName: String {
+        switch self {
+        case .system: "system"
+        case .user: "user"
+        case .assistant: "assistant"
+        case .tool: "tool"
+        }
+    }
 }
 
 struct ChatConversation: Identifiable, Codable {

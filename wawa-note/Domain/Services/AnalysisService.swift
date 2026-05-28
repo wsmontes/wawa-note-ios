@@ -75,17 +75,17 @@ final class AnalysisService: @unchecked Sendable {
             "[\(seg.id.uuidString)|\(formatTime(seg.startTime))] \(seg.text)"
         }
 
-        // Check if chunking is needed
         let totalChars = segmentsText.reduce(0) { $0 + $1.count }
-        if totalChars <= chunker.maxCharsPerChunk {
-            // Direct path — transcript fits in one request
+        let maxChunk = configService.maxChunkChars(for: model)
+        AppLog.provider.info("Transcript: \(totalChars) chars, model \(model) chunk limit: \(maxChunk) chars")
+
+        if totalChars <= maxChunk {
             let userPrompt = configService.renderPrompt(for: "analysis", variables: ["transcript": segmentsText.joined(separator: "\n")])
             return try await singleAnalysis(provider: provider, model: model, systemPrompt: systemPrompt, userPrompt: userPrompt)
         }
 
-        // Map-Reduce path
-        AppLog.provider.info("Transcript is \(totalChars) chars, using map-reduce")
-        let chunks = chunker.chunkTranscript(transcript)
+        AppLog.provider.info("Using map-reduce for \(totalChars) chars (\(model) context)")
+        let chunks = chunker.chunkTranscript(transcript, maxCharsPerChunk: maxChunk)
         return try await mapReduceAnalysis(chunks: chunks, provider: provider, model: model, systemPrompt: systemPrompt)
     }
 
@@ -105,27 +105,30 @@ final class AnalysisService: @unchecked Sendable {
 
     // MARK: - Map-Reduce
 
+    private static let maxConcurrentChunks = 3
+    private static let maxRetries = 3
+
     private func mapReduceAnalysis(chunks: [TextChunk], provider: any AIProvider, model: String, systemPrompt: String) async throws -> MeetingAnalysis {
-        // MAP: Summarize each chunk in parallel
-        let chunkSummaries: [String] = try await withThrowingTaskGroup(of: (Int, String).self) { group in
-            for (i, chunk) in chunks.enumerated() {
-                group.addTask {
-                    let summary = try await self.summarizeChunk(chunk, index: i, total: chunks.count, provider: provider, model: model)
-                    return (i, summary)
-                }
-            }
-            var results: [(Int, String)] = []
-            for try await result in group { results.append(result) }
-            return results.sorted { $0.0 < $1.0 }.map { $0.1 }
+        // MAP: Summarize each chunk with limited concurrency and retry
+        let chunkSummaries = await summarizeChunksWithLimit(chunks, provider: provider, model: model)
+
+        let validSummaries = chunkSummaries.compactMap(\.value)
+        let failedCount = chunkSummaries.count - validSummaries.count
+        if failedCount > 0 {
+            AppLog.provider.warning("Map phase: \(failedCount)/\(chunkSummaries.count) chunks failed after retries")
         }
 
-        AppLog.provider.info("Map phase done: \(chunkSummaries.count) summaries")
+        guard !validSummaries.isEmpty else {
+            throw ProviderError.decodingFailed
+        }
+
+        AppLog.provider.info("Map phase done: \(validSummaries.count) summaries")
 
         // REDUCE: Consolidate summaries into final analysis
         await MainActor.run { onProgress?(.reducing) }
 
-        let combined = chunkSummaries.enumerated().map { idx, summary in
-            "--- Part \(idx + 1) of \(chunkSummaries.count) ---\n\(summary)"
+        let combined = validSummaries.enumerated().map { idx, summary in
+            "--- Part \(idx + 1) of \(validSummaries.count) ---\n\(summary)"
         }.joined(separator: "\n\n")
 
         let reducePrompt = """
@@ -144,13 +147,48 @@ final class AnalysisService: @unchecked Sendable {
                 AIMessage(role: .user, content: [.text(reducePrompt)])
             ]
         )
-        let response = try await provider.send(request)
+        let response = try await sendWithRetry(provider: provider, request: request, maxRetries: Self.maxRetries)
         return parseResponse(response.content, meetingId: UUID(), providerId: provider.id, model: model)
     }
 
-    private func summarizeChunk(_ chunk: TextChunk, index: Int, total: Int, provider: any AIProvider, model: String) async throws -> String {
-        await MainActor.run { onProgress?(.mapping(index + 1, total)) }
+    /// Process chunks with limited concurrency (max 3 simultaneous requests)
+    private func summarizeChunksWithLimit(_ chunks: [TextChunk], provider: any AIProvider, model: String) async -> [(index: Int, value: String?)] {
+        let total = chunks.count
+        var results: [(Int, String?)] = []
+        results.reserveCapacity(total)
 
+        // Process in batches of maxConcurrentChunks
+        var offset = 0
+        while offset < total {
+            let batchSize = min(Self.maxConcurrentChunks, total - offset)
+            let batch = Array(chunks[offset..<(offset + batchSize)])
+
+            let batchResults = await withTaskGroup(of: (Int, String?).self) { group in
+                for i in 0..<batchSize {
+                    let chunkIndex = offset + i
+                    let chunk = batch[i]
+                    group.addTask {
+                        await MainActor.run { self.onProgress?(.mapping(chunkIndex + 1, total)) }
+                        let summary = await self.summarizeChunkWithRetry(
+                            chunk, index: chunkIndex, total: total,
+                            provider: provider, model: model
+                        )
+                        return (chunkIndex, summary)
+                    }
+                }
+                var collected: [(Int, String?)] = []
+                for await r in group { collected.append(r) }
+                return collected.sorted { $0.0 < $1.0 }
+            }
+
+            results.append(contentsOf: batchResults)
+            offset += batchSize
+        }
+
+        return results
+    }
+
+    private func summarizeChunkWithRetry(_ chunk: TextChunk, index: Int, total: Int, provider: any AIProvider, model: String) async -> String? {
         let prompt = """
         You are a meeting note taker. Summarize this meeting excerpt concisely.
         Focus on: key decisions, action items, risks, open questions, important dates, people mentioned, systems mentioned.
@@ -166,19 +204,55 @@ final class AnalysisService: @unchecked Sendable {
                 AIMessage(role: .user, content: [.text(prompt)])
             ]
         )
-        let response = try await provider.send(request)
-        return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        do {
+            let response = try await sendWithRetry(provider: provider, request: request, maxRetries: Self.maxRetries)
+            return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            AppLog.provider.error("Chunk \(index + 1)/\(total) failed after retries: \(error)")
+            return nil
+        }
+    }
+
+    /// Retry a request with exponential backoff for transient errors
+    private func sendWithRetry(provider: any AIProvider, request: AIRequest, maxRetries: Int) async throws -> AIResponse {
+        var lastError: Error?
+        for attempt in 0...maxRetries {
+            do {
+                return try await provider.send(request)
+            } catch let error as ProviderError {
+                lastError = error
+                if case .apiError(let code, _) = error, (code == 503 || code == 429), attempt < maxRetries {
+                    let delay = Double(1 << attempt) // 1s, 2s, 4s
+                    AppLog.provider.warning("Retrying after \(delay)s (attempt \(attempt + 1)/\(maxRetries), code \(code))")
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    continue
+                }
+                throw error
+            } catch {
+                lastError = error
+                if attempt < maxRetries {
+                    let delay = Double(1 << attempt)
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    continue
+                }
+                throw error
+            }
+        }
+        throw lastError ?? ProviderError.requestFailed(statusCode: 0)
     }
 
     // MARK: - Parse
 
     private func parseResponse(_ content: String, meetingId: UUID, providerId: String, model: String) -> MeetingAnalysis {
-        guard let data = content.data(using: .utf8) else {
+        let cleaned = ProviderAdapter.normalizeJSON(content)
+        guard let data = cleaned.data(using: .utf8) else {
             return buildFallback(rawContent: content, meetingId: meetingId, providerId: providerId, model: model)
         }
 
         do {
-            let parsed = try JSONDecoder().decode(AnalysisResponse.self, from: data)
+            let decoder = JSONDecoder()
+            let parsed = try decoder.decode(AnalysisResponse.self, from: data)
             return buildAnalysis(from: parsed, meetingId: meetingId, providerId: providerId, model: model)
         } catch {
             AppLog.provider.error("Failed to parse analysis JSON: \(error.localizedDescription)")

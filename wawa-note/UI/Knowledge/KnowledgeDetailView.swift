@@ -11,6 +11,9 @@ struct KnowledgeDetailView: View {
     @State private var transcriptionError: String?
     @State private var transcriptionProgress: String?
     @State private var showPromoteSheet = false
+    @State private var isAnalyzing = false
+    @State private var analysisError: String?
+    @State private var selectedModel: String = ""
     @State private var selectedLocale = "pt-BR"
     @State private var showLocalePicker = false
 
@@ -222,6 +225,41 @@ struct KnowledgeDetailView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
+            }
+
+            // Analyze button — show when transcript exists but no analysis yet
+            if transcript != nil && analysis == nil && !isAnalyzing {
+                VStack(spacing: 12) {
+                    Image(systemName: "sparkles")
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
+                    Text("Ready for analysis")
+                        .font(.headline)
+                    if let error = analysisError {
+                        Text(error).font(.caption).foregroundStyle(.red)
+                    }
+                    ActiveModelPicker(selectedModel: $selectedModel, label: "Model")
+                    Button("Analyze Now") {
+                        Task { await runAnalysis() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(24)
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+            }
+
+            if isAnalyzing {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Analyzing...")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity)
             }
         } else if item.audioFileRelativePath != nil && !isTranscribing {
             VStack(spacing: 12) {
@@ -455,8 +493,7 @@ struct KnowledgeDetailView: View {
             item.transcriptionEngineId = engine.id
 
             // Auto-generate embedding after transcription
-            if let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext),
-               let provider = try? ProviderRouter().provider(for: config) {
+            if let provider = try? ProviderRouter.resolveActive(context: modelContext) {
                 let pipeline = EmbeddingPipelineService()
                 await pipeline.ensureEmbedding(for: item, using: provider)
             }
@@ -480,18 +517,59 @@ struct KnowledgeDetailView: View {
     // MARK: - Helpers
 
     private func loadData() {
+        if selectedModel.isEmpty {
+            selectedModel = ActiveModelPicker.effectiveModel(context: modelContext, feature: "analysis")
+        }
         transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id)
         analysis = try? fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id)
 
         let annService = AnnotationService(context: modelContext)
         annotations = (try? annService.annotations(for: item.id)) ?? []
 
-        // Auto-extract entities and build decision graph from analysis
         if let analysis, item.type == .meeting {
             let extractor = EntityExtractionService(context: modelContext)
             _ = try? extractor.extractAndPersist(from: analysis, sourceItemID: item.id)
             try? extractor.buildDecisionGraph(from: analysis, sourceItemID: item.id)
         }
+    }
+
+    // MARK: - Analysis
+
+    private func runAnalysis() async {
+        guard transcript != nil else {
+            analysisError = "No transcript available. Transcribe first."
+            return
+        }
+        guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
+            analysisError = "No AI provider configured. Go to Settings."
+            return
+        }
+
+        isAnalyzing = true
+        analysisError = nil
+
+        do {
+            let svc = AnalysisService()
+            let model = selectedModel.isEmpty
+                ? ActiveModelPicker.effectiveModel(context: modelContext, feature: "analysis")
+                : selectedModel
+
+            guard let t = transcript else { return }
+            let result = try await svc.analyze(transcript: t, using: provider, model: model)
+
+            // Show immediately, then save
+            analysis = result
+            item.status = .analyzed
+
+            try? fileStore.createMeetingDirectory(for: item.id)
+            try? fileStore.writeArtifact(result, fileName: "analysis.json", meetingId: item.id)
+        } catch let error as ProviderError {
+            analysisError = "[Provider] \(error.userMessage)"
+        } catch {
+            analysisError = "[Error] \(error.localizedDescription)"
+        }
+
+        isAnalyzing = false
     }
 
     private var typeIcon: String { item.type.icon }

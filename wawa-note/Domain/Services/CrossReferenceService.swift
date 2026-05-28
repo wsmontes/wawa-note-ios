@@ -45,7 +45,7 @@ final class CrossReferenceService: @unchecked Sendable {
                 AIMessage(role: .system, content: [.text(systemPrompt)]),
                 AIMessage(role: .user, content: [.text(userPrompt)])
             ],
-            responseFormat: .json
+            responseFormat: .jsonObject
         ))
 
         return try parse(response.content)
@@ -76,9 +76,6 @@ final class CrossReferenceService: @unchecked Sendable {
     }
 
     private func parse(_ json: String) throws -> CrossReferenceResult {
-        guard let data = json.data(using: .utf8) else {
-            throw ProviderError.decodingFailed
-        }
-        return try JSONDecoder().decode(CrossReferenceResult.self, from: data)
+        try ProviderAdapter.decode(CrossReferenceResult.self, from: json)
     }
 }

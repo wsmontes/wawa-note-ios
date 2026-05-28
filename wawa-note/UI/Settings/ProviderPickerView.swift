@@ -17,21 +17,8 @@ struct ProviderPickerView: View {
     var body: some View {
         List {
             // Active model selector
-            if !providers.isEmpty {
-                Section {
-                    Picker("Active Model", selection: $activeModelKey) {
-                        ForEach(allModelKeys, id: \.self) { key in
-                            Text(key).tag(key)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                } header: {
-                    Text("Active AI Service")
-                } footer: {
-                    Text("Used for summaries, chat, and analysis. Connect more providers to see additional options.")
-                }
-            } else {
-                Section {
+            Section {
+                if providers.isEmpty {
                     HStack {
                         Image(systemName: "brain.head.profile")
                             .font(.title3)
@@ -39,9 +26,33 @@ struct ProviderPickerView: View {
                         Text("No AI service connected")
                             .foregroundStyle(.secondary)
                     }
-                } header: {
-                    Text("Active AI Service")
+                } else {
+                    Picker("Provider", selection: $activeModelKey) {
+                        ForEach(allModelKeys, id: \.self) { key in
+                            Text(key).tag(key)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    if let active = activeProvider {
+                        Picker("Model", selection: Binding(
+                            get: { active.defaultModel },
+                            set: { newModel in
+                                active.defaultModel = newModel
+                                try? modelContext.save()
+                                syncActiveSelection()
+                            }
+                        )) {
+                            ForEach(availableModelsForActive, id: \.self) { model in
+                                Text(model).tag(model)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
                 }
+            } header: {
+                Text("Active AI Service")
+            } footer: {
+                Text("Used for summaries, analysis, and cross-reference. Connect a provider to enable AI features.")
             }
 
             cloudServicesSection
@@ -58,9 +69,7 @@ struct ProviderPickerView: View {
         .sheet(isPresented: $showCustomEditor) {
             ProviderEditorView(existingProvider: nil)
         }
-        .onAppear {
-            syncActiveSelection()
-        }
+        .onAppear { syncActiveSelection() }
         .onChange(of: activeModelKey) { _, newKey in
             updateActiveFromKey(newKey)
         }
@@ -72,20 +81,37 @@ struct ProviderPickerView: View {
         providers.map { "\($0.type.displayName) · \($0.defaultModel)" }
     }
 
+    private var activeProvider: AIProviderConfigModel? {
+        guard let activeId = activeManager.getActiveProviderID(),
+              let uuid = UUID(uuidString: activeId) else { return nil }
+        return providers.first(where: { $0.id == uuid })
+    }
+
+    private var availableModelsForActive: [String] {
+        guard let active = activeProvider else { return [] }
+        var models = Set(AIConfigService.shared.availableModels(for: active.providerConfigId))
+        if models.isEmpty {
+            models = Set(AIConfigService.shared.availableModels(for: active.typeRaw))
+        }
+        active.availableModels.forEach { models.insert($0) }
+        models.insert(active.defaultModel)
+        return Array(models).sorted()
+    }
+
     private func syncActiveSelection() {
         if let activeId = activeManager.getActiveProviderID(),
-           let active = providers.first(where: { $0.id == activeId }) {
+           let uuid = UUID(uuidString: activeId),
+           let active = providers.first(where: { $0.id == uuid }) {
             activeModelKey = "\(active.type.displayName) · \(active.defaultModel)"
         } else if let first = providers.first {
-            // Auto-set first provider as active
-            activeManager.setActiveProviderID(first.id)
+            activeManager.setActiveProviderID(first.id.uuidString)
             activeModelKey = "\(first.type.displayName) · \(first.defaultModel)"
         }
     }
 
     private func updateActiveFromKey(_ key: String) {
         guard let provider = providers.first(where: { "\($0.type.displayName) · \($0.defaultModel)" == key }) else { return }
-        activeManager.setActiveProviderID(provider.id)
+        activeManager.setActiveProviderID(provider.id.uuidString)
     }
 
     // MARK: - Sections
