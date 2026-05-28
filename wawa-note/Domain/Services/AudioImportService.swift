@@ -20,12 +20,21 @@ final class AudioImportService: @unchecked Sendable {
     ]
 
     func canRead(url: URL) -> Bool {
-        if let _ = try? AVAudioPlayer(contentsOf: url) {
+        // Try AVAudioPlayer first (covers m4a, mp3, wav, aiff)
+        if (try? AVAudioPlayer(contentsOf: url)) != nil {
             return true
         }
+        // Try AVAsset with audio tracks
         let asset = AVAsset(url: url)
-        if asset.isReadable {
-            return asset.tracks(withMediaType: .audio).first != nil
+        if asset.isReadable, asset.tracks(withMediaType: .audio).first != nil {
+            return true
+        }
+        // Try ExtAudioFile (covers opus, ogg, flac, and other formats AVAudioPlayer doesn't handle)
+        var file: ExtAudioFileRef?
+        let status = ExtAudioFileOpenURL(url as CFURL, &file)
+        if status == noErr, file != nil {
+            ExtAudioFileDispose(file!)
+            return true
         }
         return false
     }
@@ -54,17 +63,16 @@ final class AudioImportService: @unchecked Sendable {
                 userInfo: [NSLocalizedDescriptionKey: "File not found at path"]))
         }
 
-        let player: AVAudioPlayer
-        do {
-            player = try AVAudioPlayer(contentsOf: url)
-        } catch {
-            throw ImportError.conversionFailed(NSError(domain: "import", code: -2,
-                userInfo: [NSLocalizedDescriptionKey: "Cannot open audio: \(error.localizedDescription)"]))
-        }
+        let playerDuration = (try? AVAudioPlayer(contentsOf: url))?.duration ?? 0
 
         let asset = AVAsset(url: url)
         let assetDuration = (try? await asset.load(.duration)).map { CMTimeGetSeconds($0) } ?? 0
-        let effectiveDuration = max(player.duration, assetDuration)
+        let effectiveDuration = max(playerDuration, assetDuration)
+
+        guard effectiveDuration > 0 else {
+            throw ImportError.conversionFailed(NSError(domain: "import", code: -2,
+                userInfo: [NSLocalizedDescriptionKey: "Cannot read audio duration"]))
+        }
 
         return ImportMetadata(
             duration: effectiveDuration,

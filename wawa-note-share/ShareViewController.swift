@@ -3,63 +3,109 @@ import UniformTypeIdentifiers
 
 final class ShareViewController: UIViewController {
 
+    private var savedFiles: [String] = []
+    private var processingDone = false
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        // Transparent background so the share sheet UI is less jarring
+        view.backgroundColor = .clear
+        processAttachments()
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-
-        guard let extensionItems = extensionContext?.inputItems as? [NSExtensionItem] else {
+        // If processing already finished, complete immediately
+        if processingDone {
             complete()
+        }
+    }
+
+    // MARK: - Attachment processing
+
+    private func processAttachments() {
+        guard let extensionItems = extensionContext?.inputItems as? [NSExtensionItem] else {
+            processingDone = true
             return
         }
 
-        var handled = false
-        for item in extensionItems {
-            guard let attachments = item.attachments else { continue }
-            for provider in attachments {
-                // Try audio first, then movie, then generic file
-                let types: [String] = [
-                    UTType.audio.identifier,
-                    UTType.movie.identifier,
-                    UTType.fileURL.identifier,
-                    UTType.data.identifier
-                ]
-                for typeID in types {
-                    if provider.hasItemConformingToTypeIdentifier(typeID) {
-                        loadFile(from: provider, typeIdentifier: typeID)
-                        handled = true
-                        break
-                    }
-                }
-                if handled { break }
-            }
-            if handled { break }
+        let allProviders: [NSItemProvider] = extensionItems.compactMap { $0.attachments }.flatMap { $0 }
+
+        guard !allProviders.isEmpty else {
+            processingDone = true
+            return
         }
 
-        if !handled { complete() }
+        let group = DispatchGroup()
+        let queue = DispatchQueue(label: "share.import", qos: .userInitiated)
+        var saved: [String] = []
+
+        for provider in allProviders {
+            let types: [String] = [
+                UTType.audio.identifier,
+                UTType.movie.identifier,
+                UTType.fileURL.identifier,
+                UTType.data.identifier
+            ]
+
+            var matched = false
+            for typeID in types {
+                if provider.hasItemConformingToTypeIdentifier(typeID) {
+                    group.enter()
+                    loadFile(from: provider, typeIdentifier: typeID) { filename in
+                        if let name = filename {
+                            queue.sync { saved.append(name) }
+                        }
+                        group.leave()
+                    }
+                    matched = true
+                    break
+                }
+            }
+            if !matched {
+                NSLog("[WawaShare] No supported type for: \(provider.registeredTypeIdentifiers)")
+            }
+        }
+
+        group.notify(queue: .main) { [weak self] in
+            self?.savedFiles = saved
+            if saved.isEmpty {
+                NSLog("[WawaShare] No files saved")
+            } else {
+                let shared = UserDefaults(suiteName: "group.com.wawa-note")
+                shared?.set(saved, forKey: "pendingImportFiles")
+                NSLog("[WawaShare] Saved \(saved.count) files: \(saved)")
+            }
+            self?.processingDone = true
+            if self?.isViewLoaded == true, self?.view.window != nil {
+                self?.complete()
+            }
+        }
     }
 
-    private func loadFile(from provider: NSItemProvider, typeIdentifier: String) {
-        provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { [weak self] url, error in
-            guard let self else { return }
+    // MARK: - File copy
 
+    private func loadFile(from provider: NSItemProvider, typeIdentifier: String, completion: @escaping (String?) -> Void) {
+        provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, error in
             if let error {
                 NSLog("[WawaShare] loadFileRepresentation error: \(error.localizedDescription)")
-                DispatchQueue.main.async { self.complete() }
+                completion(nil)
                 return
             }
 
             guard let url = url else {
-                DispatchQueue.main.async { self.complete() }
+                completion(nil)
                 return
             }
 
             let originalName = provider.suggestedName ?? url.lastPathComponent
-            let safeName = safeImportFilename(original: originalName)
-            NSLog("[WawaShare] Received file: \(originalName), saving as \(safeName)")
+            let safeName = self.safeImportFilename(original: originalName)
+            NSLog("[WawaShare] Received: \(originalName) -> \(safeName)")
 
             guard let containerURL = FileManager.default
                 .containerURL(forSecurityApplicationGroupIdentifier: "group.com.wawa-note") else {
                 NSLog("[WawaShare] No App Group container")
-                DispatchQueue.main.async { self.complete() }
+                completion(nil)
                 return
             }
 
@@ -69,39 +115,24 @@ final class ShareViewController: UIViewController {
                 let destURL = sharedDir.appendingPathComponent(safeName)
                 try? FileManager.default.removeItem(at: destURL)
                 try FileManager.default.copyItem(at: url, to: destURL)
-                NSLog("[WawaShare] File copied to: \(destURL.path)")
-
-                let shared = UserDefaults(suiteName: "group.com.wawa-note")
-                shared?.set(safeName, forKey: "pendingImportFile")
-                shared?.synchronize()
+                NSLog("[WawaShare] Copied to: \(destURL.path)")
+                completion(safeName)
             } catch {
-                NSLog("[WawaShare] File copy error: \(error.localizedDescription)")
+                NSLog("[WawaShare] Copy error: \(error.localizedDescription)")
+                completion(nil)
             }
-
-            DispatchQueue.main.async { self.complete() }
         }
     }
 
-    private func safeImportFilename(original: String) -> String {
+    private nonisolated func safeImportFilename(original: String) -> String {
         let sanitized = original
             .replacingOccurrences(of: "[^a-zA-Z0-9._-]", with: "_", options: .regularExpression)
         return "\(UUID().uuidString)-\(sanitized)"
     }
 
+    // MARK: - Complete
+
     private func complete() {
         extensionContext?.completeRequest(returningItems: nil)
-
-        // Open main app
-        guard let url = URL(string: "wawanote://import") else { return }
-        var responder: UIResponder? = self
-        while responder != nil {
-            if let app = responder as? UIApplication {
-                app.open(url, options: [:]) { success in
-                    NSLog("[WawaShare] openURL result: \(success)")
-                }
-                break
-            }
-            responder = responder?.next
-        }
     }
 }
