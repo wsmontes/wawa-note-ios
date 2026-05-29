@@ -68,6 +68,7 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: "NO"
         SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: "NO"
+        CODE_SIGN_ENTITLEMENTS: wawa-note/wawa-note.entitlements
 
   wawa-noteTests:
     type: bundle.unit-test
@@ -102,6 +103,7 @@ targets:
         DEVELOPMENT_TEAM: 955573A4YH
         CODE_SIGN_STYLE: Automatic
         SWIFT_VERSION: "6.0"
+        CODE_SIGN_ENTITLEMENTS: wawa-note-share/wawa-note-share.entitlements
 
   wawa-note-watch:
     type: application

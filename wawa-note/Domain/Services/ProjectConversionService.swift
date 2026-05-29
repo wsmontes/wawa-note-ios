@@ -7,6 +7,10 @@ struct ConversionPreview: Codable, Sendable {
     let people: [ConversionPerson]
     let entities: [ConversionEntity]
     let edges: [ConversionEdge]
+    enum CodingKeys: String, CodingKey {
+        case projectName = "project_name"
+        case tasks, people, entities, edges
+    }
 
     struct ConversionTask: Codable, Identifiable, Sendable {
         var id: String = UUID().uuidString
@@ -14,25 +18,44 @@ struct ConversionPreview: Codable, Sendable {
         let ownerName: String?
         let priority: String?
         let sourceSegmentIDs: [String]
+        enum CodingKeys: String, CodingKey {
+            case title
+            case ownerName = "owner_name"
+            case priority
+            case sourceSegmentIDs = "source_segment_ids"
+        }
     }
 
     struct ConversionPerson: Codable, Identifiable, Sendable {
         var id: String = UUID().uuidString
         let displayName: String
         let role: String?
+        enum CodingKeys: String, CodingKey {
+            case displayName = "display_name"
+            case role
+        }
     }
 
     struct ConversionEntity: Codable, Identifiable, Sendable {
         var id: String = UUID().uuidString
         let kind: String
         let displayName: String
+        enum CodingKeys: String, CodingKey {
+            case kind
+            case displayName = "display_name"
+        }
     }
 
     struct ConversionEdge: Codable, Identifiable, Sendable {
         var id: String = UUID().uuidString
-        let fromRef: String        // "task:0", "entity:0", "person:0"
-        let toRef: String          // "project", "task:1", etc.
+        let fromRef: String
+        let toRef: String
         let edgeType: String
+        enum CodingKeys: String, CodingKey {
+            case fromRef = "from_ref"
+            case toRef = "to_ref"
+            case edgeType = "edge_type"
+        }
     }
 }
 
@@ -67,13 +90,10 @@ final class ProjectConversionService {
                 AIMessage(role: .system, content: [.text(conversionSystemPrompt)]),
                 AIMessage(role: .user, content: [.text(prompt)])
             ],
-            responseFormat: .json
+            responseFormat: .jsonObject
         ))
 
-        guard let data = response.content.data(using: .utf8) else {
-            throw ProviderError.decodingFailed
-        }
-        return try JSONDecoder().decode(ConversionPreview.self, from: data)
+        return try ProviderAdapter.decode(ConversionPreview.self, from: response.content)
     }
 
     /// Execute the conversion: create Project, Tasks, People, Entities, and Edges
@@ -162,17 +182,15 @@ final class ProjectConversionService {
     // MARK: - Helpers
 
     private func buildItemContext(_ item: KnowledgeItem) -> String {
-        var ctx = "Item Title: \(item.title)\n"
-        ctx += "Type: \(item.type.rawValue)\n"
-        ctx += "ID: \(item.id.uuidString)\n"
+        var ctx = "Title: \(item.title)\n"
 
         if let analysis = try? fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) {
             if !analysis.shortSummary.isEmpty {
                 ctx += "Summary: \(analysis.shortSummary)\n"
             }
             if !analysis.actionItems.isEmpty {
-                ctx += "Action Items:\n"
-                for a in analysis.actionItems {
+                ctx += "Actions:\n"
+                for a in analysis.actionItems.prefix(5) {
                     ctx += "- \(a.task)"
                     if let owner = a.owner { ctx += " (owner: \(owner))" }
                     ctx += "\n"
@@ -180,18 +198,7 @@ final class ProjectConversionService {
             }
             if !analysis.decisions.isEmpty {
                 ctx += "Decisions:\n"
-                for d in analysis.decisions { ctx += "- \(d.title)\n" }
-            }
-            if !analysis.entities.isEmpty {
-                ctx += "Entities:\n"
-                for e in analysis.entities { ctx += "- \(e.name) [\(e.type.rawValue)]\n" }
-            }
-        }
-
-        if let transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id) {
-            ctx += "Transcript excerpt:\n"
-            for seg in transcript.segments.prefix(20) {
-                ctx += "[\(seg.id)] \(seg.text)\n"
+                for d in analysis.decisions.prefix(5) { ctx += "- \(d.title)\n" }
             }
         }
 

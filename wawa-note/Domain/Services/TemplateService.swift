@@ -73,7 +73,7 @@ final class TemplateService: @unchecked Sendable {
             ],
             temperature: request.temperature,
             maxTokens: request.maxTokens,
-            responseFormat: hint.supportsJSONSchema ? .json : nil
+            responseFormat: hint.supportsJSONSchema ? .jsonObject : nil
         ))
 
         return ProviderAdapter.normalizeResponse(response.content, tactic: hint.tactic)

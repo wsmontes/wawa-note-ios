@@ -1,6 +1,6 @@
 {
-  "version": "1.0",
-  "description": "Centralized AI configuration for wawa-note. Edit this file to change models, prompts, and parameters across all features.",
+  "version": "1.1",
+  "description": "Centralized AI configuration. Edit to change models, prompts, context windows, and parameters.",
   "providers": {
     "openai": {
       "id": "openai",
@@ -17,7 +17,14 @@
         "chat": "/chat/completions",
         "models": "/models",
         "audioTranscription": "/audio/transcriptions"
-      }
+      },
+      "availableModels": [
+        "gpt-5.5",
+        "gpt-4o",
+        "gpt-4o-mini",
+        "o3-mini",
+        "o3"
+      ]
     },
     "anthropic": {
       "id": "anthropic",
@@ -33,7 +40,12 @@
       "endpoints": {
         "chat": "/messages",
         "models": "/models"
-      }
+      },
+      "availableModels": [
+        "claude-sonnet-4-6",
+        "claude-opus-4-7",
+        "claude-haiku-4-5"
+      ]
     },
     "gemini": {
       "id": "gemini",
@@ -45,11 +57,15 @@
       "iconName": "circle.hexagongrid",
       "category": "cloud",
       "description": "Cloud AI. Requires an API key.",
-      "defaultModel": "gemini-2.0-flash",
+      "defaultModel": "gemini-2.5-flash",
       "endpoints": {
         "chat": "/models/{model}:generateContent",
         "models": "/models"
-      }
+      },
+      "availableModels": [
+        "gemini-2.5-flash",
+        "gemini-3-flash"
+      ]
     },
     "deepseek": {
       "id": "deepseek",
@@ -65,7 +81,11 @@
       "endpoints": {
         "chat": "/chat/completions",
         "models": "/models"
-      }
+      },
+      "availableModels": [
+        "deepseek-v4-pro",
+        "deepseek-v4-flash"
+      ]
     },
     "lmstudio": {
       "id": "lmstudio",
@@ -109,44 +129,111 @@
   },
   "modelPresets": {
     "gpt-5.5": {
+      "contextWindowTokens": 272000,
+      "maxOutputTokens": 128000,
       "supportsTemperature": false,
       "supportsMaxTokens": true,
-      "usesMaxCompletionTokens": true
+      "usesMaxCompletionTokens": true,
+      "reasoningModel": true
     },
     "gpt-4o": {
+      "contextWindowTokens": 128000,
+      "maxOutputTokens": 16384,
       "supportsTemperature": true,
       "supportsMaxTokens": true,
-      "usesMaxCompletionTokens": true
+      "usesMaxCompletionTokens": true,
+      "reasoningModel": false,
+      "deprecated": "2026-07-23"
     },
     "gpt-4o-mini": {
+      "contextWindowTokens": 128000,
+      "maxOutputTokens": 16384,
       "supportsTemperature": true,
       "supportsMaxTokens": true,
-      "usesMaxCompletionTokens": true
+      "usesMaxCompletionTokens": true,
+      "reasoningModel": false,
+      "deprecated": "2026-07-23"
     },
     "o3-mini": {
+      "contextWindowTokens": 200000,
+      "maxOutputTokens": 100000,
       "supportsTemperature": false,
       "supportsMaxTokens": true,
-      "usesMaxCompletionTokens": true
+      "usesMaxCompletionTokens": true,
+      "reasoningModel": true,
+      "deprecated": "2026-10-23"
     },
     "o3": {
+      "contextWindowTokens": 200000,
+      "maxOutputTokens": 100000,
       "supportsTemperature": false,
       "supportsMaxTokens": true,
-      "usesMaxCompletionTokens": true
+      "usesMaxCompletionTokens": true,
+      "reasoningModel": true
+    },
+    "claude-opus-4-7": {
+      "contextWindowTokens": 200000,
+      "maxOutputTokens": 128000,
+      "supportsTemperature": true,
+      "supportsMaxTokens": true,
+      "usesMaxCompletionTokens": false,
+      "reasoningModel": false
+    },
+    "claude-sonnet-4-6": {
+      "contextWindowTokens": 200000,
+      "maxOutputTokens": 64000,
+      "supportsTemperature": true,
+      "supportsMaxTokens": true,
+      "usesMaxCompletionTokens": false,
+      "reasoningModel": false
+    },
+    "claude-haiku-4-5": {
+      "contextWindowTokens": 200000,
+      "maxOutputTokens": 64000,
+      "supportsTemperature": true,
+      "supportsMaxTokens": true,
+      "usesMaxCompletionTokens": false,
+      "reasoningModel": false
+    },
+    "gemini-2.5-flash": {
+      "contextWindowTokens": 1048576,
+      "maxOutputTokens": 65536,
+      "supportsTemperature": true,
+      "supportsMaxTokens": true,
+      "usesMaxCompletionTokens": false,
+      "reasoningModel": false
+    },
+    "gemini-3-flash": {
+      "contextWindowTokens": 1048576,
+      "maxOutputTokens": 65536,
+      "supportsTemperature": true,
+      "supportsMaxTokens": true,
+      "usesMaxCompletionTokens": false,
+      "reasoningModel": false
     },
     "deepseek-v4-pro": {
+      "contextWindowTokens": 1048576,
+      "maxOutputTokens": 384000,
       "supportsTemperature": true,
       "supportsMaxTokens": true,
-      "usesMaxCompletionTokens": false
+      "usesMaxCompletionTokens": false,
+      "reasoningModel": false
     },
     "deepseek-v4-flash": {
+      "contextWindowTokens": 1048576,
+      "maxOutputTokens": 384000,
       "supportsTemperature": true,
       "supportsMaxTokens": true,
-      "usesMaxCompletionTokens": false
+      "usesMaxCompletionTokens": false,
+      "reasoningModel": false
     },
     "whisper-1": {
+      "contextWindowTokens": 0,
+      "maxOutputTokens": 0,
       "supportsTemperature": false,
       "supportsMaxTokens": false,
-      "usesMaxCompletionTokens": false
+      "usesMaxCompletionTokens": false,
+      "reasoningModel": false
     }
   },
   "features": {

@@ -6,14 +6,12 @@ struct TextChunk {
 }
 
 final class TranscriptChunker: @unchecked Sendable {
-    let maxCharsPerChunk = 24000  // ~6000 tokens
     let overlapSegments = 2
 
-    func chunkTranscript(_ transcript: Transcript) -> [TextChunk] {
+    func chunkTranscript(_ transcript: Transcript, maxCharsPerChunk: Int = 12000) -> [TextChunk] {
         let segments = transcript.segments
         guard !segments.isEmpty else { return [] }
 
-        // Estimate total chars
         let totalChars = segments.reduce(0) { $0 + $1.text.count }
         if totalChars <= maxCharsPerChunk {
             let fullText = segments.map { "[\(formatTime($0.startTime))] \($0.text)" }.joined(separator: "\n")

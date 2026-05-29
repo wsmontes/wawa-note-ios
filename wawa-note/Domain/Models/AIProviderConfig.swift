@@ -49,6 +49,7 @@ struct AIProviderConfig: Identifiable, Codable {
     var supportsStreaming: Bool
     var supportsAudio: Bool
     var supportsTools: Bool
+    var supportsEmbeddings: Bool
     var apiKeyKeychainIdentifier: String?
     var notes: String?
 
@@ -61,6 +62,7 @@ struct AIProviderConfig: Identifiable, Codable {
         supportsStreaming: Bool = true,
         supportsAudio: Bool = false,
         supportsTools: Bool = false,
+        supportsEmbeddings: Bool = false,
         apiKeyKeychainIdentifier: String? = nil,
         notes: String? = nil
     ) {
@@ -72,6 +74,7 @@ struct AIProviderConfig: Identifiable, Codable {
         self.supportsStreaming = supportsStreaming
         self.supportsAudio = supportsAudio
         self.supportsTools = supportsTools
+        self.supportsEmbeddings = supportsEmbeddings
         self.apiKeyKeychainIdentifier = apiKeyKeychainIdentifier
         self.notes = notes
     }

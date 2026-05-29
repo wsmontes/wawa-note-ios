@@ -22,30 +22,26 @@ final class CoCreationService: @unchecked Sendable {
                 AIMessage(role: .system, content: [.text(systemPrompt)]),
                 AIMessage(role: .user, content: [.text(userPrompt)])
             ],
-            responseFormat: .json
+            responseFormat: .jsonObject
         ))
-
-        guard let data = response.content.data(using: .utf8) else {
-            return CocreationResult(expandedText: response.content, suggestions: [], relatedItemIds: [])
-        }
 
         struct Raw: Decodable {
             let expandedText: String?
-            let expanded_text: String?
             let suggestions: [String]?
             let relatedItems: [String]?
-            let related_items: [String]?
-            let relatedItemIds: [String]?
-            let related_item_ids: [String]?
+            enum CodingKeys: String, CodingKey {
+                case expandedText = "expanded_text"
+                case suggestions
+                case relatedItems = "related_items"
+            }
         }
 
-        if let raw = try? JSONDecoder().decode(Raw.self, from: data) {
-            let text = raw.expandedText ?? raw.expanded_text ?? response.content
+        if let raw = try? ProviderAdapter.decode(Raw.self, from: response.content) {
+            let text = raw.expandedText ?? response.content
             let sugs = (raw.suggestions ?? []).map {
                 CoCreationSuggestion(text: $0, category: .expansion, relatedItemIds: [])
             }
-            let ids = (raw.relatedItems ?? raw.related_items ?? raw.relatedItemIds ?? raw.related_item_ids ?? [])
-                .compactMap(UUID.init(uuidString:))
+            let ids = (raw.relatedItems ?? []).compactMap(UUID.init(uuidString:))
             return CocreationResult(expandedText: text, suggestions: sugs, relatedItemIds: ids)
         }
 

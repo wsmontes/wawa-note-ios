@@ -7,9 +7,10 @@ struct PromoteToProjectSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
-    @State private var isGenerating = true
+    @State private var isGenerating = false
     @State private var preview: ConversionPreview?
     @State private var errorMessage: String?
+    @State private var selectedModel: String = ""
 
     init(item: KnowledgeItem, onComplete: @escaping (Project) -> Void) {
         self.item = item
@@ -19,12 +20,14 @@ struct PromoteToProjectSheet: View {
     var body: some View {
         NavigationStack {
             Group {
-                if isGenerating {
-                    generatingView
-                } else if let error = errorMessage {
+                if let error = errorMessage {
                     errorView(error)
                 } else if let preview {
                     previewContent(preview)
+                } else if isGenerating {
+                    generatingView
+                } else {
+                    configView
                 }
             }
             .navigationTitle("Promote to Project")
@@ -36,7 +39,36 @@ struct PromoteToProjectSheet: View {
             }
         }
         .task {
-            await generatePreview()
+            selectedModel = ActiveModelPicker.effectiveModel(context: modelContext, feature: "analysis")
+        }
+    }
+
+    // MARK: - Config
+
+    private var configView: some View {
+        VStack(spacing: 20) {
+            Spacer()
+            Image(systemName: "sparkles.rectangle.stack")
+                .font(.system(size: 48))
+                .foregroundStyle(.blue)
+            Text("Create Project from Meeting")
+                .font(.title2)
+                .fontWeight(.semibold)
+            Text("AI will extract tasks, people, entities, and relationships from the analysis.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            ActiveModelPicker(selectedModel: $selectedModel, label: "Model")
+            Button {
+                Task { await generatePreview() }
+            } label: {
+                Label("Generate Project", systemImage: "wand.and.stars")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .padding(.horizontal, 32)
+            Spacer()
         }
     }
 
@@ -311,15 +343,18 @@ struct PromoteToProjectSheet: View {
     }
 
     private func generatePreview() async {
-        guard let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext),
-              let provider = try? ProviderRouter().provider(for: config) else {
+        isGenerating = true
+        guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
             errorMessage = "No AI provider configured. Go to Settings to add one."
             isGenerating = false
             return
         }
 
         do {
-            let preview = try await makeService().generatePreview(from: item, using: provider, model: config.defaultModel)
+            let model = selectedModel.isEmpty
+                ? ActiveModelPicker.effectiveModel(context: modelContext, feature: "analysis")
+                : selectedModel
+            let preview = try await makeService().generatePreview(from: item, using: provider, model: model)
             self.preview = preview
         } catch let error as ProviderError {
             errorMessage = error.userMessage

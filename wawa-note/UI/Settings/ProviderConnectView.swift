@@ -18,6 +18,7 @@ final class ProviderConnectViewModel: ObservableObject {
     private let keychain = SecureKeyStore()
     private let router = ProviderRouter()
     private var savedProvider: AIProviderConfigModel?
+    private let fetchKeychainId = UUID().uuidString
 
     var effectiveModel: String {
         if !selectedModel.isEmpty { return selectedModel }
@@ -90,29 +91,47 @@ final class ProviderConnectViewModel: ObservableObject {
         isFetchingModels = true
         modelFetchError = nil
 
-        let url = URL(string: baseURL.absoluteString + "/models") ?? baseURL
-        var request = URLRequest(url: url)
-        if !apiKey.isEmpty {
-            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        }
-        request.timeoutInterval = 10
-
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard (200...299).contains((response as? HTTPURLResponse)?.statusCode ?? 500) else {
-                modelFetchError = "Could not fetch models. Check your API key."
-                isFetchingModels = false
-                return
+            let models: [String]
+            // Use the provider's fetchModels if key is in keychain, else use static list
+            if apiKey.isEmpty && template.requiresAuth {
+                models = AIConfigService.shared.availableModels(for: template.id)
+            } else {
+                if template.requiresAuth && !apiKey.isEmpty {
+                    try? keychain.saveAPIKey(apiKey, for: fetchKeychainId)
+                }
+                let testConfig = AIProviderConfigModel(
+                    name: template.displayName, type: template.providerType, providerConfigId: template.id, baseURL: baseURL,
+                    defaultModel: effectiveModel, supportsStreaming: true, supportsAudio: false,
+                    supportsTools: true,
+                    supportsEmbeddings: template.providerType == .openAI || template.providerType == .gemini,
+                    apiKeyKeychainIdentifier: template.requiresAuth ? fetchKeychainId : nil
+                )
+                let provider = try router.provider(for: testConfig)
+                models = try await provider.fetchModels()
+                // Clean up temp keychain entry if pre-connect
+                if savedProvider == nil && template.requiresAuth {
+                    try? keychain.deleteAPIKey(for: fetchKeychainId)
+                }
             }
-            let decoded = try JSONDecoder().decode(ModelsResponse.self, from: data)
-            availableModels = decoded.data.map(\.id).sorted()
+
+            let staticModels = AIConfigService.shared.availableModels(for: template.id)
+            var merged = Set(staticModels)
+            models.forEach { merged.insert($0) }
+            availableModels = Array(merged).sorted()
             if availableModels.isEmpty {
                 modelFetchError = "No models available."
-            } else if selectedModel.isEmpty {
-                selectedModel = availableModels.first!
+            } else if selectedModel.isEmpty || !availableModels.contains(selectedModel) {
+                selectedModel = template.defaultModel
             }
         } catch {
-            modelFetchError = "Could not fetch models."
+            let staticModels = AIConfigService.shared.availableModels(for: template.id)
+            if !staticModels.isEmpty {
+                availableModels = staticModels.sorted()
+                selectedModel = template.defaultModel
+            } else {
+                modelFetchError = "Could not fetch models."
+            }
         }
         isFetchingModels = false
     }
@@ -144,11 +163,13 @@ final class ProviderConnectViewModel: ObservableObject {
         let testConfig = AIProviderConfigModel(
             name: template.displayName,
             type: template.providerType,
+            providerConfigId: template.id,
             baseURL: baseURL,
             defaultModel: effectiveModel,
             supportsStreaming: true,
             supportsAudio: false,
             supportsTools: true,
+            supportsEmbeddings: template.providerType == .openAI || template.providerType == .gemini,
             apiKeyKeychainIdentifier: template.requiresAuth ? keychainId : nil,
             notes: nil
         )
@@ -188,11 +209,13 @@ final class ProviderConnectViewModel: ObservableObject {
             let savedProvider = AIProviderConfigModel(
                 name: template.displayName,
                 type: template.providerType,
+                providerConfigId: template.id,
                 baseURL: baseURL,
                 defaultModel: effectiveModel,
                 supportsStreaming: true,
                 supportsAudio: false,
                 supportsTools: true,
+                supportsEmbeddings: template.providerType == .openAI || template.providerType == .gemini,
                 apiKeyKeychainIdentifier: template.requiresAuth ? keychainId : nil,
                 notes: nil
             )
@@ -205,7 +228,7 @@ final class ProviderConnectViewModel: ObservableObject {
                 return
             }
             self.savedProvider = savedProvider
-            ActiveProviderManager.shared.setActiveProviderID(savedProvider.id)
+            ActiveProviderManager.shared.setActiveProviderID(savedProvider.id.uuidString)
 
             // Attempt model discovery.
             let models = await discoverModels(baseURL: baseURL, apiKeyId: keychainId)
@@ -213,8 +236,9 @@ final class ProviderConnectViewModel: ObservableObject {
             if let firstModel = models.first {
                 selectedModel = firstModel
                 savedProvider.defaultModel = firstModel
-                try? context.save()
             }
+            savedProvider.availableModels = models
+            try? context.save()
 
             connectionPhase = .success
 
@@ -235,22 +259,12 @@ final class ProviderConnectViewModel: ObservableObject {
     // MARK: - Model discovery
 
     private func discoverModels(baseURL: URL, apiKeyId: String?) async -> [String] {
-        let modelsURL = baseURL.appendingPathComponent("models")
-        var request = URLRequest(url: modelsURL)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 8
-
-        if let keyId = apiKeyId, let key = try? keychain.loadAPIKey(for: keyId) {
-            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        }
-
+        guard let savedProvider else { return [] }
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return [] }
-            let decoded = try JSONDecoder().decode(ModelsListResponse.self, from: data)
-            return decoded.data.map(\.id).sorted()
+            let provider = try router.provider(for: savedProvider)
+            return try await provider.fetchModels()
         } catch {
-            return []
+            return AIConfigService.shared.availableModels(for: template.id)
         }
     }
 
@@ -258,21 +272,6 @@ final class ProviderConnectViewModel: ObservableObject {
         guard let provider = savedProvider else { return }
         provider.defaultModel = selectedModel
         try? context.save()
-    }
-}
-
-// MARK: - Models list response
-
-private struct ModelsResponse: Decodable {
-    let data: [ModelItem]
-    struct ModelItem: Decodable { let id: String }
-}
-
-private struct ModelsListResponse: Decodable {
-    let data: [ModelEntry]
-
-    struct ModelEntry: Decodable {
-        let id: String
     }
 }
 

@@ -13,6 +13,11 @@ struct CrossReferenceResult: Codable, Sendable {
         let relationship: String
         let explanation: String
         let strength: Double
+        enum CodingKeys: String, CodingKey {
+            case fromItemId = "from_item_id"
+            case toItemId = "to_item_id"
+            case relationship, explanation, strength
+        }
     }
 
     struct Insight: Codable, Identifiable, Sendable {
@@ -20,6 +25,10 @@ struct CrossReferenceResult: Codable, Sendable {
         let text: String
         let sourceItemIds: [UUID]
         let confidence: Double
+        enum CodingKeys: String, CodingKey {
+            case sourceItemIds = "source_item_ids"
+            case text, confidence
+        }
     }
 
     struct Contradiction: Codable, Identifiable, Sendable {
@@ -28,5 +37,10 @@ struct CrossReferenceResult: Codable, Sendable {
         let itemAId: UUID
         let itemBId: UUID
         let resolution: String?
+        enum CodingKeys: String, CodingKey {
+            case itemAId = "item_a_id"
+            case itemBId = "item_b_id"
+            case description, resolution
+        }
     }
 }

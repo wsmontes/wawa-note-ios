@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import EventKit
 
 @main
 struct WawaNoteApp: App {
@@ -7,6 +8,7 @@ struct WawaNoteApp: App {
     private let recordingCoordinator: RecordingCoordinator
     private let watchSessionManager: iOSWatchSessionManager
     private let calendarSyncService: CalendarSyncService
+    private let sharedEventStore: EKEventStore
 
     init() {
         do {
@@ -31,7 +33,8 @@ struct WawaNoteApp: App {
         watchSessionManager = iOSWatchSessionManager(coordinator: coordinator)
         watchSessionManager.activate()
 
-        calendarSyncService = CalendarSyncService()
+        sharedEventStore = EKEventStore()
+        calendarSyncService = CalendarSyncService(eventStore: sharedEventStore)
     }
 
     var body: some Scene {

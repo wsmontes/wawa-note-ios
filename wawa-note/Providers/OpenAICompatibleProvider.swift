@@ -1,44 +1,78 @@
 import Foundation
 import OSLog
 
-// MARK: - Request body codable types
+// MARK: - Chat Completions API
 
 private struct ChatCompletionRequest: Encodable {
     let model: String
-    let messages: [RequestMessage]
+    let messages: [Message]
     let temperature: Double?
     let maxTokens: Int?
     let responseFormat: ResponseFormat?
-    let usesMaxTokens: Bool // true = use "max_tokens", false = use "max_completion_tokens"
 
-    enum CodingKeys: String, CodingKey {
-        case model, messages, temperature
-        case maxTokensAlt = "max_tokens"
-        case maxCompletionTokens = "max_completion_tokens"
-        case responseFormat = "response_format"
-    }
+    struct Message: Encodable {
+        let role: String
+        let content: Content
 
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(model, forKey: .model)
-        try container.encode(messages, forKey: .messages)
-        try container.encodeIfPresent(temperature, forKey: .temperature)
-        if let tokens = maxTokens {
-            if usesMaxTokens {
-                try container.encode(tokens, forKey: .maxTokensAlt)
-            } else {
-                try container.encode(tokens, forKey: .maxCompletionTokens)
+        enum Content: Encodable {
+            case string(String)
+            case parts([ContentPart])
+
+            func encode(to encoder: any Encoder) throws {
+                var container = encoder.singleValueContainer()
+                switch self {
+                case .string(let s): try container.encode(s)
+                case .parts(let p): try container.encode(p)
+                }
             }
         }
-        try container.encodeIfPresent(responseFormat, forKey: .responseFormat)
-    }
 
-    struct RequestMessage: Encodable {
-        let role: String; let content: String
+        struct ContentPart: Encodable {
+            let type: String
+            let text: String?
+            let imageUrl: ImageURL?
+
+            enum CodingKeys: String, CodingKey {
+                case type, text
+                case imageUrl = "image_url"
+            }
+
+            struct ImageURL: Encodable {
+                let url: String
+            }
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case role, content
+        }
     }
 
     struct ResponseFormat: Encodable {
         let type: String
+        var jsonSchema: JSONSchema? = nil
+
+        struct JSONSchema: Encodable {
+            let name: String
+            let strict: Bool
+            let schema: String
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case type
+            case jsonSchema = "json_schema"
+        }
+
+        func encode(to encoder: any Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(type, forKey: .type)
+            try container.encodeIfPresent(jsonSchema, forKey: .jsonSchema)
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case model, messages, temperature
+        case maxTokens = "max_tokens"
+        case responseFormat = "response_format"
     }
 }
 
@@ -50,11 +84,41 @@ private struct ChatCompletionResponse: Decodable {
 
     struct Choice: Decodable {
         let message: Message
-        struct Message: Decodable { let content: String }
+        let finishReason: String?
+
+        struct Message: Decodable {
+            let role: String?
+            let content: String?
+            let toolCalls: [ToolCall]?
+
+            struct ToolCall: Decodable {
+                let id: String?
+                let type: String?
+                let function: FunctionCall?
+
+                struct FunctionCall: Decodable {
+                    let name: String?
+                    let arguments: String?
+                }
+            }
+
+            enum CodingKeys: String, CodingKey {
+                case role, content
+                case toolCalls = "tool_calls"
+            }
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case message
+            case finishReason = "finish_reason"
+        }
     }
 
     struct Usage: Decodable {
-        let promptTokens: Int?; let completionTokens: Int?; let totalTokens: Int?
+        let promptTokens: Int?
+        let completionTokens: Int?
+        let totalTokens: Int?
+
         enum CodingKeys: String, CodingKey {
             case promptTokens = "prompt_tokens"
             case completionTokens = "completion_tokens"
@@ -63,11 +127,19 @@ private struct ChatCompletionResponse: Decodable {
     }
 }
 
+// MARK: - Embeddings API
+
+private struct EmbeddingRequest: Encodable {
+    let model: String
+    let input: String
+}
+
 // MARK: - Provider
 
 final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
     let id: String
     let displayName: String
+    let providerType: ProviderType
     let capabilities: AIProviderCapabilities
 
     private let baseURL: URL
@@ -76,16 +148,22 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
     private let session: URLSession
 
     init(
-        id: String, displayName: String, baseURL: URL, apiKey: String, model: String,
+        id: String, displayName: String, providerType: ProviderType, baseURL: URL, apiKey: String, model: String,
         capabilities: AIProviderCapabilities = AIProviderCapabilities(
             supportsStreaming: true, supportsAudioInput: false,
             supportsStructuredOutput: true, supportsToolCalling: false,
             supportsEmbeddings: false
         ),
-        session: URLSession = .shared
+        session: URLSession = {
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 180
+            config.timeoutIntervalForResource = 300
+            return URLSession(configuration: config)
+        }()
     ) {
         self.id = id
         self.displayName = displayName
+        self.providerType = providerType
         self.baseURL = baseURL
         self.apiKey = apiKey
         self.model = model
@@ -93,22 +171,126 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
         self.session = session
     }
 
+    // MARK: - Chat Completions
+
     func send(_ request: AIRequest) async throws -> AIResponse {
-        guard let url = URL(string: baseURL.absoluteString + "/chat/completions") else {
-            throw ProviderError.invalidBaseURL
+        let url = baseURL.appendingPathComponent("chat/completions")
+        let effectiveModel = request.model.isEmpty ? model : request.model
+
+        let bodyMessages: [[String: Any]] = request.messages.map { msg in
+            let textContent = msg.content.compactMap { block -> String? in
+                if case .text(let t) = block { return t }
+                return nil
+            }.joined(separator: "\n")
+            let imageBlocks = msg.content.compactMap { block -> URL? in
+                if case .imageFile(let url) = block { return url }
+                return nil
+            }
+
+            if imageBlocks.isEmpty {
+                var m: [String: Any] = ["role": msg.role.apiName, "content": textContent]
+
+                // Tool calls in assistant messages
+                if let tcs = msg.toolCalls, !tcs.isEmpty {
+                    m["tool_calls"] = tcs.map { tc -> [String: Any] in
+                        [
+                            "id": tc.id,
+                            "type": "function",
+                            "function": [
+                                "name": tc.name,
+                                "arguments": tc.arguments
+                            ]
+                        ]
+                    }
+                }
+
+                // Tool call ID in tool messages
+                if let tci = msg.toolCallId {
+                    m["tool_call_id"] = tci
+                }
+
+                return m
+            }
+            var parts: [[String: Any]] = []
+            if !textContent.isEmpty {
+                parts.append(["type": "text", "text": textContent])
+            }
+            for imgURL in imageBlocks {
+                parts.append(["type": "image_url", "image_url": ["url": imgURL.absoluteString]])
+            }
+            return ["role": msg.role.apiName, "content": parts]
+        }
+
+        var body: [String: Any] = [
+            "model": effectiveModel,
+            "messages": bodyMessages
+        ]
+        if let t = request.temperature { body["temperature"] = t }
+        if let mt = request.maxTokens {
+            let preset = AIConfigService.shared.presetFor(model: effectiveModel)
+            if preset?.usesMaxCompletionTokens == true {
+                body["max_completion_tokens"] = mt
+            } else {
+                body["max_tokens"] = mt
+            }
+        }
+
+        if let fmt = request.responseFormat {
+            switch fmt {
+            case .jsonObject:
+                body["response_format"] = ["type": "json_object"]
+            case .jsonSchema(let name, let schemaJSON):
+                if let schemaData = schemaJSON.data(using: .utf8),
+                   let schemaObj = try? JSONSerialization.jsonObject(with: schemaData) {
+                    body["response_format"] = [
+                        "type": "json_schema",
+                        "json_schema": [
+                            "name": name,
+                            "strict": true,
+                            "schema": schemaObj
+                        ]
+                    ]
+                } else {
+                    body["response_format"] = ["type": "json_object"]
+                }
+            }
+        }
+
+        // Tools (function calling)
+        if let tools = request.tools, !tools.isEmpty {
+            body["tools"] = tools.map { tool -> [String: Any] in
+                var parameters: [String: Any] = [
+                    "type": tool.parameters.type,
+                    "properties": tool.parameters.properties.mapValues { prop -> [String: Any] in
+                        var p: [String: Any] = ["type": prop.type, "description": prop.description]
+                        if let en = prop.enum { p["enum"] = en }
+                        return p
+                    }
+                ]
+                if !tool.parameters.required.isEmpty {
+                    parameters["required"] = tool.parameters.required
+                }
+                return [
+                    "type": "function",
+                    "function": [
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": parameters
+                    ]
+                ]
+            }
+            if let tc = request.toolChoice { body["tool_choice"] = tc }
         }
 
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-
-        let body = buildRequestBody(from: request)
-        let bodyData = try JSONEncoder().encode(body)
-        urlRequest.httpBody = bodyData
+        if !apiKey.isEmpty {
+            urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         AppLog.provider.info("POST \(url.absoluteString)")
-        AppLog.provider.info("Request body: \(String(data: bodyData, encoding: .utf8) ?? "<err>")")
 
         let (data, response) = try await session.data(for: urlRequest)
 
@@ -118,55 +300,19 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
 
         guard (200...299).contains(httpResponse.statusCode) else {
             let bodyStr = String(data: data, encoding: .utf8) ?? "<no body>"
-            AppLog.provider.error("Provider returned \(httpResponse.statusCode). Body: \(bodyStr.prefix(500))")
+            // Log the failing request for debugging
+            if let reqBody = urlRequest.httpBody, let reqStr = String(data: reqBody, encoding: .utf8) {
+                AppLog.provider.error("Provider returned \(httpResponse.statusCode): \(bodyStr.prefix(300))")
+                AppLog.provider.error("Failing request body (last 1000 chars): \(String(reqStr.suffix(1000)))")
+            }
             throw ProviderError.apiError(statusCode: httpResponse.statusCode, body: bodyStr)
         }
 
-        return try parseResponse(data: data)
-    }
-
-    // MARK: - Private
-
-    private func buildRequestBody(from request: AIRequest) -> ChatCompletionRequest {
-        let messages = request.messages.map { msg in
-            let content = msg.content.map { block -> String in
-                switch block {
-                case .text(let text): return text
-                case .audioFile: return "[audio]"
-                case .imageFile: return "[image]"
-                }
-            }.joined(separator: "\n")
-
-            return ChatCompletionRequest.RequestMessage(role: msg.role.rawValue, content: content)
-        }
-
-        let effectiveModel = request.model.isEmpty ? model : request.model
-        let preset = AIConfigService.shared.presetFor(model: effectiveModel)
-        let usesMaxTokens = preset?.usesMaxCompletionTokens == false
-
-        let responseFormat: ChatCompletionRequest.ResponseFormat? = {
-            if request.responseFormat == .json {
-                return ChatCompletionRequest.ResponseFormat(type: "json_object")
-            }
-            return nil
-        }()
-
-        return ChatCompletionRequest(
-            model: effectiveModel,
-            messages: messages,
-            temperature: (preset?.supportsTemperature == false) ? nil : request.temperature,
-            maxTokens: (preset?.supportsMaxTokens == false) ? nil : request.maxTokens,
-            responseFormat: responseFormat,
-            usesMaxTokens: usesMaxTokens
-        )
-    }
-
-    private func parseResponse(data: Data) throws -> AIResponse {
         let decoded: ChatCompletionResponse
         do {
             decoded = try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
         } catch {
-            AppLog.provider.error("Failed to decode response: \(error.localizedDescription)")
+            AppLog.provider.error("Failed to decode chat completion: \(error)")
             throw ProviderError.decodingFailed
         }
 
@@ -177,15 +323,48 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
             return nil
         }()
 
-        let response = AIResponse(
-            id: decoded.id,
-            model: decoded.model,
-            content: decoded.choices.first?.message.content ?? "",
-            usage: usage
-        )
-        AppLog.provider.info("Received response: \(response.content.prefix(100))...")
-        return response
+        let msg = decoded.choices.first?.message
+        let text = msg?.content ?? ""
+        let finishReason = decoded.choices.first?.finishReason
+
+        let toolCalls: [AIToolCall]? = msg?.toolCalls?.compactMap { tc -> AIToolCall? in
+            guard let id = tc.id, let fn = tc.function, let name = fn.name else { return nil }
+            return AIToolCall(id: id, name: name, arguments: fn.arguments ?? "{}")
+        }
+
+        AppLog.provider.info("Response: \(text.prefix(100))...")
+        return AIResponse(id: decoded.id, model: decoded.model, content: text, usage: usage, toolCalls: toolCalls, finishReason: finishReason)
     }
+
+    private func buildContent(from blocks: [AIContentBlock]) -> ChatCompletionRequest.Message.Content {
+        let textBlocks = blocks.compactMap { block -> String? in
+            if case .text(let t) = block { return t }
+            return nil
+        }
+        let imageBlocks = blocks.compactMap { block -> URL? in
+            if case .imageFile(let url) = block { return url }
+            return nil
+        }
+
+        if imageBlocks.isEmpty {
+            return .string(textBlocks.joined(separator: "\n"))
+        }
+
+        var parts: [ChatCompletionRequest.Message.ContentPart] = []
+        for text in textBlocks {
+            parts.append(ChatCompletionRequest.Message.ContentPart(type: "text", text: text, imageUrl: nil))
+        }
+        for imageURL in imageBlocks {
+            parts.append(ChatCompletionRequest.Message.ContentPart(
+                type: "image_url",
+                text: nil,
+                imageUrl: ChatCompletionRequest.Message.ContentPart.ImageURL(url: imageURL.absoluteString)
+            ))
+        }
+        return .parts(parts)
+    }
+
+    // MARK: - Embeddings
 
     func embed(_ text: String, model: String) async throws -> [Float] {
         guard capabilities.supportsEmbeddings else {
@@ -195,9 +374,11 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        let body: [String: Any] = ["model": model, "input": text]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        if !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+        let body = EmbeddingRequest(model: model, input: text)
+        request.httpBody = try JSONEncoder().encode(body)
 
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
@@ -209,5 +390,28 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
             throw ProviderError.decodingFailed
         }
         return embedding.map { Float($0) }
+    }
+
+    // MARK: - Model discovery
+
+    func fetchModels() async throws -> [String] {
+        // Ollama uses /api/tags, everyone else uses /models
+        let path = providerType == .localNetwork && baseURL.absoluteString.contains("11434")
+            ? "api/tags" : "models"
+        let endpoint = baseURL.appendingPathComponent(path)
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+        request.timeoutInterval = 10
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw ProviderError.requestFailed(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        let decoded = try JSONDecoder().decode(UnifiedModelsResponse.self, from: data)
+        return decoded.modelIDs.sorted()
     }
 }

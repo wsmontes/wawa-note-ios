@@ -13,14 +13,13 @@ struct HomeView: View {
     @State private var showFilePicker = false
     @State private var pendingImport: ImportPending?
     @State private var importError: String?
-    @State private var showNewNote = false
-    @State private var newNoteTitle = ""
-    @State private var showNewFolder = false
-    @State private var newFolderName = ""
-    @State private var navigateToCalendar = false
+    @State private var showCreationSheet = false
     @State private var trashFolderID: UUID?
+    @State private var importProgress: String?
+    @State private var importDebug: String?
 
     private let importService = AudioImportService()
+    private let artifactStore = FileArtifactStore()
 
     var body: some View {
         NavigationStack {
@@ -29,14 +28,40 @@ struct HomeView: View {
                     headerSection
                     quickActionsSection
                     recordSection
-                    recentSection
                 }
             }
             .background(Color(.systemGroupedBackground))
+            .overlay(alignment: .top) {
+                VStack(spacing: 6) {
+                    if let progress = importProgress {
+                        HStack {
+                            ProgressView()
+                                .tint(.white)
+                            Text(progress)
+                                .font(.subheadline).fontWeight(.medium)
+                                .foregroundStyle(.white)
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 10)
+                        .background(.blue, in: Capsule())
+                    }
+                    if let debug = importDebug {
+                        Text(debug)
+                            .font(.caption2)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(.black.opacity(0.7), in: Capsule())
+                    }
+                }
+                .padding(.top, 8)
+                .animation(.easeInOut, value: importProgress != nil)
+            }
             .task {
                 let trash = try? TrashService(context: modelContext).trashFolder()
                 trashFolderID = trash?.id
                 await backfillEmbeddingsIfNeeded()
+                await scanSharedDirectoryAndImport()
             }
             .fullScreenCover(isPresented: $showRecording) {
                 RecordView(coordinator: coordinator) { item in
@@ -47,10 +72,7 @@ struct HomeView: View {
             .navigationDestination(item: $navigateToItem) { item in
                 KnowledgeDetailView(item: item)
             }
-            .navigationDestination(isPresented: $navigateToCalendar) {
-                CalendarContainerView()
-            }
-            .fileImporter(isPresented: $showFilePicker, allowedContentTypes: AudioImportService.supportedUTTypes, allowsMultipleSelection: false) { handleFilePick($0) }
+            .fileImporter(isPresented: $showFilePicker, allowedContentTypes: AudioImportService.supportedUTTypes, allowsMultipleSelection: true) { handleFilePick($0) }
             .sheet(item: $pendingImport) { item in
                 ImportFormView(sourceURL: item.url, metadata: item.metadata, isFromShareExtension: item.isFromShareExtension) { knowledgeItem in
                     pendingImport = nil
@@ -59,15 +81,8 @@ struct HomeView: View {
             }
             .onOpenURL { handleIncomingURL($0) }
             .alert("Import Error", isPresented: .constant(importError != nil)) { Button("OK") { importError = nil } } message: { Text(importError ?? "") }
-            .alert("New Note", isPresented: $showNewNote) {
-                TextField("Title", text: $newNoteTitle)
-                Button("Create") { createNote() }
-                Button("Cancel", role: .cancel) { newNoteTitle = "" }
-            }
-            .alert("New Folder", isPresented: $showNewFolder) {
-                TextField("Name", text: $newFolderName)
-                Button("Create") { createFolder() }
-                Button("Cancel", role: .cancel) { newFolderName = "" }
+            .sheet(isPresented: $showCreationSheet) {
+                CreationSheetView()
             }
         }
     }
@@ -102,57 +117,34 @@ struct HomeView: View {
     // MARK: - Quick Actions
 
     private var quickActionsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionLabel("Quick Actions")
+        VStack(spacing: 16) {
+            HStack(spacing: 16) {
+                Button {
+                    showCreationSheet = true
+                } label: {
+                    Label("New", systemImage: "plus.circle.fill")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(Color(.systemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                }
 
-            HStack(spacing: 12) {
-                quickActionCard(
-                    icon: "square.and.pencil",
-                    label: "New Note",
-                    color: .orange
-                ) { showNewNote = true }
-
-                quickActionCard(
-                    icon: "folder.badge.plus",
-                    label: "New Folder",
-                    color: .blue
-                ) { showNewFolder = true }
-
-                quickActionCard(
-                    icon: "calendar",
-                    label: "Calendar",
-                    color: .red
-                ) { navigateToCalendar = true }
-
-                quickActionCard(
-                    icon: "square.and.arrow.down",
-                    label: "Import",
-                    color: .green
-                ) { showFilePicker = true }
+                Button {
+                    showFilePicker = true
+                } label: {
+                    Label("Import", systemImage: "square.and.arrow.down")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(Color(.systemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                }
             }
+
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 24)
-    }
-
-    private func quickActionCard(icon: String, label: String, color: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.title3)
-                    .foregroundStyle(color)
-                    .frame(width: 44, height: 44)
-                    .background(color.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                Text(label)
-                    .font(.caption).fontWeight(.medium)
-                    .foregroundStyle(.primary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-        }
     }
 
     // MARK: - Record
@@ -282,43 +274,80 @@ struct HomeView: View {
     private func icon(for type: KnowledgeItemType) -> String { type.icon }
     private func color(for type: KnowledgeItemType) -> Color { type.color }
 
-    private func createNote() {
-        guard !newNoteTitle.isEmpty else { return }
-        let item = KnowledgeItem(type: .note, title: newNoteTitle, status: .draft)
-        modelContext.insert(item)
-        try? modelContext.save()
-        newNoteTitle = ""
-        navigateToItem = item
-    }
-
-    private func createFolder() {
-        guard !newFolderName.isEmpty else { return }
-        let folder = Folder(name: newFolderName)
-        modelContext.insert(folder)
-        try? modelContext.save()
-        newFolderName = ""
-    }
-
     // MARK: - File picker
 
     private func handleFilePick(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
-            guard let url = urls.first else { importError = "No file was selected."; return }
-            let didStart = url.startAccessingSecurityScopedResource()
-            defer { if didStart { url.stopAccessingSecurityScopedResource() } }
-            guard importService.canRead(url: url) else { importError = "Format not supported."; return }
-            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
-            try? FileManager.default.removeItem(at: tempURL)
-            do { try FileManager.default.copyItem(at: url, to: tempURL) } catch { importError = error.localizedDescription; return }
-            Task {
-                do {
-                    let metadata = try await importService.extractMetadata(url: tempURL)
-                    await MainActor.run { pendingImport = ImportPending(url: tempURL, metadata: metadata, isFromShareExtension: false) }
-                } catch { await MainActor.run { importError = error.localizedDescription } }
+            guard !urls.isEmpty else { importError = "No file was selected."; return }
+            // If a single file, show ImportFormView for editing; multiple files auto-import
+            if urls.count == 1, let url = urls.first {
+                stageSingleImport(url)
+            } else {
+                Task { await importFilePickerFiles(urls) }
             }
         case .failure(let e): importError = e.localizedDescription
         }
+    }
+
+    private func stageSingleImport(_ url: URL) {
+        let didStart = url.startAccessingSecurityScopedResource()
+        defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+        guard importService.canRead(url: url) else { importError = "Format not supported."; return }
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+        try? FileManager.default.removeItem(at: tempURL)
+        do { try FileManager.default.copyItem(at: url, to: tempURL) } catch { importError = error.localizedDescription; return }
+        Task {
+            do {
+                let metadata = try await importService.extractMetadata(url: tempURL)
+                await MainActor.run { pendingImport = ImportPending(url: tempURL, metadata: metadata, isFromShareExtension: false) }
+            } catch { await MainActor.run { importError = error.localizedDescription } }
+        }
+    }
+
+    private func importFilePickerFiles(_ urls: [URL]) async {
+        let total = urls.count
+        var imported = 0
+        await MainActor.run { importProgress = "Importing 0/\(total)..." }
+
+        for url in urls {
+            let didStart = url.startAccessingSecurityScopedResource()
+            defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+
+            guard importService.canRead(url: url) else { continue }
+
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+            try? FileManager.default.removeItem(at: tempURL)
+            do { try FileManager.default.copyItem(at: url, to: tempURL) } catch { continue }
+
+            let metadata: ImportMetadata
+            do { metadata = try await importService.extractMetadata(url: tempURL) } catch { continue }
+
+            let itemId = await MainActor.run {
+                coordinator.createItemFromImport(
+                    title: metadata.suggestedTitle,
+                    date: metadata.creationDate ?? Date(),
+                    duration: metadata.duration
+                )?.id
+            }
+            guard let itemId = itemId else { continue }
+
+            let destURL = artifactStore.audioFileURL(for: itemId)
+            do {
+                if importService.isNativeM4ACompatible(tempURL) {
+                    try artifactStore.copyAudioToMeeting(sourceURL: tempURL, meetingId: itemId)
+                } else {
+                    try await importService.convertToAAC(inputURL: tempURL, outputURL: destURL)
+                }
+                try? FileManager.default.removeItem(at: tempURL)
+                imported += 1
+                await MainActor.run { importProgress = "Importing \(imported)/\(total)..." }
+            } catch {
+                await MainActor.run { coordinator.deleteItem(itemId) }
+            }
+        }
+
+        await MainActor.run { importProgress = nil }
     }
 
     // MARK: - Embedding backfill
@@ -327,8 +356,7 @@ struct HomeView: View {
         let backfillKey = "embedding_backfill_completed"
         guard !UserDefaults.standard.bool(forKey: backfillKey) else { return }
 
-        guard let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext),
-              let provider = try? ProviderRouter().provider(for: config) else { return }
+        guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else { return }
 
         let allItems = (try? modelContext.fetch(FetchDescriptor<KnowledgeItem>())) ?? []
         let pipeline = EmbeddingPipelineService()
@@ -348,20 +376,98 @@ struct HomeView: View {
 
     private func handleIncomingURL(_ url: URL) {
         guard url.scheme == "wawanote" else { return }
-        let shared = UserDefaults(suiteName: "group.com.wawa-note")
-        guard let filename = shared?.string(forKey: "pendingImportFile") else { return }
-        guard let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.wawa-note") else { importError = "Could not access shared storage."; return }
-        let fileURL = containerURL.appendingPathComponent("shared").appendingPathComponent(filename)
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { importError = "Shared file no longer available."; shared?.removeObject(forKey: "pendingImportFile"); return }
-        guard importService.canRead(url: fileURL) else { importError = "Format not supported."; try? FileManager.default.removeItem(at: fileURL); shared?.removeObject(forKey: "pendingImportFile"); return }
-        Task {
+        Task { await scanSharedDirectoryAndImport() }
+    }
+
+    // MARK: - Pending import checker (backup if onOpenURL misses)
+
+    private func checkPendingImports() {
+        Task { await scanSharedDirectoryAndImport() }
+    }
+
+    // MARK: - Scan shared directory and import all files
+
+    private func scanSharedDirectoryAndImport() async {
+        guard let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.wawa-note") else {
+            await MainActor.run { importDebug = "No App Group container" }
+            return
+        }
+
+        let sharedDir = containerURL.appendingPathComponent("shared", isDirectory: true)
+        let fileManager = FileManager.default
+
+        guard fileManager.fileExists(atPath: sharedDir.path) else {
+            // No shared directory = nothing to import, not an error
+            return
+        }
+
+        let files: [URL]
+        do {
+            files = try fileManager.contentsOfDirectory(at: sharedDir, includingPropertiesForKeys: [.fileSizeKey])
+                .filter { !$0.hasDirectoryPath }
+        } catch {
+            await MainActor.run { importDebug = "Failed to list shared dir: \(error.localizedDescription)" }
+            return
+        }
+
+        guard !files.isEmpty else { return }
+
+        let total = files.count
+        var imported = 0
+        await MainActor.run { importProgress = "Importing 0/\(total)..." }
+
+        for fileURL in files {
+            guard importService.canRead(url: fileURL) else {
+                try? fileManager.removeItem(at: fileURL)
+                continue
+            }
+
+            let metadata: ImportMetadata
             do {
-                let metadata = try await importService.extractMetadata(url: fileURL)
-                await MainActor.run {
-                    pendingImport = ImportPending(url: fileURL, metadata: metadata, isFromShareExtension: true)
-                    shared?.removeObject(forKey: "pendingImportFile")
+                metadata = try await importService.extractMetadata(url: fileURL)
+            } catch {
+                await MainActor.run { importDebug = "extractMetadata failed: \(error.localizedDescription)" }
+                continue
+            }
+
+            let itemId = await MainActor.run {
+                coordinator.createItemFromImport(
+                    title: metadata.suggestedTitle,
+                    date: metadata.creationDate ?? Date(),
+                    duration: metadata.duration
+                )?.id
+            }
+            guard let itemId = itemId else {
+                await MainActor.run { importDebug = "createItemFromImport returned nil" }
+                continue
+            }
+
+            let destURL = artifactStore.audioFileURL(for: itemId)
+            do {
+                if importService.isNativeM4ACompatible(fileURL) {
+                    try artifactStore.copyAudioToMeeting(sourceURL: fileURL, meetingId: itemId)
+                } else {
+                    try await importService.convertToAAC(inputURL: fileURL, outputURL: destURL)
                 }
-            } catch { await MainActor.run { importError = error.localizedDescription } }
+                try? fileManager.removeItem(at: fileURL)
+                imported += 1
+                await MainActor.run { importProgress = "Importing \(imported)/\(total)..." }
+            } catch {
+                await MainActor.run {
+                    importDebug = "Audio processing failed: \(error.localizedDescription)"
+                    coordinator.deleteItem(itemId)
+                }
+            }
+        }
+
+        // Also clean up old UserDefaults keys if present
+        let shared = UserDefaults(suiteName: "group.com.wawa-note")
+        shared?.removeObject(forKey: "pendingImportFiles")
+        shared?.removeObject(forKey: "pendingImportFile")
+
+        await MainActor.run {
+            importProgress = nil
+            if imported > 0 { importDebug = "Imported \(imported) of \(total) files" }
         }
     }
 }

@@ -11,8 +11,15 @@ struct KnowledgeDetailView: View {
     @State private var transcriptionError: String?
     @State private var transcriptionProgress: String?
     @State private var showPromoteSheet = false
+    @State private var isAnalyzing = false
+    @State private var analysisError: String?
+    @State private var selectedModel: String = ""
     @State private var selectedLocale = "pt-BR"
     @State private var showLocalePicker = false
+    @State private var isEditing = false
+    @State private var editedTitle = ""
+    @State private var editedBody = ""
+    @State private var backlinks: [(edge: GraphEdge, sourceItem: KnowledgeItem)] = []
 
     private let fileStore = FileArtifactStore()
 
@@ -66,6 +73,10 @@ struct KnowledgeDetailView: View {
                     annotationsSection
                         .padding(.top, 20)
                 }
+
+                if !backlinks.isEmpty {
+                    backlinksSection
+                }
             }
             .padding(.vertical, 16)
         }
@@ -74,10 +85,23 @@ struct KnowledgeDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 12) {
-                    Button {
-                        showPromoteSheet = true
-                    } label: {
-                        Label("Promote", systemImage: "sparkles.rectangle.stack")
+                    if item.type == .note || item.type == .journalEntry {
+                        if isEditing {
+                            Button("Save") { saveEdits() }
+                                .fontWeight(.semibold)
+                            Button("Cancel") { cancelEditing() }
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Button("Edit") { startEditing() }
+                        }
+                    }
+
+                    if item.type == .meeting {
+                        Button {
+                            showPromoteSheet = true
+                        } label: {
+                            Label("Turn into Project", systemImage: "sparkles.rectangle.stack")
+                        }
                     }
 
                     if let transcript {
@@ -115,8 +139,13 @@ struct KnowledgeDetailView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10))
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title.isEmpty ? "Untitled" : item.title)
-                        .font(.title3).fontWeight(.bold)
+                    if isEditing {
+                        TextField("Title", text: $editedTitle, axis: .vertical)
+                            .font(.title3).fontWeight(.bold)
+                    } else {
+                        Text(item.title.isEmpty ? "Untitled" : item.title)
+                            .font(.title3).fontWeight(.bold)
+                    }
                     Text(item.type.label)
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -223,6 +252,41 @@ struct KnowledgeDetailView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
             }
+
+            // Analyze button — show when transcript exists but no analysis yet
+            if transcript != nil && analysis == nil && !isAnalyzing {
+                VStack(spacing: 12) {
+                    Image(systemName: "sparkles")
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
+                    Text("Ready for analysis")
+                        .font(.headline)
+                    if let error = analysisError {
+                        Text(error).font(.caption).foregroundStyle(.red)
+                    }
+                    ActiveModelPicker(selectedModel: $selectedModel, label: "Model")
+                    Button("Analyze Now") {
+                        Task { await runAnalysis() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(24)
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+            }
+
+            if isAnalyzing {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Analyzing...")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity)
+            }
         } else if item.audioFileRelativePath != nil && !isTranscribing {
             VStack(spacing: 12) {
                 Image(systemName: "text.alignleft")
@@ -278,18 +342,75 @@ struct KnowledgeDetailView: View {
 
     private var textContentSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let body = item.bodyText, !body.isEmpty {
-                Text(body)
-                    .font(.body)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            if isEditing {
+                VStack(spacing: 0) {
+                    TextEditor(text: $editedBody)
+                        .font(.body)
+                        .frame(minHeight: 200)
+                        .scrollContentBackground(.hidden)
+                        .padding(12)
+                        .background(Color(.systemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
             } else {
-                Text(item.title.isEmpty ? "No content yet" : item.title)
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let body = item.bodyText, !body.isEmpty {
+                    Text(body)
+                        .font(.body)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    VStack(spacing: 12) {
+                        Text("No content yet")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                        Button("Write something") {
+                            startEditing()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 24)
+                }
             }
         }
         .padding(.horizontal, 16)
+    }
+
+    // MARK: - Backlinks
+
+    private var backlinksSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("Referenced by", icon: "link")
+                .padding(.horizontal, 16)
+
+            ForEach(backlinks, id: \.edge.id) { link in
+                    NavigationLink {
+                        KnowledgeDetailView(item: link.sourceItem)
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: edgeIcon(for: link.edge.edgeType))
+                                .font(.caption)
+                                .foregroundStyle(edgeColor(for: link.edge.edgeType))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(link.sourceItem.title.isEmpty ? "Untitled" : link.sourceItem.title)
+                                    .font(.subheadline)
+                                    .lineLimit(1)
+                                Text(edgeLabel(for: link.edge.edgeType))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(10)
+                        .background(Color(.secondarySystemGroupedBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .padding(.horizontal, 16)
+                }
+        }
+        .padding(.top, 20)
     }
 
     // MARK: - Bookmark
@@ -410,11 +531,23 @@ struct KnowledgeDetailView: View {
         transcriptionError = nil
         transcriptionProgress = nil
 
-        // Resolve engine
+        // Resolve engine based on user preference
         let engine: TranscriptionEngine
-        if let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext),
-           config.supportsAudio,
-           let baseURL = config.baseURL {
+        let settings = TranscriptionSettings.shared
+        let activeConfig = ActiveProviderManager.shared.getActiveProvider(context: modelContext)
+
+        let hasWhisperAPI: Bool = {
+            guard let config = activeConfig,
+                  let baseURL = config.baseURL,
+                  let keyId = config.apiKeyKeychainIdentifier,
+                  let apiKey = try? SecureKeyStore().loadAPIKey(for: keyId),
+                  !apiKey.isEmpty else { return false }
+            return config.type == .openAI || config.type == .openAICompatible
+        }()
+
+        if settings.useRemoteWhisper, hasWhisperAPI {
+           let config = activeConfig!
+           let baseURL = config.baseURL!
             var apiKey = ""
             if let keyId = config.apiKeyKeychainIdentifier {
                 apiKey = (try? SecureKeyStore().loadAPIKey(for: keyId)) ?? ""
@@ -455,8 +588,7 @@ struct KnowledgeDetailView: View {
             item.transcriptionEngineId = engine.id
 
             // Auto-generate embedding after transcription
-            if let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext),
-               let provider = try? ProviderRouter().provider(for: config) {
+            if let provider = try? ProviderRouter.resolveActive(context: modelContext) {
                 let pipeline = EmbeddingPipelineService()
                 await pipeline.ensureEmbedding(for: item, using: provider)
             }
@@ -480,18 +612,147 @@ struct KnowledgeDetailView: View {
     // MARK: - Helpers
 
     private func loadData() {
+        if selectedModel.isEmpty {
+            selectedModel = ActiveModelPicker.effectiveModel(context: modelContext, feature: "analysis")
+        }
         transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id)
         analysis = try? fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id)
 
         let annService = AnnotationService(context: modelContext)
         annotations = (try? annService.annotations(for: item.id)) ?? []
 
-        // Auto-extract entities and build decision graph from analysis
         if let analysis, item.type == .meeting {
             let extractor = EntityExtractionService(context: modelContext)
             _ = try? extractor.extractAndPersist(from: analysis, sourceItemID: item.id)
             try? extractor.buildDecisionGraph(from: analysis, sourceItemID: item.id)
         }
+
+        loadBacklinks()
+    }
+
+    // MARK: - Editing
+
+    private func startEditing() {
+        editedTitle = item.title
+        editedBody = item.bodyText ?? ""
+        isEditing = true
+    }
+
+    private func saveEdits() {
+        let service = KnowledgeItemService(context: modelContext)
+        try? service.updateItem(
+            item,
+            title: editedTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? item.title : editedTitle.trimmingCharacters(in: .whitespacesAndNewlines),
+            bodyText: editedBody.isEmpty ? nil : editedBody,
+            tags: nil
+        )
+        isEditing = false
+    }
+
+    private func cancelEditing() {
+        isEditing = false
+    }
+
+    // MARK: - Backlinks
+
+    private func loadBacklinks() {
+        let edgeService = GraphEdgeService(context: modelContext)
+        let incomingEdges = (try? edgeService.edges(to: item.id)) ?? []
+
+        var results: [(edge: GraphEdge, sourceItem: KnowledgeItem)] = []
+        for edge in incomingEdges {
+            let sourceID = edge.fromID
+            if let sourceItem = try? modelContext.fetch(
+                FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.id == sourceID })
+            ).first {
+                results.append((edge: edge, sourceItem: sourceItem))
+            }
+        }
+        backlinks = results
+    }
+
+    private func edgeLabel(for type: EdgeType) -> String {
+        switch type {
+        case .relatesTo: "Related"
+        case .mentions: "Mentions"
+        case .supports: "Supports"
+        case .assignedTo: "Assigned to"
+        case .blockedBy: "Blocked by"
+        case .belongsTo: "Belongs to"
+        case .produced: "Produced"
+        case .precedes: "Precedes"
+        case .references: "References"
+        case .contradicts: "Contradicts"
+        }
+    }
+
+    private func edgeIcon(for type: EdgeType) -> String {
+        switch type {
+        case .relatesTo: "arrow.left.arrow.right"
+        case .mentions: "at"
+        case .supports: "checkmark.seal"
+        case .assignedTo: "person"
+        case .blockedBy: "hand.raised"
+        case .belongsTo: "folder"
+        case .produced: "hammer"
+        case .precedes: "arrow.right"
+        case .references: "quote.bubble"
+        case .contradicts: "exclamationmark.triangle"
+        }
+    }
+
+    private func edgeColor(for type: EdgeType) -> Color {
+        switch type {
+        case .relatesTo: .blue
+        case .mentions: .purple
+        case .supports: .green
+        case .assignedTo: .orange
+        case .blockedBy: .red
+        case .belongsTo: .brown
+        case .produced: .indigo
+        case .precedes: .gray
+        case .references: .teal
+        case .contradicts: .pink
+        }
+    }
+
+    // MARK: - Analysis
+
+    private func runAnalysis() async {
+        guard transcript != nil else {
+            analysisError = "No transcript available. Transcribe first."
+            return
+        }
+        guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
+            analysisError = "No AI provider configured. Go to Settings."
+            return
+        }
+
+        isAnalyzing = true
+        analysisError = nil
+
+        do {
+            let svc = AnalysisService()
+            let model = selectedModel.isEmpty
+                ? ActiveModelPicker.effectiveModel(context: modelContext, feature: "analysis")
+                : selectedModel
+
+            guard let t = transcript else { return }
+            let result = try await svc.analyze(transcript: t, using: provider, model: model)
+
+            // Show immediately, then save
+            analysis = result
+            item.status = .analyzed
+
+            try? fileStore.createMeetingDirectory(for: item.id)
+            try? fileStore.writeArtifact(result, fileName: "analysis.json", meetingId: item.id)
+        } catch let error as ProviderError {
+            analysisError = "[Provider] \(error.userMessage)"
+        } catch {
+            analysisError = "[Error] \(error.localizedDescription)"
+        }
+
+        isAnalyzing = false
     }
 
     private var typeIcon: String { item.type.icon }
