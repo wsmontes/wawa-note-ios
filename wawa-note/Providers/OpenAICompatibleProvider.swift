@@ -89,6 +89,23 @@ private struct ChatCompletionResponse: Decodable {
         struct Message: Decodable {
             let role: String?
             let content: String?
+            let toolCalls: [ToolCall]?
+
+            struct ToolCall: Decodable {
+                let id: String?
+                let type: String?
+                let function: FunctionCall?
+
+                struct FunctionCall: Decodable {
+                    let name: String?
+                    let arguments: String?
+                }
+            }
+
+            enum CodingKeys: String, CodingKey {
+                case role, content
+                case toolCalls = "tool_calls"
+            }
         }
 
         enum CodingKeys: String, CodingKey {
@@ -171,7 +188,28 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
             }
 
             if imageBlocks.isEmpty {
-                return ["role": msg.role.apiName, "content": textContent]
+                var m: [String: Any] = ["role": msg.role.apiName, "content": textContent]
+
+                // Tool calls in assistant messages
+                if let tcs = msg.toolCalls, !tcs.isEmpty {
+                    m["tool_calls"] = tcs.map { tc -> [String: Any] in
+                        [
+                            "id": tc.id,
+                            "type": "function",
+                            "function": [
+                                "name": tc.name,
+                                "arguments": tc.arguments
+                            ]
+                        ]
+                    }
+                }
+
+                // Tool call ID in tool messages
+                if let tci = msg.toolCallId {
+                    m["tool_call_id"] = tci
+                }
+
+                return m
             }
             var parts: [[String: Any]] = []
             if !textContent.isEmpty {
@@ -188,7 +226,14 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
             "messages": bodyMessages
         ]
         if let t = request.temperature { body["temperature"] = t }
-        if let mt = request.maxTokens { body["max_tokens"] = mt }
+        if let mt = request.maxTokens {
+            let preset = AIConfigService.shared.presetFor(model: effectiveModel)
+            if preset?.usesMaxCompletionTokens == true {
+                body["max_completion_tokens"] = mt
+            } else {
+                body["max_tokens"] = mt
+            }
+        }
 
         if let fmt = request.responseFormat {
             switch fmt {
@@ -211,6 +256,32 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
             }
         }
 
+        // Tools (function calling)
+        if let tools = request.tools, !tools.isEmpty {
+            body["tools"] = tools.map { tool -> [String: Any] in
+                var parameters: [String: Any] = [
+                    "type": tool.parameters.type,
+                    "properties": tool.parameters.properties.mapValues { prop -> [String: Any] in
+                        var p: [String: Any] = ["type": prop.type, "description": prop.description]
+                        if let en = prop.enum { p["enum"] = en }
+                        return p
+                    }
+                ]
+                if !tool.parameters.required.isEmpty {
+                    parameters["required"] = tool.parameters.required
+                }
+                return [
+                    "type": "function",
+                    "function": [
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": parameters
+                    ]
+                ]
+            }
+            if let tc = request.toolChoice { body["tool_choice"] = tc }
+        }
+
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -229,7 +300,11 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
 
         guard (200...299).contains(httpResponse.statusCode) else {
             let bodyStr = String(data: data, encoding: .utf8) ?? "<no body>"
-            AppLog.provider.error("Provider returned \(httpResponse.statusCode): \(bodyStr.prefix(500))")
+            // Log the failing request for debugging
+            if let reqBody = urlRequest.httpBody, let reqStr = String(data: reqBody, encoding: .utf8) {
+                AppLog.provider.error("Provider returned \(httpResponse.statusCode): \(bodyStr.prefix(300))")
+                AppLog.provider.error("Failing request body (last 1000 chars): \(String(reqStr.suffix(1000)))")
+            }
             throw ProviderError.apiError(statusCode: httpResponse.statusCode, body: bodyStr)
         }
 
@@ -248,9 +323,17 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
             return nil
         }()
 
-        let text = decoded.choices.first?.message.content ?? ""
+        let msg = decoded.choices.first?.message
+        let text = msg?.content ?? ""
+        let finishReason = decoded.choices.first?.finishReason
+
+        let toolCalls: [AIToolCall]? = msg?.toolCalls?.compactMap { tc -> AIToolCall? in
+            guard let id = tc.id, let fn = tc.function, let name = fn.name else { return nil }
+            return AIToolCall(id: id, name: name, arguments: fn.arguments ?? "{}")
+        }
+
         AppLog.provider.info("Response: \(text.prefix(100))...")
-        return AIResponse(id: decoded.id, model: decoded.model, content: text, usage: usage)
+        return AIResponse(id: decoded.id, model: decoded.model, content: text, usage: usage, toolCalls: toolCalls, finishReason: finishReason)
     }
 
     private func buildContent(from blocks: [AIContentBlock]) -> ChatCompletionRequest.Message.Content {

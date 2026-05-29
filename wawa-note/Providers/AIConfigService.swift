@@ -149,6 +149,12 @@ final class AIConfigService: @unchecked Sendable {
         presetFor(model: model)?.reasoningModel ?? false
     }
 
+    func supportsAudioTranscription(for providerType: String) -> Bool {
+        guard let pc = config.providers[providerType],
+              let endpoints = pc.endpoints else { return false }
+        return endpoints["audioTranscription"] != nil
+    }
+
     func availableModels(for providerId: String) -> [String] {
         config.providers[providerId]?.availableModels ?? []
     }

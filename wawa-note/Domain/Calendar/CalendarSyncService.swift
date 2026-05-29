@@ -1,18 +1,17 @@
 import EventKit
 import OSLog
 import Foundation
-import SwiftData
 
 @MainActor
 final class CalendarSyncService: ObservableObject {
     @Published var authorizationStatus: EKAuthorizationStatus = .notDetermined
-    @Published var selectedCalendarIDs: Set<String> = []
 
     private let eventStore: EKEventStore
 
     init(eventStore: EKEventStore = EKEventStore()) {
         self.eventStore = eventStore
         self.authorizationStatus = EKEventStore.authorizationStatus(for: .event)
+        observeEventStoreChanges()
     }
 
     // MARK: - Permission
@@ -30,14 +29,27 @@ final class CalendarSyncService: ObservableObject {
     }
 
     var hasPermission: Bool {
-        authorizationStatus == .fullAccess
+        let status = EKEventStore.authorizationStatus(for: .event)
+        return status == .fullAccess || status == .authorized
+    }
+
+    // MARK: - Reactive updates
+
+    private func observeEventStoreChanges() {
+        NotificationCenter.default.addObserver(
+            forName: .EKEventStoreChanged,
+            object: eventStore,
+            queue: .main
+        ) { [weak self] _ in
+            self?.objectWillChange.send()
+        }
     }
 
     // MARK: - Calendars
 
     func fetchCalendars() -> [EKCalendar] {
         guard hasPermission else { return [] }
-        return eventStore.calendars(for: .event).filter { $0.allowsContentModifications || true }
+        return eventStore.calendars(for: .event)
     }
 
     // MARK: - Fetch events
@@ -60,27 +72,25 @@ final class CalendarSyncService: ObservableObject {
         return fetchEvents(for: DateInterval(start: startOfDay, end: endOfDay))
     }
 
-    // MARK: - Month events (for dot indicators)
+    // MARK: - Month summaries (for day cell dots)
 
     func eventDatesForMonth(containing date: Date, items: [KnowledgeItem]) -> Set<Date> {
         let cal = Calendar.current
         guard let firstOfMonth = cal.date(from: cal.dateComponents([.year, .month], from: date)),
-              let lastOfMonth = cal.date(byAdding: DateComponents(month: 1, day: -1), to: firstOfMonth) else {
+              let firstOfNext = cal.date(byAdding: DateComponents(month: 1), to: firstOfMonth) else {
             return []
         }
 
         var dates: Set<Date> = []
-        let monthInterval = DateInterval(start: firstOfMonth, end: lastOfMonth)
+        let monthInterval = DateInterval(start: firstOfMonth, end: firstOfNext)
 
-        // Wawa Note items (meetings only)
-        for item in items where item.type == .meeting {
-            let meetingDate = item.scheduledDate ?? item.createdAt
-            if monthInterval.contains(meetingDate) {
-                dates.insert(cal.startOfDay(for: meetingDate))
+        for item in items {
+            let itemDate = item.scheduledDate ?? item.createdAt
+            if monthInterval.contains(itemDate) {
+                dates.insert(cal.startOfDay(for: itemDate))
             }
         }
 
-        // iPhone calendar events
         if hasPermission {
             let ekEvents = fetchEvents(for: monthInterval)
             for event in ekEvents {
@@ -102,20 +112,17 @@ final class CalendarSyncService: ObservableObject {
 
         var events: [CalendarEvent] = []
 
-        // Wawa Note meetings that fall on this day
-        for item in items where item.type == .meeting {
-            let meetingDate = item.scheduledDate ?? item.createdAt
-            if meetingDate >= dayStart && meetingDate < dayEnd {
+        for item in items {
+            let itemDate = item.scheduledDate ?? item.createdAt
+            if itemDate >= dayStart && itemDate < dayEnd {
                 events.append(CalendarEvent(item: item))
             }
         }
 
-        // iPhone calendar events
         if hasPermission {
             let ekEvents = fetchEvents(for: DateInterval(start: dayStart, end: dayEnd))
             for ekEvent in ekEvents {
-                if let calID = ekEvent.eventIdentifier,
-                   items.contains(where: { $0.calendarEventIdentifier == calID }) {
+                if isAlreadyRepresented(ekEvent: ekEvent, items: items) {
                     continue
                 }
                 events.append(CalendarEvent(ekEvent: ekEvent))
@@ -123,6 +130,22 @@ final class CalendarSyncService: ObservableObject {
         }
 
         return events.sorted { $0.startDate < $1.startDate }
+    }
+
+    private func isAlreadyRepresented(ekEvent: EKEvent, items: [KnowledgeItem]) -> Bool {
+        // Match by calendarEventIdentifier
+        if let calID = ekEvent.eventIdentifier,
+           items.contains(where: { $0.calendarEventIdentifier == calID }) {
+            return true
+        }
+        // Fallback: match by scheduledDate + title
+        guard let eventStart = ekEvent.startDate else { return false }
+        let eventTitle = ekEvent.title ?? ""
+        return items.contains { item in
+            guard let itemSD = item.scheduledDate else { return false }
+            return abs(itemSD.timeIntervalSince(eventStart)) < 60
+                && item.title == eventTitle
+        }
     }
 
     // MARK: - Single EKEvent lookup

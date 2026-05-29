@@ -56,6 +56,9 @@ final class KnowledgeItem {
     // Content body (Markdown for notes, journal entries)
     var bodyText: String?
 
+    // Inbox — non-nil means item is waiting to be processed
+    var inboxDate: Date?
+
     // Context columns
     var contextCalendarEventTitle: String?
     var contextAudioRoute: String?
@@ -97,7 +100,8 @@ final class KnowledgeItem {
         isFlagged: Bool = false,
         bodyText: String? = nil,
         durationSeconds: Double? = nil,
-        languageCode: String? = nil
+        languageCode: String? = nil,
+        inboxDate: Date? = Date()
     ) {
         self.id = id
         self.typeRaw = type.rawValue
@@ -112,5 +116,6 @@ final class KnowledgeItem {
         self.bodyText = bodyText
         self.durationSeconds = durationSeconds
         self.languageCode = languageCode
+        self.inboxDate = inboxDate
     }
 }

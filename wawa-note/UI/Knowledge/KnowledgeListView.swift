@@ -11,13 +11,16 @@ struct KnowledgeListView: View {
     @State private var selectedFolderID: UUID?
     @State private var showNewFolder = false
     @State private var newFolderName = ""
-    @State private var showNewNote = false
-    @State private var newNoteTitle = ""
     @State private var filterToday = false
     @State private var filterThisWeek = false
     @State private var filterFlagged = false
     @State private var filterHasAudio = false
     @State private var trashFolderID: UUID?
+    @State private var showNoteEditor = false
+    @State private var showJournalEditor = false
+    @State private var showFolderAlert = false
+    @State private var searchResults: [SearchResult] = []
+    @State private var matchingItemIDs: Set<UUID> = []
 
     var body: some View {
         Group {
@@ -27,11 +30,11 @@ struct KnowledgeListView: View {
                 Image(systemName: "tray")
                     .font(.system(size: 48))
                     .foregroundStyle(.secondary)
-                Text("Knowledge is empty")
+                Text("Explore is empty")
                     .font(.title3).fontWeight(.medium)
-                Text("Record a meeting, create a note, or import an audio file to start building your knowledge.")
+                Text("Record a meeting, create a note, or import an audio file to start building your library.")
                     .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 40)
-                Button { createFirstNote() } label: {
+                Button { showNoteEditor = true } label: {
                     Label("Create First Note", systemImage: "square.and.pencil")
                 }
                 .buttonStyle(.borderedProminent)
@@ -160,8 +163,18 @@ struct KnowledgeListView: View {
         }
         } // end if-else
         } // end Group
-        .navigationTitle("Knowledge")
+        .navigationTitle("Explore")
         .searchable(text: $searchText)
+        .onChange(of: searchText) { _, newValue in
+            if newValue.isEmpty {
+                matchingItemIDs = []
+                searchResults = []
+            } else {
+                let service = SearchService()
+                searchResults = service.searchNow(query: newValue, in: allItems)
+                matchingItemIDs = Set(searchResults.map(\.itemID))
+            }
+        }
         .onAppear {
             let trash = try? TrashService(context: modelContext).trashFolder()
             trashFolderID = trash?.id
@@ -176,11 +189,14 @@ struct KnowledgeListView: View {
                     }
 
                     Menu {
-                        Button { showNewFolder = true } label: {
-                            Label("New Folder", systemImage: "folder.badge.plus")
-                        }
-                        Button { showNewNote = true } label: {
+                        Button { showNoteEditor = true } label: {
                             Label("New Note", systemImage: "square.and.pencil")
+                        }
+                        Button { showJournalEditor = true } label: {
+                            Label("New Journal", systemImage: "book")
+                        }
+                        Button { showFolderAlert = true } label: {
+                            Label("New Folder", systemImage: "folder.badge.plus")
                         }
                     } label: {
                         Image(systemName: "plus")
@@ -188,15 +204,16 @@ struct KnowledgeListView: View {
                 }
             }
         }
-        .alert("New Folder", isPresented: $showNewFolder) {
+        .sheet(isPresented: $showNoteEditor) {
+            NoteEditorView(mode: .create(type: .note, folderID: selectedFolderID, initialTag: nil))
+        }
+        .sheet(isPresented: $showJournalEditor) {
+            JournalEditorView(mode: .create(folderID: selectedFolderID))
+        }
+        .alert("New Folder", isPresented: $showFolderAlert) {
             TextField("Name", text: $newFolderName)
             Button("Create") { createFolder() }
             Button("Cancel", role: .cancel) { newFolderName = "" }
-        }
-        .alert("New Note", isPresented: $showNewNote) {
-            TextField("Title", text: $newNoteTitle)
-            Button("Create") { createNote() }
-            Button("Cancel", role: .cancel) { newNoteTitle = "" }
         }
     }
 
@@ -227,7 +244,6 @@ struct KnowledgeListView: View {
         if let folderID = selectedFolderID {
             result = result.filter { $0.folderID == folderID }
         } else if let trashID = trashFolderID {
-            // "All Items" — hide items in trash
             result = result.filter { $0.folderID != trashID }
         }
         if filterToday {
@@ -246,8 +262,8 @@ struct KnowledgeListView: View {
         if filterHasAudio {
             result = result.filter { $0.audioFileRelativePath != nil }
         }
-        if !searchText.isEmpty {
-            result = result.filter { $0.title.localizedCaseInsensitiveContains(searchText) }
+        if !searchText.isEmpty && !matchingItemIDs.isEmpty {
+            result = result.filter { matchingItemIDs.contains($0.id) }
         }
         return result
     }
@@ -258,18 +274,6 @@ struct KnowledgeListView: View {
         modelContext.insert(folder)
         try? modelContext.save()
         newFolderName = ""
-    }
-
-    private func createFirstNote() {
-        showNewNote = true
-    }
-
-    private func createNote() {
-        guard !newNoteTitle.isEmpty else { return }
-        let item = KnowledgeItem(type: .note, title: newNoteTitle, status: .draft, folderID: selectedFolderID)
-        modelContext.insert(item)
-        try? modelContext.save()
-        newNoteTitle = ""
     }
 
     private func smartFilterChip(label: String, icon: String, active: Bool, action: @escaping () -> Void) -> some View {

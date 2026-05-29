@@ -76,6 +76,21 @@ final class TaskService {
         try context.save()
     }
 
+    func updateTask(
+        _ task: TaskItem,
+        title: String? = nil,
+        ownerName: String? = nil,
+        priority: TaskPriority? = nil,
+        dueAt: Date? = nil
+    ) throws {
+        if let title { task.title = title }
+        if let ownerName { task.ownerName = ownerName }
+        if let priority { task.priority = priority }
+        if let dueAt { task.dueAt = dueAt }
+        task.updatedAt = Date()
+        try context.save()
+    }
+
     func deleteTask(_ task: TaskItem) throws {
         // Remove associated edges
         let tid = task.id

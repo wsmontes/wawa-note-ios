@@ -50,6 +50,10 @@ final class FileArtifactStore: @unchecked Sendable {
         baseURL.appendingPathComponent("configs", isDirectory: true)
     }
 
+    func chatDirectoryURL() -> URL {
+        baseURL.appendingPathComponent("Chat", isDirectory: true)
+    }
+
     func createMeetingDirectory(for meetingId: UUID) throws {
         let url = meetingDirectoryURL(for: meetingId)
         try fileManager.createDirectory(at: url, withIntermediateDirectories: true)

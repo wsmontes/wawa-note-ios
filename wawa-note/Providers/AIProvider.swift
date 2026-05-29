@@ -69,19 +69,26 @@ struct AIRequest: Sendable {
         case jsonObject
         case jsonSchema(name: String, schema: String)
     }
+
+    var tools: [AIToolDefinition]?
+    var toolChoice: String?
 }
 
 // MARK: - Message
 
-struct AIMessage: Codable, Identifiable, Sendable {
+struct AIMessage: Identifiable, Sendable {
     let id: UUID
     var role: AIRole
     var content: [AIContentBlock]
+    var toolCalls: [AIToolCall]?
+    var toolCallId: String?
 
-    init(id: UUID = UUID(), role: AIRole, content: [AIContentBlock]) {
+    init(id: UUID = UUID(), role: AIRole, content: [AIContentBlock], toolCalls: [AIToolCall]? = nil, toolCallId: String? = nil) {
         self.id = id
         self.role = role
         self.content = content
+        self.toolCalls = toolCalls
+        self.toolCallId = toolCallId
     }
 }
 
@@ -99,12 +106,65 @@ struct AIResponse: Codable, Sendable {
     var content: String
     var rawResponsePath: String?
     var usage: AIUsage?
+    var toolCalls: [AIToolCall]?
+    var finishReason: String?
 }
 
 struct AIUsage: Codable, Sendable {
     var promptTokens: Int?
     var completionTokens: Int?
     var totalTokens: Int?
+}
+
+// MARK: - Tool Calls
+
+struct AIToolCall: Codable, Sendable {
+    let id: String
+    let name: String
+    let arguments: String
+}
+
+enum AIFinishReason: String, Codable, Sendable {
+    case stop
+    case length
+    case toolCalls = "tool_calls"
+    case contentFilter = "content_filter"
+}
+
+// MARK: - Streaming
+
+enum AIStreamEvent: Sendable {
+    case textDelta(String)
+    case toolCallDelta(id: String, name: String?, arguments: String?)
+    case finished(AIFinishReason?)
+}
+
+extension AIProvider {
+    func sendStreaming(_ request: AIRequest) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    let response = try await self.send(request)
+
+                    if let toolCalls = response.toolCalls, !toolCalls.isEmpty {
+                        for tc in toolCalls {
+                            continuation.yield(.toolCallDelta(id: tc.id, name: tc.name, arguments: tc.arguments))
+                        }
+                    }
+
+                    if !response.content.isEmpty {
+                        continuation.yield(.textDelta(response.content))
+                    }
+
+                    let finish: AIFinishReason? = response.finishReason.flatMap { AIFinishReason(rawValue: $0) }
+                    continuation.yield(.finished(finish))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Errors

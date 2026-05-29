@@ -13,11 +13,7 @@ struct HomeView: View {
     @State private var showFilePicker = false
     @State private var pendingImport: ImportPending?
     @State private var importError: String?
-    @State private var showNewNote = false
-    @State private var newNoteTitle = ""
-    @State private var showNewFolder = false
-    @State private var newFolderName = ""
-    @State private var navigateToCalendar = false
+    @State private var showCreationSheet = false
     @State private var trashFolderID: UUID?
     @State private var importProgress: String?
     @State private var importDebug: String?
@@ -32,7 +28,6 @@ struct HomeView: View {
                     headerSection
                     quickActionsSection
                     recordSection
-                    recentSection
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -77,9 +72,6 @@ struct HomeView: View {
             .navigationDestination(item: $navigateToItem) { item in
                 KnowledgeDetailView(item: item)
             }
-            .navigationDestination(isPresented: $navigateToCalendar) {
-                CalendarContainerView()
-            }
             .fileImporter(isPresented: $showFilePicker, allowedContentTypes: AudioImportService.supportedUTTypes, allowsMultipleSelection: true) { handleFilePick($0) }
             .sheet(item: $pendingImport) { item in
                 ImportFormView(sourceURL: item.url, metadata: item.metadata, isFromShareExtension: item.isFromShareExtension) { knowledgeItem in
@@ -89,15 +81,8 @@ struct HomeView: View {
             }
             .onOpenURL { handleIncomingURL($0) }
             .alert("Import Error", isPresented: .constant(importError != nil)) { Button("OK") { importError = nil } } message: { Text(importError ?? "") }
-            .alert("New Note", isPresented: $showNewNote) {
-                TextField("Title", text: $newNoteTitle)
-                Button("Create") { createNote() }
-                Button("Cancel", role: .cancel) { newNoteTitle = "" }
-            }
-            .alert("New Folder", isPresented: $showNewFolder) {
-                TextField("Name", text: $newFolderName)
-                Button("Create") { createFolder() }
-                Button("Cancel", role: .cancel) { newFolderName = "" }
+            .sheet(isPresented: $showCreationSheet) {
+                CreationSheetView()
             }
         }
     }
@@ -132,57 +117,34 @@ struct HomeView: View {
     // MARK: - Quick Actions
 
     private var quickActionsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionLabel("Quick Actions")
+        VStack(spacing: 16) {
+            HStack(spacing: 16) {
+                Button {
+                    showCreationSheet = true
+                } label: {
+                    Label("New", systemImage: "plus.circle.fill")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(Color(.systemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                }
 
-            HStack(spacing: 12) {
-                quickActionCard(
-                    icon: "square.and.pencil",
-                    label: "New Note",
-                    color: .orange
-                ) { showNewNote = true }
-
-                quickActionCard(
-                    icon: "folder.badge.plus",
-                    label: "New Folder",
-                    color: .blue
-                ) { showNewFolder = true }
-
-                quickActionCard(
-                    icon: "calendar",
-                    label: "Calendar",
-                    color: .red
-                ) { navigateToCalendar = true }
-
-                quickActionCard(
-                    icon: "square.and.arrow.down",
-                    label: "Import",
-                    color: .green
-                ) { showFilePicker = true }
+                Button {
+                    showFilePicker = true
+                } label: {
+                    Label("Import", systemImage: "square.and.arrow.down")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(Color(.systemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                }
             }
+
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 24)
-    }
-
-    private func quickActionCard(icon: String, label: String, color: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.title3)
-                    .foregroundStyle(color)
-                    .frame(width: 44, height: 44)
-                    .background(color.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                Text(label)
-                    .font(.caption).fontWeight(.medium)
-                    .foregroundStyle(.primary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-        }
     }
 
     // MARK: - Record
@@ -311,23 +273,6 @@ struct HomeView: View {
 
     private func icon(for type: KnowledgeItemType) -> String { type.icon }
     private func color(for type: KnowledgeItemType) -> Color { type.color }
-
-    private func createNote() {
-        guard !newNoteTitle.isEmpty else { return }
-        let item = KnowledgeItem(type: .note, title: newNoteTitle, status: .draft)
-        modelContext.insert(item)
-        try? modelContext.save()
-        newNoteTitle = ""
-        navigateToItem = item
-    }
-
-    private func createFolder() {
-        guard !newFolderName.isEmpty else { return }
-        let folder = Folder(name: newFolderName)
-        modelContext.insert(folder)
-        try? modelContext.save()
-        newFolderName = ""
-    }
 
     // MARK: - File picker
 

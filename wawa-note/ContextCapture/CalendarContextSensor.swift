@@ -5,7 +5,11 @@ import OSLog
 final class CalendarContextSensor: ContextSensor, @unchecked Sendable {
     let sensorName = "calendar_context"
 
-    private let eventStore = EKEventStore()
+    private let eventStore: EKEventStore
+
+    init(eventStore: EKEventStore = EKEventStore()) {
+        self.eventStore = eventStore
+    }
 
     func capture() async throws -> [CapturedAnnotation] {
         let status = EKEventStore.authorizationStatus(for: .event)

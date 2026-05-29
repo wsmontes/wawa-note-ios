@@ -7,6 +7,8 @@ struct SettingsView: View {
     @Query(sort: \KnowledgeItem.updatedAt) private var allItems: [KnowledgeItem]
     @Query(sort: \Folder.name) private var folders: [Folder]
 
+    @State private var transcriptionMode: TranscriptionMode = TranscriptionSettings.shared.mode
+
     var body: some View {
         NavigationStack {
             List {
@@ -19,8 +21,35 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("AI & Transcription")
+                }
+
+                // Transcription mode
+                Section {
+                    Picker("Transcription Engine", selection: $transcriptionMode) {
+                        Text(TranscriptionMode.apple.label)
+                            .tag(TranscriptionMode.apple)
+                        Text(TranscriptionMode.whisper.label)
+                            .tag(TranscriptionMode.whisper)
+                    }
+                    .pickerStyle(.menu)
+                } header: {
+                    Text("Transcription Mode")
                 } footer: {
-                    Text(transcriptionFooter)
+                    VStack(alignment: .leading, spacing: 4) {
+                        if transcriptionMode == .whisper {
+                            if hasWhisperProvider {
+                                Text("Whisper API will be used. Language is auto-detected — no need to pick a locale.")
+                            } else {
+                                Text("No provider with audio support configured. Add an OpenAI API key in AI Services to use Whisper.")
+                                    .foregroundStyle(.orange)
+                            }
+                        } else {
+                            Text("On-device transcription. Works offline, no API key needed. Locale: \(supportedLocales().joined(separator: ", "))")
+                        }
+                    }
+                }
+                .onChange(of: transcriptionMode) { _, newValue in
+                    TranscriptionSettings.shared.mode = newValue
                 }
 
                 // Knowledge workspace
@@ -38,7 +67,7 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 } header: {
-                    Text("Knowledge Workspace")
+                    Text("Library")
                 }
 
                 // Privacy
@@ -49,13 +78,6 @@ struct SettingsView: View {
                         Text("On this iPhone")
                             .foregroundStyle(.secondary)
                     }
-                    HStack {
-                        Label("Transcription", systemImage: "text.alignleft")
-                        Spacer()
-                        Text(transcriptionMode)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
                 } header: {
                     Text("Privacy & Data")
                 }
@@ -64,34 +86,22 @@ struct SettingsView: View {
         }
     }
 
-    private var transcriptionMode: String {
+    private var hasWhisperProvider: Bool {
         guard let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext),
-              config.supportsAudio else {
-            return "Apple Speech (on-device)"
+              let keyId = config.apiKeyKeychainIdentifier,
+              let apiKey = try? SecureKeyStore().loadAPIKey(for: keyId),
+              !apiKey.isEmpty else {
+            return false
         }
-        return config.name
-    }
-
-    private var transcriptionFooter: String {
-        let locales = supportedLocales()
-        let base = "On-device: \(locales.joined(separator: ", "))"
-        if let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext),
-           config.supportsAudio {
-            return "Remote (\(config.name)) + \(base)"
-        }
-        return base
+        return config.type == .openAI || config.type == .openAICompatible
     }
 
     private func supportedLocales() -> [String] {
         let all = SFSpeechRecognizer.supportedLocales()
         let configured = Set(["pt-BR", "pt-PT", "en-US", "es-ES", "fr-FR", "de-DE", "it-IT", "ja-JP", "zh-CN"])
-        var available = all.filter { configured.contains($0.identifier) }
+        let available = all.filter { configured.contains($0.identifier) }
         let usable = available.filter { SFSpeechRecognizer(locale: $0)?.isAvailable == true }
-        if usable.isEmpty { available = [Locale(identifier: "en-US")] }
-        return usable.map { "\($0.identifier)✓" } + available.filter { !usable.contains($0) }.map { "\($0.identifier)⬇" }
+        if usable.isEmpty { return [Locale(identifier: "en-US").identifier] }
+        return usable.map(\.identifier)
     }
-}
-
-#Preview {
-    SettingsView()
 }
