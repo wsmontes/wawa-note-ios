@@ -11,6 +11,8 @@ struct EvidenceInspectorView: View {
     @State private var targetItem: KnowledgeItem?
     @State private var transcriptSegments: [TranscriptSegment] = []
     @State private var analysis: MeetingAnalysis?
+    @State private var isConfirmed: Bool = false
+    @State private var isDismissed: Bool = false
 
     private let fileStore = FileArtifactStore()
 
@@ -51,17 +53,17 @@ struct EvidenceInspectorView: View {
     // MARK: - Header
 
     private var edgeHeader: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: edgeIcon)
                     .font(.title2)
                     .foregroundStyle(edgeColor)
-                Text(edge.edgeType.rawValue.capitalized)
-                    .font(.title3)
-                    .fontWeight(.semibold)
-                Spacer()
-                Text("\(Int(edge.weight * 100))%")
+                Text(relationshipSentence)
                     .font(.subheadline)
+                    .fontWeight(.medium)
+                Spacer()
+                Text("\(Int(edge.weight * 100))% confidence")
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
@@ -69,10 +71,36 @@ struct EvidenceInspectorView: View {
                     .clipShape(Capsule())
             }
 
-            if edge.provenanceItemID != nil {
-                Label("Evidence-backed connection", systemImage: "checkmark.shield.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
+            HStack(spacing: 8) {
+                if edge.provenanceItemID != nil {
+                    Label("Evidence-backed", systemImage: "checkmark.shield.fill")
+                        .font(.caption).foregroundStyle(.green)
+                } else {
+                    Label("AI-inferred", systemImage: "sparkles")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+
+                Spacer()
+
+                if !isConfirmed && !isDismissed {
+                    Button { isConfirmed = true } label: {
+                        Label("Confirm", systemImage: "checkmark.circle")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered).tint(.green)
+
+                    Button { isDismissed = true } label: {
+                        Label("Dismiss", systemImage: "xmark.circle")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered).tint(.red)
+                } else if isConfirmed {
+                    Label("Confirmed", systemImage: "checkmark.circle.fill")
+                        .font(.caption).foregroundStyle(.green)
+                } else {
+                    Label("Dismissed", systemImage: "xmark.circle.fill")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
         }
         .padding(16)
@@ -181,6 +209,23 @@ struct EvidenceInspectorView: View {
     }
 
     // MARK: - Helpers
+
+    private var relationshipSentence: String {
+        let fromName = findItem(edge.fromID)?.title ?? "Item"
+        let toName = findItem(edge.toID)?.title ?? "another item"
+        switch edge.edgeType {
+        case .supports: return "\(fromName) supports \(toName)"
+        case .contradicts: return "\(fromName) contradicts \(toName)"
+        case .produced: return "\(fromName) produced \(toName)"
+        case .mentions: return "\(fromName) mentions \(toName)"
+        case .assignedTo: return "\(fromName) assigned to \(toName)"
+        case .blockedBy: return "\(fromName) blocked by \(toName)"
+        case .belongsTo: return "\(fromName) belongs to \(toName)"
+        case .precedes: return "\(fromName) precedes \(toName)"
+        case .references: return "\(fromName) references \(toName)"
+        case .relatesTo: return "\(fromName) relates to \(toName)"
+        }
+    }
 
     private var edgeIcon: String {
         switch edge.edgeType {

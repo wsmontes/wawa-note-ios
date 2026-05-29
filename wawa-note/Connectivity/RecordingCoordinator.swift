@@ -178,6 +178,15 @@ final class RecordingCoordinator: ObservableObject {
         notifyStatusChange()
     }
 
+    func returnToIdle() {
+        state = .idle
+        elapsedTime = 0
+        pausedDuration = 0
+        audioLevel = 0
+        savedItemId = nil
+        errorMessage = nil
+    }
+
     // MARK: - Status
 
     func currentStatus() -> RecordingStatus {

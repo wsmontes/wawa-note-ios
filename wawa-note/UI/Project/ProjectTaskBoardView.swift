@@ -14,34 +14,38 @@ struct ProjectTaskBoardView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if tasks.isEmpty && !showNewTask {
+            if tasks.isEmpty {
                 VStack(spacing: 12) {
                     Spacer().frame(height: 40)
                     Image(systemName: "checklist.unchecked")
-                        .font(.title)
-                        .foregroundStyle(.secondary)
+                        .font(.title).foregroundStyle(.secondary)
                     Text("No tasks yet")
                         .font(.headline)
                     Text("Promote a meeting to a project or add a task manually.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 40)
-                    Button {
-                        newTaskStatus = .todo
-                        showNewTask = true
-                    } label: {
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center).padding(.horizontal, 40)
+                    Button { newTaskStatus = .todo; showNewTask = true } label: {
                         Label("Add Task", systemImage: "plus")
                     }
                     .buttonStyle(.borderedProminent)
                 }
             } else {
-                HStack(alignment: .top, spacing: 8) {
-                    ForEach(columns, id: \.rawValue) { status in
-                        taskColumn(status)
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 0) {
+                            ForEach(columns, id: \.rawValue) { status in
+                                taskColumn(status)
+                                    .containerRelativeFrame(.horizontal, count: 1, span: 1, spacing: 0)
+                                    .id(status.rawValue)
+                            }
+                        }
+                        .scrollTargetLayout()
+                    }
+                    .scrollTargetBehavior(.viewAligned)
+                    .safeAreaInset(edge: .bottom) {
+                        columnIndicator
                     }
                 }
-                .padding(12)
             }
         }
         .sheet(item: $editingTask) { task in
@@ -52,20 +56,20 @@ struct ProjectTaskBoardView: View {
         }
     }
 
+    // MARK: - Column
+
     private func taskColumn(_ status: TaskStatus) -> some View {
         let columnTasks = tasks.filter { $0.status == status }
 
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: 0) {
+            // Column header
             HStack {
                 Text(statusLabel(status))
-                    .font(.footnote)
-                    .fontWeight(.semibold)
+                    .font(.headline)
                 Spacer()
                 Text("\(columnTasks.count)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
+                    .font(.caption).foregroundStyle(.secondary)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(Color(.secondarySystemBackground))
                     .clipShape(Capsule())
 
@@ -73,85 +77,120 @@ struct ProjectTaskBoardView: View {
                     newTaskStatus = status
                     showNewTask = true
                 } label: {
-                    Image(systemName: "plus.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title3).foregroundStyle(.secondary)
                 }
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
 
-            ScrollView {
-                VStack(spacing: 6) {
-                    ForEach(columnTasks, id: \.id) { task in
-                        taskCard(task, status: status)
+            Divider()
+
+            // Card list
+            if columnTasks.isEmpty {
+                VStack(spacing: 12) {
+                    Spacer().frame(height: 40)
+                    Image(systemName: statusEmptyIcon(status))
+                        .font(.title2).foregroundStyle(.tertiary)
+                    Text(statusEmptyText(status))
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                }
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        ForEach(columnTasks, id: \.id) { task in
+                            taskCard(task, status: status)
+                                .padding(.horizontal, 12)
+                                .onTapGesture { editingTask = task }
+                        }
                     }
+                    .padding(.vertical, 8)
                 }
             }
         }
-        .frame(maxWidth: .infinity)
+        .background(Color(.systemGroupedBackground))
     }
+
+    // MARK: - Task card
 
     private func taskCard(_ task: TaskItem, status: TaskStatus) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(task.title)
-                .font(.subheadline)
-                .lineLimit(3)
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(task.title)
+                        .font(.subheadline)
+                        .foregroundStyle(task.statusRaw == "cancelled" ? .secondary : .primary)
+                        .strikethrough(task.statusRaw == "cancelled")
+                        .lineLimit(3)
 
-            HStack(spacing: 6) {
-                if let owner = task.ownerName {
-                    Label(owner, systemImage: "person")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                priorityBadge(task.priority)
-                Spacer()
-                if let next = nextStatus(status) {
-                    Button {
-                        advanceTask(task, to: next)
-                    } label: {
-                        Image(systemName: "arrow.right.circle")
-                            .font(.caption)
+                    HStack(spacing: 8) {
+                        if let owner = task.ownerName {
+                            Label(owner, systemImage: "person")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        priorityBadge(task.priority)
+                        if let due = task.dueAt {
+                            Text(due.formatted(date: .abbreviated, time: .omitted))
+                                .font(.caption2).foregroundStyle(due < Date() ? .red : .secondary)
+                        }
                     }
                 }
-            }
-        }
-        .padding(8)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .shadow(color: .black.opacity(0.04), radius: 2, y: 1)
-        .onTapGesture {
-            editingTask = task
-        }
-        .swipeActions(edge: .trailing) {
-            Button(role: .destructive) {
-                deleteTask(task)
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
-        }
-        .swipeActions(edge: .leading) {
-            if let prev = previousStatus(status) {
-                Button {
-                    advanceTask(task, to: prev)
+                Spacer()
+                Menu {
+                    ForEach(columns, id: \.rawValue) { col in
+                        if col != status {
+                            Button { moveTask(task, to: col) } label: {
+                                Label("Move to \(statusLabel(col))", systemImage: "arrow.right")
+                            }
+                        }
+                    }
+                    Divider()
+                    Button(role: .destructive) { deleteTask(task) } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
                 } label: {
-                    Label("Move Back", systemImage: "arrow.left.circle")
+                    Image(systemName: "ellipsis.circle")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-                .tint(.gray)
             }
         }
+        .padding(10)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.04), radius: 2, y: 1)
     }
+
+    // MARK: - Column indicator
+
+    private var columnIndicator: some View {
+        HStack(spacing: 6) {
+            ForEach(columns, id: \.rawValue) { status in
+                let count = tasks.filter { $0.status == status }.count
+                Circle()
+                    .fill(count > 0 ? Color.accentColor : Color(.tertiarySystemFill))
+                    .frame(width: 6, height: 6)
+            }
+        }
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity)
+        .background(.bar)
+    }
+
+    // MARK: - Priority
 
     private func priorityBadge(_ priority: TaskPriority) -> some View {
         Text(priority.rawValue.capitalized)
             .font(.caption2)
             .foregroundStyle(priorityColor(priority))
-            .padding(.horizontal, 4)
-            .padding(.vertical, 1)
+            .padding(.horizontal, 4).padding(.vertical, 1)
             .background(priorityColor(priority).opacity(0.1))
             .clipShape(Capsule())
     }
 
-    private func advanceTask(_ task: TaskItem, to status: TaskStatus) {
+    // MARK: - Actions
+
+    private func moveTask(_ task: TaskItem, to status: TaskStatus) {
         let svc = TaskService(context: modelContext)
         try? svc.updateStatus(task, to: status)
     }
@@ -161,23 +200,7 @@ struct ProjectTaskBoardView: View {
         try? svc.deleteTask(task)
     }
 
-    private func nextStatus(_ current: TaskStatus) -> TaskStatus? {
-        switch current {
-        case .todo: .inProgress
-        case .inProgress: .done
-        case .done: nil
-        case .cancelled: nil
-        }
-    }
-
-    private func previousStatus(_ current: TaskStatus) -> TaskStatus? {
-        switch current {
-        case .todo: nil
-        case .inProgress: .todo
-        case .done: .inProgress
-        case .cancelled: nil
-        }
-    }
+    // MARK: - Labels
 
     private func statusLabel(_ status: TaskStatus) -> String {
         switch status {
@@ -185,6 +208,24 @@ struct ProjectTaskBoardView: View {
         case .inProgress: "In Progress"
         case .done: "Done"
         case .cancelled: "Cancelled"
+        }
+    }
+
+    private func statusEmptyIcon(_ status: TaskStatus) -> String {
+        switch status {
+        case .todo: "circle"
+        case .inProgress: "circle.dotted"
+        case .done: "checkmark.circle"
+        case .cancelled: "xmark.circle"
+        }
+    }
+
+    private func statusEmptyText(_ status: TaskStatus) -> String {
+        switch status {
+        case .todo: "No tasks to do"
+        case .inProgress: "Nothing in progress"
+        case .done: "Nothing completed yet"
+        case .cancelled: "No cancelled tasks"
         }
     }
 

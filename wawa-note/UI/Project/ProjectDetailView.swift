@@ -27,21 +27,19 @@ struct ProjectDetailView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
 
-            // Content
-            TabView(selection: $selectedTab) {
+            // Content — segmented switch, no page swipe
+            switch selectedTab {
+            case 0:
                 ProjectTaskBoardView(tasks: tasks, projectID: project.id)
-                    .tag(0)
-
+            case 1:
                 projectItemsList
-                    .tag(1)
-
+            case 2:
                 ProjectGraphView(projectID: project.id)
-                    .tag(2)
-
+            case 3:
                 ProjectTimelineView(projectID: project.id)
-                    .tag(3)
+            default:
+                EmptyView()
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
         }
         .background(Color(.systemGroupedBackground))
         .navigationTitle(project.name)

@@ -47,16 +47,14 @@ struct ContentView: View {
 }
 
 struct ExploreView: View {
-    @State private var selectedTab: ExploreTab = .library
+    @State private var selectedTab: ExploreTab = .projects
 
     enum ExploreTab: String, CaseIterable {
-        case library = "Library"
         case projects = "Projects"
         case timeline = "Timeline"
 
         var icon: String {
             switch self {
-            case .library: "list.bullet.rectangle"
             case .projects: "folder"
             case .timeline: "calendar.day.timeline.leading"
             }
@@ -75,8 +73,6 @@ struct ExploreView: View {
             .padding(.vertical, 8)
 
             switch selectedTab {
-            case .library:
-                KnowledgeListView()
             case .projects:
                 ProjectListView()
             case .timeline:

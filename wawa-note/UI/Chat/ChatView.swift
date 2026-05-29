@@ -135,6 +135,16 @@ struct ChatView: View {
 
     private var chatInputBar: some View {
         HStack(alignment: .bottom, spacing: 8) {
+            // Voice input button
+            Button {
+                // Future: dictation
+            } label: {
+                Image(systemName: "mic")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, height: 36)
+            }
+
             TextField("Ask anything...", text: $viewModel.inputText, axis: .vertical)
                 .lineLimit(1...5)
                 .textFieldStyle(.plain)
