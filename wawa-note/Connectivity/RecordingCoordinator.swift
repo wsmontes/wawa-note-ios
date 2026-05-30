@@ -52,7 +52,8 @@ final class RecordingCoordinator: ObservableObject {
     func startRecording(
         title: String? = nil,
         scheduledDate: Date? = nil,
-        calendarEventIdentifier: String? = nil
+        calendarEventIdentifier: String? = nil,
+        projectID: UUID? = nil
     ) {
         guard self.state == .idle else {
             AppLog.audio.warning("RecordingCoordinator: startRecording called but state is \(String(describing: self.state))")
@@ -69,6 +70,7 @@ final class RecordingCoordinator: ObservableObject {
         let item = KnowledgeItem(type: .meeting, title: meetingTitle, status: .recording)
         item.scheduledDate = scheduledDate
         item.calendarEventIdentifier = calendarEventIdentifier
+        if let projectID { item.projectID = projectID; item.inboxDate = nil }
         context.insert(item)
 
         do {

@@ -12,6 +12,8 @@ struct InboxView: View {
     @State private var showFolderPicker: KnowledgeItem? = nil
     @State private var searchResults: [SearchResult] = []
     @State private var matchingIDs: Set<UUID> = []
+    @State private var trashFolderID: UUID?
+    @State private var navigateToProject: Project?
 
     private let searchService = SearchService()
 
@@ -20,6 +22,7 @@ struct InboxView: View {
         case all = "All"
         case unassigned = "Unassigned"
         case flagged = "Flagged"
+        case trash = "Trash"
 
         var icon: String {
             switch self {
@@ -27,6 +30,7 @@ struct InboxView: View {
             case .all: "tray.full"
             case .unassigned: "questionmark.folder"
             case .flagged: "flag"
+            case .trash: "trash"
             }
         }
     }
@@ -43,15 +47,13 @@ struct InboxView: View {
                 }
             }
             .navigationTitle("Inbox")
+            .navigationDestination(item: $navigateToProject) { ProjectDetailView(project: $0) }
             .searchable(text: $searchText, prompt: "Search all sources...")
             .onChange(of: searchText) { _, newValue in
-                if newValue.isEmpty {
-                    matchingIDs = []
-                    searchResults = []
-                } else {
-                    performSearch()
-                }
+                if newValue.isEmpty { matchingIDs = []; searchResults = [] }
+                else { performSearch() }
             }
+            .onAppear { loadTrashFolder() }
             .sheet(item: $showFolderPicker) { item in
                 folderPickerSheet(for: item)
             }
@@ -108,25 +110,22 @@ struct InboxView: View {
                             inboxRow(item)
                         }
                         .swipeActions(edge: .leading) {
-                            Button {
-                                archiveItem(item)
-                            } label: {
-                                Label("Mark Reviewed", systemImage: "checkmark.circle")
+                            if filterMode == .trash {
+                                Button { try? TrashService(context: modelContext).restore(item) } label: {
+                                    Label("Restore", systemImage: "arrow.uturn.backward")
+                                }.tint(.green)
+                            } else {
+                                Button { archiveItem(item) } label: {
+                                    Label("Mark Reviewed", systemImage: "checkmark.circle")
+                                }.tint(.green)
                             }
-                            .tint(.green)
                         }
                         .swipeActions(edge: .trailing) {
-                            Button {
-                                showFolderPicker = item
-                            } label: {
+                            Button { showFolderPicker = item } label: {
                                 Label("Move to Project", systemImage: "folder.badge.plus")
-                            }
-                            .tint(.blue)
-
-                            Button(role: .destructive) {
-                                discardItem(item)
-                            } label: {
-                                Label("Delete", systemImage: "trash")
+                            }.tint(.blue)
+                            Button(role: .destructive) { discardItem(item) } label: {
+                                Label("Trash", systemImage: "trash")
                             }
                         }
                     }
@@ -256,6 +255,7 @@ struct InboxView: View {
         case .all: "No source items yet. Start recording, importing, or creating a note."
         case .unassigned: "All items are assigned to a project. Nice work."
         case .flagged: "No flagged items. Flag items to mark them for follow-up."
+        case .trash: "Trash is empty."
         }
     }
 
@@ -264,25 +264,25 @@ struct InboxView: View {
     private var filteredItems: [KnowledgeItem] {
         var result = allItems
 
-        // Full-text search via SearchService
-        if !searchText.isEmpty {
-            if matchingIDs.isEmpty {
-                result = []
-            } else {
-                result = result.filter { matchingIDs.contains($0.id) }
-            }
+        // Exclude trash unless viewing trash
+        if filterMode != .trash, let trashID = trashFolderID {
+            result = result.filter { $0.folderID != trashID }
+        }
+        if filterMode == .trash, let trashID = trashFolderID {
+            result = result.filter { $0.folderID == trashID }
         }
 
-        // Filter mode
+        // Full-text search via SearchService
+        if !searchText.isEmpty {
+            if matchingIDs.isEmpty { result = [] }
+            else { result = result.filter { matchingIDs.contains($0.id) } }
+        }
+
         switch filterMode {
-        case .needsReview:
-            result = result.filter { $0.inboxDate != nil }
-        case .all:
-            break
-        case .unassigned:
-            result = result.filter { $0.projectID == nil && $0.folderID == nil }
-        case .flagged:
-            result = result.filter { $0.isFlagged }
+        case .needsReview: result = result.filter { $0.inboxDate != nil }
+        case .all, .trash: break
+        case .unassigned: result = result.filter { $0.projectID == nil && $0.folderID == nil }
+        case .flagged: result = result.filter { $0.isFlagged }
         }
 
         return result
@@ -342,6 +342,10 @@ struct InboxView: View {
         try? service.removeFromInbox(item)
     }
 
+    private func loadTrashFolder() {
+        trashFolderID = (try? TrashService(context: modelContext).trashFolder())?.id
+    }
+
     private func discardItem(_ item: KnowledgeItem) {
         let trash = TrashService(context: modelContext)
         try? trash.moveToTrash(item)
@@ -385,17 +389,17 @@ struct InboxView: View {
     }
 
     private func assignToProject(_ item: KnowledgeItem, project: Project) {
-        item.projectID = project.id
-        if item.inboxDate != nil {
-            let service = KnowledgeItemService(context: modelContext)
-            try? service.removeFromInbox(item)
-        }
-        try? modelContext.save()
+        let itemID = item.id
+        let projectID = project.id
+
+        try? ProjectService(context: modelContext).addItem(itemID, to: projectID)
+
+        showFolderPicker = nil
+        navigateToProject = project
     }
 
     private func removeFromProject(_ item: KnowledgeItem) {
-        item.projectID = nil
-        try? modelContext.save()
+        try? ProjectService(context: modelContext).removeItem(item.id)
     }
 
     private func formatDuration(_ seconds: Double) -> String {

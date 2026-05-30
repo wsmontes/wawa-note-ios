@@ -28,6 +28,8 @@ struct GitHubIssuesImporter: FormatImporter {
         )
         item.bodyText = buildBody(for: issues)
         item.tags = buildTags(for: issues)
+        item.isImported = true
+        item.importSourceURL = url.absoluteString
 
         AppLog.general.info("Imported \(issues.count) GitHub issues into one KnowledgeItem")
         return ImportResult(knowledgeItem: item, artifacts: [:], warnings: [])

@@ -124,6 +124,11 @@ struct NoteEditorView: View {
                 try? modelContext.save()
             }
 
+            // Trigger pipeline for analysis if there's content
+            if let body = item.bodyText, !body.isEmpty {
+                ContentPipelineService.shared.process( item.id, using: modelContext)
+            }
+
         case .edit(let item):
             let service = KnowledgeItemService(context: modelContext)
             try? service.updateItem(

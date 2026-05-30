@@ -42,9 +42,11 @@ final class ICSImporter: FormatImporter, @unchecked Sendable {
             }
         }
 
-        let item = KnowledgeItem(type: .meeting, title: title, createdAt: startDate, status: .draft, durationSeconds: duration)
+        let item = KnowledgeItem(type: .meeting, title: title, createdAt: startDate, status: .recorded, durationSeconds: duration)
         item.scheduledDate = startDate
         if let uid = eventUID { item.calendarEventIdentifier = uid }
+        item.isImported = true
+        item.importSourceURL = url.absoluteString
 
         return ImportResult(knowledgeItem: item, artifacts: [:], warnings: warnings)
     }

@@ -104,9 +104,10 @@ final class ProjectConversionService {
             iconName: "folder.fill"
         )
 
-        // Link the source item to the project
-        item.projectID = project.id
-        item.updatedAt = Date()
+        // Link the source item to the project (preserve existing assignment)
+        if item.projectID == nil {
+            try? projectService.addItem(item.id, to: project.id, startPipeline: false)
+        }
 
         // Create edge: item belongs to project
         try edgeService.create(
@@ -182,27 +183,7 @@ final class ProjectConversionService {
     // MARK: - Helpers
 
     private func buildItemContext(_ item: KnowledgeItem) -> String {
-        var ctx = "Title: \(item.title)\n"
-
-        if let analysis = try? fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) {
-            if !analysis.shortSummary.isEmpty {
-                ctx += "Summary: \(analysis.shortSummary)\n"
-            }
-            if !analysis.actionItems.isEmpty {
-                ctx += "Actions:\n"
-                for a in analysis.actionItems.prefix(5) {
-                    ctx += "- \(a.task)"
-                    if let owner = a.owner { ctx += " (owner: \(owner))" }
-                    ctx += "\n"
-                }
-            }
-            if !analysis.decisions.isEmpty {
-                ctx += "Decisions:\n"
-                for d in analysis.decisions.prefix(5) { ctx += "- \(d.title)\n" }
-            }
-        }
-
-        return ctx
+        ItemContextBuilder.buildItemContext(item: item, fileStore: fileStore)
     }
 
     private func resolveRef(

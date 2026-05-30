@@ -16,7 +16,8 @@ final class AudioImportService: @unchecked Sendable {
     // MARK: - Format support
 
     static let supportedUTTypes: [UTType] = [
-        .mpeg4Audio, .mp3, .wav, .aiff
+        .mpeg4Audio, .mp3, .wav, .aiff,
+        .mpeg4Movie, .quickTimeMovie, .movie
     ]
 
     func canRead(url: URL) -> Bool {
@@ -43,6 +44,17 @@ final class AudioImportService: @unchecked Sendable {
         let ext = url.pathExtension.lowercased()
         guard ext == "m4a" || ext == "aac" || ext == "mp4" else { return false }
         return (try? AVAudioPlayer(contentsOf: url)) != nil
+    }
+
+    /// Copies or converts audio into the meeting artifact directory.
+    /// Handles both native M4A/AAC (direct copy) and other formats (ExtAudioFile conversion).
+    func storeAudio(sourceURL: URL, itemID: UUID, using artifactStore: FileArtifactStore) async throws {
+        let destURL = artifactStore.audioFileURL(for: itemID)
+        if isNativeM4ACompatible(sourceURL) {
+            try artifactStore.copyAudioToMeeting(sourceURL: sourceURL, meetingId: itemID)
+        } else {
+            try await convertToAAC(inputURL: sourceURL, outputURL: destURL)
+        }
     }
 
     // MARK: - Metadata extraction

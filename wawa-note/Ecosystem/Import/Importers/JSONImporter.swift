@@ -69,6 +69,9 @@ final class JSONImporter: FormatImporter, @unchecked Sendable {
             item.id = uuid
         }
 
+        item.isImported = true
+        item.importSourceURL = url.absoluteString
+
         var warnings: [String] = []
         if imported.version == nil {
             warnings.append("No version field in JSON")

@@ -41,18 +41,35 @@ final class ProjectService {
         return try context.fetch(descriptor)
     }
 
-    func addItem(_ itemID: UUID, to projectID: UUID) throws {
+    /// Standardized entry point for adding any item to a project.
+    /// Handles: projectID assignment, inbox removal, timestamp, persistence,
+    /// state tracking, and background pipeline (transcription → analysis → ingestion).
+    /// - Parameters:
+    ///   - startPipeline: Set to false only when downstream work must complete first
+    ///     (e.g. audio file storage) and the caller will start the pipeline manually.
+    func addItem(_ itemID: UUID, to projectID: UUID, startPipeline: Bool = true) throws {
         guard let item = try fetchItem(itemID) else { return }
         item.projectID = projectID
         item.updatedAt = Date()
+        if item.inboxDate != nil {
+            item.inboxDate = nil
+        }
         try context.save()
+        ProjectIngestionState.shared.start(projectID)
+        if startPipeline {
+            ContentPipelineService.shared.process( itemID, using: context)
+        }
     }
 
     func removeItem(_ itemID: UUID) throws {
         guard let item = try fetchItem(itemID) else { return }
+        let previousProjectID = item.projectID
         item.projectID = nil
         item.updatedAt = Date()
         try context.save()
+        if let pid = previousProjectID {
+            ProjectIngestionState.shared.finish(pid)
+        }
     }
 
     func deleteProject(_ project: Project) throws {

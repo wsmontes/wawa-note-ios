@@ -6,31 +6,55 @@ import AVFoundation
 struct HomeView: View {
     @EnvironmentObject private var coordinator: RecordingCoordinator
     @Query(sort: \Project.updatedAt, order: .reverse) private var projects: [Project]
+    @Query(sort: \KnowledgeItem.updatedAt, order: .reverse) private var allItems: [KnowledgeItem]
     @Environment(\.modelContext) private var modelContext
 
     @StateObject private var captureVM = CaptureViewModel()
     @State private var navigateToItem: KnowledgeItem?
+    @State private var navigateToProject: Project?
     @State private var showFilePicker = false
+    @State private var targetProjectForImport: Project?
     @State private var pendingImport: ImportPending?
     @State private var importError: String?
     @State private var showCreationSheet = false
     @State private var importProgress: String?
+    @State private var expandedProjectIDs: Set<UUID> = []
 
     private let importService = AudioImportService()
     private let artifactStore = FileArtifactStore()
+    private let importRouter = ImportRouter(importers: [
+        AudioImportService(),
+        PlainTextImporter(),
+        MarkdownImporter(),
+        JSONImporter(),
+        PDFImporter(),
+        HTMLImporter(),
+        RTFImporter(),
+        SRTImporter(),
+        ICSImporter(),
+        GitHubIssuesImporter()
+    ])
 
     var body: some View {
-        VStack(spacing: 0) {
+        ZStack {
             switch captureVM.recordingState {
             case .recording, .paused:
                 recordingPanel
             case .stopped:
-                postRecordingPanel
+                defaultSurface
+                    .onAppear {
+                        if let itemId = captureVM.savedItemId,
+                           let item = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemId) {
+                            navigateToItem = item
+                        }
+                        captureVM.finishCapture()
+                    }
             default:
                 defaultSurface
             }
         }
         .background(Color(.systemGroupedBackground))
+        .animation(.easeInOut(duration: 0.2), value: captureVM.recordingState)
         .overlay(alignment: .top) {
             if let progress = importProgress {
                 HStack {
@@ -40,75 +64,80 @@ struct HomeView: View {
                 .padding(.horizontal, 20).padding(.vertical, 10)
                 .background(.blue, in: Capsule())
                 .padding(.top, 8)
-                .animation(.easeInOut, value: importProgress != nil)
             }
         }
-        .animation(.easeInOut(duration: 0.25), value: captureVM.recordingState)
         .task {
             await backfillEmbeddingsIfNeeded()
             await scanSharedDirectoryAndImport()
         }
         .navigationDestination(item: $navigateToItem) { KnowledgeDetailView(item: $0) }
-        .fileImporter(isPresented: $showFilePicker, allowedContentTypes: AudioImportService.supportedUTTypes, allowsMultipleSelection: true) { handleFilePick($0) }
-        .sheet(item: $pendingImport) { ImportFormView(sourceURL: $0.url, metadata: $0.metadata, isFromShareExtension: $0.isFromShareExtension) { navigateToItem = $0; pendingImport = nil } }
+        .navigationDestination(item: $navigateToProject) { ProjectDetailView(project: $0) }
+        .fileImporter(isPresented: $showFilePicker, allowedContentTypes: importRouter.allUTTypes(), allowsMultipleSelection: true) { handleFilePick($0) }
+        .sheet(item: $pendingImport) { imp in
+            ImportFormView(
+                sourceURL: imp.url,
+                kind: imp.kind,
+                textImporter: imp.textImporter,
+                isFromShareExtension: imp.isFromShareExtension
+            ) { item in
+                if let target = targetProjectForImport {
+                    try? ProjectService(context: modelContext).addItem(item.id, to: target.id)
+                } else {
+                    ContentPipelineService.shared.process( item.id, using: modelContext)
+                }
+                navigateToItem = item
+                pendingImport = nil
+            }
+        }
         .onOpenURL { if $0.scheme == "wawanote" { Task { await scanSharedDirectoryAndImport() } } }
         .alert("Import Error", isPresented: .constant(importError != nil)) { Button("OK") { importError = nil } } message: { Text(importError ?? "") }
         .sheet(isPresented: $showCreationSheet) { CreationSheetView() }
-        .onAppear { captureVM.bind(coordinator: coordinator) }
+        .onAppear {
+            captureVM.bind(coordinator: coordinator)
+            captureVM.modelContext = modelContext
+        }
     }
 
-    // MARK: - Default surface
+    // ── Default surface ───────────────────────────────────────
 
     private var defaultSurface: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 12) {
+            VStack(spacing: 4) {
                 Image(.wawaSymbolGradient)
                     .resizable().aspectRatio(contentMode: .fit)
-                    .frame(width: 56, height: 56)
-                    .shadow(color: .blue.opacity(0.15), radius: 12, y: 4)
-                Text("wawa-note")
-                    .font(.title2).fontWeight(.semibold)
+                    .frame(width: 96, height: 96)
+                    .shadow(color: .blue.opacity(0.15), radius: 16, y: 4)
+                Text("wawa-note").font(.title2).fontWeight(.semibold)
                 Text("Capture, organize, understand")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
-            .padding(.top, 48)
-            .padding(.bottom, 24)
+            .padding(.top, 0).padding(.bottom, 20)
 
             if !projects.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        ForEach(projects.prefix(5)) { project in
-                            NavigationLink(value: project) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "folder.fill").font(.caption)
-                                    Text(project.name).font(.subheadline).lineLimit(1)
-                                }
-                                .padding(.horizontal, 14).padding(.vertical, 10)
-                                .background(Color(.systemBackground))
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.horizontal, 20)
+                Text("Projects").font(.caption).foregroundStyle(.secondary).textCase(.uppercase)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20).padding(.bottom, 6)
+                List {
+                    ForEach(projects) { project in projectRow(project) }
+                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                        .listRowBackground(Color(.systemBackground))
+                        .listRowSeparator(.hidden)
                 }
-                .padding(.bottom, 12)
-            }
-
-            Spacer()
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+            } else { Spacer() }
         }
+        .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { expandedProjectIDs = [] } }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 0) {
                 Divider()
                 HStack(spacing: 16) {
                     Button(action: { captureVM.startRecording() }) {
                         HStack(spacing: 8) {
-                            Image(systemName: "record.circle.fill")
-                                .font(.title3).symbolRenderingMode(.hierarchical)
+                            Image(systemName: "record.circle.fill").font(.title3).symbolRenderingMode(.hierarchical)
                             Text("Record").font(.headline)
                         }
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity).frame(height: 52)
+                        .foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 52)
                         .background(LinearGradient(colors: [.red, .red.opacity(0.85)], startPoint: .leading, endPoint: .trailing))
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                     }
@@ -116,180 +145,155 @@ struct HomeView: View {
                         VStack(spacing: 4) {
                             Image(systemName: "square.and.arrow.down").font(.subheadline)
                             Text("Import").font(.caption2)
-                        }
-                        .foregroundStyle(.primary)
-                        .frame(width: 60, height: 52)
+                        }.foregroundStyle(.primary).frame(width: 60, height: 52)
                         .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
                     }
                     Button(action: { showCreationSheet = true }) {
                         VStack(spacing: 4) {
                             Image(systemName: "plus.circle").font(.subheadline)
                             Text("New").font(.caption2)
-                        }
-                        .foregroundStyle(.primary)
-                        .frame(width: 60, height: 52)
+                        }.foregroundStyle(.primary).frame(width: 60, height: 52)
                         .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
                     }
                 }
-                .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 8)
-                .background(.bar)
+                .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 8).background(.bar)
+                .shadow(color: .black.opacity(0.08), radius: 4, y: -2)
             }
         }
     }
 
-    // MARK: - Recording panel
+    // ── Project Row ───────────────────────────────────────────
+
+    private func projectRow(_ project: Project) -> some View {
+        let projectItems = allItems.filter { $0.projectID == project.id }
+        let isExpanded = expandedProjectIDs.contains(project.id)
+
+        return VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Image(systemName: project.iconName ?? "folder.fill")
+                    .font(.title3).foregroundStyle(.blue)
+                    .frame(width: 32, height: 32)
+                    .background(Color.blue.opacity(0.1)).clipShape(RoundedRectangle(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(project.name).font(.subheadline).fontWeight(.medium)
+                    Text("\(projectItems.count) items · Updated \(project.updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer()
+                if isExpanded {
+                    Image(systemName: "chevron.up").font(.caption).foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .contentShape(Rectangle())
+            .onTapGesture { navigateToProject = project }
+            .onLongPressGesture(minimumDuration: 0.4) {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    if isExpanded { expandedProjectIDs.remove(project.id) }
+                    else { expandedProjectIDs.insert(project.id) }
+                }
+            }
+            .background(Color(.systemBackground))
+            .swipeActions(edge: .leading) {
+                Button { navigateToProject = project } label: {
+                    Label("Tasks", systemImage: "checklist")
+                }.tint(.green)
+                Button { navigateToProject = project } label: {
+                    Label("Timeline", systemImage: "calendar.day.timeline.leading")
+                }.tint(.orange)
+            }
+            .swipeActions(edge: .trailing) {
+                Button { startRecordingFor(project) } label: {
+                    Label("Record", systemImage: "record.circle")
+                }.tint(.red)
+                Button { targetProjectForImport = project; showFilePicker = true } label: {
+                    Label("Import", systemImage: "square.and.arrow.down")
+                }.tint(.blue)
+            }
+
+            if isExpanded {
+                Divider().padding(.leading, 56)
+                VStack(spacing: 0) {
+                    ForEach(projectItems.prefix(5)) { item in
+                        Button { navigateToItem = item } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: item.type.icon).font(.caption).foregroundStyle(item.type.color)
+                                Text(item.title.isEmpty ? "Untitled" : item.title)
+                                    .font(.subheadline).lineLimit(1).foregroundStyle(.primary)
+                                Spacer()
+                                Text(item.createdAt.formatted(date: .omitted, time: .shortened))
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }.padding(.horizontal, 20).padding(.vertical, 8)
+                        }
+                    }
+                    if projectItems.count > 5 {
+                        Button { navigateToProject = project } label: {
+                            Text("+\(projectItems.count - 5) more items").font(.caption).foregroundStyle(.blue)
+                                .padding(.horizontal, 20).padding(.vertical, 6)
+                        }
+                    }
+                    if projectItems.isEmpty {
+                        Text("No items yet").font(.caption).foregroundStyle(.secondary).padding(.vertical, 8)
+                    }
+                }
+                .background(Color(.secondarySystemBackground))
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func startRecordingFor(_ project: Project) {
+        captureVM.startRecording(projectID: project.id)
+    }
+
+    // ── Recording panel ───────────────────────────────────────
 
     private var recordingPanel: some View {
         let isPaused = captureVM.recordingState == .paused
-
         return VStack(spacing: 0) {
             Spacer()
-
-            VStack(spacing: 4) {
-                Image(.wawaSymbolGradient)
-                    .resizable().aspectRatio(contentMode: .fit)
-                    .frame(width: 28, height: 28)
-                Text("wawa-note").font(.caption).foregroundStyle(.secondary)
-            }
-
+            ScrollingWaveformView(level: captureVM.audioLevel, isRunning: !isPaused)
+                .frame(height: 64).padding(.horizontal, 16)
+            Spacer().frame(height: 24)
+            Text(captureVM.elapsedTimeFormatted)
+                .font(.system(size: 48, weight: .thin, design: .monospaced))
+                .foregroundStyle(isPaused ? .orange : .primary)
+            Text(isPaused ? "Paused" : "Recording")
+                .font(.subheadline).foregroundStyle(isPaused ? .orange : .secondary)
             Spacer()
-
-            // Recording indicator + timer
-            HStack(spacing: 12) {
-                Circle()
-                    .fill(isPaused ? .orange : .red)
-                    .frame(width: 12, height: 12)
-                    .scaleEffect(isPaused ? 1.0 : 1.3)
-                    .animation(isPaused ? .default : .easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isPaused)
-
-                Text(isPaused ? "Paused" : "Recording")
-                    .font(.headline)
-                    .foregroundStyle(isPaused ? .orange : .red)
-
-                Spacer()
-
-                Text(captureVM.elapsedTimeFormatted)
-                    .font(.system(.title2, design: .monospaced).bold())
-            }
-            .padding(.horizontal, 24)
-
-            // Audio meter
-            AudioLevelMeterView(level: captureVM.audioLevel)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
-
-            if let error = captureVM.errorMessage {
-                Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 20)
-            }
-
-            Spacer()
-
-            // Transport
-            HStack(spacing: 32) {
-                Button(action: { captureVM.stopRecording() }) {
-                    Image(systemName: "stop.circle.fill")
-                        .font(.system(size: 44))
-                        .foregroundStyle(.red)
-                }
-
+            HStack(spacing: 40) {
                 if isPaused {
                     Button(action: { captureVM.resumeRecording() }) {
-                        Image(systemName: "play.circle.fill")
-                            .font(.system(size: 56))
-                            .foregroundStyle(.green)
+                        ZStack {
+                            Circle().fill(.red).frame(width: 64, height: 64)
+                            Image(systemName: "record.circle.fill").font(.system(size: 28)).foregroundStyle(.white)
+                        }
+                    }
+                    Button(action: { captureVM.stopRecording() }) {
+                        Text("Finish").font(.headline).foregroundStyle(.primary)
+                            .frame(width: 80, height: 44)
+                            .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 22))
                     }
                 } else {
                     Button(action: { captureVM.pauseRecording() }) {
-                        Image(systemName: "pause.circle.fill")
-                            .font(.system(size: 56))
-                            .foregroundStyle(.orange)
-                    }
-                }
-
-                Button(action: {
-                    if let itemId = captureVM.savedItemId,
-                       let svc = try? KnowledgeItemService(context: modelContext),
-                       let item = try? svc.fetchItem(id: itemId) {
-                        item.isFlagged.toggle()
-                        try? modelContext.save()
-                    }
-                }) {
-                    Image(systemName: "star")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 44, height: 44)
-                        .background(Color(.tertiarySystemFill))
-                        .clipShape(Circle())
-                }
-            }
-            .padding(.bottom, 48)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemGroupedBackground))
-    }
-
-    // MARK: - Post-recording
-
-    private var postRecordingPanel: some View {
-        VStack(spacing: 0) {
-            Spacer()
-
-            if let stage = captureVM.pipelineStage {
-                HStack(spacing: 10) {
-                    if stage != .ready {
-                        ProgressView()
-                    } else {
-                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                    }
-                    Text(stage.rawValue)
-                        .font(.subheadline)
-                        .foregroundStyle(stage == .ready ? .green : .secondary)
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity)
-                .background(stage == .ready ? Color.green.opacity(0.08) : Color(.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .padding(.horizontal, 20)
-
-                if stage == .ready {
-                    if let itemId = captureVM.savedItemId {
-                        Button {
-                            if let item = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemId) {
-                                navigateToItem = item
-                            }
-                        } label: {
-                            Label("Open Source Item", systemImage: "doc.text")
-                                .frame(maxWidth: .infinity)
+                        ZStack {
+                            Circle().fill(.white).frame(width: 64, height: 64)
+                            Image(systemName: "pause.fill").font(.system(size: 24)).foregroundStyle(.orange)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 16)
                     }
-
-                    Button(action: { captureVM.finishCapture() }) {
-                        Label("Done", systemImage: "checkmark")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 8)
                 }
-            }
-
-            Spacer()
+            }.padding(.bottom, 48)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemGroupedBackground))
+        .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(.systemGroupedBackground))
     }
 
-    // MARK: - Import (unchanged)
+    // ── Import ────────────────────────────────────────────────
 
     private func handleFilePick(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
             guard !urls.isEmpty else { importError = "No file was selected."; return }
-            if urls.count == 1, let url = urls.first { stageSingleImport(url) }
-            else { Task { await importFilePickerFiles(urls) } }
+            if urls.count == 1, let url = urls.first { stageSingleImport(url) } else { Task { await importFiles(urls, deleteSource: false) } }
         case .failure(let e): importError = e.localizedDescription
         }
     }
@@ -297,104 +301,198 @@ struct HomeView: View {
     private func stageSingleImport(_ url: URL) {
         let didStart = url.startAccessingSecurityScopedResource()
         defer { if didStart { url.stopAccessingSecurityScopedResource() } }
-        guard importService.canRead(url: url) else { importError = "Format not supported."; return }
+
+        guard let importer = importRouter.importer(for: url) else {
+            importError = "Format not supported."
+            return
+        }
+
+        // Copy to temp so the security-scoped bookmark stays valid
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
         try? FileManager.default.removeItem(at: tempURL)
-        do { try FileManager.default.copyItem(at: url, to: tempURL) } catch { importError = error.localizedDescription; return }
-        Task {
-            do {
-                let metadata = try await importService.extractMetadata(url: tempURL)
-                await MainActor.run { pendingImport = ImportPending(url: tempURL, metadata: metadata, isFromShareExtension: false) }
-            } catch { await MainActor.run { importError = error.localizedDescription } }
+        do { try FileManager.default.copyItem(at: url, to: tempURL) } catch {
+            importError = error.localizedDescription; return
+        }
+
+        if importer.formatIdentifier == "audio" {
+            Task {
+                do {
+                    let meta = try await importService.extractMetadata(url: tempURL)
+                    await MainActor.run {
+                        pendingImport = ImportPending(
+                            url: tempURL,
+                            kind: .audio(meta),
+                            isFromShareExtension: false
+                        )
+                    }
+                } catch {
+                    await MainActor.run { importError = error.localizedDescription }
+                }
+            }
+        } else {
+            // Text/document — extract preview and present form
+            let preview = extractTextPreview(url: tempURL, importer: importer)
+            pendingImport = ImportPending(
+                url: tempURL,
+                kind: .text(preview),
+                textImporter: importer,
+                isFromShareExtension: false
+            )
         }
     }
 
-    private func importFilePickerFiles(_ urls: [URL]) async {
-        await importFiles(urls, deleteSource: false)
+    private func extractTextPreview(url: URL, importer: any FormatImporter) -> TextImportPreview {
+        let resourceValues = try? url.resourceValues(forKeys: [.fileSizeKey, .creationDateKey, .contentModificationDateKey])
+        let filename = url.deletingPathExtension().lastPathComponent
+        let fileSize = Int64(resourceValues?.fileSize ?? 0)
+        let creationDate = resourceValues?.creationDate ?? resourceValues?.contentModificationDate
+
+        var snippet = ""
+        if let handle = try? FileHandle(forReadingFrom: url),
+           let data = try? handle.read(upToCount: 4096),
+           let text = String(data: data, encoding: .utf8) {
+            snippet = String(text.prefix(500))
+        }
+
+        return TextImportPreview(
+            formatIdentifier: importer.formatIdentifier,
+            displayName: importer.displayName,
+            suggestedTitle: filename,
+            fileSize: fileSize,
+            creationDate: creationDate,
+            textSnippet: snippet
+        )
     }
 
     private func scanSharedDirectoryAndImport() async {
-        guard let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.wawa-note") else { return }
-        let sharedDir = containerURL.appendingPathComponent("Shared", isDirectory: true)
-        guard FileManager.default.fileExists(atPath: sharedDir.path) else { return }
-        guard let files = try? FileManager.default.contentsOfDirectory(at: sharedDir, includingPropertiesForKeys: nil) else { return }
+        guard let c = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.wawa-note") else { return }
+        let d = c.appendingPathComponent("Shared", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: d.path) else { return }
+        guard let files = try? FileManager.default.contentsOfDirectory(at: d, includingPropertiesForKeys: nil) else { return }
         let pending = files.filter { !$0.lastPathComponent.hasPrefix(".") }
         guard !pending.isEmpty else { return }
         await importFiles(pending, deleteSource: true)
     }
 
     private func importFiles(_ urls: [URL], deleteSource: Bool) async {
-        let total = urls.count
-        var imported = 0
+        let total = urls.count; var imported = 0
         await MainActor.run { importProgress = "Importing 0/\(total)..." }
 
         for url in urls {
             let didStart = url.startAccessingSecurityScopedResource()
             defer { if didStart { url.stopAccessingSecurityScopedResource() } }
-            guard importService.canRead(url: url) else { continue }
-            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
-            try? FileManager.default.removeItem(at: tempURL)
-            do { try FileManager.default.copyItem(at: url, to: tempURL) } catch { continue }
-            let metadata: ImportMetadata
-            do { metadata = try await importService.extractMetadata(url: tempURL) } catch { continue }
-            let itemId = await MainActor.run {
-                coordinator.createItemFromImport(title: metadata.suggestedTitle, date: metadata.creationDate ?? Date(), duration: metadata.duration)?.id
+
+            guard let importer = importRouter.importer(for: url) else { continue }
+
+            if importer.formatIdentifier == "audio" {
+                await importAudioFile(url, importer: importer, deleteSource: deleteSource)
+            } else {
+                await importTextFile(url, importer: importer, deleteSource: deleteSource)
             }
-            guard let itemId else { continue }
-            let destURL = artifactStore.audioFileURL(for: itemId)
-            do {
-                if importService.isNativeM4ACompatible(tempURL) {
-                    try artifactStore.copyAudioToMeeting(sourceURL: tempURL, meetingId: itemId)
+
+            imported += 1
+            await MainActor.run { importProgress = "Importing \(imported)/\(total)..." }
+        }
+
+        await MainActor.run { importProgress = nil; targetProjectForImport = nil }
+    }
+
+    private func importAudioFile(_ url: URL, importer: any FormatImporter, deleteSource: Bool) async {
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+        try? FileManager.default.removeItem(at: tempURL)
+        do { try FileManager.default.copyItem(at: url, to: tempURL) } catch { return }
+
+        let meta: ImportMetadata
+        do { meta = try await importService.extractMetadata(url: tempURL) } catch { return }
+
+        let itemId = await MainActor.run {
+            let item = coordinator.createItemFromImport(
+                title: meta.suggestedTitle,
+                date: meta.creationDate ?? Date(),
+                duration: meta.duration
+            )
+            if let target = targetProjectForImport, let item {
+                try? ProjectService(context: modelContext).addItem(item.id, to: target.id, startPipeline: false)
+            }
+            return item?.id
+        }
+        guard let itemId else { return }
+
+        do {
+            try await importService.storeAudio(sourceURL: tempURL, itemID: itemId, using: artifactStore)
+            try? FileManager.default.removeItem(at: tempURL)
+            if deleteSource { try? FileManager.default.removeItem(at: url) }
+            ContentPipelineService.shared.process( itemId, using: modelContext)
+        } catch {
+            await MainActor.run { coordinator.deleteItem(itemId) }
+        }
+    }
+
+    private func importTextFile(_ url: URL, importer: any FormatImporter, deleteSource: Bool) async {
+        do {
+            let result = try await importer.importFromURL(url)
+            let item = result.knowledgeItem
+            await MainActor.run {
+                modelContext.insert(item)
+                try? modelContext.save()
+                if let target = targetProjectForImport {
+                    try? ProjectService(context: modelContext).addItem(item.id, to: target.id)
                 } else {
-                    try await importService.convertToAAC(inputURL: tempURL, outputURL: destURL)
+                    ContentPipelineService.shared.process( item.id, using: modelContext)
                 }
-                try? FileManager.default.removeItem(at: tempURL)
-                if deleteSource { try? FileManager.default.removeItem(at: url) }
-                imported += 1
-                await MainActor.run { importProgress = "Importing \(imported)/\(total)..." }
-            } catch {
-                await MainActor.run { coordinator.deleteItem(itemId) }
+            }
+            if deleteSource { try? FileManager.default.removeItem(at: url) }
+        } catch {
+            await MainActor.run {
+                importError = "Failed to import \(url.lastPathComponent): \(error.localizedDescription)"
             }
         }
-        await MainActor.run { importProgress = nil }
     }
 
     private func backfillEmbeddingsIfNeeded() async {
         let flag = "embeddings_backfill_done_v1"
         guard !UserDefaults.standard.bool(forKey: flag) else { return }
         guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else { return }
-        let pipeline = EmbeddingPipelineService()
-        let items = (try? KnowledgeItemService(context: modelContext).allItems()) ?? []
-        await pipeline.backfillAll(items: items, using: provider) { _, _ in }
+        await EmbeddingPipelineService().backfillAll(items: allItems, using: provider) { _, _ in }
         UserDefaults.standard.set(true, forKey: flag)
     }
 }
 
-// MARK: - Supporting types
+// ── Waveform ─────────────────────────────────────────────────
+
+struct ScrollingWaveformView: View {
+    let level: Float; let isRunning: Bool
+    @State private var offset: CGFloat = 0; @State private var timer: Timer?
+
+    var body: some View {
+        TimelineView(.animation) { _ in
+            Canvas { context, size in
+                let midY = size.height / 2; let amp = size.height / 2 - 4
+                var path = Path(); path.move(to: CGPoint(x: 0, y: midY))
+                for i in 0...60 {
+                    let x = size.width * CGFloat(i) / 60
+                    let v = isRunning ? CGFloat(level) : 0.08
+                    let y = midY + CGFloat(sin(Double(i) * 0.5 + offset) * Double(amp) * Double(v) * 1.5)
+                    path.addLine(to: CGPoint(x: x, y: y))
+                }
+                context.stroke(path, with: .color(isRunning ? .red : .orange.opacity(0.4)),
+                               style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            }
+        }
+        .onChange(of: isRunning) { _, r in r ? start() : stop() }
+        .onAppear { if isRunning { start() } }
+        .onDisappear { stop() }
+    }
+    private func start() { stop(); timer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { _ in Task { @MainActor in offset += 0.15 } } }
+    private func stop() { timer?.invalidate(); timer = nil }
+}
+
+// MARK: - Import pending model
 
 struct ImportPending: Identifiable {
     let id = UUID()
     let url: URL
-    let metadata: ImportMetadata
+    let kind: ImportKind
+    var textImporter: (any FormatImporter)?
     let isFromShareExtension: Bool
-}
-
-struct AudioLevelMeterView: View {
-    let level: Float
-    private let barCount = 20
-
-    var body: some View {
-        GeometryReader { proxy in
-            let barWidth = max(2, (proxy.size.width / CGFloat(barCount)) - 2)
-            HStack(spacing: 2) {
-                ForEach(0..<barCount, id: \.self) { i in
-                    let threshold = Float(i) / Float(barCount)
-                    RoundedRectangle(cornerRadius: 1)
-                        .fill(level > threshold ? (level > 0.7 ? .red : .orange) : .secondary.opacity(0.15))
-                        .frame(width: barWidth, height: max(4, CGFloat(level > threshold ? level * 32 : 4)))
-                }
-            }
-        }
-        .frame(height: 40)
-    }
 }

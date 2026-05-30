@@ -1,4 +1,5 @@
 import Foundation
+import UniformTypeIdentifiers
 
 final class ImportRouter {
     private let importers: [any FormatImporter]
@@ -17,5 +18,9 @@ final class ImportRouter {
 
     func allImporters() -> [any FormatImporter] {
         importers
+    }
+
+    func allUTTypes() -> [UTType] {
+        importers.flatMap(\.supportedUTTypes)
     }
 }

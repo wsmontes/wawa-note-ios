@@ -75,8 +75,11 @@ final class MarkdownImporter: FormatImporter, @unchecked Sendable {
             createdAt: date ?? Date(),
             status: .draft,
             tags: tags,
+            bodyText: body,
             durationSeconds: durationSeconds
         )
+        item.isImported = true
+        item.importSourceURL = url.absoluteString
 
         if date == nil { warnings.append("No date in frontmatter, using current date") }
 

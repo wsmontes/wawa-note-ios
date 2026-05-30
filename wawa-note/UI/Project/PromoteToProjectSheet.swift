@@ -367,6 +367,9 @@ struct PromoteToProjectSheet: View {
     private func executeConversion(_ preview: ConversionPreview) {
         do {
             let project = try makeService().executeConversion(from: item, preview: preview)
+            // Pipeline handles analysis + ingestion (Step 3 picks up projectID from re-fetch)
+            // ProjectDetailView will show progress via ingestionState environment object
+            ContentPipelineService.shared.process( item.id, using: modelContext)
             dismiss()
             onComplete(project)
         } catch {

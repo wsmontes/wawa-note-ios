@@ -20,6 +20,7 @@ struct KnowledgeDetailView: View {
     @State private var editedTitle = ""
     @State private var editedBody = ""
     @State private var backlinks: [(edge: GraphEdge, sourceItem: KnowledgeItem)] = []
+    @State private var isPipelineProcessing = false
 
     private let fileStore = FileArtifactStore()
 
@@ -29,10 +30,10 @@ struct KnowledgeDetailView: View {
                 header
                     .padding(.horizontal, 16)
 
-                if isTranscribing {
+                if isTranscribing || isPipelineProcessing {
                     HStack(spacing: 10) {
                         ProgressView()
-                        Text(transcriptionProgress ?? "Transcribing...")
+                        Text(transcriptionProgress ?? (isPipelineProcessing ? "Processing..." : "Transcribing..."))
                             .font(.subheadline).foregroundStyle(.secondary)
                     }
                     .padding(12)
@@ -62,6 +63,7 @@ struct KnowledgeDetailView: View {
                 case .meeting:
                     meetingSections
                 case .note, .journalEntry:
+                    if analysis != nil { analysisCards }
                     textContentSection
                 case .webBookmark:
                     bookmarkSection
@@ -123,7 +125,29 @@ struct KnowledgeDetailView: View {
                 showPromoteSheet = false
             }
         }
-        .onAppear { loadData() }
+        .onAppear {
+            isPipelineProcessing = ContentPipelineService.shared.isProcessingItem(item.id)
+            Task { @MainActor in
+                await Task.yield()
+                loadData()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pipelineCompleted)) { n in
+            if n.object as? String == item.id.uuidString { isPipelineProcessing = false }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .transcriptReady)) { _ in
+            Task { @MainActor in
+                transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id)
+                isTranscribing = false; transcriptionProgress = nil
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .analysisReady)) { _ in
+            Task { @MainActor in
+                analysis = try? fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id)
+                isAnalyzing = false
+                loadData()
+            }
+        }
     }
 
     // MARK: - Header
@@ -177,10 +201,25 @@ struct KnowledgeDetailView: View {
         var b: [(String, String?, BadgeTone)] = []
         if item.audioFileRelativePath != nil { b.append(("Audio", "mic", .success)) }
         if item.transcriptionEngineId != nil { b.append(("Transcribed", "text.alignleft", .success)) }
-        if item.analysisProviderId != nil { b.append(("Analyzed", "sparkles", .success)) }
+        else if item.audioFileRelativePath != nil { b.append(("Not transcribed", "text.alignleft", .warning)) }
+        if item.analysisProviderId != nil {
+            let modelName = item.analysisProviderId ?? ""
+            b.append(("Analyzed · \(modelName)", "sparkles", .success))
+        } else if item.bodyText != nil && !item.bodyText!.isEmpty {
+            b.append(("Analysis pending", "sparkles", .neutral))
+        }
+        if item.projectID != nil { b.append((projectName ?? "In project", "folder", .success)) }
+        else { b.append(("No project", "folder", .neutral)) }
         if let cal = item.contextCalendarEventTitle { b.append((cal, "calendar", .neutral)) }
         if let route = item.contextAudioRoute { b.append((route, "airpodspro", .neutral)) }
         return b
+    }
+
+    private var projectName: String? {
+        guard let pid = item.projectID else { return nil }
+        var desc = FetchDescriptor<Project>(predicate: #Predicate { $0.id == pid })
+        desc.fetchLimit = 1
+        return (try? modelContext.fetch(desc).first)?.name
     }
 
     // MARK: - Meeting sections
@@ -254,7 +293,7 @@ struct KnowledgeDetailView: View {
             }
 
             // Analyze button — show when transcript exists but no analysis yet
-            if transcript != nil && analysis == nil && !isAnalyzing {
+            if transcript != nil && analysis == nil && !isAnalyzing && !isPipelineProcessing {
                 VStack(spacing: 12) {
                     Image(systemName: "sparkles")
                         .font(.largeTitle)
@@ -287,7 +326,7 @@ struct KnowledgeDetailView: View {
                 .padding(12)
                 .frame(maxWidth: .infinity)
             }
-        } else if item.audioFileRelativePath != nil && !isTranscribing {
+        } else if item.audioFileRelativePath != nil && !isTranscribing && !isPipelineProcessing {
             VStack(spacing: 12) {
                 Image(systemName: "text.alignleft")
                     .font(.largeTitle)
@@ -336,6 +375,79 @@ struct KnowledgeDetailView: View {
                 .font(.headline)
         }
         .padding(.bottom, 8)
+    }
+
+    // MARK: - Analysis cards (for notes, journals)
+
+    @ViewBuilder
+    private var analysisCards: some View {
+        if let analysis {
+            sectionHeader("Analysis", icon: "sparkles").padding(.horizontal, 16).padding(.top, 16)
+
+            VStack(alignment: .leading, spacing: 16) {
+                if !analysis.shortSummary.isEmpty {
+                    card(title: "Summary", systemImage: "doc.text") {
+                        Text(analysis.shortSummary).font(.body)
+                    }
+                }
+                if !analysis.actionItems.isEmpty {
+                    card(title: "Action Items", systemImage: "checklist") {
+                        ForEach(analysis.actionItems) { action in
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "circle").font(.caption).padding(.top, 3)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(action.task).font(.body)
+                                    if let owner = action.owner {
+                                        Text(owner).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+                if !analysis.decisions.isEmpty {
+                    card(title: "Decisions", systemImage: "checkmark.seal") {
+                        ForEach(analysis.decisions) { decision in
+                            Text(decision.title).font(.body).padding(.vertical, 2)
+                        }
+                    }
+                }
+                if !analysis.risks.isEmpty {
+                    card(title: "Risks", systemImage: "exclamationmark.triangle") {
+                        ForEach(analysis.risks) { risk in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(risk.risk).font(.body)
+                                if !risk.details.isEmpty {
+                                    Text(risk.details).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+                if !analysis.openQuestions.isEmpty {
+                    card(title: "Open Questions", systemImage: "questionmark.bubble") {
+                        ForEach(analysis.openQuestions) { q in
+                            Text(q.question).font(.body).padding(.vertical, 2)
+                        }
+                    }
+                }
+                if !analysis.entities.isEmpty {
+                    card(title: "Entities", systemImage: "person.3") {
+                        ForEach(analysis.entities.prefix(10)) { entity in
+                            HStack {
+                                Text(entity.name).font(.body)
+                                Spacer()
+                                Text(entity.type.rawValue).font(.caption).foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 1)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+        }
     }
 
     // MARK: - Text content (notes, journal)
@@ -592,6 +704,11 @@ struct KnowledgeDetailView: View {
                 let pipeline = EmbeddingPipelineService()
                 await pipeline.ensureEmbedding(for: item, using: provider)
             }
+
+            // Auto-run analysis after transcription if provider is configured
+            if let provider = try? ProviderRouter.resolveActive(context: modelContext) {
+                await runAnalysisWithProvider(provider)
+            }
         } catch let error as TranscriptionError {
             switch error {
             case .notAuthorized: transcriptionError = "Speech recognition off. Enable in Settings."
@@ -719,12 +836,16 @@ struct KnowledgeDetailView: View {
     // MARK: - Analysis
 
     private func runAnalysis() async {
-        guard transcript != nil else {
-            analysisError = "No transcript available. Transcribe first."
-            return
-        }
         guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
             analysisError = "No AI provider configured. Go to Settings."
+            return
+        }
+        await runAnalysisWithProvider(provider)
+    }
+
+    private func runAnalysisWithProvider(_ provider: any AIProvider) async {
+        guard transcript != nil else {
+            analysisError = "No transcript available. Transcribe first."
             return
         }
 

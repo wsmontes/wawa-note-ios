@@ -55,7 +55,7 @@ private struct AnalysisResponse: Decodable {
 // MARK: - Progress
 
 enum AnalysisProgress: Sendable {
-    case mapping(Int, Int)    // current chunk, total chunks
+    case mapping(Int, Int)
     case reducing
     case done
 }
@@ -65,10 +65,11 @@ enum AnalysisProgress: Sendable {
 final class AnalysisService: @unchecked Sendable {
     private let configService = AIConfigService.shared
     private let chunker = TranscriptChunker()
+    private let fileStore = FileArtifactStore()
 
     nonisolated(unsafe) var onProgress: (@Sendable (AnalysisProgress) -> Void)?
 
-    func analyze(transcript: Transcript, using provider: any AIProvider, model: String) async throws -> MeetingAnalysis {
+    func analyze(transcript: Transcript, using provider: any AIProvider, model: String, meetingId: UUID = UUID()) async throws -> MeetingAnalysis {
         let cfg = configService.featureConfig(for: "analysis")
         let systemPrompt = cfg?.systemPrompt ?? "You are a meeting analysis assistant. Return only valid JSON."
         let segmentsText = transcript.segments.map { seg in
@@ -81,26 +82,27 @@ final class AnalysisService: @unchecked Sendable {
 
         if totalChars <= maxChunk {
             let userPrompt = configService.renderPrompt(for: "analysis", variables: ["transcript": segmentsText.joined(separator: "\n")])
-            return try await singleAnalysis(provider: provider, model: model, systemPrompt: systemPrompt, userPrompt: userPrompt)
+            return try await singleAnalysis(provider: provider, model: model, systemPrompt: systemPrompt, userPrompt: userPrompt, meetingId: meetingId)
         }
 
         AppLog.provider.info("Using map-reduce for \(totalChars) chars (\(model) context)")
         let chunks = chunker.chunkTranscript(transcript, maxCharsPerChunk: maxChunk)
-        return try await mapReduceAnalysis(chunks: chunks, provider: provider, model: model, systemPrompt: systemPrompt)
+        return try await mapReduceAnalysis(chunks: chunks, provider: provider, model: model, systemPrompt: systemPrompt, meetingId: meetingId)
     }
 
     // MARK: - Direct (single request)
 
-    private func singleAnalysis(provider: any AIProvider, model: String, systemPrompt: String, userPrompt: String) async throws -> MeetingAnalysis {
+    private func singleAnalysis(provider: any AIProvider, model: String, systemPrompt: String, userPrompt: String, meetingId: UUID) async throws -> MeetingAnalysis {
         let request = AIRequest(
             model: model,
             messages: [
                 AIMessage(role: .system, content: [.text(systemPrompt)]),
                 AIMessage(role: .user, content: [.text(userPrompt)])
-            ]
+            ],
+            responseFormat: .jsonObject
         )
         let response = try await provider.send(request)
-        return parseResponse(response.content, meetingId: UUID(), providerId: provider.id, model: model)
+        return await parseResponse(response.content, meetingId: meetingId, providerId: provider.id, model: model, provider: provider)
     }
 
     // MARK: - Map-Reduce
@@ -108,8 +110,7 @@ final class AnalysisService: @unchecked Sendable {
     private static let maxConcurrentChunks = 3
     private static let maxRetries = 3
 
-    private func mapReduceAnalysis(chunks: [TextChunk], provider: any AIProvider, model: String, systemPrompt: String) async throws -> MeetingAnalysis {
-        // MAP: Summarize each chunk with limited concurrency and retry
+    private func mapReduceAnalysis(chunks: [TextChunk], provider: any AIProvider, model: String, systemPrompt: String, meetingId: UUID) async throws -> MeetingAnalysis {
         let chunkSummaries = await summarizeChunksWithLimit(chunks, provider: provider, model: model)
 
         let validSummaries = chunkSummaries.compactMap(\.value)
@@ -124,7 +125,6 @@ final class AnalysisService: @unchecked Sendable {
 
         AppLog.provider.info("Map phase done: \(validSummaries.count) summaries")
 
-        // REDUCE: Consolidate summaries into final analysis
         await MainActor.run { onProgress?(.reducing) }
 
         let combined = validSummaries.enumerated().map { idx, summary in
@@ -145,19 +145,18 @@ final class AnalysisService: @unchecked Sendable {
             messages: [
                 AIMessage(role: .system, content: [.text(systemPrompt)]),
                 AIMessage(role: .user, content: [.text(reducePrompt)])
-            ]
+            ],
+            responseFormat: .jsonObject
         )
         let response = try await sendWithRetry(provider: provider, request: request, maxRetries: Self.maxRetries)
-        return parseResponse(response.content, meetingId: UUID(), providerId: provider.id, model: model)
+        return await parseResponse(response.content, meetingId: meetingId, providerId: provider.id, model: model, provider: provider)
     }
 
-    /// Process chunks with limited concurrency (max 3 simultaneous requests)
     private func summarizeChunksWithLimit(_ chunks: [TextChunk], provider: any AIProvider, model: String) async -> [(index: Int, value: String?)] {
         let total = chunks.count
         var results: [(Int, String?)] = []
         results.reserveCapacity(total)
 
-        // Process in batches of maxConcurrentChunks
         var offset = 0
         while offset < total {
             let batchSize = min(Self.maxConcurrentChunks, total - offset)
@@ -214,7 +213,8 @@ final class AnalysisService: @unchecked Sendable {
         }
     }
 
-    /// Retry a request with exponential backoff for transient errors
+    /// Retry a request with exponential backoff. Retries on server errors (500, 502, 503, 504),
+    /// rate limits (429), timeouts, and transient network errors.
     private func sendWithRetry(provider: any AIProvider, request: AIRequest, maxRetries: Int) async throws -> AIResponse {
         var lastError: Error?
         for attempt in 0...maxRetries {
@@ -222,14 +222,25 @@ final class AnalysisService: @unchecked Sendable {
                 return try await provider.send(request)
             } catch let error as ProviderError {
                 lastError = error
-                if case .apiError(let code, _) = error, (code == 503 || code == 429), attempt < maxRetries {
+                let retryable: Bool = {
+                    switch error {
+                    case .apiError(let code, _):
+                        return code >= 500 || code == 429
+                    case .timeout, .networkUnavailable:
+                        return true
+                    default:
+                        return false
+                    }
+                }()
+                if retryable && attempt < maxRetries {
                     let delay = Double(1 << attempt) // 1s, 2s, 4s
-                    AppLog.provider.warning("Retrying after \(delay)s (attempt \(attempt + 1)/\(maxRetries), code \(code))")
+                    AppLog.provider.warning("Retrying after \(delay)s (attempt \(attempt + 1)/\(maxRetries), \(error))")
                     try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                     continue
                 }
                 throw error
             } catch {
+                // Non-ProviderError — retry if transient
                 lastError = error
                 if attempt < maxRetries {
                     let delay = Double(1 << attempt)
@@ -244,19 +255,67 @@ final class AnalysisService: @unchecked Sendable {
 
     // MARK: - Parse
 
-    private func parseResponse(_ content: String, meetingId: UUID, providerId: String, model: String) -> MeetingAnalysis {
+    private func parseResponse(_ content: String, meetingId: UUID, providerId: String, model: String, provider: any AIProvider) async -> MeetingAnalysis {
+        // Attempt 1: direct parse
         let cleaned = ProviderAdapter.normalizeJSON(content)
-        guard let data = cleaned.data(using: .utf8) else {
-            return buildFallback(rawContent: content, meetingId: meetingId, providerId: providerId, model: model)
+        if let data = cleaned.data(using: .utf8),
+           let parsed = tryDecode(AnalysisResponse.self, from: data) {
+            return buildAnalysis(from: parsed, meetingId: meetingId, providerId: providerId, model: model)
         }
 
-        do {
-            let decoder = JSONDecoder()
-            let parsed = try decoder.decode(AnalysisResponse.self, from: data)
+        // Attempt 2: retry with a "fix your JSON" prompt (save the failed response first)
+        saveRawResponse(content, meetingId: meetingId)
+        AppLog.provider.warning("Initial parse failed. Requesting JSON fix from provider...")
+
+        if let parsed = await tryRetryWithFix(provider: provider, model: model, failedJSON: cleaned, meetingId: meetingId) {
             return buildAnalysis(from: parsed, meetingId: meetingId, providerId: providerId, model: model)
+        }
+
+        AppLog.provider.error("All parse attempts failed for meeting \(meetingId). Using fallback.")
+        return buildFallback(rawContent: content, meetingId: meetingId, providerId: providerId, model: model)
+    }
+
+    /// Retry once with a "fix your JSON" prompt. Returns parsed DTO or nil.
+    private func tryRetryWithFix(provider: any AIProvider, model: String, failedJSON: String, meetingId: UUID) async -> AnalysisResponse? {
+        let fixPrompt = """
+        Your previous response was not valid JSON. Here is what you returned:
+
+        \(failedJSON.prefix(3000))
+
+        Return ONLY valid JSON matching the original schema. No markdown, no code fences, no explanatory text. The JSON must parse correctly with a standard JSON parser.
+        """
+
+        let request = AIRequest(
+            model: model,
+            messages: [
+                AIMessage(role: .system, content: [.text("You are a JSON repair assistant. Output ONLY valid JSON. No markdown, no code fences.")]),
+                AIMessage(role: .user, content: [.text(fixPrompt)])
+            ],
+            responseFormat: .jsonObject
+        )
+
+        do {
+            let response = try await provider.send(request)
+            saveRawResponse(response.content, meetingId: meetingId, filename: "provider.response.fix_attempt.txt")
+            let cleaned = ProviderAdapter.normalizeJSON(response.content)
+            if let data = cleaned.data(using: .utf8),
+               let parsed = tryDecode(AnalysisResponse.self, from: data) {
+                AppLog.provider.info("JSON fix retry succeeded")
+                return parsed
+            }
         } catch {
-            AppLog.provider.error("Failed to parse analysis JSON: \(error.localizedDescription)")
-            return buildFallback(rawContent: content, meetingId: meetingId, providerId: providerId, model: model)
+            AppLog.provider.error("JSON fix retry failed: \(error)")
+        }
+
+        return nil
+    }
+
+    private func tryDecode<T: Decodable>(_ type: T.Type, from data: Data) -> T? {
+        do {
+            return try JSONDecoder().decode(type, from: data)
+        } catch {
+            AppLog.provider.error("Decode failed for \(T.self): \(error)")
+            return nil
         }
     }
 
@@ -280,7 +339,8 @@ final class AnalysisService: @unchecked Sendable {
     }
 
     private func buildFallback(rawContent: String, meetingId: UUID, providerId: String, model: String) -> MeetingAnalysis {
-        MeetingAnalysis(
+        saveRawResponse(rawContent, meetingId: meetingId)
+        return MeetingAnalysis(
             meetingId: meetingId, providerId: providerId, model: model,
             shortSummary: "Analysis could not be parsed.",
             detailedSummary: "See raw response for details.",
@@ -288,8 +348,8 @@ final class AnalysisService: @unchecked Sendable {
         )
     }
 
-    func saveRawResponse(_ content: String, meetingId: UUID, fileStore: FileArtifactStore = FileArtifactStore()) {
-        let url = fileStore.meetingDirectoryURL(for: meetingId).appendingPathComponent("provider.response.raw.txt")
+    func saveRawResponse(_ content: String, meetingId: UUID, fileStore: FileArtifactStore = FileArtifactStore(), filename: String = "provider.response.raw.txt") {
+        let url = fileStore.meetingDirectoryURL(for: meetingId).appendingPathComponent(filename)
         try? content.data(using: .utf8)?.write(to: url, options: .atomic)
     }
 

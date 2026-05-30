@@ -180,13 +180,15 @@ struct JournalEditorView: View {
             var tags: [String] = []
             if let mood = selectedMood { tags.append(mood.tag) }
 
-            let _ = try? service.createItem(
+            if let item = try? service.createItem(
                 type: .journalEntry,
                 title: finalTitle,
                 bodyText: bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bodyText,
                 folderID: folderID,
                 tags: tags
-            )
+            ), let body = item.bodyText, !body.isEmpty {
+                ContentPipelineService.shared.process( item.id, using: modelContext)
+            }
 
         case .edit(let item):
             var tags = item.tags.filter { !$0.hasPrefix("mood/") }

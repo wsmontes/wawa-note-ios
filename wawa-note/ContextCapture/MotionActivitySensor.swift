@@ -11,6 +11,12 @@ final class MotionActivitySensor: ContextSensor, @unchecked Sendable {
             return []
         }
 
+        // Safety check: verify plist key exists to prevent SIGKILL
+        guard Bundle.main.object(forInfoDictionaryKey: "NSMotionUsageDescription") != nil else {
+            AppLog.general.warning("MotionActivitySensor: NSMotionUsageDescription missing from Info.plist — skipping")
+            return []
+        }
+
         let manager = CMMotionActivityManager()
 
         return await withCheckedContinuation { continuation in

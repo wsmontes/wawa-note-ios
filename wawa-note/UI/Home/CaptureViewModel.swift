@@ -1,22 +1,22 @@
 import SwiftUI
 import Combine
+import SwiftData
 
 @MainActor
 final class CaptureViewModel: ObservableObject {
     @Published var recordingState: RecordingUIState = .idle
-    @Published var elapsedTime: TimeInterval = 0
-    @Published var audioLevel: Float = 0
     @Published var elapsedTimeFormatted: String = "00:00"
+    @Published var audioLevel: Float = 0
     @Published var errorMessage: String?
     @Published var savedItemId: UUID?
     @Published var pipelineStage: PipelineStage?
 
     enum PipelineStage: String {
-        case saving = "Saving audio..."
         case transcribing = "Transcribing..."
         case analyzing = "Analyzing..."
-        case ready = "Ready"
     }
+
+    var modelContext: ModelContext?
 
     private var coordinator: RecordingCoordinator?
     private var cancellables: Set<AnyCancellable> = []
@@ -26,26 +26,41 @@ final class CaptureViewModel: ObservableObject {
     func bind(coordinator: RecordingCoordinator) {
         guard self.coordinator == nil else { return }
         self.coordinator = coordinator
-        pullState()
-        coordinator.objectWillChange.sink { [weak self] _ in self?.pullState() }
+
+        coordinator.$state
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.recordingState = $0 }
             .store(in: &cancellables)
+
+        coordinator.$elapsedTime
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.elapsedTimeFormatted = coordinator.elapsedTimeFormatted }
+            .store(in: &cancellables)
+
+        coordinator.$audioLevel
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.audioLevel = $0 }
+            .store(in: &cancellables)
+
+        coordinator.$errorMessage
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.errorMessage = $0 }
+            .store(in: &cancellables)
+
+        coordinator.$savedItemId
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.savedItemId = $0 }
+            .store(in: &cancellables)
+
+        recordingState = coordinator.state
+        elapsedTimeFormatted = coordinator.elapsedTimeFormatted
+        audioLevel = coordinator.audioLevel
+        savedItemId = coordinator.savedItemId
     }
 
-    private func pullState() {
-        guard let c = coordinator else { return }
-        recordingState = c.state
-        elapsedTime = c.elapsedTime
-        audioLevel = c.audioLevel
-        elapsedTimeFormatted = c.elapsedTimeFormatted
-        errorMessage = c.errorMessage
-        savedItemId = c.savedItemId
-    }
-
-    // MARK: - Actions
-
-    func startRecording(title: String? = nil) {
+    func startRecording(title: String? = nil, projectID: UUID? = nil) {
         pipelineStage = nil
-        coordinator?.startRecording(title: title)
+        coordinator?.startRecording(title: title, projectID: projectID)
     }
 
     func pauseRecording() { coordinator?.pauseRecording() }
@@ -53,27 +68,22 @@ final class CaptureViewModel: ObservableObject {
 
     func stopRecording() {
         coordinator?.stopRecording()
-        Task { await runPipeline() }
+        launchPipeline()
     }
 
     func finishCapture() {
         pipelineStage = nil
         savedItemId = nil
         errorMessage = nil
-        // Reset coordinator state back to idle so user returns to default surface
         coordinator?.returnToIdle()
     }
 
     // MARK: - Pipeline
 
-    private func runPipeline() async {
-        pipelineStage = .saving
-        try? await Task.sleep(nanoseconds: 500_000_000)
-        pipelineStage = .transcribing
-        try? await Task.sleep(nanoseconds: 600_000_000)
-        pipelineStage = .analyzing
-        try? await Task.sleep(nanoseconds: 400_000_000)
-        pipelineStage = .ready
+    private func launchPipeline() {
+        guard let itemId = savedItemId ?? coordinator?.savedItemId,
+              let ctx = modelContext else { return }
+        // Pipeline runs via singleton — survives navigation and backgrounding
+        ContentPipelineService.shared.process(itemId, using: ctx)
     }
 }
-

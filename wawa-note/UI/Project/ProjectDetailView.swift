@@ -10,6 +10,7 @@ struct ProjectDetailView: View {
     @State private var tasks: [TaskItem] = []
     @State private var projectItems: [KnowledgeItem] = []
     @State private var selectedTab = 0
+    @ObservedObject private var ingestionState = ProjectIngestionState.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -73,6 +74,11 @@ struct ProjectDetailView: View {
             }
         }
         .task { loadData() }
+        .onChange(of: ingestionState.activeProjectIDs) { _, newValue in
+            if !newValue.contains(project.id) {
+                loadData()
+            }
+        }
     }
 
     // MARK: - Header
@@ -110,6 +116,19 @@ struct ProjectDetailView: View {
                 statLabel("\(tasks.filter { $0.status == .done }.count)", "Done")
                 statLabel("\(projectItems.count)", "Items")
             }
+
+            if ingestionState.activeProjectIDs.contains(project.id) {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("Analyzing new item...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.blue.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
         }
         .padding(16)
         .background(Color(.systemBackground))
@@ -134,54 +153,70 @@ struct ProjectDetailView: View {
                 VStack(spacing: 12) {
                     Spacer().frame(height: 40)
                     Image(systemName: "doc.text.magnifyingglass")
-                        .font(.title)
-                        .foregroundStyle(.secondary)
+                        .font(.title).foregroundStyle(.secondary)
                     Text("No items in this project")
                         .font(.headline)
-                    Text("Promote a meeting or add items from the Knowledge library.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 40)
+                    Text("Promote a meeting or add items from the library.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center).padding(.horizontal, 40)
                 }
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(projectItems) { item in
-                            NavigationLink {
-                                KnowledgeDetailView(item: item)
-                            } label: {
-                                HStack(spacing: 10) {
-                                    Image(systemName: item.type.icon)
-                                        .font(.title3)
-                                        .foregroundStyle(item.type.color)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(item.title.isEmpty ? "Untitled" : item.title)
-                                            .font(.subheadline)
-                                            .foregroundStyle(.primary)
+                List {
+                    ForEach(projectItems) { item in
+                        NavigationLink {
+                            KnowledgeDetailView(item: item)
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: item.type.icon)
+                                    .font(.title3).foregroundStyle(item.type.color)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.title.isEmpty ? "Untitled" : item.title)
+                                        .font(.subheadline).foregroundStyle(.primary)
+                                    HStack(spacing: 6) {
                                         Text(item.createdAt.formatted(date: .abbreviated, time: .shortened))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                            .font(.caption).foregroundStyle(.secondary)
+                                        if item.inboxDate != nil {
+                                            Text("·").font(.caption).foregroundStyle(.secondary)
+                                            Text("Unprocessed").font(.caption2).foregroundStyle(.orange)
+                                        }
+                                        if item.analysisProviderId != nil {
+                                            Text("·").font(.caption).foregroundStyle(.secondary)
+                                            Text("Analyzed").font(.caption2).foregroundStyle(.indigo)
+                                        }
                                     }
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption)
-                                        .foregroundStyle(.tertiary)
                                 }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 10)
                             }
-                            .buttonStyle(.plain)
-
-                            if item.id != projectItems.last?.id {
-                                Divider().padding(.leading, 48)
+                        }
+                        .swipeActions(edge: .leading) {
+                            if item.inboxDate != nil {
+                                Button {
+                                    let svc = KnowledgeItemService(context: modelContext)
+                                    try? svc.removeFromInbox(item)
+                                    loadData()
+                                } label: {
+                                    Label("Mark Reviewed", systemImage: "checkmark.circle")
+                                }.tint(.green)
+                            }
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button {
+                                try? ProjectService(context: modelContext).removeItem(item.id)
+                                loadData()
+                            } label: {
+                                Label("Remove", systemImage: "folder.badge.minus")
+                            }.tint(.orange)
+                            Button(role: .destructive) {
+                                let trash = TrashService(context: modelContext)
+                                try? trash.moveToTrash(item)
+                                loadData()
+                            } label: {
+                                Label("Trash", systemImage: "trash")
                             }
                         }
                     }
-                    .background(Color(.systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                    .padding(16)
                 }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
             }
         }
     }

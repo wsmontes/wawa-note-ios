@@ -58,25 +58,38 @@ struct ProjectListView: View {
     }
 
     private var listView: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(projects) { project in
-                    NavigationLink {
-                        ProjectDetailView(project: project)
+        List {
+            ForEach(projects) { project in
+                NavigationLink {
+                    ProjectDetailView(project: project)
+                } label: {
+                    projectRow(project)
+                }
+                .swipeActions(edge: .leading) {
+                    Button {
+                        // Quick capture into project
                     } label: {
-                        projectRow(project)
-                    }
-                    .buttonStyle(.plain)
-
-                    if project.id != projects.last?.id {
-                        Divider().padding(.leading, 56)
+                        Label("Record", systemImage: "record.circle")
+                    }.tint(.red)
+                }
+                .swipeActions(edge: .trailing) {
+                    Button {
+                        project.status = project.status == .archived ? .active : .archived
+                        try? modelContext.save()
+                    } label: {
+                        Label(project.status == .archived ? "Restore" : "Archive", systemImage: project.status == .archived ? "arrow.uturn.backward" : "archivebox")
+                    }.tint(.orange)
+                    Button(role: .destructive) {
+                        let svc = ProjectService(context: modelContext)
+                        try? svc.deleteProject(project)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
                     }
                 }
             }
-            .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .padding(16)
         }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
     }
 
     private func projectRow(_ project: Project) -> some View {
