@@ -6,9 +6,19 @@ This document defines the boundaries Claude Code should preserve when implementi
 
 Provider-specific APIs should be isolated behind internal contracts.
 
-## 2. AIProvider contract
+## 2. Current provider implementations
 
-Initial version:
+As of 2026-05-30, the following providers implement the AIProvider protocol:
+
+| Provider | File | Status |
+|---|---|---|
+| OpenAICompatibleProvider | `Providers/OpenAICompatibleProvider.swift` | Primary — handles OpenAI, LM Studio, Ollama, any /v1/chat/completions endpoint |
+| AnthropicProvider | `Providers/AnthropicProvider.swift` | Implemented — Claude models via Anthropic API |
+| GeminiProvider | `Providers/GeminiProvider.swift` | Implemented — Google Gemini models |
+| ProviderAdapter | `Providers/ProviderAdapter.swift` | Implemented — wraps provider selection + configuration |
+| ProviderRouter | `Providers/ProviderRouter.swift` | Implemented — routes requests by model/provider capability |
+
+## 3. AIProvider contract
 
 ```swift
 protocol AIProvider {

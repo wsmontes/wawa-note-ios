@@ -208,3 +208,114 @@ Consequences:
 - RecordView is a called screen, not a fixed tab.
 - "Record" as a tab would waste a slot on something used only during
   active meetings; Home provides more utility.
+
+---
+
+## ADR-0009: Navigation pivot to Capture / Inbox / Explore / Chat
+
+**Date:** 2026-05-29
+
+**Decision:** Replace the Home / Knowledge / Ask / Settings tab layout with Capture / Inbox / Explore / Chat.
+
+**Motivation:**
+
+The UX redesign plan identified four product ontology problems with the old navigation:
+1. Home mixed recording, project overview, and inbox duties into one overloaded surface
+2. Knowledge was a flat "All Items" browser without project-first organization
+3. Ask (KnowledgeQueryView) was a lightweight title-search UI not wired to semantic search, giving a poor experience
+4. Settings was wasting a primary tab slot
+
+The new structure maps directly to the product ontology:
+- **Capture** = create or import sources (record, scan, import, new)
+- **Inbox** = find, review, search, and triage all source items
+- **Explore** = manage projects/workspaces with project-first layout
+- **Chat** = agentic interaction with tool calling
+
+**Alternatives considered:**
+- Remove Chat tab per expert panel recommendation. Rejected: the agentic tool calling system makes Chat a differentiated feature.
+- Keep Ask tab and wire semantic search. Rejected: Chat with tools subsumes the Ask use case.
+
+**Consequences:**
+- KnowledgeQueryView deleted. No dedicated "Ask all items" screen.
+- ContentView rewritten with 4-tab layout.
+- Explore tab re-centered on Project browsing, not "All Items."
+- Inbox tab created as universal search/review surface.
+
+---
+
+## ADR-0010: Agentic chat with tool calling
+
+**Date:** 2026-05-29
+
+**Decision:** Implement an agentic chat system (AgentLoop) that calls tools (GetItem, ListItems, SearchKnowledge, GraphAndTaskTools) rather than simple Q&A.
+
+**Motivation:**
+
+The original "Ask" tab performed lightweight title-based context assembly. This was insufficient for a knowledge workspace where users need to:
+1. Query across all items with semantic understanding
+2. Get structured responses with citations to source evidence
+3. Perform actions like creating items, finding connections, listing project tasks
+
+The AgentLoop architecture enables:
+- Streaming responses with tool call / tool result interleaving
+- Token budget management via ContextWindowManager
+- Extensible tool registry for future capabilities
+- Evidence provenance in every response
+
+**Alternatives considered:**
+- Wire SemanticSearchService to a simple Q&A UI. Rejected: doesn't support actions or structured queries.
+- Use a third-party agent framework. Rejected: adds dependency; our needs are straightforward.
+
+**Consequences:**
+- 10 new files in `Domain/Agent/`.
+- ChatViewModel uses AgentLoop instead of raw provider calls.
+- Tool calls are surfaced in Chat UI as actionable cards.
+
+---
+
+## ADR-0011: VisionKit document scanner for image capture
+
+**Date:** 2026-05-30
+
+**Decision:** Use VisionKit's VNDocumentCameraViewController + Vision VNRecognizeTextRequest for document scanning instead of a custom camera or photo picker.
+
+**Motivation:**
+
+The `.image` KnowledgeItemType existed but was non-functional. Users need to capture documents (contracts, agendas, reports) into their knowledge workspace. VisionKit provides:
+- Auto edge detection and perspective correction
+- Multi-page scanning in a single session
+- Native iOS look and feel
+- On-device OCR via Vision framework (no network call)
+
+**Alternatives considered:**
+- PHPicker for photo library selection. Rejected: no edge detection, poor document quality.
+- Custom AVCaptureSession camera. Rejected: unnecessary complexity; VisionKit already solves the problem.
+- Remote OCR API. Rejected: privacy concern; on-device Vision is fast and accurate.
+
+**Consequences:**
+- ScannerView wraps VNDocumentCameraViewController via UIViewControllerRepresentable.
+- Multiple pages saved as scan_0.jpg, scan_1.jpg, etc. in a single KnowledgeItem.
+- OCR text concatenated into bodyText; piped through ContentPipelineService for AI analysis.
+- NSCameraUsageDescription added to Info.plist.
+
+---
+
+## ADR-0012: Live Activities for recording status
+
+**Date:** 2026-05-30
+
+**Decision:** Use ActivityKit to show recording timer on the lock screen during active recording.
+
+**Motivation:**
+
+Users lock their iPhone during meetings. A Live Activity shows:
+- That recording is active (trust signal)
+- Elapsed time
+- Paused/resumed state
+
+RecordingCoordinator already publishes state changes and elapsed time via a 1-second timer. Integrating ActivityKit requires minimal additional code.
+
+**Consequences:**
+- RecordingActivityAttributes + start/update/stop methods in RecordingCoordinator.
+- @preconcurrency import ActivityKit required for Swift 6 Sendable compatibility.
+- No Info.plist changes needed.

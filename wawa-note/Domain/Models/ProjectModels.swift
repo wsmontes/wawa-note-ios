@@ -9,6 +9,7 @@ final class Project {
     var name: String
     var slug: String
     var summary: String?
+    var customInstructions: String?
     var statusRaw: String
     var colorHex: String?
     var iconName: String?
@@ -25,6 +26,7 @@ final class Project {
         name: String,
         slug: String? = nil,
         summary: String? = nil,
+        customInstructions: String? = nil,
         status: ProjectStatus = .active,
         colorHex: String? = nil,
         iconName: String? = "folder.fill",
@@ -35,6 +37,7 @@ final class Project {
         self.name = name
         self.slug = slug ?? name.lowercased().replacingOccurrences(of: " ", with: "-")
         self.summary = summary
+        self.customInstructions = customInstructions
         self.statusRaw = status.rawValue
         self.colorHex = colorHex
         self.iconName = iconName

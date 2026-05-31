@@ -8,6 +8,8 @@ struct SettingsView: View {
     @Query(sort: \Folder.name) private var folders: [Folder]
 
     @State private var transcriptionMode: TranscriptionMode = TranscriptionSettings.shared.mode
+    @State private var autoTranscribe: Bool = AutomationSettings.shared.autoTranscribe
+    @State private var autoAnalyze: Bool = AutomationSettings.shared.autoAnalyze
 
     var body: some View {
         NavigationStack {
@@ -50,6 +52,24 @@ struct SettingsView: View {
                 }
                 .onChange(of: transcriptionMode) { _, newValue in
                     TranscriptionSettings.shared.mode = newValue
+                }
+
+                // Automation
+                Section {
+                    Toggle("Automatic Transcription", isOn: $autoTranscribe)
+                        .onChange(of: autoTranscribe) { _, v in AutomationSettings.shared.autoTranscribe = v }
+                    Toggle("Automatic Analysis", isOn: $autoAnalyze)
+                        .onChange(of: autoAnalyze) { _, v in AutomationSettings.shared.autoAnalyze = v }
+                } header: {
+                    Text("Automation")
+                } footer: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("When enabled, new recordings are transcribed and analyzed automatically after saving.")
+                        if autoAnalyze {
+                            Text("Automatic analysis uses a fast, affordable model (GPT-5 nano). Manual re-analysis uses your selected model.")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
 
                 // Knowledge workspace

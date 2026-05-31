@@ -40,6 +40,12 @@
 	</array>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Wawa Note shows your calendar events so you can start recordings with the right meeting context.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Wawa Note shows your calendar events so you can start recordings with the right meeting context.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>Wawa Note creates reminders from your meeting action items so you can track follow-ups.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Wawa Note creates reminders from your meeting action items so you can track follow-ups.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -55,7 +61,15 @@
 	<string>Wawa Note records your location once when you start a recording so you can remember where it happened. Location data stays on your device.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Speech recognition is used to turn your recorded meetings into a searchable transcript.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Wawa Note uses the camera to scan documents and extract text. Scanned content stays on your device.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Wawa Note matches meeting speakers with your contacts to enrich project context. Contact data stays on your device.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Wawa Note uses Face ID to protect your knowledge workspace.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>Wawa Note detects your motion activity to add context to your recordings (e.g., walking, driving). Motion data stays on your device.</string>
+	<key>NSFocusStatusUsageDescription</key>
+	<string>Wawa Note checks your Focus mode to avoid interruptions while recording meetings.</string>
 </dict>
 </plist>

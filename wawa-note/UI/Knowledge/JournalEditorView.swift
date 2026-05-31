@@ -1,8 +1,10 @@
 import SwiftUI
+import SwiftData
 
 struct JournalEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var contentPipeline: ContentPipelineService
 
     enum Mode {
         case create(folderID: UUID?)
@@ -180,13 +182,15 @@ struct JournalEditorView: View {
             var tags: [String] = []
             if let mood = selectedMood { tags.append(mood.tag) }
 
-            let _ = try? service.createItem(
+            if let item = try? service.createItem(
                 type: .journalEntry,
                 title: finalTitle,
                 bodyText: bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bodyText,
                 folderID: folderID,
                 tags: tags
-            )
+            ), let body = item.bodyText, !body.isEmpty {
+                contentPipeline.process( item.id, using: modelContext)
+            }
 
         case .edit(let item):
             var tags = item.tags.filter { !$0.hasPrefix("mood/") }

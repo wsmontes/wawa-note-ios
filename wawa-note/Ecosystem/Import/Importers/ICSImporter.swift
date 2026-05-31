@@ -25,11 +25,15 @@ final class ICSImporter: FormatImporter, @unchecked Sendable {
         var startDate = Date()
         var duration: Double?
         var eventUID: String?
+        var location: String?
+        var description: String?
 
         for line in text.split(separator: "\n") {
             let trimmed = String(line)
             if trimmed.hasPrefix("SUMMARY:") { title = String(trimmed.dropFirst(8)).trimmingCharacters(in: .whitespaces) }
             if trimmed.hasPrefix("UID:") { eventUID = String(trimmed.dropFirst(4)).trimmingCharacters(in: .whitespaces) }
+            if trimmed.hasPrefix("LOCATION:") { location = String(trimmed.dropFirst(9)).trimmingCharacters(in: .whitespaces) }
+            if trimmed.hasPrefix("DESCRIPTION:") { description = String(trimmed.dropFirst(12)).trimmingCharacters(in: .whitespaces) }
             if trimmed.hasPrefix("DTSTART:") {
                 let dateStr = String(trimmed.dropFirst(8))
                 startDate = parseICSDate(dateStr) ?? Date()
@@ -42,9 +46,19 @@ final class ICSImporter: FormatImporter, @unchecked Sendable {
             }
         }
 
-        let item = KnowledgeItem(type: .meeting, title: title, createdAt: startDate, status: .draft, durationSeconds: duration)
+        // Build bodyText so the pipeline has content to analyze
+        var bodyParts: [String] = []
+        if let loc = location, !loc.isEmpty { bodyParts.append("Location: \(loc)") }
+        if let dur = duration { bodyParts.append("Duration: \(Int(dur/60)) minutes") }
+        if let desc = description, !desc.isEmpty { bodyParts.append(desc) }
+        let bodyText = bodyParts.isEmpty ? nil : bodyParts.joined(separator: "\n\n")
+
+        let item = KnowledgeItem(type: .meeting, title: title, createdAt: startDate, status: .recorded, durationSeconds: duration)
+        item.bodyText = bodyText
         item.scheduledDate = startDate
         if let uid = eventUID { item.calendarEventIdentifier = uid }
+        item.isImported = true
+        item.importSourceURL = url.absoluteString
 
         return ImportResult(knowledgeItem: item, artifacts: [:], warnings: warnings)
     }

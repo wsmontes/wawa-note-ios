@@ -9,6 +9,7 @@ final class CoCreationService: @unchecked Sendable {
         model: String
     ) async throws -> CocreationResult {
         let config = AIConfigService.shared
+        let params = config.requestParams(for: "co_creation", model: model)
         let systemPrompt = config.systemPrompt(for: "co_creation")
             ?? "You are a collaborative AI writing partner."
         let userPrompt = (config.userPrompt(for: "co_creation") ?? "")
@@ -22,6 +23,8 @@ final class CoCreationService: @unchecked Sendable {
                 AIMessage(role: .system, content: [.text(systemPrompt)]),
                 AIMessage(role: .user, content: [.text(userPrompt)])
             ],
+            temperature: params.temperature,
+            maxTokens: params.maxTokens,
             responseFormat: .jsonObject
         ))
 

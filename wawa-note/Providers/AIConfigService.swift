@@ -168,4 +168,41 @@ final class AIConfigService: @unchecked Sendable {
         let safeTokens = max(1000, usableTokens)
         return safeTokens * 4
     }
+
+    // MARK: - Feature parameters (centralized resolution)
+
+    /// Resolved AI request parameters for a feature, adapting to model capabilities.
+    /// Call sites should use this instead of hardcoding temperature / maxTokens.
+    func requestParams(for feature: String, model: String) -> AIFeatureParams {
+        let feat = featureConfig(for: feature)
+        let preset = presetFor(model: model)
+        let isReasoning = preset?.reasoningModel ?? false
+
+        // Temperature: from feature config, nil for reasoning models
+        let temperature: Double? = isReasoning ? nil : (feat?.temperature)
+
+        // Max tokens: feature config ceiling, capped by model preset
+        let featMax = feat?.maxCompletionTokens ?? feat?.maxTokens
+        let modelMax = preset?.maxOutputTokens ?? 4096
+        let maxTokens: Int? = featMax.map { min($0, modelMax) } ?? modelMax
+
+        // Context window for chunking
+        let contextWindow = preset?.contextWindowTokens ?? 128000
+
+        return AIFeatureParams(
+            temperature: temperature,
+            maxTokens: maxTokens,
+            contextWindow: contextWindow,
+            isReasoning: isReasoning
+        )
+    }
+}
+
+// MARK: - Feature params DTO
+
+struct AIFeatureParams {
+    let temperature: Double?
+    let maxTokens: Int?
+    let contextWindow: Int
+    let isReasoning: Bool
 }

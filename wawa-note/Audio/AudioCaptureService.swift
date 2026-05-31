@@ -22,9 +22,20 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     @Published private(set) var state: AudioCaptureState = .idle
     @Published private(set) var audioLevel: Float = 0.0
     @Published private(set) var elapsedTime: TimeInterval = 0.0
+    @Published private(set) var audioInterruptionReason: String?
 
     private var timerTask: Task<Void, Never>?
     private var levelMonitorTask: Task<Void, Never>?
+    private var recordingStartTime: Date?
+    private var stateBeforeInterruption: AudioCaptureState?
+
+    private let audioLevelLock = NSLock()
+    private nonisolated(unsafe) var rawAudioLevel: Float = 0.0
+
+    private static let captureBufferSize: AVAudioFrameCount = 4096
+    private static let levelDecayFactor: Float = 0.85
+    private static let levelUpdateIntervalNS: UInt64 = 50_000_000
+    private static let timerUpdateInterval: TimeInterval = 0.1
 
     var outputFileURL: URL? {
         fileWriter.currentFileURL
@@ -57,7 +68,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // The engine must keep running (iOS forbids engine.start() in the
         // background), so the tap stays installed for the lifetime of the
         // recording.
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buffer, _ in
+        inputNode.installTap(onBus: 0, bufferSize: Self.captureBufferSize, format: nil) { [weak self] buffer, _ in
             guard let self else { return }
             self.updateAudioLevel(from: buffer)
             if self.state == .recording {
@@ -75,6 +86,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         state = .recording
         startTimer()
         startLevelSmoothing()
+        observeAudioNotifications()
         AppLog.audio.info("Recording started")
     }
 
@@ -103,23 +115,104 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         timerTask?.cancel()
         timerTask = nil
         levelMonitorTask?.cancel()
+        removeAudioNotificationObservers()
         try? sessionManager.deactivate()
 
         fileWriter.finishRecording()
         state = .stopped
         audioLevel = 0.0
+        elapsedTime = 0.0
+        recordingStartTime = nil
         AppLog.audio.info("Recording stopped")
     }
 
     // MARK: - Timer
 
+    private func observeAudioNotifications() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleInterruption),
+            name: AVAudioSession.interruptionNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleRouteChange),
+            name: AVAudioSession.routeChangeNotification,
+            object: nil
+        )
+    }
+
+    private func removeAudioNotificationObservers() {
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
+    }
+
+    @objc private func handleInterruption(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+
+        switch type {
+        case .began:
+            AppLog.audio.info("Audio interrupted — pausing")
+            stateBeforeInterruption = state
+            if state == .recording {
+                state = .paused
+                timerTask?.cancel()
+            }
+        case .ended:
+            guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
+            let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+            if options.contains(.shouldResume), stateBeforeInterruption == .recording {
+                AppLog.audio.info("Audio interruption ended — resuming")
+                try? sessionManager.configureForRecording()
+                state = .recording
+                startTimer()
+            }
+            stateBeforeInterruption = nil
+        @unknown default:
+            break
+        }
+    }
+
+    @objc private func handleRouteChange(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
+
+        switch reason {
+        case .oldDeviceUnavailable:
+            AppLog.audio.info("Audio route: old device unavailable — pausing")
+            if state == .recording {
+                audioInterruptionReason = "Headphones disconnected. Recording paused."
+                state = .paused
+                timerTask?.cancel()
+            }
+        case .newDeviceAvailable:
+            AppLog.audio.info("Audio route: new device available")
+        case .override, .categoryChange:
+            break
+        default:
+            AppLog.audio.info("Audio route changed: \(reason.rawValue)")
+        }
+    }
+
     private func startTimer() {
         timerTask?.cancel()
-        // Use Task.sleep loop instead of Timer.scheduledTimer.
-        // Timer requires a run loop on the current thread, but this code
-        // may execute on a Swift concurrency cooperative thread that has none.
-        // The ViewModel drives its own elapsed-time display via a main-thread timer;
-        // this timer is retained so the service tracks elapsedTime internally.
+        recordingStartTime = Date()
+        timerTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                if let start = self.recordingStartTime {
+                    let elapsed = Date().timeIntervalSince(start)
+                    await MainActor.run {
+                        self.elapsedTime = elapsed
+                    }
+                }
+                try? await Task.sleep(nanoseconds: UInt64(Self.timerUpdateInterval * 1_000_000_000))
+            }
+        }
     }
 
     // MARK: - Audio level
@@ -137,16 +230,23 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             let absolute = sample < 0 ? -sample : sample
             if absolute > peak { peak = absolute }
         }
-        audioLevel = min(1.0, peak * 4.0)
+        audioLevelLock.withLock {
+            rawAudioLevel = min(1.0, peak * 4.0)
+        }
     }
 
     private func startLevelSmoothing() {
         levelMonitorTask?.cancel()
         levelMonitorTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 50_000_000)
-                await MainActor.run {
-                    self?.audioLevel *= 0.85
+                try? await Task.sleep(nanoseconds: Self.levelUpdateIntervalNS)
+                guard let self else { return }
+                self.audioLevelLock.withLock {
+                    self.rawAudioLevel *= Self.levelDecayFactor
+                }
+                let level = self.audioLevelLock.withLock { self.rawAudioLevel }
+                await MainActor.run { [weak self] in
+                    self?.audioLevel = level
                 }
             }
         }

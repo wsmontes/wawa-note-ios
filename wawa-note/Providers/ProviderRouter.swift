@@ -62,6 +62,8 @@ final class ProviderRouter: Sendable {
                 supportsToolCalling: config.supportsTools,
                 supportsEmbeddings: config.supportsEmbeddings
             )
+            // Resolve endpoint path from provider config (e.g. Ollama uses /v1/chat/completions)
+            let endpointPath = AIConfigService.shared.config.providers[config.providerConfigId]?.endpoints?["chat"] ?? "chat/completions"
             return OpenAICompatibleProvider(
                 id: id,
                 displayName: config.name,
@@ -69,7 +71,8 @@ final class ProviderRouter: Sendable {
                 baseURL: baseURL,
                 apiKey: apiKey,
                 model: config.defaultModel,
-                capabilities: capabilities
+                capabilities: capabilities,
+                endpointPath: endpointPath
             )
         }
     }

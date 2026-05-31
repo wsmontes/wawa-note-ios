@@ -32,6 +32,7 @@ final class CrossReferenceService: @unchecked Sendable {
 
         // Pass 3: AI synthesis
         let config = AIConfigService.shared
+        let params = config.requestParams(for: "cross_reference", model: model)
         let systemPrompt = config.systemPrompt(for: "cross_reference")
             ?? "You are analyzing a knowledge workspace. Identify connections, patterns, and contradictions."
         let userPrompt = config.renderPrompt(for: "cross_reference", variables: [
@@ -45,6 +46,8 @@ final class CrossReferenceService: @unchecked Sendable {
                 AIMessage(role: .system, content: [.text(systemPrompt)]),
                 AIMessage(role: .user, content: [.text(userPrompt)])
             ],
+            temperature: params.temperature,
+            maxTokens: params.maxTokens,
             responseFormat: .jsonObject
         ))
 

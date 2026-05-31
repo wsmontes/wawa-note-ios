@@ -15,10 +15,10 @@ struct CreationSheetView: View {
     @State private var showNoteEditor = false
     @State private var showJournalEditor = false
     @State private var showTaskEditor = false
-    @State private var showFolderAlert = false
     @State private var showIdeaEditor = false
     @State private var showQuestionEditor = false
-    @State private var newFolderName = ""
+    @State private var showProjectAlert = false
+    @State private var newProjectName = ""
 
     var body: some View {
         NavigationStack {
@@ -62,10 +62,10 @@ struct CreationSheetView: View {
                         action: { showTaskEditor = true }
                     )
                     creationButton(
-                        title: "Folder",
-                        icon: "folder.badge.plus",
-                        color: .blue,
-                        action: { showFolderAlert = true }
+                        title: "Project",
+                        icon: "square.grid.2x2",
+                        color: .indigo,
+                        action: { createProject() }
                     )
                 }
                 .padding(.horizontal, 32)
@@ -92,10 +92,10 @@ struct CreationSheetView: View {
             .sheet(isPresented: $showQuestionEditor) {
                 NoteEditorView(mode: .create(type: .note, folderID: folderID, initialTag: "question"))
             }
-            .alert("New Folder", isPresented: $showFolderAlert) {
-                TextField("Name", text: $newFolderName)
-                Button("Create") { createFolder() }
-                Button("Cancel", role: .cancel) { newFolderName = "" }
+            .alert("New Project", isPresented: $showProjectAlert) {
+                TextField("Name", text: $newProjectName)
+                Button("Create") { createProjectConfirmed() }
+                Button("Cancel", role: .cancel) { newProjectName = "" }
             }
             .onChange(of: showNoteEditor) { _, _ in if !showNoteEditor { dismiss() } }
             .onChange(of: showJournalEditor) { _, _ in if !showJournalEditor { dismiss() } }
@@ -127,12 +127,17 @@ struct CreationSheetView: View {
         }
     }
 
-    private func createFolder() {
-        guard !newFolderName.isEmpty else { return }
-        let folder = Folder(name: newFolderName, parentFolderID: folderID)
-        modelContext.insert(folder)
+    private func createProject() {
+        newProjectName = ""
+        showProjectAlert = true
+    }
+
+    private func createProjectConfirmed() {
+        guard !newProjectName.isEmpty else { return }
+        let project = Project(name: newProjectName)
+        modelContext.insert(project)
         try? modelContext.save()
-        newFolderName = ""
+        newProjectName = ""
         dismiss()
     }
 }

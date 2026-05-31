@@ -53,13 +53,29 @@ final class SRTImporter: FormatImporter, @unchecked Sendable {
         let item = KnowledgeItem(
             type: .meeting,
             title: url.deletingPathExtension().lastPathComponent,
-            status: .recorded,
+            status: .transcribed,
             durationSeconds: segments.last?.endTime
         )
+        item.isImported = true
+        item.importSourceURL = url.absoluteString
+        item.transcriptionEngineId = "srt_import"
 
-        let transcript = Transcript(segments: segments, sourceEngineId: "srt_import")
+        let transcript = Transcript(meetingId: item.id, languageCode: nil, segments: segments, sourceEngineId: "srt_import")
 
-        return ImportResult(knowledgeItem: item, artifacts: ["transcript.json": url], warnings: warnings)
+        // Persist transcript to disk so pipeline and search can use it
+        let fileStore = FileArtifactStore()
+        do {
+            try fileStore.createMeetingDirectory(for: item.id)
+            try fileStore.writeArtifact(transcript, fileName: "transcript.json", meetingId: item.id)
+        } catch {
+            // Non-fatal: analysis can still run from bodyText
+        }
+
+        // Body text from segments for analysis pipeline
+        item.bodyText = segments.map(\.text).joined(separator: " ")
+
+        let transcriptURL = fileStore.itemDirectoryURL(for: item.id).appendingPathComponent("transcript.json")
+        return ImportResult(knowledgeItem: item, artifacts: ["transcript.json": transcriptURL], warnings: warnings)
     }
 
     private func parseSRTTime(_ str: String) -> Double {

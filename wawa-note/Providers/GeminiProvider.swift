@@ -104,9 +104,16 @@ final class GeminiProvider: AIProvider, @unchecked Sendable {
     private let model: String
     private let session: URLSession
 
+    private static var configuredSession: URLSession {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 180
+        config.timeoutIntervalForResource = 300
+        return URLSession(configuration: config)
+    }
+
     init(
         id: String, displayName: String, baseURL: URL, apiKey: String, model: String,
-        session: URLSession = .shared
+        session: URLSession = GeminiProvider.configuredSession
     ) {
         self.id = id
         self.displayName = displayName

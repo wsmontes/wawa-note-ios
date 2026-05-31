@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import Contacts
 
 @MainActor
 final class PersonService {
@@ -41,5 +42,33 @@ final class PersonService {
         let q = query.lowercased()
         let all = try self.all()
         return all.filter { $0.displayName.lowercased().contains(q) || ($0.email?.lowercased().contains(q) ?? false) }
+    }
+
+    func findOrCreateFromContact(name: String, email: String? = nil) throws -> Person {
+        let enriched = enrichFromContacts(name: name)
+        return try findOrCreate(
+            displayName: name,
+            email: email ?? enriched.email,
+            role: enriched.organization
+        )
+    }
+
+    private func enrichFromContacts(name: String) -> (email: String?, organization: String?) {
+        let status = CNContactStore.authorizationStatus(for: .contacts)
+        guard status == .authorized else { return (nil, nil) }
+
+        let store = CNContactStore()
+        let keys: [CNKeyDescriptor] = [
+            CNContactEmailAddressesKey as CNKeyDescriptor,
+            CNContactOrganizationNameKey as CNKeyDescriptor
+        ]
+        let predicate = CNContact.predicateForContacts(matchingName: name)
+        guard let contact = try? store.unifiedContacts(matching: predicate, keysToFetch: keys).first else {
+            return (nil, nil)
+        }
+        return (
+            email: contact.emailAddresses.first?.value as String?,
+            organization: contact.organizationName.isEmpty ? nil : contact.organizationName
+        )
     }
 }

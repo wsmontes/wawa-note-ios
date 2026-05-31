@@ -20,6 +20,9 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
     private let candidateLocales: [Locale]
     private let chunker: AudioChunker
+    private var activeRecognitionTask: SFSpeechRecognitionTask?
+
+    private static let chunkOverlap: TimeInterval = 1.5
 
     var onProgress: ((TranscriptionProgress) -> Void)?
     var onCheckpoint: ((Transcript, Int) -> Void)?
@@ -53,12 +56,13 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         }
 
         self.candidateLocales = locales
-        self.chunker = AudioChunker(chunkDuration: Self.maxLocalDuration, overlap: 0)
+        self.chunker = AudioChunker(chunkDuration: Self.maxLocalDuration, overlap: Self.chunkOverlap)
         AppLog.transcription.info("Transcription locales (priority): \(locales.map(\.identifier).prefix(5).joined(separator: ", "))")
     }
 
     func cancel() {
         isCancelled = true
+        activeRecognitionTask?.cancel()
     }
 
     func requestAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {
@@ -71,6 +75,11 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
     func transcribeFile(_ audioFileURL: URL) async throws -> Transcript {
         isCancelled = false
+
+        guard firstAvailableRecognizer() != nil else {
+            AppLog.transcription.error("No supported speech recognizer locale available — language pack may not be downloaded")
+            throw TranscriptionError.noSupportedLocale
+        }
 
         let status = await requestAuthorization()
         guard status == .authorized else {
@@ -170,7 +179,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         // happens on first use; ensure device has internet).
 
         return try await withCheckedThrowingContinuation { continuation in
-            recognizer.recognitionTask(with: request) { result, error in
+            let task = recognizer.recognitionTask(with: request) { result, error in
                 if let error {
                     AppLog.transcription.error("Recognition error: \(error.localizedDescription)")
                     continuation.resume(throwing: TranscriptionError.recognitionFailed)
@@ -203,6 +212,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                 AppLog.transcription.info("Transcription complete: \(segments.count) segments, language: \(detectedLang ?? "unknown")")
                 continuation.resume(returning: transcript)
             }
+            self.activeRecognitionTask = task
         }
     }
 
@@ -228,13 +238,15 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         return nil
     }
 
+    private static let languageConfidenceThreshold: Double = 0.5
+
     private func detectLanguage(_ text: String) -> String? {
         guard !text.isEmpty else { return nil }
         let recognizer = NLLanguageRecognizer()
         recognizer.processString(text)
         guard let language = recognizer.dominantLanguage,
               let confidence = recognizer.languageHypotheses(withMaximum: 1)[language],
-              confidence > 0.5 else {
+              confidence > Self.languageConfidenceThreshold else {
             return nil
         }
         return language.rawValue
