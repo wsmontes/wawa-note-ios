@@ -7,7 +7,11 @@ final class CalendarContextSensor: ContextSensor, @unchecked Sendable {
 
     private let eventStore: EKEventStore
 
-    init(eventStore: EKEventStore = EKEventStore()) {
+    private static let contextWindowBefore: TimeInterval = -900    // 15 minutes
+    private static let contextWindowAfter: TimeInterval = 10800    // 3 hours
+    private static let proximityThreshold: TimeInterval = 300      // 5 minutes
+
+    init(eventStore: EKEventStore = .shared) {
         self.eventStore = eventStore
     }
 
@@ -19,8 +23,8 @@ final class CalendarContextSensor: ContextSensor, @unchecked Sendable {
         }
 
         let now = Date()
-        let windowStart = now.addingTimeInterval(-15 * 60)
-        let windowEnd = now.addingTimeInterval(3 * 60 * 60)
+        let windowStart = now.addingTimeInterval(Self.contextWindowBefore)
+        let windowEnd = now.addingTimeInterval(Self.contextWindowAfter)
 
         let predicate = eventStore.predicateForEvents(withStart: windowStart, end: windowEnd, calendars: nil)
         let events = eventStore.events(matching: predicate)
@@ -28,18 +32,19 @@ final class CalendarContextSensor: ContextSensor, @unchecked Sendable {
         var annotations: [CapturedAnnotation] = []
 
         for event in events {
+            let title = event.title ?? ""
             if event.startDate <= now && event.endDate >= now {
                 annotations.append(CapturedAnnotation(source: sensorName, key: "event_proximity", value: "during"))
-                annotations.append(CapturedAnnotation(source: sensorName, key: "event_title", value: event.title))
+                annotations.append(CapturedAnnotation(source: sensorName, key: "event_title", value: title))
                 if let location = event.location, !location.isEmpty {
                     annotations.append(CapturedAnnotation(source: sensorName, key: "event_location", value: location))
                 }
-            } else if now < event.startDate && event.startDate.timeIntervalSince(now) < 5 * 60 {
+            } else if now < event.startDate && event.startDate.timeIntervalSince(now) < Self.proximityThreshold {
                 annotations.append(CapturedAnnotation(source: sensorName, key: "event_proximity", value: "before"))
-                annotations.append(CapturedAnnotation(source: sensorName, key: "event_title", value: event.title))
-            } else if now > event.endDate && now.timeIntervalSince(event.endDate) < 5 * 60 {
+                annotations.append(CapturedAnnotation(source: sensorName, key: "event_title", value: title))
+            } else if now > event.endDate && now.timeIntervalSince(event.endDate) < Self.proximityThreshold {
                 annotations.append(CapturedAnnotation(source: sensorName, key: "event_proximity", value: "after"))
-                annotations.append(CapturedAnnotation(source: sensorName, key: "event_title", value: event.title))
+                annotations.append(CapturedAnnotation(source: sensorName, key: "event_title", value: title))
             }
         }
 

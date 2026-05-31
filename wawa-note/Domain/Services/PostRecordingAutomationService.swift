@@ -3,28 +3,45 @@ import SwiftData
 
 // MARK: - Notifications
 
+// MARK: - App notifications
+// Centralized definitions. Prefer @Published on services over NotificationCenter
+// when possible. These remain for cross-service events that don't share an ObservableObject.
+
 extension Notification.Name {
     static let transcriptReady = Notification.Name("PostRecordingTranscriptReady")
     static let analysisReady = Notification.Name("PostRecordingAnalysisReady")
     static let processingStageChanged = Notification.Name("PostRecordingStageChanged")
     static let pipelineCompleted = Notification.Name("WawaPipelineCompleted")
-    static let projectIngestionStarted = Notification.Name("WawaProjectIngestionStarted")
-    static let projectIngestionCompleted = Notification.Name("WawaProjectIngestionCompleted")
+    static let contentPipelineStageChanged = Notification.Name("ContentPipelineStageChanged")
 }
 
 // MARK: - Project ingestion state
 
 /// Tracks which projects are currently being enriched, so views can show progress.
-/// Survives navigation timing issues (notification posted before view appears).
+/// Uses @Published for ingestion events (preferred over NotificationCenter).
 @MainActor
 final class ProjectIngestionState: ObservableObject {
-    static let shared = ProjectIngestionState()
     @Published var activeProjectIDs: Set<UUID> = []
+    @Published var ingestionErrors: [UUID: String] = [:]
+    @Published var ingestionVersion = 0
 
-    private init() {}
+    init() {}
 
-    func start(_ projectID: UUID) { activeProjectIDs.insert(projectID) }
-    func finish(_ projectID: UUID) { activeProjectIDs.remove(projectID) }
+    func start(_ projectID: UUID) {
+        activeProjectIDs.insert(projectID)
+        ingestionErrors[projectID] = nil
+    }
+
+    func finish(_ projectID: UUID) {
+        activeProjectIDs.remove(projectID)
+        ingestionVersion += 1
+    }
+
+    func setError(_ projectID: UUID, message: String) {
+        ingestionErrors[projectID] = message
+        activeProjectIDs.remove(projectID)
+        ingestionVersion += 1
+    }
 }
 
 // MARK: - Shared context builder

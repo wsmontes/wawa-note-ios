@@ -5,27 +5,42 @@ import OSLog
 final class MotionActivitySensor: ContextSensor, @unchecked Sendable {
     let sensorName = "motion_activity"
 
+    private static let timeoutSeconds: TimeInterval = 5
+
     func capture() async throws -> [CapturedAnnotation] {
         guard CMMotionActivityManager.isActivityAvailable() else {
             AppLog.general.info("MotionActivitySensor: not available")
             return []
         }
 
-        // Safety check: verify plist key exists to prevent SIGKILL
         guard Bundle.main.object(forInfoDictionaryKey: "NSMotionUsageDescription") != nil else {
             AppLog.general.warning("MotionActivitySensor: NSMotionUsageDescription missing from Info.plist — skipping")
             return []
         }
 
-        let manager = CMMotionActivityManager()
-
-        return await withCheckedContinuation { continuation in
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[CapturedAnnotation], Error>) in
+            let manager = CMMotionActivityManager()
             let queue = OperationQueue()
             queue.maxConcurrentOperationCount = 1
 
-            manager.startActivityUpdates(to: queue) { activity in
-                guard let activity else { return }
+            var resumed = false
+
+            // Timeout after 5s
+            let timeoutWork = DispatchWorkItem {
+                guard !resumed else { return }
+                resumed = true
                 manager.stopActivityUpdates()
+                queue.cancelAllOperations()
+                continuation.resume(returning: [])
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + Self.timeoutSeconds, execute: timeoutWork)
+
+            manager.startActivityUpdates(to: queue) { activity in
+                guard let activity, !resumed else { return }
+                resumed = true
+                timeoutWork.cancel()
+                manager.stopActivityUpdates()
+                queue.cancelAllOperations()
 
                 var annotations: [CapturedAnnotation] = []
                 if activity.stationary { annotations.append(CapturedAnnotation(source: "motion_activity", key: "activity", value: "stationary")) }
@@ -46,12 +61,6 @@ final class MotionActivitySensor: ContextSensor, @unchecked Sendable {
                 annotations.append(CapturedAnnotation(source: "motion_activity", key: "confidence", value: conf))
 
                 continuation.resume(returning: annotations)
-            }
-
-            // Timeout after 5s
-            DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
-                manager.stopActivityUpdates()
-                continuation.resume(returning: [])
             }
         }
     }

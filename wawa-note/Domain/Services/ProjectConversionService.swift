@@ -106,7 +106,7 @@ final class ProjectConversionService {
 
         // Link the source item to the project (preserve existing assignment)
         if item.projectID == nil {
-            try? projectService.addItem(item.id, to: project.id, startPipeline: false)
+            try? projectService.addItem(item.id, to: project.id)
         }
 
         // Create edge: item belongs to project

@@ -36,6 +36,8 @@ final class JSONImporter: FormatImporter, @unchecked Sendable {
                 let tags: [String]?
                 let durationSeconds: Double?
                 let languageCode: String?
+                let body: String?
+                let summary: String?
             }
 
             struct ImportMeeting: Codable {
@@ -44,6 +46,9 @@ final class JSONImporter: FormatImporter, @unchecked Sendable {
                 let durationSeconds: Double?
                 let status: String?
                 let tags: [String]?
+                let body: String?
+                let summary: String?
+                let transcript: String?
             }
         }
 
@@ -53,6 +58,9 @@ final class JSONImporter: FormatImporter, @unchecked Sendable {
         let createdAt = ISO8601DateFormatter().date(from: dateStr) ?? Date()
 
         let itemType = KnowledgeItemType(rawValue: imported.item?.type ?? "meeting") ?? .meeting
+
+        let bodyText = imported.item?.body ?? imported.item?.summary
+            ?? imported.meeting?.body ?? imported.meeting?.summary
 
         let item = KnowledgeItem(
             type: itemType,
@@ -64,6 +72,7 @@ final class JSONImporter: FormatImporter, @unchecked Sendable {
             durationSeconds: imported.item?.durationSeconds ?? imported.meeting?.durationSeconds,
             languageCode: imported.item?.languageCode
         )
+        item.bodyText = bodyText
 
         if let idStr = imported.item?.id, let uuid = UUID(uuidString: idStr) {
             item.id = uuid

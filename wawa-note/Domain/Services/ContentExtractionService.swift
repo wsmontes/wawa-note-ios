@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+import UIKit
+import Vision
 
 // MARK: - Text extraction from any content type
 
@@ -21,7 +23,17 @@ final class ContentExtractionService {
 
     // MARK: - Audio → text
 
+    /// Returns existing transcript text if available, otherwise transcribes and returns text.
+    /// Never returns nil as long as a transcript exists on disk — extraction failure
+    /// falls back to the existing transcript instead of blocking Phase 3.
     func extractTextFromAudio(_ item: KnowledgeItem) async -> String? {
+        // Reuse existing transcript when available — avoids re-transcribing
+        // and prevents a failed re-transcription from blocking project ingestion.
+        if let existing = loadExistingTranscriptText(for: item.id) {
+            AppLog.provider.info("ContentExtraction: reusing existing transcript for item \(item.id)")
+            return existing
+        }
+
         let audioURL = fileStore.audioFileURL(for: item.id)
         guard FileManager.default.fileExists(atPath: audioURL.path) else {
             AppLog.provider.warning("ContentExtraction: no audio file for item \(item.id)")
@@ -59,8 +71,20 @@ final class ContentExtractionService {
             return result.segments.map(\.text).joined(separator: "\n")
         } catch {
             AppLog.provider.error("ContentExtraction: transcription failed for item \(item.id): \(error)")
+            // Fall back to existing transcript if available (may have been saved by a prior run)
+            if let fallback = loadExistingTranscriptText(for: item.id) {
+                AppLog.provider.warning("ContentExtraction: falling back to existing transcript for item \(item.id)")
+                return fallback
+            }
             return nil
         }
+    }
+
+    /// Reads transcript text from an already-saved transcript.json, if it exists.
+    private func loadExistingTranscriptText(for itemID: UUID) -> String? {
+        guard let transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: itemID),
+              !transcript.segments.isEmpty else { return nil }
+        return transcript.segments.map(\.text).joined(separator: "\n")
     }
 
     // MARK: - Document → text
@@ -72,6 +96,53 @@ final class ContentExtractionService {
         }
         AppLog.provider.info("ContentExtraction: using bodyText (\(bodyText.count) chars)")
         return bodyText
+    }
+
+    // MARK: - Image → text
+
+    func extractTextFromImage(_ item: KnowledgeItem) async -> String? {
+        if let body = item.bodyText, !body.isEmpty {
+            return body
+        }
+        guard let relativePath = item.imageFileRelativePath else { return nil }
+        let imageURL = fileStore.itemDirectoryURL(for: item.id).appendingPathComponent(relativePath)
+        guard let imageData = try? Data(contentsOf: imageURL),
+              let image = UIImage(data: imageData),
+              let cgImage = image.cgImage else { return nil }
+
+        return await withCheckedContinuation { continuation in
+            let request = VNRecognizeTextRequest { request, _ in
+                let text = (request.results as? [VNRecognizedTextObservation] ?? [])
+                    .compactMap { $0.topCandidates(1).first?.string }
+                    .joined(separator: "\n")
+                continuation.resume(returning: text.isEmpty ? nil : text)
+            }
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = true
+            try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
+            if request.results == nil {
+                continuation.resume(returning: nil)
+            }
+        }
+    }
+
+    // MARK: - Best-effort text retrieval
+
+    /// Returns the best available text for an item without running expensive extraction.
+    /// Checks transcript (audio) or bodyText (documents). Falls back to analysis summary.
+    /// Used when the pipeline needs text for Phase 3 but extraction isn't required.
+    func bestAvailableText(for item: KnowledgeItem) -> String? {
+        if let transcript = loadExistingTranscriptText(for: item.id) {
+            return transcript
+        }
+        if let body = item.bodyText, !body.isEmpty {
+            return body
+        }
+        if let analysis = try? fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) {
+            let parts = [analysis.shortSummary, analysis.detailedSummary].filter { !$0.isEmpty }
+            if !parts.isEmpty { return parts.joined(separator: "\n") }
+        }
+        return nil
     }
 
     // MARK: - Analyze text (always the same, regardless of source)

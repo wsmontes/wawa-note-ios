@@ -38,13 +38,13 @@ final class iOSWatchSessionManager: NSObject, WCSessionDelegate, @unchecked Send
         guard session.activationState == .activated else { return }
 
         let message: [String: Any] = [
-            "type": "status",
-            "state": status.state,
-            "elapsedTime": status.elapsedTime,
-            "audioLevel": status.audioLevel,
-            "isActive": status.isActive,
-            "meetingTitle": status.meetingTitle ?? NSNull(),
-            "errorMessage": status.errorMessage ?? NSNull(),
+            WatchMessageKey.type: "status",
+            WatchMessageKey.state: status.state,
+            WatchMessageKey.elapsedTime: status.elapsedTime,
+            WatchMessageKey.audioLevel: status.audioLevel,
+            WatchMessageKey.isActive: status.isActive,
+            WatchMessageKey.meetingTitle: status.meetingTitle ?? NSNull(),
+            WatchMessageKey.errorMessage: status.errorMessage ?? NSNull(),
         ]
 
         if session.isReachable {
@@ -82,30 +82,43 @@ final class iOSWatchSessionManager: NSObject, WCSessionDelegate, @unchecked Send
     }
 
     func session(_ wcSession: WCSession, didReceiveMessage message: [String: Any]) {
-        guard let rawCommand = message["command"] as? String else { return }
+        guard let rawCommand = message[WatchMessageKey.command] as? String else { return }
         DispatchQueue.main.async { [weak self] in
             self?.applyCommand(rawCommand)
         }
     }
 
     func session(_ wcSession: WCSession, didReceiveMessage message: [String: Any], replyHandler: @escaping ([String: Any]) -> Void) {
-        let rawCommand = message["command"] as? String ?? ""
-        // replyHandler is an ObjC block — safe to call from any thread.
-        // Swift 6 wants explicit Sendable capture; hand off unsafely.
+        let rawCommand = message[WatchMessageKey.command] as? String ?? ""
         nonisolated(unsafe) let handler = replyHandler
         DispatchQueue.main.async { [weak self] in
             guard let self else {
-                handler(["state": "error", "elapsedTime": 0, "audioLevel": 0, "isActive": false])
+                handler([
+                    WatchMessageKey.state: "error",
+                    WatchMessageKey.elapsedTime: 0,
+                    WatchMessageKey.audioLevel: 0,
+                    WatchMessageKey.isActive: false
+                ])
                 return
             }
             self.applyCommand(rawCommand)
             let status = self.coordinator.currentStatus()
             handler([
-                "state": status.state,
-                "elapsedTime": status.elapsedTime,
-                "audioLevel": status.audioLevel,
-                "isActive": status.isActive,
+                WatchMessageKey.state: status.state,
+                WatchMessageKey.elapsedTime: status.elapsedTime,
+                WatchMessageKey.audioLevel: status.audioLevel,
+                WatchMessageKey.isActive: status.isActive,
             ])
+        }
+    }
+
+    func sessionReachabilityDidChange(_ wcSession: WCSession) {
+        AppLog.general.info("WCSession reachability: \(wcSession.isReachable)")
+        if wcSession.isReachable {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.sendStatus(self.coordinator.currentStatus())
+            }
         }
     }
 

@@ -93,12 +93,15 @@ final class AnalysisService: @unchecked Sendable {
     // MARK: - Direct (single request)
 
     private func singleAnalysis(provider: any AIProvider, model: String, systemPrompt: String, userPrompt: String, meetingId: UUID) async throws -> MeetingAnalysis {
+        let params = configService.requestParams(for: "analysis", model: model)
         let request = AIRequest(
             model: model,
             messages: [
                 AIMessage(role: .system, content: [.text(systemPrompt)]),
                 AIMessage(role: .user, content: [.text(userPrompt)])
             ],
+            temperature: params.temperature,
+            maxTokens: params.maxTokens,
             responseFormat: .jsonObject
         )
         let response = try await provider.send(request)
@@ -140,12 +143,15 @@ final class AnalysisService: @unchecked Sendable {
         Return only valid JSON with these keys: short_summary, detailed_summary, decisions, action_items, open_questions, risks, important_dates, mentioned_people, mentioned_systems, mentioned_organizations, mentioned_repositories, mentioned_locations.
         """
 
+        let params = configService.requestParams(for: "analysis", model: model)
         let request = AIRequest(
             model: model,
             messages: [
                 AIMessage(role: .system, content: [.text(systemPrompt)]),
                 AIMessage(role: .user, content: [.text(reducePrompt)])
             ],
+            temperature: params.temperature,
+            maxTokens: params.maxTokens,
             responseFormat: .jsonObject
         )
         let response = try await sendWithRetry(provider: provider, request: request, maxRetries: Self.maxRetries)

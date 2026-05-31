@@ -2,6 +2,18 @@ import SwiftUI
 import Foundation
 import SwiftData
 
+enum ItemStatus: String, Codable, CaseIterable {
+    case draft
+    case recording
+    case recorded
+    case transcribing
+    case transcribed
+    case analyzing
+    case analyzed
+    case failed
+    case archived
+}
+
 enum KnowledgeItemType: String, Codable, CaseIterable, Hashable {
     case meeting
     case note
@@ -71,6 +83,8 @@ final class KnowledgeItem {
 
     // Legacy meeting fields
     var audioFileRelativePath: String?
+    var imageFileRelativePath: String?
+    var imagePageCount: Int?
     var transcriptionEngineId: String?
     var analysisProviderId: String?
     var calendarEventIdentifier: String?
@@ -83,8 +97,8 @@ final class KnowledgeItem {
         set { typeRaw = newValue.rawValue }
     }
 
-    var status: MeetingStatus {
-        get { MeetingStatus(rawValue: statusRaw) ?? .draft }
+    var status: ItemStatus {
+        get { ItemStatus(rawValue: statusRaw) ?? .draft }
         set { statusRaw = newValue.rawValue }
     }
 
@@ -94,7 +108,7 @@ final class KnowledgeItem {
         title: String = "",
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
-        status: MeetingStatus = .draft,
+        status: ItemStatus = .draft,
         tags: [String] = [],
         folderID: UUID? = nil,
         isFlagged: Bool = false,

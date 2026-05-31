@@ -5,20 +5,51 @@ import OSLog
 final class LocationContextSensor: ContextSensor, @unchecked Sendable {
     let sensorName = "location_context"
 
-    func capture() async throws -> [CapturedAnnotation] {
-        let manager = CLLocationManager()
+    private let manager = CLLocationManager()
+    private static let timeoutSeconds: TimeInterval = 10
 
-        // Check authorization
+    func requestPermission() {
+        manager.requestWhenInUseAuthorization()
+    }
+
+    func capture() async throws -> [CapturedAnnotation] {
         let status = manager.authorizationStatus
-        guard status == .authorizedWhenInUse || status == .authorizedAlways else {
+
+        switch status {
+        case .notDetermined:
+            AppLog.general.info("LocationContextSensor: authorization not determined")
+            return []
+        case .denied, .restricted:
             AppLog.general.info("LocationContextSensor: not authorized (\(status.rawValue))")
+            return []
+        case .authorizedWhenInUse, .authorizedAlways:
+            break
+        @unknown default:
+            AppLog.general.warning("LocationContextSensor: unknown authorization status (\(status.rawValue))")
             return []
         }
 
-        let delegate = LocationDelegate()
-        return await withCheckedContinuation { (continuation: CheckedContinuation<[CapturedAnnotation], Never>) in
-            delegate.onResult = { [weak delegate] location, placemark, error in
-                _ = delegate // retain
+        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[CapturedAnnotation], Error>) in
+            let delegate = LocationDelegate()
+            manager.delegate = delegate
+
+            var resumed = false
+
+            // Timeout
+            let timeoutWork = DispatchWorkItem {
+                guard !resumed else { return }
+                resumed = true
+                continuation.resume(returning: [])
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + Self.timeoutSeconds, execute: timeoutWork)
+
+            delegate.onResult = { location, placemark, error in
+                guard !resumed else { return }
+                resumed = true
+                timeoutWork.cancel()
+
                 if let error {
                     AppLog.general.warning("LocationContextSensor: \(error.localizedDescription)")
                     continuation.resume(returning: [])
@@ -39,7 +70,7 @@ final class LocationContextSensor: ContextSensor, @unchecked Sendable {
                 }
                 continuation.resume(returning: annotations)
             }
-            manager.delegate = delegate
+
             manager.requestLocation()
         }
     }
@@ -58,7 +89,8 @@ private final class LocationDelegate: NSObject, CLLocationManagerDelegate {
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        onResult?(nil, nil, error)
+        guard let callback = onResult else { return }
         onResult = nil
+        callback(nil, nil, error)
     }
 }

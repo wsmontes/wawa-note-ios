@@ -3,6 +3,7 @@ import SwiftData
 
 struct InboxView: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var contentPipeline: ContentPipelineService
     @Query(sort: \KnowledgeItem.updatedAt, order: .reverse) private var allItems: [KnowledgeItem]
     @Query(sort: \Folder.name) private var folders: [Folder]
     @Query(sort: \Project.name) private var projects: [Project]
@@ -170,7 +171,7 @@ struct InboxView: View {
                             .background(Color.orange.opacity(0.1))
                             .clipShape(Capsule())
                     }
-                    if item.type == .meeting && item.transcriptionEngineId != nil {
+                    if item.transcriptionEngineId != nil {
                         Text("·").font(.caption).foregroundStyle(.secondary)
                         Text("Transcribed")
                             .font(.caption2)
@@ -190,7 +191,7 @@ struct InboxView: View {
                             .background(Color.indigo.opacity(0.1))
                             .clipShape(Capsule())
                     }
-                    if item.audioFileRelativePath == nil && item.type == .meeting {
+                    if item.audioFileRelativePath == nil && item.bodyText == nil && item.transcriptionEngineId == nil {
                         Text("·").font(.caption).foregroundStyle(.secondary)
                         Text("No audio")
                             .font(.caption2)
@@ -393,6 +394,7 @@ struct InboxView: View {
         let projectID = project.id
 
         try? ProjectService(context: modelContext).addItem(itemID, to: projectID)
+        contentPipeline.process(itemID, using: modelContext)
 
         showFolderPicker = nil
         navigateToProject = project

@@ -1,21 +1,24 @@
 import UIKit
 import UniformTypeIdentifiers
 
+private let appGroupIdentifier = "group.com.wawa-note"
+private let sharedDirectoryName = "shared"
+private let pendingImportFilesKey = "pendingImportFiles"
+
 final class ShareViewController: UIViewController {
 
     private var savedFiles: [String] = []
     private var processingDone = false
+    private var hasErrors = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // Transparent background so the share sheet UI is less jarring
         view.backgroundColor = .clear
         processAttachments()
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        // If processing already finished, complete immediately
         if processingDone {
             complete()
         }
@@ -24,6 +27,14 @@ final class ShareViewController: UIViewController {
     // MARK: - Attachment processing
 
     private func processAttachments() {
+        guard let containerURL = FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) else {
+            NSLog("[WawaShare] App Group container not available — cannot import")
+            processingDone = true
+            hasErrors = true
+            return
+        }
+
         guard let extensionItems = extensionContext?.inputItems as? [NSExtensionItem] else {
             processingDone = true
             return
@@ -37,8 +48,12 @@ final class ShareViewController: UIViewController {
         }
 
         let group = DispatchGroup()
-        let queue = DispatchQueue(label: "share.import", qos: .userInitiated)
         var saved: [String] = []
+        var errorCount = 0
+        let lock = NSLock()
+
+        // Timeout after 25 seconds to stay within system's ~30s limit
+        let deadline = DispatchTime.now() + .seconds(25)
 
         for provider in allProviders {
             let types: [String] = [
@@ -52,10 +67,14 @@ final class ShareViewController: UIViewController {
             for typeID in types {
                 if provider.hasItemConformingToTypeIdentifier(typeID) {
                     group.enter()
-                    loadFile(from: provider, typeIdentifier: typeID) { filename in
+                    loadFile(from: provider, typeIdentifier: typeID, containerURL: containerURL) { filename in
+                        lock.lock()
                         if let name = filename {
-                            queue.sync { saved.append(name) }
+                            saved.append(name)
+                        } else {
+                            errorCount += 1
                         }
+                        lock.unlock()
                         group.leave()
                     }
                     matched = true
@@ -70,22 +89,35 @@ final class ShareViewController: UIViewController {
         group.notify(queue: .main) { [weak self] in
             self?.savedFiles = saved
             if saved.isEmpty {
-                NSLog("[WawaShare] No files saved")
+                NSLog("[WawaShare] No files saved (errors: \(errorCount))")
+                self?.hasErrors = true
             } else {
-                let shared = UserDefaults(suiteName: "group.com.wawa-note")
-                shared?.set(saved, forKey: "pendingImportFiles")
-                NSLog("[WawaShare] Saved \(saved.count) files: \(saved)")
+                let shared = UserDefaults(suiteName: appGroupIdentifier)
+                shared?.set(saved, forKey: pendingImportFilesKey)
+                NSLog("[WawaShare] Saved \(saved.count) files (errors: \(errorCount)): \(saved)")
             }
             self?.processingDone = true
             if self?.isViewLoaded == true, self?.view.window != nil {
                 self?.complete()
             }
         }
+
+        // Safety timeout: complete anyway after deadline
+        DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
+            guard let self, !self.processingDone else { return }
+            NSLog("[WawaShare] Timed out waiting for attachments — completing with \(saved.count) files saved")
+            self.savedFiles = saved
+            if !saved.isEmpty {
+                let shared = UserDefaults(suiteName: appGroupIdentifier)
+                shared?.set(saved, forKey: pendingImportFilesKey)
+            }
+            self.processingDone = true
+        }
     }
 
     // MARK: - File copy
 
-    private func loadFile(from provider: NSItemProvider, typeIdentifier: String, completion: @escaping (String?) -> Void) {
+    private func loadFile(from provider: NSItemProvider, typeIdentifier: String, containerURL: URL, completion: @escaping (String?) -> Void) {
         provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, error in
             if let error {
                 NSLog("[WawaShare] loadFileRepresentation error: \(error.localizedDescription)")
@@ -98,18 +130,16 @@ final class ShareViewController: UIViewController {
                 return
             }
 
-            let originalName = provider.suggestedName ?? url.lastPathComponent
-            let safeName = self.safeImportFilename(original: originalName)
-            NSLog("[WawaShare] Received: \(originalName) -> \(safeName)")
-
-            guard let containerURL = FileManager.default
-                .containerURL(forSecurityApplicationGroupIdentifier: "group.com.wawa-note") else {
-                NSLog("[WawaShare] No App Group container")
-                completion(nil)
-                return
+            defer {
+                // Clean up system-provided temp file
+                try? FileManager.default.removeItem(at: url)
             }
 
-            let sharedDir = containerURL.appendingPathComponent("shared", isDirectory: true)
+            let originalName = provider.suggestedName ?? url.lastPathComponent
+            let safeName = Self.safeImportFilename(original: originalName)
+            NSLog("[WawaShare] Received: \(originalName) -> \(safeName)")
+
+            let sharedDir = containerURL.appendingPathComponent(sharedDirectoryName, isDirectory: true)
             do {
                 try FileManager.default.createDirectory(at: sharedDir, withIntermediateDirectories: true)
                 let destURL = sharedDir.appendingPathComponent(safeName)
@@ -124,7 +154,7 @@ final class ShareViewController: UIViewController {
         }
     }
 
-    private nonisolated func safeImportFilename(original: String) -> String {
+    private static func safeImportFilename(original: String) -> String {
         let sanitized = original
             .replacingOccurrences(of: "[^a-zA-Z0-9._-]", with: "_", options: .regularExpression)
         return "\(UUID().uuidString)-\(sanitized)"

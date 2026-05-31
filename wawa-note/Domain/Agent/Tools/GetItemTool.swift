@@ -47,21 +47,20 @@ struct GetItemTool: AgentTool {
             content += "\n### Content\n\(preview)\n"
         }
 
-        if item.type == .meeting {
-            if let t = try? context.fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id) {
-                let excerpt = t.segments.prefix(15).map { "[\(Int($0.startTime))s] \($0.text)" }.joined(separator: "\n")
-                content += "\n### Transcript (\(t.segments.count) segments)\n\(excerpt)"
-                if t.segments.count > 15 { content += "\n... +\(t.segments.count - 15) more segments. Full transcript available in app." }
-                content += "\n"
+        // Show transcript and analysis if artifacts exist — capability-based
+        if let t = try? context.fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id) {
+            let excerpt = t.segments.prefix(15).map { "[\(Int($0.startTime))s] \($0.text)" }.joined(separator: "\n")
+            content += "\n### Transcript (\(t.segments.count) segments)\n\(excerpt)"
+            if t.segments.count > 15 { content += "\n... +\(t.segments.count - 15) more segments. Full transcript available in app." }
+            content += "\n"
+        }
+        if let a = try? context.fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) {
+            content += "\n### AI Analysis\n\(a.shortSummary)\n"
+            if !a.decisions.isEmpty {
+                content += "\n**Decisions:**\n" + a.decisions.map { "- \($0.title)" }.joined(separator: "\n") + "\n"
             }
-            if let a = try? context.fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) {
-                content += "\n### AI Analysis\n\(a.shortSummary)\n"
-                if !a.decisions.isEmpty {
-                    content += "\n**Decisions:**\n" + a.decisions.map { "- \($0.title)" }.joined(separator: "\n") + "\n"
-                }
-                if !a.actionItems.isEmpty {
-                    content += "\n**Action Items:**\n" + a.actionItems.map { "- \($0.task) (owner: \($0.owner ?? "unassigned"))" }.joined(separator: "\n") + "\n"
-                }
+            if !a.actionItems.isEmpty {
+                content += "\n**Action Items:**\n" + a.actionItems.map { "- \($0.task) (owner: \($0.owner ?? "unassigned"))" }.joined(separator: "\n") + "\n"
             }
         }
 

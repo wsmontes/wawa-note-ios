@@ -17,6 +17,7 @@ final class CaptureViewModel: ObservableObject {
     }
 
     var modelContext: ModelContext?
+    var contentPipeline: ContentPipelineService?
 
     private var coordinator: RecordingCoordinator?
     private var cancellables: Set<AnyCancellable> = []
@@ -83,7 +84,6 @@ final class CaptureViewModel: ObservableObject {
     private func launchPipeline() {
         guard let itemId = savedItemId ?? coordinator?.savedItemId,
               let ctx = modelContext else { return }
-        // Pipeline runs via singleton — survives navigation and backgrounding
-        ContentPipelineService.shared.process(itemId, using: ctx)
+        contentPipeline?.process(itemId, using: ctx)
     }
 }

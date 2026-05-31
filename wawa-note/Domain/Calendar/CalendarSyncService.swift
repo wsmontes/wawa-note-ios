@@ -2,13 +2,19 @@ import EventKit
 import OSLog
 import Foundation
 
+extension EKEventStore {
+    nonisolated(unsafe) static let shared = EKEventStore()
+}
+
 @MainActor
 final class CalendarSyncService: ObservableObject {
     @Published var authorizationStatus: EKAuthorizationStatus = .notDetermined
 
     private let eventStore: EKEventStore
 
-    init(eventStore: EKEventStore = EKEventStore()) {
+    private static let eventMatchTolerance: TimeInterval = 60
+
+    init(eventStore: EKEventStore = .shared) {
         self.eventStore = eventStore
         self.authorizationStatus = EKEventStore.authorizationStatus(for: .event)
         observeEventStoreChanges()
@@ -41,7 +47,11 @@ final class CalendarSyncService: ObservableObject {
             object: eventStore,
             queue: .main
         ) { [weak self] _ in
-            self?.objectWillChange.send()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.objectWillChange.send()
+                self.authorizationStatus = EKEventStore.authorizationStatus(for: .event)
+            }
         }
     }
 
@@ -143,7 +153,7 @@ final class CalendarSyncService: ObservableObject {
         let eventTitle = ekEvent.title ?? ""
         return items.contains { item in
             guard let itemSD = item.scheduledDate else { return false }
-            return abs(itemSD.timeIntervalSince(eventStart)) < 60
+            return abs(itemSD.timeIntervalSince(eventStart)) < Self.eventMatchTolerance
                 && item.title == eventTitle
         }
     }
@@ -154,4 +164,23 @@ final class CalendarSyncService: ObservableObject {
         guard hasPermission else { return nil }
         return eventStore.event(withIdentifier: identifier)
     }
+
+    // MARK: - Create events
+
+    func createEvent(title: String, startDate: Date, endDate: Date? = nil, notes: String? = nil) throws -> String {
+        guard hasPermission else { throw CalendarError.permissionDenied }
+        let event = EKEvent(eventStore: eventStore)
+        event.title = title
+        event.startDate = startDate
+        event.endDate = endDate ?? startDate.addingTimeInterval(3600)
+        event.notes = notes
+        event.calendar = eventStore.defaultCalendarForNewEvents ?? eventStore.calendars(for: .event).first
+        try eventStore.save(event, span: .thisEvent, commit: true)
+        return event.eventIdentifier
+    }
+}
+
+enum CalendarError: Error, LocalizedError {
+    case permissionDenied
+    var errorDescription: String? { "Calendar access is off. Enable in Settings > Privacy & Security > Calendars." }
 }

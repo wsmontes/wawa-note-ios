@@ -1,4 +1,5 @@
 import Foundation
+import CoreSpotlight
 
 struct SearchResult: Identifiable {
     let id = UUID()
@@ -46,19 +47,18 @@ final class SearchService {
             results.append(SearchResult(itemID: item.id, matchedField: .bodyText, snippet: snippet))
         }
 
-        if item.type == .meeting {
-            if let transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id) {
-                let fullText = transcript.segments.map(\.text).joined(separator: " ")
-                if let snippet = match(in: fullText, query: query, maxLength: 120) {
-                    results.append(SearchResult(itemID: item.id, matchedField: .transcript, snippet: snippet))
-                }
+        // Search transcript and analysis if they exist — capability-based, not type-based
+        if let transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id) {
+            let fullText = transcript.segments.map(\.text).joined(separator: " ")
+            if let snippet = match(in: fullText, query: query, maxLength: 120) {
+                results.append(SearchResult(itemID: item.id, matchedField: .transcript, snippet: snippet))
             }
+        }
 
-            if let analysis = try? fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) {
-                let analysisText = [analysis.shortSummary, analysis.detailedSummary].compactMap { $0 }.joined(separator: " ")
-                if let snippet = match(in: analysisText, query: query, maxLength: 120) {
-                    results.append(SearchResult(itemID: item.id, matchedField: .analysis, snippet: snippet))
-                }
+        if let analysis = try? fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) {
+            let analysisText = [analysis.shortSummary, analysis.detailedSummary].compactMap { $0 }.joined(separator: " ")
+            if let snippet = match(in: analysisText, query: query, maxLength: 120) {
+                results.append(SearchResult(itemID: item.id, matchedField: .analysis, snippet: snippet))
             }
         }
 
@@ -76,5 +76,34 @@ final class SearchService {
         if start != text.startIndex { snippet = "..." + snippet }
         if end != text.endIndex { snippet = snippet + "..." }
         return snippet
+    }
+}
+
+// MARK: - Core Spotlight Indexing
+
+final class SpotlightIndexService {
+    private let index = CSSearchableIndex.default()
+
+    func indexItem(_ item: KnowledgeItem) {
+        let attrs = CSSearchableItemAttributeSet(contentType: .text)
+        attrs.title = item.title
+        attrs.contentDescription = item.bodyText.map { String($0.prefix(300)) }
+        attrs.keywords = item.tags
+        attrs.addedDate = item.createdAt
+
+        let searchableItem = CSSearchableItem(
+            uniqueIdentifier: item.id.uuidString,
+            domainIdentifier: "com.wawa-note.knowledge",
+            attributeSet: attrs
+        )
+        index.indexSearchableItems([searchableItem]) { error in
+            if let error { AppLog.general.warning("Spotlight index failed: \(error)") }
+        }
+    }
+
+    func deleteItem(_ itemID: UUID) {
+        index.deleteSearchableItems(withIdentifiers: [itemID.uuidString]) { error in
+            if let error { AppLog.general.warning("Spotlight delete failed: \(error)") }
+        }
     }
 }

@@ -4,6 +4,7 @@ import SwiftData
 struct NoteEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var contentPipeline: ContentPipelineService
 
     enum Mode {
         case create(type: KnowledgeItemType, folderID: UUID?, initialTag: String?)
@@ -126,7 +127,7 @@ struct NoteEditorView: View {
 
             // Trigger pipeline for analysis if there's content
             if let body = item.bodyText, !body.isEmpty {
-                ContentPipelineService.shared.process( item.id, using: modelContext)
+                contentPipeline.process( item.id, using: modelContext)
             }
 
         case .edit(let item):

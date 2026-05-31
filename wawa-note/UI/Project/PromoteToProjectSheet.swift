@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 struct PromoteToProjectSheet: View {
     let item: KnowledgeItem
@@ -6,6 +7,7 @@ struct PromoteToProjectSheet: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var contentPipeline: ContentPipelineService
 
     @State private var isGenerating = false
     @State private var preview: ConversionPreview?
@@ -369,7 +371,7 @@ struct PromoteToProjectSheet: View {
             let project = try makeService().executeConversion(from: item, preview: preview)
             // Pipeline handles analysis + ingestion (Step 3 picks up projectID from re-fetch)
             // ProjectDetailView will show progress via ingestionState environment object
-            ContentPipelineService.shared.process( item.id, using: modelContext)
+            contentPipeline.process( item.id, using: modelContext)
             dismiss()
             onComplete(project)
         } catch {

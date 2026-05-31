@@ -1,8 +1,10 @@
 import SwiftUI
+import SwiftData
 
 struct JournalEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var contentPipeline: ContentPipelineService
 
     enum Mode {
         case create(folderID: UUID?)
@@ -187,7 +189,7 @@ struct JournalEditorView: View {
                 folderID: folderID,
                 tags: tags
             ), let body = item.bodyText, !body.isEmpty {
-                ContentPipelineService.shared.process( item.id, using: modelContext)
+                contentPipeline.process( item.id, using: modelContext)
             }
 
         case .edit(let item):

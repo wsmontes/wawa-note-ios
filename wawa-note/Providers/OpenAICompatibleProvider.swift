@@ -146,6 +146,7 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
     private let apiKey: String
     private let model: String
     private let session: URLSession
+    private let endpointPath: String
 
     init(
         id: String, displayName: String, providerType: ProviderType, baseURL: URL, apiKey: String, model: String,
@@ -154,6 +155,7 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
             supportsStructuredOutput: true, supportsToolCalling: false,
             supportsEmbeddings: false
         ),
+        endpointPath: String = "chat/completions",
         session: URLSession = {
             let config = URLSessionConfiguration.default
             config.timeoutIntervalForRequest = 180
@@ -168,13 +170,14 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
         self.apiKey = apiKey
         self.model = model
         self.capabilities = capabilities
+        self.endpointPath = endpointPath
         self.session = session
     }
 
     // MARK: - Chat Completions
 
     func send(_ request: AIRequest) async throws -> AIResponse {
-        let url = baseURL.appendingPathComponent("chat/completions")
+        let url = baseURL.appendingPathComponent(endpointPath)
         let effectiveModel = request.model.isEmpty ? model : request.model
 
         let bodyMessages: [[String: Any]] = request.messages.map { msg in

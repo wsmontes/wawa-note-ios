@@ -1,5 +1,6 @@
 import Foundation
 import Intents
+import OSLog
 
 final class FocusModeSensor: ContextSensor, @unchecked Sendable {
     let sensorName = "focus_mode"

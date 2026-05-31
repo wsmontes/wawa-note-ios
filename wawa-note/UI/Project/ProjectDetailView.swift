@@ -1,24 +1,132 @@
 import SwiftUI
 import SwiftData
+import Combine
+
+// MARK: - ViewModel
+
+@MainActor
+final class ProjectDetailViewModel: ObservableObject {
+    let project: Project
+
+    @Published var tasks: [TaskItem] = []
+    @Published var projectItems: [KnowledgeItem] = []
+    @Published var selectedTab = 0
+    @Published var remindersExportMessage: String?
+    @Published var remindersExportNeedsSettings = false
+
+    private var modelContext: ModelContext?
+    private var cancellables = Set<AnyCancellable>()
+
+    init(project: Project) {
+        self.project = project
+    }
+
+    func configure(modelContext: ModelContext, ingestionState: ProjectIngestionState) {
+        guard self.modelContext == nil else { return }
+        self.modelContext = modelContext
+        observeIngestionState(ingestionState)
+        loadData()
+    }
+
+    // MARK: Data
+
+    func loadData() {
+        guard let ctx = modelContext else { return }
+        let taskSvc = TaskService(context: ctx)
+        tasks = (try? taskSvc.tasks(for: project.id)) ?? []
+
+        let projSvc = ProjectService(context: ctx)
+        projectItems = (try? projSvc.items(in: project.id)) ?? []
+    }
+
+    // MARK: Actions
+
+    func removeFromInbox(_ item: KnowledgeItem) {
+        guard let ctx = modelContext else { return }
+        let svc = KnowledgeItemService(context: ctx)
+        try? svc.removeFromInbox(item)
+        loadData()
+    }
+
+    func removeItem(_ item: KnowledgeItem) {
+        guard let ctx = modelContext else { return }
+        try? ProjectService(context: ctx).removeItem(item.id)
+        loadData()
+    }
+
+    func moveToTrash(_ item: KnowledgeItem) {
+        guard let ctx = modelContext else { return }
+        let trash = TrashService(context: ctx)
+        try? trash.moveToTrash(item)
+        loadData()
+    }
+
+    // MARK: Export
+
+    func exportMarkdown() {
+        guard let ctx = modelContext else { return }
+        let exporter = ProjectExportService()
+        let svc = GraphEdgeService(context: ctx)
+        let allEdges = (try? svc.neighborhood(of: project.id, radius: 2)) ?? []
+
+        let markdown = exporter.exportMarkdown(project: project, items: projectItems, tasks: tasks, edges: allEdges)
+        let activityVC = UIActivityViewController(activityItems: [markdown], applicationActivities: nil)
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let root = windowScene.windows.first?.rootViewController {
+            root.present(activityVC, animated: true)
+        }
+    }
+
+    func exportTasksToReminders() async {
+        let service = TaskRemindersService()
+        let result = await service.exportTasks(tasks)
+        remindersExportMessage = result.message
+        remindersExportNeedsSettings = result.needsSettingsButton
+    }
+
+    var doneTaskCount: Int {
+        tasks.filter { $0.status == .done }.count
+    }
+
+    // MARK: Ingestion observation
+
+    private func observeIngestionState(_ state: ProjectIngestionState) {
+        state.$activeProjectIDs
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] activeIDs in
+                guard let self, !activeIDs.contains(self.project.id) else { return }
+                self.loadData()
+            }
+            .store(in: &cancellables)
+
+        // Reload when ingestion completes or fails for this project
+        state.$ingestionVersion
+            .receive(on: DispatchQueue.main)
+            .dropFirst()
+            .sink { [weak self] _ in self?.loadData() }
+            .store(in: &cancellables)
+    }
+}
+
+// MARK: - View
 
 struct ProjectDetailView: View {
     let project: Project
 
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \KnowledgeItem.updatedAt, order: .reverse) private var allItems: [KnowledgeItem]
+    @EnvironmentObject private var ingestionState: ProjectIngestionState
+    @StateObject private var viewModel: ProjectDetailViewModel
 
-    @State private var tasks: [TaskItem] = []
-    @State private var projectItems: [KnowledgeItem] = []
-    @State private var selectedTab = 0
-    @ObservedObject private var ingestionState = ProjectIngestionState.shared
+    init(project: Project) {
+        self.project = project
+        _viewModel = StateObject(wrappedValue: ProjectDetailViewModel(project: project))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            // Project header
             headerSection
 
-            // Tab picker
-            Picker("View", selection: $selectedTab) {
+            Picker("View", selection: $viewModel.selectedTab) {
                 Text("Tasks").tag(0)
                 Text("Items").tag(1)
                 Text("Graph").tag(2)
@@ -28,10 +136,9 @@ struct ProjectDetailView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
 
-            // Content — segmented switch, no page swipe
-            switch selectedTab {
+            switch viewModel.selectedTab {
             case 0:
-                ProjectTaskBoardView(tasks: tasks, projectID: project.id)
+                ProjectTaskBoardView(tasks: viewModel.tasks, projectID: project.id)
             case 1:
                 projectItemsList
             case 2:
@@ -48,22 +155,22 @@ struct ProjectDetailView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 16) {
                     Menu {
-                        Button { selectedTab = 0 } label: { Label("Tasks", systemImage: "checklist") }
-                        Button { selectedTab = 1 } label: { Label("Items", systemImage: "doc.text") }
-                        Button { selectedTab = 2 } label: { Label("Graph", systemImage: "circle.hexagonpath") }
-                        Button { selectedTab = 3 } label: { Label("Timeline", systemImage: "clock") }
+                        Button { viewModel.selectedTab = 0 } label: { Label("Tasks", systemImage: "checklist") }
+                        Button { viewModel.selectedTab = 1 } label: { Label("Items", systemImage: "doc.text") }
+                        Button { viewModel.selectedTab = 2 } label: { Label("Graph", systemImage: "circle.hexagonpath") }
+                        Button { viewModel.selectedTab = 3 } label: { Label("Timeline", systemImage: "clock") }
                     } label: {
                         Label("View", systemImage: "ellipsis.circle")
                     }
 
                     Menu {
                         Button {
-                            exportProject()
+                            viewModel.exportMarkdown()
                         } label: {
                             Label("Export Markdown", systemImage: "doc.richtext")
                         }
                         Button {
-                            Task { await exportTasksToReminders() }
+                            Task { await viewModel.exportTasksToReminders() }
                         } label: {
                             Label("Send Tasks to Reminders", systemImage: "checklist")
                         }
@@ -73,11 +180,27 @@ struct ProjectDetailView: View {
                 }
             }
         }
-        .task { loadData() }
-        .onChange(of: ingestionState.activeProjectIDs) { _, newValue in
-            if !newValue.contains(project.id) {
-                loadData()
+        .onAppear {
+            viewModel.configure(modelContext: modelContext, ingestionState: ingestionState)
+        }
+        .alert("Reminders", isPresented: Binding(
+            get: { viewModel.remindersExportMessage != nil },
+            set: { if !$0 { viewModel.remindersExportMessage = nil; viewModel.remindersExportNeedsSettings = false } }
+        )) {
+            if viewModel.remindersExportNeedsSettings {
+                Button("Open Settings") {
+                    viewModel.remindersExportMessage = nil
+                    viewModel.remindersExportNeedsSettings = false
+                    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                    UIApplication.shared.open(url)
+                }
             }
+            Button("OK") {
+                viewModel.remindersExportMessage = nil
+                viewModel.remindersExportNeedsSettings = false
+            }
+        } message: {
+            Text(viewModel.remindersExportMessage ?? "")
         }
     }
 
@@ -112,9 +235,9 @@ struct ProjectDetailView: View {
             }
 
             HStack(spacing: 24) {
-                statLabel("\(tasks.count)", "Tasks")
-                statLabel("\(tasks.filter { $0.status == .done }.count)", "Done")
-                statLabel("\(projectItems.count)", "Items")
+                statLabel("\(viewModel.tasks.count)", "Tasks")
+                statLabel("\(viewModel.doneTaskCount)", "Done")
+                statLabel("\(viewModel.projectItems.count)", "Items")
             }
 
             if ingestionState.activeProjectIDs.contains(project.id) {
@@ -127,6 +250,30 @@ struct ProjectDetailView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(Color.blue.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+
+            if let errorMsg = ingestionState.ingestionErrors[project.id] {
+                Button {
+                    ingestionState.ingestionErrors[project.id] = nil
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                        Text(errorMsg)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                        Spacer()
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange.opacity(0.6))
+                    }
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.orange.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
         }
@@ -149,7 +296,7 @@ struct ProjectDetailView: View {
 
     private var projectItemsList: some View {
         Group {
-            if projectItems.isEmpty {
+            if viewModel.projectItems.isEmpty {
                 VStack(spacing: 12) {
                     Spacer().frame(height: 40)
                     Image(systemName: "doc.text.magnifyingglass")
@@ -162,7 +309,7 @@ struct ProjectDetailView: View {
                 }
             } else {
                 List {
-                    ForEach(projectItems) { item in
+                    ForEach(viewModel.projectItems) { item in
                         NavigationLink {
                             KnowledgeDetailView(item: item)
                         } label: {
@@ -190,9 +337,7 @@ struct ProjectDetailView: View {
                         .swipeActions(edge: .leading) {
                             if item.inboxDate != nil {
                                 Button {
-                                    let svc = KnowledgeItemService(context: modelContext)
-                                    try? svc.removeFromInbox(item)
-                                    loadData()
+                                    viewModel.removeFromInbox(item)
                                 } label: {
                                     Label("Mark Reviewed", systemImage: "checkmark.circle")
                                 }.tint(.green)
@@ -200,15 +345,12 @@ struct ProjectDetailView: View {
                         }
                         .swipeActions(edge: .trailing) {
                             Button {
-                                try? ProjectService(context: modelContext).removeItem(item.id)
-                                loadData()
+                                viewModel.removeItem(item)
                             } label: {
                                 Label("Remove", systemImage: "folder.badge.minus")
                             }.tint(.orange)
                             Button(role: .destructive) {
-                                let trash = TrashService(context: modelContext)
-                                try? trash.moveToTrash(item)
-                                loadData()
+                                viewModel.moveToTrash(item)
                             } label: {
                                 Label("Trash", systemImage: "trash")
                             }
@@ -219,36 +361,5 @@ struct ProjectDetailView: View {
                 .scrollContentBackground(.hidden)
             }
         }
-    }
-
-    // MARK: - Data
-
-    private func loadData() {
-        let taskSvc = TaskService(context: modelContext)
-        tasks = (try? taskSvc.tasks(for: project.id)) ?? []
-
-        let projSvc = ProjectService(context: modelContext)
-        projectItems = (try? projSvc.items(in: project.id)) ?? []
-    }
-
-    // MARK: - Export
-
-    private func exportProject() {
-        let exporter = ProjectExportService()
-        let svc = GraphEdgeService(context: modelContext)
-        let allEdges = (try? svc.neighborhood(of: project.id, radius: 2)) ?? []
-
-        let markdown = exporter.exportMarkdown(project: project, items: projectItems, tasks: tasks, edges: allEdges)
-        let activityVC = UIActivityViewController(activityItems: [markdown], applicationActivities: nil)
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let root = windowScene.windows.first?.rootViewController {
-            root.present(activityVC, animated: true)
-        }
-    }
-
-    private func exportTasksToReminders() async {
-        let tasksToExport = tasks
-        let service = TaskRemindersService()
-        _ = await service.exportTasks(tasksToExport)
     }
 }

@@ -4,6 +4,7 @@ import SwiftData
 struct KnowledgeDetailView: View {
     let item: KnowledgeItem
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var contentPipeline: ContentPipelineService
     @State private var transcript: Transcript?
     @State private var analysis: MeetingAnalysis?
     @State private var annotations: [Annotation] = []
@@ -59,17 +60,16 @@ struct KnowledgeDetailView: View {
 
                 Divider().padding(.top, 16)
 
-                switch item.type {
-                case .meeting:
-                    meetingSections
-                case .note, .journalEntry:
-                    if analysis != nil { analysisCards }
-                    textContentSection
-                case .webBookmark:
-                    bookmarkSection
-                case .image:
-                    imageSection
-                }
+                // Analysis always at the top — like every other item type
+                if transcript != nil || analysis != nil { artifactSections }
+
+                // Image gallery + OCR for scanned documents
+                if item.type == .image { imageSection }
+
+                // Body text for notes, journals, and any non-image item with bodyText
+                // Images: OCR text already shown inside imageSection
+                if (item.bodyText != nil && item.type != .image) || item.type == .note || item.type == .journalEntry { textContentSection }
+                if item.type == .webBookmark { bookmarkSection }
 
                 if !annotations.isEmpty {
                     annotationsSection
@@ -87,7 +87,7 @@ struct KnowledgeDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 12) {
-                    if item.type == .note || item.type == .journalEntry {
+                    if item.bodyText != nil {
                         if isEditing {
                             Button("Save") { saveEdits() }
                                 .fontWeight(.semibold)
@@ -98,20 +98,18 @@ struct KnowledgeDetailView: View {
                         }
                     }
 
-                    if item.type == .meeting {
-                        Button {
-                            showPromoteSheet = true
-                        } label: {
-                            Label("Turn into Project", systemImage: "sparkles.rectangle.stack")
-                        }
+                    Button {
+                        showPromoteSheet = true
+                    } label: {
+                        Label("Turn into Project", systemImage: "sparkles.rectangle.stack")
                     }
 
-                    if let transcript {
+                    if transcript != nil || (item.type == .image && item.bodyText != nil) || item.type == .note || item.type == .journalEntry {
                         Menu {
-                            ShareLink(item: MarkdownExporter().export(item: item, transcript: transcript, analysis: analysis))
+                            ShareLink("Markdown", item: MarkdownExporter().export(item: item, transcript: transcript, analysis: analysis))
                             if let jsonData = try? JSONExporter().export(item: item, transcript: transcript, analysis: analysis),
                                let jsonString = String(data: jsonData, encoding: .utf8) {
-                                ShareLink(item: jsonString)
+                                ShareLink("JSON Export", item: jsonString)
                             }
                         } label: {
                             Label("Export", systemImage: "square.and.arrow.up")
@@ -126,14 +124,17 @@ struct KnowledgeDetailView: View {
             }
         }
         .onAppear {
-            isPipelineProcessing = ContentPipelineService.shared.isProcessingItem(item.id)
+            isPipelineProcessing = contentPipeline.isProcessingItem(item.id)
             Task { @MainActor in
                 await Task.yield()
                 loadData()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .pipelineCompleted)) { n in
-            if n.object as? String == item.id.uuidString { isPipelineProcessing = false }
+            if n.object as? String == item.id.uuidString {
+                isPipelineProcessing = false
+                Task { @MainActor in loadData() }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .transcriptReady)) { _ in
             Task { @MainActor in
@@ -225,7 +226,7 @@ struct KnowledgeDetailView: View {
     // MARK: - Meeting sections
 
     @ViewBuilder
-    private var meetingSections: some View {
+    private var artifactSections: some View {
         if let analysis {
             sectionHeader("Summary", icon: "sparkles").padding(.horizontal, 16)
 
@@ -538,13 +539,78 @@ struct KnowledgeDetailView: View {
         .padding(.horizontal, 16)
     }
 
-    // MARK: - Image placeholder
+    // MARK: - Image
 
+    @State private var currentPage = 0
+
+    @ViewBuilder
     private var imageSection: some View {
-        Text("Image preview not yet available")
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 16)
+        let pageCount = item.imagePageCount ?? 1
+        let pages = loadScannedPages(count: pageCount)
+
+        if pages.isEmpty {
+            Text("No scanned image")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+        } else {
+            VStack(alignment: .leading, spacing: 16) {
+                // Page indicator above gallery
+                if pageCount > 1 {
+                    HStack {
+                        Image(systemName: "doc.on.doc")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Page \(currentPage + 1) of \(pageCount)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 16)
+                }
+
+                // Gallery
+                TabView(selection: $currentPage) {
+                    ForEach(Array(pages.enumerated()), id: \.offset) { idx, image in
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+                            .padding(.horizontal, 16)
+                            .tag(idx)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: pageCount > 1 ? .always : .never))
+                .frame(minHeight: 350)
+
+                // OCR text
+                if let text = item.bodyText, !text.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Extracted Text", systemImage: "doc.text.magnifyingglass")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.secondary)
+                        Text(text)
+                            .font(.body)
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.secondarySystemGroupedBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal, 16)
+                }
+            }
+            .padding(.top, 8)
+        }
+    }
+
+    private func loadScannedPages(count: Int) -> [UIImage] {
+        let dir = fileStore.itemDirectoryURL(for: item.id)
+        return (0..<count).compactMap { idx in
+            let url = dir.appendingPathComponent("scan_\(idx).jpg")
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            return UIImage(data: data)
+        }
     }
 
     // MARK: - Annotations
@@ -696,7 +762,7 @@ struct KnowledgeDetailView: View {
             try fileStore.createMeetingDirectory(for: item.id)
             try fileStore.writeArtifact(result, fileName: "transcript.json", meetingId: item.id)
 
-            if item.type == .meeting { item.status = .transcribed }
+            item.status = .transcribed
             item.transcriptionEngineId = engine.id
 
             // Auto-generate embedding after transcription
@@ -738,7 +804,7 @@ struct KnowledgeDetailView: View {
         let annService = AnnotationService(context: modelContext)
         annotations = (try? annService.annotations(for: item.id)) ?? []
 
-        if let analysis, item.type == .meeting {
+        if let analysis {
             let extractor = EntityExtractionService(context: modelContext)
             _ = try? extractor.extractAndPersist(from: analysis, sourceItemID: item.id)
             try? extractor.buildDecisionGraph(from: analysis, sourceItemID: item.id)

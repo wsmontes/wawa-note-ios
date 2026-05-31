@@ -87,6 +87,22 @@ final class GraphEdgeService {
         return try context.fetch(descriptor)
     }
 
+    /// Increase weight on the strongest edge between two nodes (any type).
+    /// Used to persist edge reinforcements from project ingestion.
+    func reinforce(fromID: UUID, toID: UUID) throws {
+        // Find all edges between these nodes, reinforce the one with highest weight
+        let fromTypeRaw = EdgeType.relatesTo.rawValue
+        var descriptor = FetchDescriptor<GraphEdge>(
+            predicate: #Predicate { $0.fromID == fromID && $0.toID == toID }
+        )
+        descriptor.sortBy = [SortDescriptor(\.weight, order: .reverse)]
+        descriptor.fetchLimit = 1
+        if let edge = try context.fetch(descriptor).first {
+            edge.weight += 0.5
+            try context.save()
+        }
+    }
+
     func deleteEdge(_ edge: GraphEdge) throws {
         context.delete(edge)
         try context.save()

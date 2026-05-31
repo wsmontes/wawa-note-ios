@@ -101,8 +101,8 @@ struct ProjectTimelineView: View {
         ) {
             for item in items {
                 events.append(TimelineEvent(
-                    id: item.id, title: item.title.isEmpty ? "Meeting" : item.title,
-                    subtitle: item.type.label, date: item.createdAt, kind: item.type == .meeting ? .meeting : .note
+                    id: item.id, title: item.title.isEmpty ? "Untitled" : item.title,
+                    subtitle: item.type.label, date: item.createdAt, kind: .from(itemType: item.type)
                 ))
             }
         }
@@ -134,23 +134,29 @@ struct ProjectTimelineView: View {
 
     private func eventColor(_ kind: TimelineEventKind) -> Color {
         switch kind {
-        case .meeting: return .blue
-        case .note: return .orange
-        case .task: return .green
-        case .done: return .gray
-        case .decision: return .purple
-        case .person: return .indigo
+        case .meeting: .blue
+        case .note: .orange
+        case .journalEntry: .purple
+        case .webBookmark: .green
+        case .image: .pink
+        case .task: .green
+        case .done: .gray
+        case .decision: .purple
+        case .person: .indigo
         }
     }
 
     private func eventIcon(_ kind: TimelineEventKind) -> String {
         switch kind {
-        case .meeting: return "recordingtape"
-        case .note: return "note.text"
-        case .task: return "checklist"
-        case .done: return "checkmark.circle"
-        case .decision: return "lightbulb"
-        case .person: return "person"
+        case .meeting: "recordingtape"
+        case .note: "note.text"
+        case .journalEntry: "book"
+        case .webBookmark: "bookmark"
+        case .image: "photo"
+        case .task: "checklist"
+        case .done: "checkmark.circle"
+        case .decision: "lightbulb"
+        case .person: "person"
         }
     }
 }
@@ -158,12 +164,17 @@ struct ProjectTimelineView: View {
 // MARK: - Models
 
 enum TimelineEventKind {
-    case meeting
-    case note
-    case task
-    case decision
-    case person
-    case done
+    case meeting, note, journalEntry, webBookmark, image, task, decision, person, done
+
+    static func from(itemType: KnowledgeItemType) -> TimelineEventKind {
+        switch itemType {
+        case .meeting: .meeting
+        case .note: .note
+        case .journalEntry: .journalEntry
+        case .webBookmark: .webBookmark
+        case .image: .image
+        }
+    }
 }
 
 struct TimelineEvent: Identifiable {

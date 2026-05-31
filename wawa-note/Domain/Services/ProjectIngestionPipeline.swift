@@ -2,23 +2,96 @@ import Foundation
 import SwiftData
 import OSLog
 
-@MainActor
-final class ProjectIngestionPipeline {
-    static let shared = ProjectIngestionPipeline()
+// MARK: - Ingestion models (Codable)
 
-    private init() {}
+struct IngestionResponse: Codable {
+    var item_project_view: String?
+    var project_item_view: String?
+    var connections: [IngestionConnection]?
+    var task_updates: [IngestionTaskUpdate]?
+    var new_tasks: [IngestionNewTask]?
+    var edge_reinforcements: [IngestionReinforcement]?
+    var insights: [IngestionInsight]?
+    var project_summary_contribution: String?
+    var project_summary_update: String? // legacy key, also checked
+}
+
+struct IngestionConnection: Codable {
+    var from_title: String
+    var to_title: String
+    var type: String
+    var explanation: String?
+}
+
+struct IngestionTaskUpdate: Codable {
+    var task_title: String
+    var new_status: String
+    var reason: String?
+}
+
+struct IngestionNewTask: Codable {
+    var title: String
+    var priority: String?
+    var reason: String?
+    var confidence: Double?
+}
+
+struct IngestionReinforcement: Codable {
+    var from_title: String?
+    var to_title: String?
+    var note: String?
+}
+
+struct IngestionInsight: Codable {
+    var text: String
+    var confidence: Double?
+}
+
+// MARK: - Pipeline
+
+@MainActor
+final class ProjectIngestionPipeline: ObservableObject {
+    private let ingestionState: ProjectIngestionState
+    private let fileStore: FileArtifactStore
+
+    init(ingestionState: ProjectIngestionState, fileStore: FileArtifactStore = FileArtifactStore()) {
+        self.ingestionState = ingestionState
+        self.fileStore = fileStore
+    }
 
     func ingest(itemID: UUID, projectID: UUID, using modelContext: ModelContext) async {
         await runIngestion(itemID: itemID, projectID: projectID, context: modelContext)
+    }
+
+    // MARK: - Errors
+
+    enum IngestionError: Error, LocalizedError {
+        case noProvider
+        case itemNotFound
+        case projectNotFound
+        case aiFailed(String)
+        case jsonParseFailed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .noProvider: return "No AI provider configured. Go to Settings to add one."
+            case .itemNotFound: return "Item not found."
+            case .projectNotFound: return "Project not found."
+            case .aiFailed(let msg): return "AI call failed: \(msg)"
+            case .jsonParseFailed(let msg): return "Failed to parse AI response: \(msg)"
+            }
+        }
     }
 
     // MARK: - Private
 
     private func runIngestion(itemID: UUID, projectID: UUID, context: ModelContext) async {
         AppLog.provider.info("ProjectIngestion: starting for item \(itemID) → project \(projectID)")
+        ingestionState.start(projectID)
 
         guard let provider = try? ProviderRouter.resolveActive(context: context) else {
             AppLog.provider.error("ProjectIngestion: NO AI PROVIDER configured. Cannot enrich project \(projectID). Go to Settings to add one.")
+            postIngestionFailed(itemID: itemID, projectID: projectID, error: .noProvider)
             return
         }
 
@@ -26,11 +99,10 @@ final class ProjectIngestionPipeline {
         let knowledgeSvc = KnowledgeItemService(context: context)
         let taskSvc = TaskService(context: context)
         let edgeSvc = GraphEdgeService(context: context)
-        let fileStore = FileArtifactStore()
-
         guard let project = try? projSvc.fetch(id: projectID),
               let newItem = try? knowledgeSvc.fetchItem(id: itemID) else {
             AppLog.provider.error("ProjectIngestion: project \(projectID) or item \(itemID) NOT FOUND in SwiftData")
+            postIngestionFailed(itemID: itemID, projectID: projectID, error: .projectNotFound)
             return
         }
 
@@ -53,10 +125,12 @@ final class ProjectIngestionPipeline {
         // 2. Prompt: dual-perspective analysis
         let prompt = buildIngestionPrompt(projectContext: projectContext, newItemContext: itemContext)
         let model = AutomationSettings.shared.resolveAutoAnalysisModel(context: context) ?? AutomationSettings.shared.autoAnalysisModel
-        let config = AIConfigService.shared
-        let preset = config.presetFor(model: model)
+        let preset = AIConfigService.shared.presetFor(model: model)
         let isReasoning = preset?.reasoningModel ?? false
         let maxOut = preset?.maxOutputTokens ?? 4096
+
+        // Snapshot summary before AI call to avoid race condition on read-modify-write
+        let previousSummary = project.summary ?? ""
 
         let request = AIRequest(
             model: model,
@@ -65,7 +139,7 @@ final class ProjectIngestionPipeline {
                 AIMessage(role: .user, content: [.text(prompt)])
             ],
             temperature: isReasoning ? nil : 0.3,
-            maxTokens: min(maxOut / 2, 4000),
+            maxTokens: min(maxOut * 2 / 3, 8000),
             responseFormat: .jsonObject
         )
 
@@ -75,22 +149,35 @@ final class ProjectIngestionPipeline {
             AppLog.provider.info("ProjectIngestion: raw response (\(rawContent.count) chars): \(String(rawContent.prefix(500)))")
 
             if let json = parseIngestionJSON(rawContent) {
-                applyResults(json: json, newItem: newItem, project: project, allItems: allItems,
-                            existingTasks: existingTasks, edgeSvc: edgeSvc, taskSvc: taskSvc, context: context)
-                AppLog.provider.info("ProjectIngestion: SUCCESS — \(json["new_tasks"] as? [[String: Any]] ?? []).count new tasks, \(json["connections"] as? [[String: Any]] ?? []).count connections for project \(project.name)")
+                applyResults(response: json, newItem: newItem, project: project, allItems: allItems,
+                            existingTasks: existingTasks, edgeSvc: edgeSvc, taskSvc: taskSvc,
+                            context: context, previousSummary: previousSummary)
+                AppLog.provider.info("ProjectIngestion: SUCCESS — \(json.new_tasks?.count ?? 0) new tasks, \(json.connections?.count ?? 0) connections for project \(project.name)")
+                postIngestionCompleted(itemID: itemID, projectID: projectID)
                 return
             }
 
-            // Attempt 2: retry with "fix your JSON" prompt
+            // JSON fix retry: include original schema context so model knows target format
             saveRawIngestionResponse(rawContent, itemID: itemID, label: "raw")
             AppLog.provider.warning("ProjectIngestion: initial parse failed. Retrying with JSON fix prompt...")
 
             let fixPrompt = """
-            Your previous response was not valid JSON. Here is what you returned:
+            Original task: \(prompt.prefix(1000))...
 
-            \(ProviderAdapter.normalizeJSON(rawContent).prefix(2000))
+            Your previous response was not valid JSON. Fix it to match this schema:
 
-            Return ONLY valid JSON matching the original schema. No markdown, no code fences. The JSON must parse correctly.
+            {
+              "connections": [{"from_title":"...","to_title":"...","type":"supports|contradicts|references|relates_to","explanation":"..."}],
+              "task_updates": [{"task_title":"...","new_status":"done|cancelled","reason":"..."}],
+              "new_tasks": [{"title":"...","priority":"low|medium|high","reason":"...","confidence":0.8}],
+              "edge_reinforcements": [{"from_title":"...","to_title":"...","note":"..."}],
+              "insights": [{"text":"...","confidence":0.8}],
+              "project_summary_contribution": "..."
+            }
+
+            Your broken response: \(ProviderAdapter.normalizeJSON(rawContent).prefix(1500))
+
+            Return ONLY valid JSON matching the schema. No markdown, no code fences.
             """
 
             let fixRequest = AIRequest(
@@ -107,8 +194,10 @@ final class ProjectIngestionPipeline {
                 saveRawIngestionResponse(fixResponse.content, itemID: itemID, label: "fix_attempt")
                 if let json = parseIngestionJSON(fixResponse.content) {
                     AppLog.provider.info("ProjectIngestion: JSON fix retry succeeded")
-                    applyResults(json: json, newItem: newItem, project: project, allItems: allItems,
-                                existingTasks: existingTasks, edgeSvc: edgeSvc, taskSvc: taskSvc, context: context)
+                    applyResults(response: json, newItem: newItem, project: project, allItems: allItems,
+                                existingTasks: existingTasks, edgeSvc: edgeSvc, taskSvc: taskSvc,
+                                context: context, previousSummary: previousSummary)
+                    postIngestionCompleted(itemID: itemID, projectID: projectID)
                     return
                 }
             } catch {
@@ -116,9 +205,19 @@ final class ProjectIngestionPipeline {
             }
 
             AppLog.provider.error("ProjectIngestion: all parse attempts failed for item \(itemID)")
+            postIngestionFailed(itemID: itemID, projectID: projectID, error: .jsonParseFailed("All parse attempts failed after JSON fix retry"))
         } catch {
             AppLog.provider.error("ProjectIngestion: AI call failed after retries: \(error)")
+            postIngestionFailed(itemID: itemID, projectID: projectID, error: .aiFailed(error.localizedDescription))
         }
+    }
+
+    private func postIngestionCompleted(itemID: UUID, projectID: UUID) {
+        ingestionState.finish(projectID)
+    }
+
+    private func postIngestionFailed(itemID: UUID, projectID: UUID, error: IngestionError) {
+        ingestionState.setError(projectID, message: error.localizedDescription)
     }
 
     // MARK: - System Prompt
@@ -138,7 +237,7 @@ final class ProjectIngestionPipeline {
         {
           "item_project_view": "one sentence: how this item fits into the project's existing knowledge",
           "project_item_view": "one sentence: what this item reveals about the project that was not clear before",
-          "connections": [{"from_title": "...", "to_title": "...", "type": "supports|contradicts|references|extends|relates_to", "explanation": "..."}],
+          "connections": [{"from_title": "...", "to_title": "...", "type": "supports|contradicts|references|relates_to", "explanation": "..."}],
           "task_updates": [{"task_title": "...", "new_status": "done|cancelled", "reason": "..."}],
           "new_tasks": [{"title": "...", "priority": "low|medium|high", "reason": "..."}],
           "edge_reinforcements": [{"from_title": "...", "to_title": "...", "note": "this connection is confirmed by the new item"}],
@@ -247,7 +346,7 @@ final class ProjectIngestionPipeline {
         How does this item fit into the existing project? What does it add, confirm, or extend?
 
         PART B — Project through item eyes:
-        Reading the project with the knowledge from this item — what becomes clearer? What was uncertain that is now confirmed? What assumptions should be revisited?
+        Reading the project with the knowledge from this item — what becomes clearer? What was uncertain that is now confirmed or extended?
 
         Return JSON as specified in the system prompt.
         """
@@ -256,81 +355,122 @@ final class ProjectIngestionPipeline {
     // MARK: - Apply results
 
     private func applyResults(
-        json: [String: Any],
+        response: IngestionResponse,
         newItem: KnowledgeItem,
         project: Project,
         allItems: [KnowledgeItem],
         existingTasks: [TaskItem],
         edgeSvc: GraphEdgeService,
         taskSvc: TaskService,
-        context: ModelContext
+        context: ModelContext,
+        previousSummary: String
     ) {
-        // --- Task status updates (never delete) ---
-        if let updates = json["task_updates"] as? [[String: Any]] {
+        // Task status updates (never delete)
+        if let updates = response.task_updates {
             for update in updates {
-                guard let title = update["task_title"] as? String,
-                      let newStatusRaw = update["new_status"] as? String else { continue }
-                if let task = findTask(byTitle: title, in: existingTasks),
-                   let newStatus = TaskStatus(rawValue: newStatusRaw) {
+                if let task = findTask(byTitle: update.task_title, in: existingTasks),
+                   let newStatus = TaskStatus(rawValue: update.new_status) {
                     try? taskSvc.updateStatus(task, to: newStatus)
                 }
             }
         }
 
-        // --- New tasks ---
-        if let newTasks = json["new_tasks"] as? [[String: Any]] {
+        // New tasks — dedup by title against existing tasks
+        if let newTasks = response.new_tasks {
+            let existingTitles = Set(existingTasks.map { $0.title.lowercased().trimmingCharacters(in: .whitespaces) })
             for t in newTasks.prefix(3) {
-                guard let title = t["title"] as? String else { continue }
-                let priority = (t["priority"] as? String).flatMap(TaskPriority.init(rawValue:)) ?? .medium
-                try? taskSvc.create(title: title, projectID: project.id, priority: priority, sourceItemID: newItem.id)
+                let normalized = t.title.lowercased().trimmingCharacters(in: .whitespaces)
+                guard !existingTitles.contains(normalized) else {
+                    AppLog.provider.info("ProjectIngestion: skipping duplicate task \"\(t.title)\"")
+                    continue
+                }
+                let priority = t.priority.flatMap(TaskPriority.init(rawValue:)) ?? .medium
+                try? taskSvc.create(
+                    title: t.title, projectID: project.id, priority: priority,
+                    sourceItemID: newItem.id, confidence: t.confidence
+                )
             }
         }
 
-        // --- New connections ---
-        if let connections = json["connections"] as? [[String: Any]] {
+        // New connections
+        if let connections = response.connections {
             for conn in connections.prefix(5) {
-                guard let fromTitle = conn["from_title"] as? String,
-                      let toTitle = conn["to_title"] as? String,
-                      let typeStr = conn["type"] as? String else { continue }
+                let fromItem = findItem(byTitle: conn.from_title, in: allItems) ?? newItem
+                guard let toItem = findItem(byTitle: conn.to_title, in: allItems) else { continue }
 
-                let fromItem = findItem(byTitle: fromTitle, in: allItems) ?? newItem
-                let toItem = findItem(byTitle: toTitle, in: allItems)
-                guard let toItem else { continue }
-
-                let edgeType = edgeType(from: typeStr)
+                let edgeType = edgeType(from: conn.type)
                 try? edgeSvc.create(fromID: fromItem.id, toID: toItem.id, edgeType: edgeType, provenanceItemID: newItem.id)
             }
         }
 
-        // --- Edge reinforcements (confirmed connections) ---
-        if let reinforcements = json["edge_reinforcements"] as? [[String: Any]], !reinforcements.isEmpty {
-            AppLog.provider.info("ProjectIngestion: \(reinforcements.count) edge reinforcements confirmed")
+        // Edge reinforcements — update weight on existing edges
+        if let reinforcements = response.edge_reinforcements {
+            for r in reinforcements {
+                guard let fromTitle = r.from_title,
+                      let toTitle = r.to_title,
+                      let fromItem = findItem(byTitle: fromTitle, in: allItems),
+                      let toItem = findItem(byTitle: toTitle, in: allItems) else { continue }
+                try? edgeSvc.reinforce(fromID: fromItem.id, toID: toItem.id)
+            }
         }
 
-        // --- Insights ---
-        if let insights = json["insights"] as? [[String: Any]], !insights.isEmpty {
-            AppLog.provider.info("ProjectIngestion: \(insights.count) insights received")
+        // Insights — persist as annotations on the new item
+        if let insights = response.insights {
+            for insight in insights.prefix(5) {
+                let annotation = Annotation(
+                    source: "project_ingestion",
+                    key: "ai_insight",
+                    value: insight.text,
+                    itemID: newItem.id,
+                    confidence: insight.confidence
+                )
+                context.insert(annotation)
+            }
+            try? context.save()
         }
 
-        // --- Project summary update ---
-        let contribution = (json["project_summary_contribution"] as? String) ?? (json["project_summary_update"] as? String) ?? ""
+        // Project summary update — use snapshot to avoid race condition
+        let contribution = response.project_summary_contribution ?? response.project_summary_update ?? ""
         if !contribution.isEmpty {
             let datePrefix = Date().formatted(date: .abbreviated, time: .omitted)
             let entry = "\n\n[\(datePrefix) — from \"\(newItem.title)\"]\n\(contribution)"
-            project.summary = (project.summary ?? "") + entry
+            project.summary = previousSummary + entry
             do { try context.save() }
             catch { AppLog.provider.error("ProjectIngestion: failed to save summary: \(error.localizedDescription)") }
         } else {
-            AppLog.provider.warning("ProjectIngestion: no summary contribution in AI response. Keys present: \(json.keys.sorted().joined(separator: ", "))")
+            AppLog.provider.warning("ProjectIngestion: no summary contribution in AI response")
         }
     }
 
+    // MARK: - Fuzzy matching (exact match first, then word-boundary)
+
     private func findItem(byTitle title: String, in items: [KnowledgeItem]) -> KnowledgeItem? {
-        ItemContextBuilder.findItem(byTitle: title, in: items)
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Exact match first
+        if let exact = items.first(where: { $0.title.localizedCaseInsensitiveCompare(trimmed) == .orderedSame }) {
+            return exact
+        }
+        // Word boundary: match only if the title appears as a whole word
+        let lower = trimmed.lowercased()
+        return items.first { item in
+            let itemLower = item.title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            // Require at least 4 chars to avoid false positives on short tokens like "ai", "a", "it"
+            guard lower.count >= 4 else { return false }
+            return itemLower.contains(lower)
+        }
     }
 
     private func findTask(byTitle title: String, in tasks: [TaskItem]) -> TaskItem? {
-        ItemContextBuilder.findTask(byTitle: title, in: tasks)
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let exact = tasks.first(where: { $0.title.localizedCaseInsensitiveCompare(trimmed) == .orderedSame }) {
+            return exact
+        }
+        let lower = trimmed.lowercased()
+        return tasks.first { task in
+            let taskLower = task.title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            guard lower.count >= 4 else { return false }
+            return taskLower.contains(lower)
+        }
     }
 
     private func edgeType(from string: String) -> EdgeType {
@@ -338,28 +478,32 @@ final class ProjectIngestionPipeline {
         case "supports": return .supports
         case "contradicts": return .contradicts
         case "references": return .references
-        case "extends": return .relatesTo
+        case "extends", "relates_to": return .relatesTo
         default: return .relatesTo
         }
     }
 
     // MARK: - Helpers
 
-    private func parseIngestionJSON(_ rawContent: String) -> [String: Any]? {
+    private func parseIngestionJSON(_ rawContent: String) -> IngestionResponse? {
         let cleaned = ProviderAdapter.normalizeJSON(rawContent)
-        guard let data = cleaned.data(using: .utf8),
-              let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
-            AppLog.provider.error("ProjectIngestion: JSON parse failed. Raw: \(String(rawContent.prefix(300)))")
+        guard let data = cleaned.data(using: .utf8) else {
+            AppLog.provider.error("ProjectIngestion: failed to convert cleaned JSON to data")
             return nil
         }
-        AppLog.provider.info("ProjectIngestion: parsed JSON with keys: \(json.keys.sorted().joined(separator: ", "))")
-        return json
+        do {
+            let response = try JSONDecoder().decode(IngestionResponse.self, from: data)
+            AppLog.provider.info("ProjectIngestion: decoded — \(response.connections?.count ?? 0) connections, \(response.new_tasks?.count ?? 0) new tasks")
+            return response
+        } catch {
+            AppLog.provider.error("ProjectIngestion: JSON decode failed: \(error). Raw: \(String(rawContent.prefix(300)))")
+            return nil
+        }
     }
 
     private func saveRawIngestionResponse(_ content: String, itemID: UUID, label: String) {
-        let fs = FileArtifactStore()
-        try? fs.createMeetingDirectory(for: itemID)
-        try? content.data(using: .utf8)?.write(to: fs.itemDirectoryURL(for: itemID).appendingPathComponent("project.ingestion.\(label).txt"))
+        try? fileStore.createMeetingDirectory(for: itemID)
+        try? content.data(using: .utf8)?.write(to: fileStore.itemDirectoryURL(for: itemID).appendingPathComponent("project.ingestion.\(label).txt"))
     }
 
     private func sendWithRetry(provider: any AIProvider, request: AIRequest, maxRetries: Int) async throws -> AIResponse {

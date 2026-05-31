@@ -24,7 +24,7 @@ final class KnowledgeItemService {
         let item = KnowledgeItem(
             type: type,
             title: title,
-            status: type == .meeting ? .recording : .draft,
+            status: .draft,
             tags: tags,
             folderID: folderID,
             bodyText: bodyText,

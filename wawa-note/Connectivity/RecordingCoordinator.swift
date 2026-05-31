@@ -1,5 +1,6 @@
 import SwiftData
 import OSLog
+@preconcurrency import ActivityKit
 
 @MainActor
 final class RecordingCoordinator: ObservableObject {
@@ -11,10 +12,12 @@ final class RecordingCoordinator: ObservableObject {
 
     private let captureService: AudioCaptureService
     private let nowPlayingController: NowPlayingController
+    private nonisolated(unsafe) var liveActivity: Activity<RecordingActivityAttributes>?
     private let modelContainer: ModelContainer
     private var modelContext: ModelContext
     private let contextCaptureService = ContextCaptureService()
     private var annotationService: AnnotationService
+    var contentPipeline: ContentPipelineService?
 
     private var recordingStartDate: Date?
     private var pausedDuration: TimeInterval = 0
@@ -167,6 +170,7 @@ final class RecordingCoordinator: ObservableObject {
         captureService.stopRecording()
         state = .stopped
         nowPlayingController.deactivate()
+        stopLiveActivity()
         observationTimer?.invalidate()
         observationTimer = nil
         nowPlayingTimer?.invalidate()
@@ -178,6 +182,14 @@ final class RecordingCoordinator: ObservableObject {
 
         updateItemOnStop()
         notifyStatusChange()
+
+        // Launch content pipeline directly so lock-screen / now-playing stops
+        // also trigger transcription → analysis → project ingestion.
+        // The guard in ContentPipelineService prevents double execution if
+        // CaptureViewModel also calls process().
+        if let itemId = savedItemId {
+            contentPipeline?.process(itemId, using: modelContext)
+        }
     }
 
     func returnToIdle() {
@@ -246,6 +258,7 @@ final class RecordingCoordinator: ObservableObject {
         }
         nowPlayingController.activate()
         nowPlayingController.update(title: meetingTitle, elapsedTime: 0, isPlaying: true)
+        startLiveActivity()
     }
 
     // MARK: - Observation
@@ -281,6 +294,7 @@ final class RecordingCoordinator: ObservableObject {
                     elapsedTime: effective,
                     isPlaying: self.state == .recording
                 )
+                self.updateLiveActivity(effective: effective)
             }
         }
     }
@@ -313,6 +327,51 @@ final class RecordingCoordinator: ObservableObject {
         }
     }
 
+    // MARK: - Live Activity
+
+    private func startLiveActivity() {
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        let attrs = RecordingActivityAttributes()
+        let state = RecordingActivityAttributes.ContentState(
+            elapsedTimeFormatted: "00:00",
+            isPaused: false,
+            title: meetingTitle
+        )
+        do {
+            liveActivity = try Activity<RecordingActivityAttributes>.request(
+                attributes: attrs,
+                contentState: state,
+                pushType: nil
+            )
+        } catch {
+            AppLog.general.warning("LiveActivity start failed: \(error)")
+        }
+    }
+
+    private func updateLiveActivity(effective: TimeInterval) {
+        guard let activity = liveActivity else { return }
+        let mm = Int(effective) / 60
+        let ss = Int(effective) % 60
+        let formatted = String(format: "%02d:%02d", mm, ss)
+        let state = RecordingActivityAttributes.ContentState(
+            elapsedTimeFormatted: formatted,
+            isPaused: state == .paused,
+            title: meetingTitle
+        )
+        Task { @MainActor [activity] in await activity.update(using: state) }
+    }
+
+    private func stopLiveActivity() {
+        guard let activity = liveActivity else { return }
+        let state = RecordingActivityAttributes.ContentState(
+            elapsedTimeFormatted: "00:00",
+            isPaused: false,
+            title: "Recording ended"
+        )
+        Task { @MainActor [activity] in await activity.end(using: state, dismissalPolicy: .immediate) }
+        liveActivity = nil
+    }
+
     // MARK: - Save
 
     private func updateItemOnStop() {
@@ -333,5 +392,15 @@ final class RecordingCoordinator: ObservableObject {
         } catch {
             AppLog.audio.error("Failed to save item update: \(error)")
         }
+    }
+}
+
+// MARK: - Live Activity Attributes
+
+struct RecordingActivityAttributes: ActivityAttributes {
+    public struct ContentState: Codable, Hashable {
+        var elapsedTimeFormatted: String
+        var isPaused: Bool
+        var title: String
     }
 }

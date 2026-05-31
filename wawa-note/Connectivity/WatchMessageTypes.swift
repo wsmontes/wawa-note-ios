@@ -8,6 +8,17 @@ enum WatchCommand: String, Codable {
     case requestStatus
 }
 
+enum WatchMessageKey {
+    static let type = "type"
+    static let command = "command"
+    static let state = "state"
+    static let elapsedTime = "elapsedTime"
+    static let audioLevel = "audioLevel"
+    static let isActive = "isActive"
+    static let meetingTitle = "meetingTitle"
+    static let errorMessage = "errorMessage"
+}
+
 struct RecordingStatus: Codable, Equatable {
     let state: String
     let elapsedTime: Double

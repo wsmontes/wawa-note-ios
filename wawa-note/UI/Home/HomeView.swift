@@ -2,38 +2,206 @@ import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
 import AVFoundation
+import Vision
+import VisionKit
+
+// MARK: - HomeViewModel
+
+@MainActor
+final class HomeViewModel: ObservableObject {
+    @Published var importProgress: String?
+    @Published var importError: String?
+    @Published var showFilePicker = false
+    @Published var pendingImport: ImportPending?
+    @Published var targetProjectForImport: Project?
+
+    private let importService = AudioImportService()
+    private let artifactStore = FileArtifactStore()
+    let importRouter = ImportRouter(importers: [
+        AudioImportService(), PlainTextImporter(), MarkdownImporter(),
+        JSONImporter(), PDFImporter(), HTMLImporter(), RTFImporter(),
+        SRTImporter(), ICSImporter(), GitHubIssuesImporter()
+    ])
+
+    private var modelContext: ModelContext?
+    private var contentPipeline: ContentPipelineService?
+    private var coordinator: RecordingCoordinator?
+
+    func configure(modelContext: ModelContext, contentPipeline: ContentPipelineService, coordinator: RecordingCoordinator) {
+        self.modelContext = modelContext
+        self.contentPipeline = contentPipeline
+        self.coordinator = coordinator
+    }
+
+    // MARK: Import
+
+    func handleFilePick(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard !urls.isEmpty else { importError = "No file was selected."; return }
+            if urls.count == 1, let url = urls.first { stageSingleImport(url) }
+            else { Task { await importFiles(urls, deleteSource: false) } }
+        case .failure(let e): importError = e.localizedDescription
+        }
+    }
+
+    private func stageSingleImport(_ url: URL) {
+        let didStart = url.startAccessingSecurityScopedResource()
+        defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+
+        guard let importer = importRouter.importer(for: url) else {
+            importError = "Format not supported."
+            return
+        }
+
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+        try? FileManager.default.removeItem(at: tempURL)
+        do { try FileManager.default.copyItem(at: url, to: tempURL) } catch {
+            importError = error.localizedDescription; return
+        }
+
+        if importer.formatIdentifier == "audio" {
+            Task {
+                do {
+                    let meta = try await importService.extractMetadata(url: tempURL)
+                    await MainActor.run {
+                        pendingImport = ImportPending(url: tempURL, kind: .audio(meta), isFromShareExtension: false)
+                    }
+                } catch {
+                    await MainActor.run { importError = error.localizedDescription }
+                }
+            }
+        } else {
+            let preview = extractTextPreview(url: tempURL, importer: importer)
+            pendingImport = ImportPending(url: tempURL, kind: .text(preview), textImporter: importer, isFromShareExtension: false)
+        }
+    }
+
+    private func extractTextPreview(url: URL, importer: any FormatImporter) -> TextImportPreview {
+        let resourceValues = try? url.resourceValues(forKeys: [.fileSizeKey, .creationDateKey, .contentModificationDateKey])
+        let filename = url.deletingPathExtension().lastPathComponent
+        let fileSize = Int64(resourceValues?.fileSize ?? 0)
+        let creationDate = resourceValues?.creationDate ?? resourceValues?.contentModificationDate
+        var snippet = ""
+        if let handle = try? FileHandle(forReadingFrom: url),
+           let data = try? handle.read(upToCount: 4096),
+           let text = String(data: data, encoding: .utf8) {
+            snippet = String(text.prefix(500))
+        }
+        return TextImportPreview(formatIdentifier: importer.formatIdentifier, displayName: importer.displayName,
+                                  suggestedTitle: filename, fileSize: fileSize, creationDate: creationDate, textSnippet: snippet)
+    }
+
+    func scanSharedDirectoryAndImport() async {
+        guard let ctx = modelContext else { return }
+        guard let c = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.wawa-note") else { return }
+        let d = c.appendingPathComponent("Shared", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: d.path) else { return }
+        guard let files = try? FileManager.default.contentsOfDirectory(at: d, includingPropertiesForKeys: nil) else { return }
+        let pending = files.filter { !$0.lastPathComponent.hasPrefix(".") }
+        guard !pending.isEmpty else { return }
+        await importFiles(pending, deleteSource: true)
+    }
+
+    private func importFiles(_ urls: [URL], deleteSource: Bool) async {
+        guard let ctx = modelContext, let pipeline = contentPipeline else { return }
+        let total = urls.count; var imported = 0
+        await MainActor.run { importProgress = "Importing 0/\(total)..." }
+
+        for url in urls {
+            let didStart = url.startAccessingSecurityScopedResource()
+            defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+
+            guard let importer = importRouter.importer(for: url) else { continue }
+
+            if importer.formatIdentifier == "audio" {
+                await importAudioFile(url, importer: importer, deleteSource: deleteSource, modelContext: ctx, pipeline: pipeline)
+            } else {
+                await importTextFile(url, importer: importer, deleteSource: deleteSource, modelContext: ctx, pipeline: pipeline)
+            }
+
+            imported += 1
+            await MainActor.run { importProgress = "Importing \(imported)/\(total)..." }
+        }
+
+        await MainActor.run { importProgress = nil; targetProjectForImport = nil }
+    }
+
+    private func importAudioFile(_ url: URL, importer: any FormatImporter, deleteSource: Bool, modelContext: ModelContext, pipeline: ContentPipelineService) async {
+        guard let coord = coordinator else { return }
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+        try? FileManager.default.removeItem(at: tempURL)
+        do { try FileManager.default.copyItem(at: url, to: tempURL) } catch { return }
+
+        let meta: ImportMetadata
+        do { meta = try await importService.extractMetadata(url: tempURL) } catch { return }
+
+        let itemId = await MainActor.run {
+            let item = coord.createItemFromImport(title: meta.suggestedTitle, date: meta.creationDate ?? Date(), duration: meta.duration)
+            if let target = targetProjectForImport, let item {
+                try? ProjectService(context: modelContext).addItem(item.id, to: target.id)
+            }
+            return item?.id
+        }
+        guard let itemId else { return }
+
+        do {
+            try await importService.storeAudio(sourceURL: tempURL, itemID: itemId, using: artifactStore)
+            try? FileManager.default.removeItem(at: tempURL)
+            if deleteSource { try? FileManager.default.removeItem(at: url) }
+            pipeline.process(itemId, using: modelContext)
+        } catch {
+            await MainActor.run { coord.deleteItem(itemId) }
+        }
+    }
+
+    private func importTextFile(_ url: URL, importer: any FormatImporter, deleteSource: Bool, modelContext: ModelContext, pipeline: ContentPipelineService) async {
+        do {
+            let result = try await importer.importFromURL(url)
+            let item = result.knowledgeItem
+            await MainActor.run {
+                modelContext.insert(item)
+                try? modelContext.save()
+                if let target = targetProjectForImport {
+                    try? ProjectService(context: modelContext).addItem(item.id, to: target.id)
+                }
+                pipeline.process(item.id, using: modelContext)
+            }
+            if deleteSource { try? FileManager.default.removeItem(at: url) }
+        } catch {
+            await MainActor.run { importError = "Failed to import \(url.lastPathComponent): \(error.localizedDescription)" }
+        }
+    }
+
+    // MARK: Backfill
+
+    func backfillEmbeddingsIfNeeded(items: [KnowledgeItem]) async {
+        guard let ctx = modelContext else { return }
+        let flag = "embeddings_backfill_done_v1"
+        guard !UserDefaults.standard.bool(forKey: flag) else { return }
+        guard let provider = try? ProviderRouter.resolveActive(context: ctx) else { return }
+        await EmbeddingPipelineService().backfillAll(items: items, using: provider) { _, _ in }
+        UserDefaults.standard.set(true, forKey: flag)
+    }
+}
+
+// MARK: - HomeView
 
 struct HomeView: View {
     @EnvironmentObject private var coordinator: RecordingCoordinator
+    @EnvironmentObject private var contentPipeline: ContentPipelineService
     @Query(sort: \Project.updatedAt, order: .reverse) private var projects: [Project]
     @Query(sort: \KnowledgeItem.updatedAt, order: .reverse) private var allItems: [KnowledgeItem]
     @Environment(\.modelContext) private var modelContext
 
     @StateObject private var captureVM = CaptureViewModel()
+    @StateObject private var importVM = HomeViewModel()
+    @StateObject private var scannerVM = ScannerViewModel()
     @State private var navigateToItem: KnowledgeItem?
     @State private var navigateToProject: Project?
-    @State private var showFilePicker = false
-    @State private var targetProjectForImport: Project?
-    @State private var pendingImport: ImportPending?
-    @State private var importError: String?
     @State private var showCreationSheet = false
-    @State private var importProgress: String?
+    @State private var showScanner = false
     @State private var expandedProjectIDs: Set<UUID> = []
-
-    private let importService = AudioImportService()
-    private let artifactStore = FileArtifactStore()
-    private let importRouter = ImportRouter(importers: [
-        AudioImportService(),
-        PlainTextImporter(),
-        MarkdownImporter(),
-        JSONImporter(),
-        PDFImporter(),
-        HTMLImporter(),
-        RTFImporter(),
-        SRTImporter(),
-        ICSImporter(),
-        GitHubIssuesImporter()
-    ])
 
     var body: some View {
         ZStack {
@@ -56,7 +224,7 @@ struct HomeView: View {
         .background(Color(.systemGroupedBackground))
         .animation(.easeInOut(duration: 0.2), value: captureVM.recordingState)
         .overlay(alignment: .top) {
-            if let progress = importProgress {
+            if let progress = importVM.importProgress {
                 HStack {
                     ProgressView().tint(.white)
                     Text(progress).font(.subheadline).fontWeight(.medium).foregroundStyle(.white)
@@ -67,38 +235,48 @@ struct HomeView: View {
             }
         }
         .task {
-            await backfillEmbeddingsIfNeeded()
-            await scanSharedDirectoryAndImport()
+            await importVM.backfillEmbeddingsIfNeeded(items: allItems)
+            await importVM.scanSharedDirectoryAndImport()
         }
         .navigationDestination(item: $navigateToItem) { KnowledgeDetailView(item: $0) }
         .navigationDestination(item: $navigateToProject) { ProjectDetailView(project: $0) }
-        .fileImporter(isPresented: $showFilePicker, allowedContentTypes: importRouter.allUTTypes(), allowsMultipleSelection: true) { handleFilePick($0) }
-        .sheet(item: $pendingImport) { imp in
-            ImportFormView(
-                sourceURL: imp.url,
-                kind: imp.kind,
-                textImporter: imp.textImporter,
-                isFromShareExtension: imp.isFromShareExtension
-            ) { item in
-                if let target = targetProjectForImport {
+        .fileImporter(isPresented: $importVM.showFilePicker, allowedContentTypes: importVM.importRouter.allUTTypes(), allowsMultipleSelection: true) { importVM.handleFilePick($0) }
+        .sheet(item: $importVM.pendingImport) { imp in
+            ImportFormView(sourceURL: imp.url, kind: imp.kind, textImporter: imp.textImporter, isFromShareExtension: imp.isFromShareExtension) { item in
+                if let target = importVM.targetProjectForImport {
                     try? ProjectService(context: modelContext).addItem(item.id, to: target.id)
-                } else {
-                    ContentPipelineService.shared.process( item.id, using: modelContext)
                 }
+                contentPipeline.process(item.id, using: modelContext)
                 navigateToItem = item
-                pendingImport = nil
+                importVM.pendingImport = nil
             }
         }
-        .onOpenURL { if $0.scheme == "wawanote" { Task { await scanSharedDirectoryAndImport() } } }
-        .alert("Import Error", isPresented: .constant(importError != nil)) { Button("OK") { importError = nil } } message: { Text(importError ?? "") }
+        .onOpenURL { if $0.scheme == "wawanote" { Task { await importVM.scanSharedDirectoryAndImport() } } }
+        .alert("Import Error", isPresented: .constant(importVM.importError != nil)) { Button("OK") { importVM.importError = nil } } message: { Text(importVM.importError ?? "") }
         .sheet(isPresented: $showCreationSheet) { CreationSheetView() }
+        .fullScreenCover(isPresented: $showScanner) {
+            ScannerView(scannedImages: $scannerVM.scannedImages)
+        }
+        .onChange(of: scannerVM.scannedImages) { _, images in
+            guard !images.isEmpty else { return }
+            Task {
+                let items = await scannerVM.createItems(from: images, context: modelContext)
+                for item in items {
+                    await contentPipeline.process(item.id, using: modelContext)
+                }
+                scannerVM.scannedImages = []
+                navigateToItem = items.first
+            }
+        }
         .onAppear {
             captureVM.bind(coordinator: coordinator)
             captureVM.modelContext = modelContext
+            captureVM.contentPipeline = contentPipeline
+            importVM.configure(modelContext: modelContext, contentPipeline: contentPipeline, coordinator: coordinator)
         }
     }
 
-    // ── Default surface ───────────────────────────────────────
+    // MARK: Default surface
 
     private var defaultSurface: some View {
         VStack(spacing: 0) {
@@ -141,7 +319,14 @@ struct HomeView: View {
                         .background(LinearGradient(colors: [.red, .red.opacity(0.85)], startPoint: .leading, endPoint: .trailing))
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                     }
-                    Button(action: { showFilePicker = true }) {
+                    Button(action: { showScanner = true }) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "doc.text.viewfinder").font(.subheadline)
+                            Text("Scan").font(.caption2)
+                        }.foregroundStyle(.primary).frame(width: 60, height: 52)
+                        .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                    Button(action: { importVM.showFilePicker = true }) {
                         VStack(spacing: 4) {
                             Image(systemName: "square.and.arrow.down").font(.subheadline)
                             Text("Import").font(.caption2)
@@ -162,7 +347,7 @@ struct HomeView: View {
         }
     }
 
-    // ── Project Row ───────────────────────────────────────────
+    // MARK: Project row
 
     private func projectRow(_ project: Project) -> some View {
         let projectItems = allItems.filter { $0.projectID == project.id }
@@ -180,9 +365,7 @@ struct HomeView: View {
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
-                if isExpanded {
-                    Image(systemName: "chevron.up").font(.caption).foregroundStyle(.tertiary)
-                }
+                if isExpanded { Image(systemName: "chevron.up").font(.caption).foregroundStyle(.tertiary) }
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
             .contentShape(Rectangle())
@@ -206,7 +389,7 @@ struct HomeView: View {
                 Button { startRecordingFor(project) } label: {
                     Label("Record", systemImage: "record.circle")
                 }.tint(.red)
-                Button { targetProjectForImport = project; showFilePicker = true } label: {
+                Button { importVM.targetProjectForImport = project; importVM.showFilePicker = true } label: {
                     Label("Import", systemImage: "square.and.arrow.down")
                 }.tint(.blue)
             }
@@ -246,7 +429,7 @@ struct HomeView: View {
         captureVM.startRecording(projectID: project.id)
     }
 
-    // ── Recording panel ───────────────────────────────────────
+    // MARK: Recording panel
 
     private var recordingPanel: some View {
         let isPaused = captureVM.recordingState == .paused
@@ -286,179 +469,9 @@ struct HomeView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(.systemGroupedBackground))
     }
-
-    // ── Import ────────────────────────────────────────────────
-
-    private func handleFilePick(_ result: Result<[URL], Error>) {
-        switch result {
-        case .success(let urls):
-            guard !urls.isEmpty else { importError = "No file was selected."; return }
-            if urls.count == 1, let url = urls.first { stageSingleImport(url) } else { Task { await importFiles(urls, deleteSource: false) } }
-        case .failure(let e): importError = e.localizedDescription
-        }
-    }
-
-    private func stageSingleImport(_ url: URL) {
-        let didStart = url.startAccessingSecurityScopedResource()
-        defer { if didStart { url.stopAccessingSecurityScopedResource() } }
-
-        guard let importer = importRouter.importer(for: url) else {
-            importError = "Format not supported."
-            return
-        }
-
-        // Copy to temp so the security-scoped bookmark stays valid
-        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
-        try? FileManager.default.removeItem(at: tempURL)
-        do { try FileManager.default.copyItem(at: url, to: tempURL) } catch {
-            importError = error.localizedDescription; return
-        }
-
-        if importer.formatIdentifier == "audio" {
-            Task {
-                do {
-                    let meta = try await importService.extractMetadata(url: tempURL)
-                    await MainActor.run {
-                        pendingImport = ImportPending(
-                            url: tempURL,
-                            kind: .audio(meta),
-                            isFromShareExtension: false
-                        )
-                    }
-                } catch {
-                    await MainActor.run { importError = error.localizedDescription }
-                }
-            }
-        } else {
-            // Text/document — extract preview and present form
-            let preview = extractTextPreview(url: tempURL, importer: importer)
-            pendingImport = ImportPending(
-                url: tempURL,
-                kind: .text(preview),
-                textImporter: importer,
-                isFromShareExtension: false
-            )
-        }
-    }
-
-    private func extractTextPreview(url: URL, importer: any FormatImporter) -> TextImportPreview {
-        let resourceValues = try? url.resourceValues(forKeys: [.fileSizeKey, .creationDateKey, .contentModificationDateKey])
-        let filename = url.deletingPathExtension().lastPathComponent
-        let fileSize = Int64(resourceValues?.fileSize ?? 0)
-        let creationDate = resourceValues?.creationDate ?? resourceValues?.contentModificationDate
-
-        var snippet = ""
-        if let handle = try? FileHandle(forReadingFrom: url),
-           let data = try? handle.read(upToCount: 4096),
-           let text = String(data: data, encoding: .utf8) {
-            snippet = String(text.prefix(500))
-        }
-
-        return TextImportPreview(
-            formatIdentifier: importer.formatIdentifier,
-            displayName: importer.displayName,
-            suggestedTitle: filename,
-            fileSize: fileSize,
-            creationDate: creationDate,
-            textSnippet: snippet
-        )
-    }
-
-    private func scanSharedDirectoryAndImport() async {
-        guard let c = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.wawa-note") else { return }
-        let d = c.appendingPathComponent("Shared", isDirectory: true)
-        guard FileManager.default.fileExists(atPath: d.path) else { return }
-        guard let files = try? FileManager.default.contentsOfDirectory(at: d, includingPropertiesForKeys: nil) else { return }
-        let pending = files.filter { !$0.lastPathComponent.hasPrefix(".") }
-        guard !pending.isEmpty else { return }
-        await importFiles(pending, deleteSource: true)
-    }
-
-    private func importFiles(_ urls: [URL], deleteSource: Bool) async {
-        let total = urls.count; var imported = 0
-        await MainActor.run { importProgress = "Importing 0/\(total)..." }
-
-        for url in urls {
-            let didStart = url.startAccessingSecurityScopedResource()
-            defer { if didStart { url.stopAccessingSecurityScopedResource() } }
-
-            guard let importer = importRouter.importer(for: url) else { continue }
-
-            if importer.formatIdentifier == "audio" {
-                await importAudioFile(url, importer: importer, deleteSource: deleteSource)
-            } else {
-                await importTextFile(url, importer: importer, deleteSource: deleteSource)
-            }
-
-            imported += 1
-            await MainActor.run { importProgress = "Importing \(imported)/\(total)..." }
-        }
-
-        await MainActor.run { importProgress = nil; targetProjectForImport = nil }
-    }
-
-    private func importAudioFile(_ url: URL, importer: any FormatImporter, deleteSource: Bool) async {
-        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
-        try? FileManager.default.removeItem(at: tempURL)
-        do { try FileManager.default.copyItem(at: url, to: tempURL) } catch { return }
-
-        let meta: ImportMetadata
-        do { meta = try await importService.extractMetadata(url: tempURL) } catch { return }
-
-        let itemId = await MainActor.run {
-            let item = coordinator.createItemFromImport(
-                title: meta.suggestedTitle,
-                date: meta.creationDate ?? Date(),
-                duration: meta.duration
-            )
-            if let target = targetProjectForImport, let item {
-                try? ProjectService(context: modelContext).addItem(item.id, to: target.id, startPipeline: false)
-            }
-            return item?.id
-        }
-        guard let itemId else { return }
-
-        do {
-            try await importService.storeAudio(sourceURL: tempURL, itemID: itemId, using: artifactStore)
-            try? FileManager.default.removeItem(at: tempURL)
-            if deleteSource { try? FileManager.default.removeItem(at: url) }
-            ContentPipelineService.shared.process( itemId, using: modelContext)
-        } catch {
-            await MainActor.run { coordinator.deleteItem(itemId) }
-        }
-    }
-
-    private func importTextFile(_ url: URL, importer: any FormatImporter, deleteSource: Bool) async {
-        do {
-            let result = try await importer.importFromURL(url)
-            let item = result.knowledgeItem
-            await MainActor.run {
-                modelContext.insert(item)
-                try? modelContext.save()
-                if let target = targetProjectForImport {
-                    try? ProjectService(context: modelContext).addItem(item.id, to: target.id)
-                } else {
-                    ContentPipelineService.shared.process( item.id, using: modelContext)
-                }
-            }
-            if deleteSource { try? FileManager.default.removeItem(at: url) }
-        } catch {
-            await MainActor.run {
-                importError = "Failed to import \(url.lastPathComponent): \(error.localizedDescription)"
-            }
-        }
-    }
-
-    private func backfillEmbeddingsIfNeeded() async {
-        let flag = "embeddings_backfill_done_v1"
-        guard !UserDefaults.standard.bool(forKey: flag) else { return }
-        guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else { return }
-        await EmbeddingPipelineService().backfillAll(items: allItems, using: provider) { _, _ in }
-        UserDefaults.standard.set(true, forKey: flag)
-    }
 }
 
-// ── Waveform ─────────────────────────────────────────────────
+// MARK: - Waveform
 
 struct ScrollingWaveformView: View {
     let level: Float; let isRunning: Bool
@@ -487,7 +500,7 @@ struct ScrollingWaveformView: View {
     private func stop() { timer?.invalidate(); timer = nil }
 }
 
-// MARK: - Import pending model
+// MARK: - ImportPending
 
 struct ImportPending: Identifiable {
     let id = UUID()
@@ -495,4 +508,112 @@ struct ImportPending: Identifiable {
     let kind: ImportKind
     var textImporter: (any FormatImporter)?
     let isFromShareExtension: Bool
+}
+
+// MARK: - ScannerView (VisionKit wrapper)
+
+struct ScannerView: UIViewControllerRepresentable {
+    @Binding var scannedImages: [UIImage]
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> VNDocumentCameraViewController {
+        let controller = VNDocumentCameraViewController()
+        controller.delegate = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: VNDocumentCameraViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    final class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
+        let parent: ScannerView
+
+        init(_ parent: ScannerView) { self.parent = parent }
+
+        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan) {
+            var images: [UIImage] = []
+            for i in 0 ..< scan.pageCount { images.append(scan.imageOfPage(at: i)) }
+            parent.scannedImages = images
+            parent.dismiss()
+        }
+
+        func documentCameraViewControllerDidCancel(_ controller: VNDocumentCameraViewController) {
+            parent.dismiss()
+        }
+
+        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFailWithError error: Error) {
+            parent.dismiss()
+        }
+    }
+}
+
+// MARK: - ScannerViewModel
+
+@MainActor
+final class ScannerViewModel: ObservableObject {
+    @Published var scannedImages: [UIImage] = []
+    @Published var isProcessing = false
+
+    private let fileStore = FileArtifactStore()
+
+    func createItems(from images: [UIImage], context: ModelContext) async -> [KnowledgeItem] {
+        guard !images.isEmpty else { return [] }
+        isProcessing = true
+        defer { isProcessing = false }
+
+        let itemService = KnowledgeItemService(context: context)
+        let title = images.count > 1 ? "Scanned Document (\(images.count) pages)" : "Scanned Document"
+
+        guard let item = try? itemService.createItem(
+            type: .image,
+            title: title,
+            bodyText: nil
+        ) else { return [] }
+
+        let dir = fileStore.itemDirectoryURL(for: item.id)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        // Save all pages and collect OCR text
+        var allText: [String] = []
+        for (idx, image) in images.enumerated() {
+            let filename = "scan_\(idx).jpg"
+            if let data = image.jpegData(compressionQuality: 0.85) {
+                try? data.write(to: dir.appendingPathComponent(filename))
+            }
+            if let text = await recognizeText(from: image), !text.isEmpty {
+                allText.append(text)
+            }
+        }
+
+        item.imageFileRelativePath = "scan_0.jpg"
+        item.imagePageCount = images.count
+        item.bodyText = allText.joined(separator: "\n\n---\n\n")
+
+        do {
+            try context.save()
+            return [item]
+        } catch {
+            AppLog.general.error("Failed to save scanned item: \(error)")
+            return []
+        }
+    }
+
+    private func recognizeText(from image: UIImage) async -> String? {
+        guard let cgImage = image.cgImage else { return nil }
+        return await withCheckedContinuation { continuation in
+            let request = VNRecognizeTextRequest { request, _ in
+                let text = (request.results as? [VNRecognizedTextObservation] ?? [])
+                    .compactMap { $0.topCandidates(1).first?.string }
+                    .joined(separator: "\n")
+                continuation.resume(returning: text.isEmpty ? nil : text)
+            }
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = true
+            try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
+            if request.results == nil { continuation.resume(returning: nil) }
+        }
+    }
 }
