@@ -125,9 +125,7 @@ final class ProjectIngestionPipeline: ObservableObject {
         // 2. Prompt: dual-perspective analysis
         let prompt = buildIngestionPrompt(projectContext: projectContext, newItemContext: itemContext)
         let model = AutomationSettings.shared.resolveAutoAnalysisModel(context: context) ?? AutomationSettings.shared.autoAnalysisModel
-        let preset = AIConfigService.shared.presetFor(model: model)
-        let isReasoning = preset?.reasoningModel ?? false
-        let maxOut = preset?.maxOutputTokens ?? 4096
+        let params = AIConfigService.shared.requestParams(for: "project_ingestion", model: model)
 
         // Snapshot summary before AI call to avoid race condition on read-modify-write
         let previousSummary = project.summary ?? ""
@@ -135,11 +133,11 @@ final class ProjectIngestionPipeline: ObservableObject {
         let request = AIRequest(
             model: model,
             messages: [
-                AIMessage(role: .system, content: [.text(systemPrompt)]),
+                AIMessage(role: .system, content: [.text(buildSystemPrompt(for: project))]),
                 AIMessage(role: .user, content: [.text(prompt)])
             ],
-            temperature: isReasoning ? nil : 0.3,
-            maxTokens: min(maxOut * 2 / 3, 8000),
+            temperature: params.temperature,
+            maxTokens: params.maxTokens,
             responseFormat: .jsonObject
         )
 
@@ -222,8 +220,8 @@ final class ProjectIngestionPipeline: ObservableObject {
 
     // MARK: - System Prompt
 
-    private var systemPrompt: String {
-        """
+    private func buildSystemPrompt(for project: Project) -> String {
+        var prompt = """
         You are a project knowledge analyst. You analyze how a new item relates to a project.
 
         KEY PRINCIPLES:
@@ -233,6 +231,19 @@ final class ProjectIngestionPipeline: ObservableObject {
         - NEVER suggest deleting tasks or connections. Tasks can change status (done/cancelled). Connections can be added.
         - Be conservative. Only report what is clearly supported. Flag uncertainty.
 
+        """
+
+        if let instructions = project.customInstructions, !instructions.trimmingCharacters(in: .whitespaces).isEmpty {
+            prompt += """
+            PROJECT INSTRUCTIONS (from user):
+            \(instructions)
+
+            Use these instructions to guide your analysis. Prioritize what the user cares about.
+
+            """
+        }
+
+        prompt += """
         Return JSON with these fields:
         {
           "item_project_view": "one sentence: how this item fits into the project's existing knowledge",
@@ -251,6 +262,8 @@ final class ProjectIngestionPipeline: ObservableObject {
         - connections: report genuine relationships. If a connection already exists, use edge_reinforcements instead to confirm it.
         - new_tasks: only tasks explicitly implied. Max 3.
         """
+
+        return prompt
     }
 
     // MARK: - Context builders

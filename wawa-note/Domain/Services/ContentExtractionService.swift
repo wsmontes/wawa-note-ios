@@ -145,10 +145,11 @@ final class ContentExtractionService {
         return nil
     }
 
-    // MARK: - Analyze text (always the same, regardless of source)
+    // MARK: - Analyze text (source-aware)
 
-    /// Runs AI analysis on extracted text. The text source doesn't matter —
-    /// this is always the same analysis pipeline.
+    /// Runs AI analysis on extracted text. The system prompt and user prompt structure
+    /// adapt to the item's source type so the LLM understands context: a recording gets
+    /// meeting-analysis framing, a scan gets document-structure framing, etc.
     func analyze(text: String, item: KnowledgeItem) async -> Bool {
         guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
             AppLog.provider.warning("ContentExtraction.analyze: no provider configured")
@@ -158,15 +159,23 @@ final class ContentExtractionService {
         let settings = AutomationSettings.shared
         let model = settings.resolveAutoAnalysisModel(context: modelContext) ?? settings.autoAnalysisModel
 
+        let sourceCtx = SourceContext.from(item)
+
         // Build synthetic transcript from text chunks for AnalysisService
         let segments = chunkText(text, itemID: item.id)
         let sourceId = segments.count > 1 ? "text-chunked" : "text-direct"
         let transcript = Transcript(meetingId: item.id, languageCode: nil, segments: segments, sourceEngineId: sourceId)
 
-        AppLog.provider.info("ContentExtraction.analyze: \(segments.count) segments, model \(model)")
+        AppLog.provider.info("ContentExtraction.analyze: source=\(sourceCtx.sourceType.rawValue), \(segments.count) segments, model \(model)")
 
         do {
-            let result = try await AnalysisService().analyze(transcript: transcript, using: provider, model: model, meetingId: item.id)
+            let result = try await AnalysisService().analyze(
+                transcript: transcript,
+                using: provider,
+                model: model,
+                meetingId: item.id,
+                sourceContext: sourceCtx
+            )
 
             try fileStore.createMeetingDirectory(for: item.id)
             try fileStore.writeArtifact(result, fileName: "analysis.json", meetingId: item.id)
@@ -178,7 +187,6 @@ final class ContentExtractionService {
             AppLog.provider.info("ContentExtraction.analyze: done — \(result.shortSummary.prefix(80))")
             NotificationCenter.default.post(name: .analysisReady, object: item.id.uuidString)
 
-            // Generate embedding for semantic search
             await EmbeddingPipelineService().ensureEmbedding(for: item, using: provider)
 
             return true
@@ -260,5 +268,92 @@ final class ContentExtractionService {
             segments.append(TranscriptSegment(meetingId: itemID, startTime: Double(idx), text: current, sourceEngineId: "text-chunk"))
         }
         return segments
+    }
+}
+
+// MARK: - Source Context
+
+/// Describes where an item came from so the analysis prompt can adapt.
+/// A meeting transcript, an imported PDF, a scanned document, and a manual note
+/// all need different AI framing to produce useful structured output.
+struct SourceContext: Sendable {
+    enum SourceType: String, Sendable {
+        case recording
+        case import_
+        case scan
+        case note
+    }
+
+    let sourceType: SourceType
+    let metadata: [String: String]
+
+    static func from(_ item: KnowledgeItem) -> SourceContext {
+        let sourceType: SourceType
+        var metadata: [String: String] = [:]
+
+        if item.audioFileRelativePath != nil {
+            sourceType = .recording
+            if let dur = item.durationSeconds { metadata["duration"] = formatDuration(dur) }
+            if let lang = item.languageCode { metadata["language"] = lang }
+        } else if item.imageFileRelativePath != nil {
+            sourceType = .scan
+            if let pages = item.imagePageCount { metadata["pageCount"] = String(pages) }
+        } else if item.isImported, let source = item.importSourceURL {
+            sourceType = .import_
+            metadata["filename"] = URL(string: source)?.lastPathComponent ?? source
+        } else {
+            sourceType = .note
+        }
+
+        metadata["createdAt"] = item.createdAt.formatted(date: .complete, time: .shortened)
+        if !item.tags.isEmpty { metadata["tags"] = item.tags.joined(separator: ", ") }
+
+        return SourceContext(sourceType: sourceType, metadata: metadata)
+    }
+
+    /// Builds the analysis system prompt for this source type.
+    /// Each source gets a different analytical lens — a meeting transcript needs
+    /// decisions/actions/risks extraction, while a scanned document needs
+    /// structure analysis and clause identification.
+    func analysisSystemPrompt() -> String {
+        switch sourceType {
+        case .recording:
+            return "You are a meeting intelligence analyst. Extract decisions, action items with owners, risks, open questions, important dates, mentioned people/systems/organizations, and a topic timeline. Return only valid JSON."
+        case .import_:
+            return "You are a document analyst. Analyze this imported file. Identify its structure, key points, decisions if any, action items, risks, mentioned entities, and dates. Consider the filename and metadata for context. Return only valid JSON."
+        case .scan:
+            return "You are a document analyst. Analyze this scanned document (OCR text). Identify document structure, key clauses, dates, parties mentioned, obligations, risks, and action items if applicable. Note that OCR may have errors — flag uncertain readings. Return only valid JSON."
+        case .note:
+            return "You are a knowledge analyst. Analyze this note. Extract key themes, questions being explored, references to other topics, action items if any, and people/systems mentioned. Return only valid JSON."
+        }
+    }
+
+    /// Builds a source-context prefix for the user prompt so the LLM knows
+    /// what kind of content it's analyzing and any relevant metadata.
+    func userPromptPrefix() -> String {
+        var lines: [String] = []
+        switch sourceType {
+        case .recording:
+            lines.append("The following is a meeting transcript.")
+            if let dur = metadata["duration"] { lines.append("Duration: \(dur)") }
+            if let lang = metadata["language"] { lines.append("Language: \(lang)") }
+        case .import_:
+            lines.append("The following is the content of an imported file.")
+            if let fn = metadata["filename"] { lines.append("Filename: \(fn)") }
+        case .scan:
+            lines.append("The following is OCR-extracted text from a scanned document.")
+            if let pages = metadata["pageCount"] { lines.append("Pages: \(pages)") }
+        case .note:
+            lines.append("The following is a user note.")
+        }
+        if let tags = metadata["tags"], !tags.isEmpty { lines.append("Tags: \(tags)") }
+        if let createdAt = metadata["createdAt"] { lines.append("Created: \(createdAt)") }
+        return lines.joined(separator: "\n") + "\n\n"
+    }
+
+    private static func formatDuration(_ seconds: Double) -> String {
+        let m = Int(seconds) / 60
+        let s = Int(seconds) % 60
+        return "\(m)m \(s)s"
     }
 }

@@ -84,12 +84,15 @@ final class ProjectConversionService {
         let context = buildItemContext(item)
         let prompt = buildConversionPrompt(context: context)
 
+        let params = AIConfigService.shared.requestParams(for: "project_conversion", model: model)
         let response = try await provider.send(AIRequest(
             model: model,
             messages: [
                 AIMessage(role: .system, content: [.text(conversionSystemPrompt)]),
                 AIMessage(role: .user, content: [.text(prompt)])
             ],
+            temperature: params.temperature,
+            maxTokens: params.maxTokens,
             responseFormat: .jsonObject
         ))
 

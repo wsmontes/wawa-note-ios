@@ -69,25 +69,33 @@ final class AnalysisService: @unchecked Sendable {
 
     nonisolated(unsafe) var onProgress: (@Sendable (AnalysisProgress) -> Void)?
 
-    func analyze(transcript: Transcript, using provider: any AIProvider, model: String, meetingId: UUID = UUID()) async throws -> MeetingAnalysis {
-        let cfg = configService.featureConfig(for: "analysis")
-        let systemPrompt = cfg?.systemPrompt ?? "You are a meeting analysis assistant. Return only valid JSON."
+    func analyze(
+        transcript: Transcript,
+        using provider: any AIProvider,
+        model: String,
+        meetingId: UUID = UUID(),
+        sourceContext: SourceContext? = nil
+    ) async throws -> MeetingAnalysis {
+        let sourceCtx = sourceContext ?? SourceContext(sourceType: .note, metadata: [:])
+        let systemPrompt = sourceCtx.analysisSystemPrompt()
+        let prefix = sourceCtx.userPromptPrefix()
         let segmentsText = transcript.segments.map { seg in
             "[\(seg.id.uuidString)|\(formatTime(seg.startTime))] \(seg.text)"
         }
 
         let totalChars = segmentsText.reduce(0) { $0 + $1.count }
         let maxChunk = configService.maxChunkChars(for: model)
-        AppLog.provider.info("Transcript: \(totalChars) chars, model \(model) chunk limit: \(maxChunk) chars")
+        AppLog.provider.info("Analysis: source=\(sourceCtx.sourceType.rawValue), \(totalChars) chars, model \(model), chunk limit: \(maxChunk)")
 
         if totalChars <= maxChunk {
-            let userPrompt = configService.renderPrompt(for: "analysis", variables: ["transcript": segmentsText.joined(separator: "\n")])
+            let body = segmentsText.joined(separator: "\n")
+            let userPrompt = prefix + (configService.renderPrompt(for: "analysis", variables: ["transcript": body]))
             return try await singleAnalysis(provider: provider, model: model, systemPrompt: systemPrompt, userPrompt: userPrompt, meetingId: meetingId)
         }
 
         AppLog.provider.info("Using map-reduce for \(totalChars) chars (\(model) context)")
         let chunks = chunker.chunkTranscript(transcript, maxCharsPerChunk: maxChunk)
-        return try await mapReduceAnalysis(chunks: chunks, provider: provider, model: model, systemPrompt: systemPrompt, meetingId: meetingId)
+        return try await mapReduceAnalysis(chunks: chunks, provider: provider, model: model, systemPrompt: systemPrompt, meetingId: meetingId, sourceContext: sourceCtx)
     }
 
     // MARK: - Direct (single request)
@@ -113,8 +121,8 @@ final class AnalysisService: @unchecked Sendable {
     private static let maxConcurrentChunks = 3
     private static let maxRetries = 3
 
-    private func mapReduceAnalysis(chunks: [TextChunk], provider: any AIProvider, model: String, systemPrompt: String, meetingId: UUID) async throws -> MeetingAnalysis {
-        let chunkSummaries = await summarizeChunksWithLimit(chunks, provider: provider, model: model)
+    private func mapReduceAnalysis(chunks: [TextChunk], provider: any AIProvider, model: String, systemPrompt: String, meetingId: UUID, sourceContext: SourceContext) async throws -> MeetingAnalysis {
+        let chunkSummaries = await summarizeChunksWithLimit(chunks, provider: provider, model: model, sourceContext: sourceContext)
 
         let validSummaries = chunkSummaries.compactMap(\.value)
         let failedCount = chunkSummaries.count - validSummaries.count
@@ -158,7 +166,7 @@ final class AnalysisService: @unchecked Sendable {
         return await parseResponse(response.content, meetingId: meetingId, providerId: provider.id, model: model, provider: provider)
     }
 
-    private func summarizeChunksWithLimit(_ chunks: [TextChunk], provider: any AIProvider, model: String) async -> [(index: Int, value: String?)] {
+    private func summarizeChunksWithLimit(_ chunks: [TextChunk], provider: any AIProvider, model: String, sourceContext: SourceContext) async -> [(index: Int, value: String?)] {
         let total = chunks.count
         var results: [(Int, String?)] = []
         results.reserveCapacity(total)
@@ -176,7 +184,7 @@ final class AnalysisService: @unchecked Sendable {
                         await MainActor.run { self.onProgress?(.mapping(chunkIndex + 1, total)) }
                         let summary = await self.summarizeChunkWithRetry(
                             chunk, index: chunkIndex, total: total,
-                            provider: provider, model: model
+                            provider: provider, model: model, sourceContext: sourceContext
                         )
                         return (chunkIndex, summary)
                     }
@@ -193,19 +201,35 @@ final class AnalysisService: @unchecked Sendable {
         return results
     }
 
-    private func summarizeChunkWithRetry(_ chunk: TextChunk, index: Int, total: Int, provider: any AIProvider, model: String) async -> String? {
+    private func summarizeChunkWithRetry(_ chunk: TextChunk, index: Int, total: Int, provider: any AIProvider, model: String, sourceContext: SourceContext) async -> String? {
+        let contentLabel: String = {
+            switch sourceContext.sourceType {
+            case .recording: return "meeting excerpt"
+            case .import_: return "document excerpt"
+            case .scan: return "scanned document excerpt (OCR)"
+            case .note: return "note excerpt"
+            }
+        }()
+        let summarizerLabel: String = {
+            switch sourceContext.sourceType {
+            case .recording: return "meeting"
+            case .import_: return "document"
+            case .scan: return "document"
+            case .note: return "note"
+            }
+        }()
         let prompt = """
-        You are a meeting note taker. Summarize this meeting excerpt concisely.
+        Summarize this \(contentLabel) concisely.
         Focus on: key decisions, action items, risks, open questions, important dates, people mentioned, systems mentioned.
 
-        Meeting excerpt (part \(index + 1) of \(total)):
+        \(contentLabel.capitalized) (part \(index + 1) of \(total)):
         \(chunk.text)
         """
 
         let request = AIRequest(
             model: model,
             messages: [
-                AIMessage(role: .system, content: [.text("You are a concise meeting summarizer. Return only the summary text, no JSON.")]),
+                AIMessage(role: .system, content: [.text("You are a concise \(summarizerLabel) summarizer. Return only the summary text, no JSON.")]),
                 AIMessage(role: .user, content: [.text(prompt)])
             ]
         )

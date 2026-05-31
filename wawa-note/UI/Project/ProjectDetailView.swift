@@ -13,6 +13,9 @@ final class ProjectDetailViewModel: ObservableObject {
     @Published var selectedTab = 0
     @Published var remindersExportMessage: String?
     @Published var remindersExportNeedsSettings = false
+    @Published var customInstructions: String = ""
+    @Published var showInstructionsEditor = false
+    @Published var isReprocessing = false
 
     private var modelContext: ModelContext?
     private var cancellables = Set<AnyCancellable>()
@@ -37,6 +40,14 @@ final class ProjectDetailViewModel: ObservableObject {
 
         let projSvc = ProjectService(context: ctx)
         projectItems = (try? projSvc.items(in: project.id)) ?? []
+        customInstructions = project.customInstructions ?? ""
+    }
+
+    func saveInstructions() {
+        guard let ctx = modelContext else { return }
+        let trimmed = customInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        project.customInstructions = trimmed.isEmpty ? nil : trimmed
+        try? ctx.save()
     }
 
     // MARK: Actions
@@ -88,6 +99,28 @@ final class ProjectDetailViewModel: ObservableObject {
         tasks.filter { $0.status == .done }.count
     }
 
+    func reprocessProject(using pipeline: ContentPipelineService) async {
+        guard let ctx = modelContext else { return }
+        isReprocessing = true
+        defer { isReprocessing = false }
+
+        let items = projectItems
+        for item in items {
+            item.analysisProviderId = nil
+            try? ctx.save()
+
+            let fileStore = FileArtifactStore()
+            let dir = fileStore.itemDirectoryURL(for: item.id)
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent("analysis.json"))
+        }
+
+        for item in items {
+            await pipeline.process(item.id, using: ctx)
+        }
+
+        loadData()
+    }
+
     // MARK: Ingestion observation
 
     private func observeIngestionState(_ state: ProjectIngestionState) {
@@ -115,6 +148,7 @@ struct ProjectDetailView: View {
 
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var ingestionState: ProjectIngestionState
+    @EnvironmentObject private var contentPipeline: ContentPipelineService
     @StateObject private var viewModel: ProjectDetailViewModel
 
     init(project: Project) {
@@ -150,10 +184,20 @@ struct ProjectDetailView: View {
             }
         }
         .background(Color(.systemGroupedBackground))
-        .navigationTitle(project.name)
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 16) {
+                    if viewModel.projectItems.count > 0 {
+                        Button {
+                            Task { await viewModel.reprocessProject(using: contentPipeline) }
+                        } label: {
+                            Label("Re-process All", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .disabled(viewModel.isReprocessing)
+                    }
+
                     Menu {
                         Button { viewModel.selectedTab = 0 } label: { Label("Tasks", systemImage: "checklist") }
                         Button { viewModel.selectedTab = 1 } label: { Label("Items", systemImage: "doc.text") }
@@ -201,6 +245,9 @@ struct ProjectDetailView: View {
             }
         } message: {
             Text(viewModel.remindersExportMessage ?? "")
+        }
+        .sheet(isPresented: $viewModel.showInstructionsEditor) {
+            instructionsEditorSheet
         }
     }
 
@@ -276,9 +323,74 @@ struct ProjectDetailView: View {
                 .background(Color.orange.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
+
+            // Custom instructions
+            Button {
+                viewModel.customInstructions = project.customInstructions ?? ""
+                viewModel.showInstructionsEditor = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "lightbulb")
+                        .font(.caption)
+                        .foregroundStyle(.yellow)
+                    if let instructions = project.customInstructions, !instructions.isEmpty {
+                        Text(instructions)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    } else {
+                        Text("Add project instructions to guide AI analysis...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.yellow.opacity(0.06))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .padding(16)
         .background(Color(.systemBackground))
+    }
+
+    private var instructionsEditorSheet: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                Text("Tell the AI what matters in this project. It will use these instructions when analyzing new items.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+
+                TextEditor(text: $viewModel.customInstructions)
+                    .font(.body)
+                    .frame(minHeight: 120)
+                    .padding(12)
+                    .background(Color(.secondarySystemGroupedBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal, 16)
+            }
+            .navigationTitle("Project Instructions")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { viewModel.showInstructionsEditor = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        viewModel.saveInstructions()
+                        viewModel.showInstructionsEditor = false
+                        viewModel.loadData()
+                    }
+                }
+            }
+        }
     }
 
     private func statLabel(_ value: String, _ label: String) -> some View {

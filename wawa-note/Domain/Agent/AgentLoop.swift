@@ -272,21 +272,15 @@ final class AgentLoop: @unchecked Sendable {
             aiMessages.append(msg)
         }
 
-        let config = AIConfigService.shared
-        let preset = config.presetFor(model: model)
-        let isReasoning = preset?.reasoningModel ?? false
-        let maxOut = preset?.maxOutputTokens ?? 4000
-
-        // Cap tool-call iteration output to leave room for final answer
-        let outputBudget = min(maxOut, 4000)
+        let params = AIConfigService.shared.requestParams(for: "agent", model: model)
 
         let hasToolSupport = !tools.isEmpty
 
         return AIRequest(
             model: model,
             messages: aiMessages,
-            temperature: isReasoning ? nil : 0.4,
-            maxTokens: outputBudget,
+            temperature: params.temperature,
+            maxTokens: params.maxTokens,
             tools: hasToolSupport ? tools : nil,
             toolChoice: hasToolSupport ? "auto" : nil
         )

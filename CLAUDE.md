@@ -192,6 +192,25 @@ Provider-specific implementations belong under Providers/, not in views.
 - Dependency injection through initializers. Avoid global mutable singletons unless wrapping system APIs.
 - Strongly typed models over dictionaries. Typed error enums.
 
+## AI request rules
+
+**Every AI call must use `AIConfigService.shared.requestParams(for:model:)`.** Never hardcode `temperature` or `maxTokens` in individual services.
+
+```swift
+// CORRECT
+let params = AIConfigService.shared.requestParams(for: "analysis", model: model)
+let request = AIRequest(model: model, messages: [...],
+    temperature: params.temperature,
+    maxTokens: params.maxTokens,
+    responseFormat: .jsonObject)
+
+// WRONG — hardcoded values bypass config and break on reasoning models
+let request = AIRequest(model: model, messages: [...],
+    temperature: 0.4, maxTokens: 4096, responseFormat: .jsonObject)
+```
+
+`requestParams` handles internally: reasoning model detection (temperature → nil), feature config ceiling, model preset caps, and context window for chunking. Services only own their system/user prompts.
+
 ## Implementation behavior
 
 1. Inspect existing files first.

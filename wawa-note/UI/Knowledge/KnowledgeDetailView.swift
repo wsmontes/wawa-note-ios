@@ -22,6 +22,7 @@ struct KnowledgeDetailView: View {
     @State private var editedBody = ""
     @State private var backlinks: [(edge: GraphEdge, sourceItem: KnowledgeItem)] = []
     @State private var isPipelineProcessing = false
+    @State private var isReprocessing = false
 
     private let fileStore = FileArtifactStore()
 
@@ -102,6 +103,15 @@ struct KnowledgeDetailView: View {
                         showPromoteSheet = true
                     } label: {
                         Label("Turn into Project", systemImage: "sparkles.rectangle.stack")
+                    }
+
+                    if item.analysisProviderId != nil || isPipelineProcessing || isReprocessing {
+                        Button {
+                            Task { await reprocessItem() }
+                        } label: {
+                            Label("Re-analyze", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .disabled(isReprocessing || isPipelineProcessing)
                     }
 
                     if transcript != nil || (item.type == .image && item.bodyText != nil) || item.type == .note || item.type == .journalEntry {
@@ -834,6 +844,30 @@ struct KnowledgeDetailView: View {
 
     private func cancelEditing() {
         isEditing = false
+    }
+
+    // MARK: - Reprocess
+
+    private func reprocessItem() async {
+        isReprocessing = true
+        defer { isReprocessing = false }
+
+        // Clear previous analysis so pipeline re-runs Phase 2
+        item.analysisProviderId = nil
+        try? modelContext.save()
+
+        // Delete stale artifacts
+        let dir = fileStore.itemDirectoryURL(for: item.id)
+        try? FileManager.default.removeItem(at: dir.appendingPathComponent("analysis.json"))
+        try? FileManager.default.removeItem(at: dir.appendingPathComponent("provider.response.raw.txt"))
+
+        // Clear local state so UI refreshes
+        analysis = nil
+        isPipelineProcessing = true
+
+        // Re-run pipeline. If item belongs to a project, Phase 3 will
+        // also re-ingest and update the project context.
+        await contentPipeline.process(item.id, using: modelContext)
     }
 
     // MARK: - Backlinks
