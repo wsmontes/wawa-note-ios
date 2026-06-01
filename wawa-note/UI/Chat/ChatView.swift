@@ -145,7 +145,7 @@ struct ChatView: View {
                 .accessibilityHidden(true)
             Text("Ask anything about your knowledge")
                 .font(.title3).fontWeight(.medium)
-            Text("Your AI assistant can search, read, and explore your meetings, notes, projects, and connections.")
+            Text("Your AI assistant can search, read, and explore your audio recordings, notes, projects, and connections.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

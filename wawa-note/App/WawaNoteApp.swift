@@ -47,6 +47,9 @@ struct WawaNoteApp: App {
 
         sharedEventStore = EKEventStore()
         calendarSyncService = CalendarSyncService(eventStore: sharedEventStore)
+
+        // Run one-time data migrations
+        KnowledgeItemService.migrateMeetingToAudio(context: ModelContext(modelContainer))
     }
 
     var body: some Scene {

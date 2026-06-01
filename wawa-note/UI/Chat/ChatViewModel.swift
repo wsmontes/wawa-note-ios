@@ -82,7 +82,8 @@ final class ChatViewModel: ObservableObject {
         let advModel = "gpt-5.5"
         let loop = AgentLoop(registry: registry, toolContext: toolContext, mode: mode, executorModel: execModel, advisorModel: advModel)
 
-        streamTask = Task {
+        streamTask = Task { [weak self] in
+            guard let self else { return }
             do {
                 let stream = loop.runStreaming(userMessage: text, history: messages, provider: provider)
 

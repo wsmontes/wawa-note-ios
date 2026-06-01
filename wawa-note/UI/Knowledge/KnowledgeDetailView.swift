@@ -22,6 +22,7 @@ struct KnowledgeDetailView: View {
     @State private var editedBody = ""
     @State private var backlinks: [(edge: GraphEdge, sourceItem: KnowledgeItem)] = []
     @State private var isPipelineProcessing = false
+    @State private var pipelineStage: String = ""
     @State private var isReprocessing = false
 
     private let fileStore = FileArtifactStore()
@@ -35,7 +36,7 @@ struct KnowledgeDetailView: View {
                 if isTranscribing || isPipelineProcessing {
                     HStack(spacing: 10) {
                         ProgressView()
-                        Text(transcriptionProgress ?? (isPipelineProcessing ? "Processing..." : "Transcribing..."))
+                        Text(transcriptionProgress ?? (pipelineStage.isEmpty ? "Processing..." : pipelineStage))
                             .font(.subheadline).foregroundStyle(.secondary)
                     }
                     .padding(12)
@@ -79,6 +80,12 @@ struct KnowledgeDetailView: View {
                 // Images: OCR text already shown inside imageSection
                 if (item.bodyText != nil && item.type != .image) || item.type == .note || item.type == .journalEntry { textContentSection }
                 if item.type == .webBookmark { bookmarkSection }
+
+                // Debug: show raw LLM response when analysis exists but summary is empty
+                if let a = analysis, a.shortSummary.trimmingCharacters(in: .whitespaces).isEmpty {
+                    rawResponseSection
+                        .padding(.top, 12)
+                }
 
                 if !annotations.isEmpty {
                     annotationsSection
@@ -151,18 +158,35 @@ struct KnowledgeDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: .pipelineCompleted)) { n in
             if n.object as? String == item.id.uuidString {
                 isPipelineProcessing = false
+                pipelineStage = ""
                 Task { @MainActor in loadData() }
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .transcriptReady)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .contentPipelineStageChanged)) { n in
+            guard n.object as? String == item.id.uuidString else { return }
+            if let stage = n.userInfo?["stage"] as? String {
+                pipelineStage = stage
+                isPipelineProcessing = true
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .transcriptReady)) { n in
+            guard n.object as? String == item.id.uuidString else { return }
             Task { @MainActor in
                 transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id)
                 isTranscribing = false; transcriptionProgress = nil
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .analysisReady)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .analysisReady)) { n in
+            guard n.object as? String == item.id.uuidString else { return }
             Task { @MainActor in
                 analysis = try? fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id)
+                if analysis == nil {
+                    if let dynamic = try? fileStore.readArtifact(DynamicAnalysis.self, fileName: "analysis.dynamic.json", meetingId: item.id) {
+                        analysis = MeetingAnalysis(meetingId: item.id, providerId: dynamic.providerId, model: dynamic.model,
+                            shortSummary: dynamic.results.stringField("short_summary") ?? "Analysis available",
+                            detailedSummary: dynamic.results.stringField("detailed_summary") ?? "")
+                    }
+                }
                 isAnalyzing = false
                 loadData()
             }
@@ -340,7 +364,7 @@ struct KnowledgeDetailView: View {
                     .foregroundStyle(.secondary)
                 Text("No transcript yet")
                     .font(.headline)
-                Text("This meeting has audio but hasn't been transcribed.")
+                Text("This recording has audio but hasn't been transcribed.")
                     .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
 
                 // Locale picker
@@ -792,6 +816,32 @@ struct KnowledgeDetailView: View {
             let url = dir.appendingPathComponent("scan_\(idx).jpg")
             guard let data = try? Data(contentsOf: url) else { return nil }
             return UIImage(data: data)
+        }
+    }
+
+    // MARK: - Raw Response (debug)
+
+    @ViewBuilder
+    private var rawResponseSection: some View {
+        let rawURL = fileStore.itemDirectoryURL(for: item.id).appendingPathComponent("provider.response.raw.txt")
+        let iterativeURL = fileStore.itemDirectoryURL(for: item.id).appendingPathComponent("analysis.iterative.txt")
+        let rawText = (try? String(contentsOf: rawURL, encoding: .utf8)) ?? ""
+        let iterText = (try? String(contentsOf: iterativeURL, encoding: .utf8)) ?? ""
+
+        if !rawText.isEmpty || !iterText.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Raw LLM Response").font(.footnote).fontWeight(.semibold).foregroundStyle(.orange)
+                if !rawText.isEmpty {
+                    Text(rawText.prefix(2000)).font(.caption).foregroundStyle(.secondary).padding(8)
+                        .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                if !iterText.isEmpty {
+                    Text("Iterative: \(iterText.prefix(2000))").font(.caption).foregroundStyle(.secondary).padding(8)
+                        .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+            }
+            .padding(12).background(Color.orange.opacity(0.06)).clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 16)
         }
     }
 

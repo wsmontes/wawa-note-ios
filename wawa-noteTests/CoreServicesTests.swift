@@ -39,70 +39,6 @@ final class SemanticSearchServiceTests: XCTestCase {
     }
 }
 
-final class CrossReferenceResultTests: XCTestCase {
-
-    func testParseValidJSON() throws {
-        let json = """
-        {
-            "answer": "Test answer",
-            "connections": [
-                {
-                    "from_item_id": "\(UUID().uuidString)",
-                    "to_item_id": "\(UUID().uuidString)",
-                    "relationship": "related",
-                    "explanation": "Test connection",
-                    "strength": 0.85
-                }
-            ],
-            "insights": [
-                {
-                    "text": "Test insight",
-                    "source_item_ids": ["\(UUID().uuidString)"],
-                    "confidence": 0.9
-                }
-            ],
-            "contradictions": [
-                {
-                    "description": "Test contradiction",
-                    "item_a_id": "\(UUID().uuidString)",
-                    "item_b_id": "\(UUID().uuidString)",
-                    "resolution": "Resolved"
-                }
-            ]
-        }
-        """
-
-        let data = json.data(using: .utf8)!
-        let result = try JSONDecoder().decode(CrossReferenceResult.self, from: data)
-
-        XCTAssertEqual(result.answer, "Test answer")
-        XCTAssertEqual(result.connections.count, 1)
-        XCTAssertEqual(result.connections[0].strength, 0.85)
-        XCTAssertEqual(result.insights.count, 1)
-        XCTAssertEqual(result.contradictions.count, 1)
-        XCTAssertEqual(result.contradictions[0].resolution, "Resolved")
-    }
-
-    func testParseMinimalJSON() throws {
-        let json = """
-        {
-            "answer": "Minimal",
-            "connections": [],
-            "insights": [],
-            "contradictions": []
-        }
-        """
-
-        let data = json.data(using: .utf8)!
-        let result = try JSONDecoder().decode(CrossReferenceResult.self, from: data)
-
-        XCTAssertEqual(result.answer, "Minimal")
-        XCTAssertTrue(result.connections.isEmpty)
-        XCTAssertTrue(result.insights.isEmpty)
-        XCTAssertTrue(result.contradictions.isEmpty)
-    }
-}
-
 final class ProjectExportServiceTests: XCTestCase {
 
     func testExportTasksCSVEmpty() {
@@ -291,9 +227,9 @@ final class IngestionResponseTests: XCTestCase {
 
 final class KnowledgeItemTests: XCTestCase {
 
-    func testDefaultTypeIsMeeting() {
+    func testDefaultTypeIsAudio() {
         let item = KnowledgeItem(title: "Test")
-        XCTAssertEqual(item.type, .meeting)
+        XCTAssertEqual(item.type, .audio)
     }
 
     func testCustomType() {

@@ -1,4 +1,3 @@
-import SwiftUI
 import Foundation
 import SwiftData
 
@@ -32,16 +31,6 @@ extension KnowledgeItemType {
         case .journalEntry: "book"
         case .webBookmark: "bookmark"
         case .image: "photo"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .audio: .blue
-        case .note: .orange
-        case .journalEntry: .purple
-        case .webBookmark: .green
-        case .image: .pink
         }
     }
 

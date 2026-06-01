@@ -20,7 +20,7 @@ struct ProjectTimelineView: View {
                         .foregroundStyle(.secondary)
                     Text("No events yet")
                         .font(.headline)
-                    Text("Events will appear as meetings are recorded, tasks are created, and decisions are made.")
+                    Text("Events will appear as items are captured, tasks are created, and decisions are made.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)

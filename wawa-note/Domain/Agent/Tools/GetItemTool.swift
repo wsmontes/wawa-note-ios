@@ -2,7 +2,7 @@ import Foundation
 
 struct GetItemTool: AgentTool {
     let name = "get_item"
-    let description = "Fetch a specific knowledge item by its full UUID. Returns title, type, body text, tags, creation date, transcript excerpts (for meetings), and analysis summaries."
+    let description = "Fetch a specific knowledge item by its full UUID. Returns title, type, body text, tags, creation date, transcript excerpts (for audio recordings), and analysis summaries."
 
     let parameters = AIToolParameters(
         properties: ["item_id": AIToolProperty(type: "string", description: "Full UUID of the item (from search_knowledge or list_items results)")],

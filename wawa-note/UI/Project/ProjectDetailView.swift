@@ -490,7 +490,7 @@ struct ProjectDetailView: View {
                         .font(.title).foregroundStyle(.secondary)
                     Text("No items in this project")
                         .font(.headline)
-                    Text("Promote a meeting or add items from the library.")
+                    Text("Promote an item or add from the library from the library.")
                         .font(.subheadline).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center).padding(.horizontal, 40)
                 }

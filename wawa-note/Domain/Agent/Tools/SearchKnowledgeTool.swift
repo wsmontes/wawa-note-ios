@@ -2,7 +2,7 @@ import Foundation
 
 struct SearchKnowledgeTool: AgentTool {
     let name = "search_knowledge"
-    let description = "Full-text search across all knowledge items (meetings, notes, journals, bookmarks, images). Searches titles, body text, transcripts, and analysis summaries. Returns item UUIDs for use with get_item."
+    let description = "Full-text search across all knowledge items (audio, notes, journals, bookmarks, images). Searches titles, body text, transcripts, and analysis summaries. Returns item UUIDs for use with get_item."
 
     let parameters = AIToolParameters(
         properties: [

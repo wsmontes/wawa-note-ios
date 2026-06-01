@@ -44,7 +44,7 @@ struct ProjectListView: View {
             Text("No projects yet")
                 .font(.title3)
                 .fontWeight(.medium)
-            Text("Promote a meeting to a project to start organizing your knowledge into actionable plans.")
+            Text("Capture audio, scan documents, or create notes — then promote them to projects.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

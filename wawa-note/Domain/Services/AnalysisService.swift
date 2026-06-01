@@ -188,7 +188,7 @@ final class AnalysisService: @unchecked Sendable {
         }.joined(separator: "\n\n")
 
         let reducePrompt = """
-        Below are summaries from different parts of a long meeting. Synthesize them into a complete meeting analysis.
+        Below are summaries from different parts of a content. Synthesize them into a complete meeting analysis.
         Extract: short_summary, detailed_summary, decisions (title, details), action_items (task, owner, due_date), open_questions, risks (risk, details), important_dates (date, meaning), mentioned_people, mentioned_systems, mentioned_organizations, mentioned_repositories, mentioned_locations.
 
         \(combined)
@@ -249,7 +249,7 @@ final class AnalysisService: @unchecked Sendable {
     private func summarizeChunkWithRetry(_ chunk: TextChunk, index: Int, total: Int, provider: any AIProvider, model: String, sourceContext: SourceContext) async -> String? {
         let contentLabel: String = {
             switch sourceContext.sourceType {
-            case .recording: return "meeting excerpt"
+            case .recording: return "content excerpt"
             case .import_: return "document excerpt"
             case .scan: return "scanned document excerpt (OCR)"
             case .note: return "note excerpt"

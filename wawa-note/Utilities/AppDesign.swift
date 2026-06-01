@@ -36,13 +36,13 @@ enum AppRadius {
 
 enum AppCopy {
     // MARK: - Home Screen
-    static let homeValueProp = "Record meetings. Get instant transcripts."
+    static let homeValueProp = "Record audio. Get instant transcripts."
 
     // MARK: - Empty States
-    static let noMeetings = "No meetings yet.\nTap the button below to record your first one."
+    static let noMeetings = "No recordings yet.\nTap the button below to record your first one."
     static let noProvider = "Connect an AI service to generate summaries and action items."
     static let noTranscript = "Your transcript will appear here.\nTap Transcribe Meeting to get started."
-    static let noActionItems = "Action items from your meeting will appear here once you generate a summary."
+    static let noActionItems = "Action items from your recording will appear here once you generate a summary."
     static let noSummary = "Transcribe this meeting first, then tap Generate Summary."
 
     // MARK: - Permissions
@@ -83,4 +83,22 @@ enum AppCopy {
     static let errorNoAIService = "No AI service connected. Go to Settings to connect one, then try again."
     static let errorMicrophoneDenied = "Microphone access is off. Turn it on in Settings > Privacy > Microphone, then come back."
     static let errorPlaybackFailed = "Couldn't play the recording. The audio file may be missing or damaged."
+}
+
+// MARK: - UI extensions for Domain types (keeps SwiftUI out of Domain layer)
+
+extension KnowledgeItemType {
+    var color: Color {
+        switch self {
+        case .audio: .blue
+        case .note: .orange
+        case .journalEntry: .purple
+        case .webBookmark: .green
+        case .image: .pink
+        }
+    }
+}
+
+extension TimelineEntry {
+    var typeColor: Color { contentType?.color ?? .blue }
 }

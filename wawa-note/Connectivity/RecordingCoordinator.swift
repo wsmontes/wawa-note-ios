@@ -182,13 +182,8 @@ final class RecordingCoordinator: ObservableObject {
         updateItemOnStop()
         notifyStatusChange()
 
-        // Launch content pipeline directly so lock-screen / now-playing stops
-        // also trigger transcription → analysis → project ingestion.
-        // The guard in ContentPipelineService prevents double execution if
-        // CaptureViewModel also calls process().
-        if let itemId = savedItemId {
-            contentPipeline?.process(itemId, using: modelContext)
-        }
+        // Pipeline is launched by CaptureViewModel.stopRecording() which owns
+        // the recording lifecycle. RecordingCoordinator just manages audio state.
     }
 
     func returnToIdle() {

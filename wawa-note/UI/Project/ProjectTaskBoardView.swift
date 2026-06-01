@@ -21,7 +21,7 @@ struct ProjectTaskBoardView: View {
                         .font(.title).foregroundStyle(.secondary)
                     Text("No tasks yet")
                         .font(.headline)
-                    Text("Promote a meeting to a project or add a task manually.")
+                    Text("Add a task or promote an item from the library.")
                         .font(.subheadline).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center).padding(.horizontal, 40)
                     Button { newTaskStatus = .todo; showNewTask = true } label: {

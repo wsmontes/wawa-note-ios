@@ -140,7 +140,7 @@ struct CreateTaskTool: AgentTool {
 
 struct SummarizeDayTool: AgentTool {
     let name = "summarize_day"
-    let description = "Summarize all activity on a specific date — items created, meetings recorded, notes written."
+    let description = "Summarize all activity on a specific date — items created, audio recorded, notes written."
     let parameters = AIToolParameters(properties: ["date": AIToolProperty(type: "string", description: "ISO 8601 date (YYYY-MM-DD)")], required: ["date"])
 
     func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {

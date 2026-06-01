@@ -83,10 +83,12 @@ final class HomeViewModel: ObservableObject {
         let fileSize = Int64(resourceValues?.fileSize ?? 0)
         let creationDate = resourceValues?.creationDate ?? resourceValues?.contentModificationDate
         var snippet = ""
-        if let handle = try? FileHandle(forReadingFrom: url),
-           let data = try? handle.read(upToCount: 4096),
-           let text = String(data: data, encoding: .utf8) {
-            snippet = String(text.prefix(500))
+        if let handle = try? FileHandle(forReadingFrom: url) {
+            defer { try? handle.close() }
+            if let data = try? handle.read(upToCount: 4096),
+               let text = String(data: data, encoding: .utf8) {
+                snippet = String(text.prefix(500))
+            }
         }
         return TextImportPreview(formatIdentifier: importer.formatIdentifier, displayName: importer.displayName,
                                   suggestedTitle: filename, fileSize: fileSize, creationDate: creationDate, textSnippet: snippet)

@@ -11,9 +11,12 @@ enum AppFileConstants {
     static let audioFileName = "audio.m4a"
     static let transcriptFileName = "transcript.json"
     static let analysisFileName = "analysis.json"
+    static let dynamicAnalysisFileName = "analysis.dynamic.json"
     static let partialTranscriptFileName = "transcript_partial.json"
     static let checkpointFileName = "checkpoint.json"
     static let embeddingFileName = "embedding.json"
+    static let scanFileName = "scan"
+    static let scanFilePattern = "scan_%d.jpg"
 }
 
 final class FileArtifactStore: @unchecked Sendable {

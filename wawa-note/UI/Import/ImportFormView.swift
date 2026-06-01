@@ -86,7 +86,7 @@ struct ImportFormView: View {
                     TextField("Title", text: $title)
                     DatePicker("Date", selection: $date)
                 } header: {
-                    Text(isAudio ? "Meeting Info" : "Note Info")
+                    Text(isAudio ? "Audio Info" : "Note Info")
                 }
 
                 Section("File Info") {
@@ -152,7 +152,7 @@ struct ImportFormView: View {
     }
 
     private var confirmLabel: String {
-        isAudio ? "Import Meeting" : "Import Note"
+        isAudio ? "Import Audio" : "Import Note"
     }
 
     // MARK: - File info
@@ -306,7 +306,7 @@ struct ImportFormView: View {
         if isFromShareExtension {
             try? FileManager.default.removeItem(at: sourceURL)
             let shared = UserDefaults(suiteName: "group.com.wawa-note")
-            shared?.removeObject(forKey: "pendingImportFile")
+            shared?.removeObject(forKey: "pendingImportFiles")
         }
     }
 

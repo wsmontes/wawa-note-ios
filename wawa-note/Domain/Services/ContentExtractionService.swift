@@ -148,65 +148,41 @@ final class ContentExtractionService {
 
     // MARK: - Analyze text (source-aware)
 
-    /// Runs AI analysis on extracted text. Uses an iterative agent pattern:
-    /// the model can call tools (search, get_item, get_project) to gather context
-    /// before producing the final analysis. The model decides when it has enough.
+    /// Runs AI analysis on extracted text. Uses the direct AnalysisService path
+    /// for reliable structured output. The iterative agent path is reserved for
+    /// framework-driven analysis (analyzeDynamic) where tools add value.
     func analyze(text: String, item: KnowledgeItem) async -> Bool {
         guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
             AppLog.provider.warning("ContentExtraction.analyze: no provider configured")
             return false
         }
 
+        // Use configured analysis model (respects user's ai_config.json), with fallback
         let settings = AutomationSettings.shared
-        let model = ModelTierResolver.resolveForAnalysis(item: item)
+        let configModel = AIConfigService.shared.featureConfig(for: "analysis")?.model
+        let model = configModel ?? settings.resolveAutoAnalysisModel(context: modelContext) ?? settings.autoAnalysisModel
         let sourceCtx = SourceContext.from(item)
-
         let segments = chunkText(text, itemID: item.id)
         let transcript = Transcript(meetingId: item.id, languageCode: nil, segments: segments, sourceEngineId: "text-direct")
 
-        AppLog.provider.info("ContentExtraction.analyze: source=\(sourceCtx.sourceType.rawValue), model=\(model), iterative")
+        AppLog.provider.info("ContentExtraction.analyze: source=\(sourceCtx.sourceType.rawValue), model=\(model)")
 
         do {
-            // Build the iterative prompt — model has tools to explore context
-            let systemPrompt = sourceCtx.analysisSystemPrompt()
-            let prefix = sourceCtx.userPromptPrefix()
-            let body = segments.map { $0.text }.joined(separator: "\n")
-            let userPrompt = """
-            \(prefix)Analyze the following content. You may call tools (search_knowledge, get_item, get_project) to gather additional context before producing your analysis. When you have enough information, return the final analysis JSON. Do not guess — if you're uncertain about something, search for related items to confirm.
+            let result = try await AnalysisService().analyze(transcript: transcript, using: provider, model: model, meetingId: item.id, sourceContext: sourceCtx)
 
-            CONTENT TO ANALYZE:
-            \(body.prefix(12000))
-
-            Return a complete analysis JSON with short_summary, detailed_summary, decisions, action_items, risks, open_questions, important_dates, mentioned_people, mentioned_systems, mentioned_organizations, mentioned_locations.
-            """
-
-            // Use iterative agent loop with analysis tools
-            let toolContext = ToolContext(modelContext: modelContext)
-            let analysisTools: [any AgentTool] = [
-                SearchKnowledgeTool(), GetItemTool(), GetProjectTool()
-            ]
-            let registry = AgentToolRegistry(tools: analysisTools)
-            let loop = AgentLoop(registry: registry, toolContext: toolContext, maxIterations: 4, mode: .auto, executorModel: model, advisorModel: ModelTierResolver.advisorModel)
-
-            var fullResponse = ""
-            let stream = loop.runStreaming(userMessage: userPrompt, history: [], provider: provider)
-            for try await event in stream {
-                if case .textDelta(let d) = event { fullResponse += d }
-            }
-
-            // The iterative agent produces the analysis as its final text output.
-            // Save raw text and run structured parse for the artifact.
             try fileStore.createMeetingDirectory(for: item.id)
-            let rawURL = fileStore.itemDirectoryURL(for: item.id).appendingPathComponent("analysis.iterative.txt")
-            try fullResponse.data(using: .utf8)?.write(to: rawURL)
-            AppLog.provider.info("ContentExtraction.analyze: iterative complete (\(fullResponse.count) chars)")
+            try fileStore.writeArtifact(result, fileName: "analysis.json", meetingId: item.id)
+            item.status = .analyzed
+            item.analysisProviderId = model
+            try modelContext.save()
 
-            // Parse through AnalysisService for structured output
-            let segments2 = chunkText(fullResponse, itemID: item.id)
-            let iterTranscript = Transcript(meetingId: item.id, languageCode: nil, segments: segments2, sourceEngineId: "iterative-analysis")
-            return await analyzeStructured(transcript: iterTranscript, item: item, sourceCtx: sourceCtx, provider: provider, model: model)
+            AppLog.provider.info("ContentExtraction.analyze: done — \(result.shortSummary.prefix(80))")
+            NotificationCenter.default.post(name: .analysisReady, object: item.id.uuidString)
+            await EmbeddingPipelineService().ensureEmbedding(for: item, using: provider)
+            return true
         } catch {
-            AppLog.provider.error("ContentExtraction.analyze: failed for item \(item.id): \(error)")
+            AppLog.provider.error("ContentExtraction.analyze: FAILED for item \(item.id): \(error.localizedDescription)")
+            try? fileStore.createMeetingDirectory(for: item.id)
             return false
         }
     }
@@ -347,7 +323,7 @@ final class ContentExtractionService {
 // MARK: - Source Context
 
 /// Describes where an item came from so the analysis prompt can adapt.
-/// A meeting transcript, an imported PDF, a scanned document, and a manual note
+/// A audio transcript, an imported PDF, a scanned document, and a manual note
 /// all need different AI framing to produce useful structured output.
 struct SourceContext: Sendable {
     enum SourceType: String, Sendable {
@@ -387,13 +363,13 @@ struct SourceContext: Sendable {
     }
 
     /// Builds the analysis system prompt for this source type.
-    /// Each source gets a different analytical lens — a meeting transcript needs
+    /// Each source gets a different analytical lens — a audio transcript needs
     /// decisions/actions/risks extraction, while a scanned document needs
     /// structure analysis and clause identification.
     func analysisSystemPrompt() -> String {
         switch sourceType {
         case .recording:
-            return "You are a meeting intelligence analyst. Extract decisions, action items with owners, risks, open questions, important dates, mentioned people/systems/organizations, and a topic timeline. Return only valid JSON."
+            return "You are a audio content analyst. Extract decisions, action items with owners, risks, open questions, important dates, mentioned people/systems/organizations, and a topic timeline. Return only valid JSON."
         case .import_:
             return "You are a document analyst. Analyze this imported file. Identify its structure, key points, decisions if any, action items, risks, mentioned entities, and dates. Consider the filename and metadata for context. Return only valid JSON."
         case .scan:
@@ -409,7 +385,7 @@ struct SourceContext: Sendable {
         var lines: [String] = []
         switch sourceType {
         case .recording:
-            lines.append("The following is a meeting transcript.")
+            lines.append("The following is a audio transcript.")
             if let dur = metadata["duration"] { lines.append("Duration: \(dur)") }
             if let lang = metadata["language"] { lines.append("Language: \(lang)") }
         case .import_:

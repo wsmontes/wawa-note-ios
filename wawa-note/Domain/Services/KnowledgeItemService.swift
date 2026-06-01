@@ -53,11 +53,31 @@ final class KnowledgeItemService {
 
     func items(ofType type: KnowledgeItemType) throws -> [KnowledgeItem] {
         let typeRaw = type.rawValue
-        var descriptor = FetchDescriptor<KnowledgeItem>(
-            predicate: #Predicate { $0.typeRaw == typeRaw }
-        )
+        // Include legacy "meeting" items when querying for audio type
+        let predicate: Predicate<KnowledgeItem>
+        if typeRaw == "audio" {
+            predicate = #Predicate { $0.typeRaw == "audio" || $0.typeRaw == "meeting" }
+        } else {
+            predicate = #Predicate { $0.typeRaw == typeRaw }
+        }
+        var descriptor = FetchDescriptor<KnowledgeItem>(predicate: predicate)
         descriptor.sortBy = [SortDescriptor(\.updatedAt, order: .reverse)]
         return try context.fetch(descriptor)
+    }
+
+    /// One-time migration: rewrite legacy "meeting" typeRaw to "audio"
+    static func migrateMeetingToAudio(context: ModelContext) {
+        let key = "migration_meeting_to_audio_done"
+        if UserDefaults.standard.bool(forKey: key) { return }
+        var descriptor = FetchDescriptor<KnowledgeItem>(
+            predicate: #Predicate { $0.typeRaw == "meeting" }
+        )
+        descriptor.fetchLimit = 1000
+        if let items = try? context.fetch(descriptor), !items.isEmpty {
+            for item in items { item.typeRaw = "audio" }
+            try? context.save()
+        }
+        UserDefaults.standard.set(true, forKey: key)
     }
 
     func recentItems(limit: Int = 20) throws -> [KnowledgeItem] {
