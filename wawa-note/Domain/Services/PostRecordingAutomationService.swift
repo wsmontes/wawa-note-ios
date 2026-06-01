@@ -87,6 +87,10 @@ enum ItemContextBuilder {
             if !analysis.entities.isEmpty {
                 ctx += "\nEntities Mentioned:\n" + analysis.entities.map { "- \($0.name) (\($0.type.rawValue))" }.joined(separator: "\n") + "\n"
             }
+        } else if let dynamic = try? fileStore.readArtifact(DynamicAnalysis.self, fileName: "analysis.dynamic.json", meetingId: item.id),
+                  let summary = dynamic.results.stringField("short_summary") {
+            ctx += "\nANALYSIS (dynamic):\n"
+            ctx += "Summary: \(summary)\n"
         }
 
         return ctx
@@ -107,6 +111,9 @@ enum ItemContextBuilder {
             if !analysis.risks.isEmpty {
                 ctx += "   Risks: \(analysis.risks.map(\.risk).joined(separator: " | "))\n"
             }
+        } else if let dynamic = try? fileStore.readArtifact(DynamicAnalysis.self, fileName: "analysis.dynamic.json", meetingId: item.id),
+                  let summary = dynamic.results.stringField("short_summary") {
+            ctx += "   Summary: \(summary)\n"
         }
         return ctx
     }

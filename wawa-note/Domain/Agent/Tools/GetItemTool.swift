@@ -67,7 +67,7 @@ struct GetItemTool: AgentTool {
         return ToolFormatting.success(
             summary: "get_item: \(item.title)",
             content: content,
-            citations: [ChatCitation(itemId: item.id, title: item.title, snippet: String(content.prefix(100)), itemType: item.typeRaw)],
+            citations: [ChatCitation(itemId: item.id, title: item.title, snippet: String(content.prefix(100)), itemType: item.type)],
             totalFound: 1, shown: 1
         )
     }

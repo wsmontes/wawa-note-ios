@@ -115,7 +115,7 @@ final class ProjectDetailViewModel: ObservableObject {
         }
 
         for item in items {
-            await pipeline.process(item.id, using: ctx)
+            pipeline.process(item.id, using: ctx)
         }
 
         loadData()
@@ -150,6 +150,11 @@ struct ProjectDetailView: View {
     @EnvironmentObject private var ingestionState: ProjectIngestionState
     @EnvironmentObject private var contentPipeline: ContentPipelineService
     @StateObject private var viewModel: ProjectDetailViewModel
+    @State private var selectedDynamicTab = 0
+
+    private var framework: ProjectFramework {
+        FrameworkService.shared.resolve(for: project)
+    }
 
     init(project: Project) {
         self.project = project
@@ -160,27 +165,29 @@ struct ProjectDetailView: View {
         VStack(spacing: 0) {
             headerSection
 
-            Picker("View", selection: $viewModel.selectedTab) {
-                Text("Tasks").tag(0)
-                Text("Items").tag(1)
-                Text("Graph").tag(2)
-                Text("Timeline").tag(3)
+            Picker("View", selection: $selectedDynamicTab) {
+                ForEach(Array(framework.views.enumerated()), id: \.offset) { idx, view in
+                    Text(view.title).tag(idx)
+                }
             }
             .pickerStyle(.segmented)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
 
-            switch viewModel.selectedTab {
-            case 0:
-                ProjectTaskBoardView(tasks: viewModel.tasks, projectID: project.id)
-            case 1:
-                projectItemsList
-            case 2:
-                ProjectGraphView(projectID: project.id)
-            case 3:
-                ProjectTimelineView(projectID: project.id)
-            default:
-                EmptyView()
+            if selectedDynamicTab < framework.views.count {
+                let viewDef = framework.views[selectedDynamicTab]
+                switch viewDef.type {
+                case .kanban:
+                    ProjectTaskBoardView(tasks: viewModel.tasks, projectID: project.id)
+                case .list:
+                    projectItemsList
+                case .graph:
+                    ProjectGraphView(projectID: project.id)
+                case .timeline:
+                    ProjectTimelineView(projectID: project.id)
+                case .cards, .table, .markdown, .chips:
+                    dynamicFrameworkView(viewDef)
+                }
             }
         }
         .background(Color(.systemGroupedBackground))
@@ -357,6 +364,74 @@ struct ProjectDetailView: View {
         }
         .padding(16)
         .background(Color(.systemBackground))
+    }
+
+    @ViewBuilder
+    private func dynamicFrameworkView(_ viewDef: ViewDefinition) -> some View {
+        switch viewDef.type {
+        case .cards:
+            let items = viewModel.projectItems
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                    ForEach(items) { item in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Image(systemName: item.type.icon).font(.title2).foregroundStyle(item.type.color)
+                            Text(item.title).font(.subheadline).fontWeight(.medium).lineLimit(2)
+                            if let body = item.bodyText {
+                                Text(body.prefix(100)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            }
+                        }
+                        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(.secondarySystemGroupedBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                }.padding(16)
+            }
+        case .table:
+            let items = viewModel.projectItems
+            List(items) { item in
+                HStack {
+                    Image(systemName: item.type.icon).foregroundStyle(item.type.color).frame(width: 24)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.title).font(.subheadline)
+                        if let date = item.scheduledDate { Text(date.formatted(date: .abbreviated, time: .omitted)).font(.caption2).foregroundStyle(.secondary) }
+                    }
+                }
+            }.listStyle(.plain)
+        case .markdown:
+            ScrollView {
+                if let summary = project.summary, !summary.isEmpty {
+                    Text(summary).font(.body).padding(16)
+                } else {
+                    Text("No content yet").font(.subheadline).foregroundStyle(.secondary).padding(16)
+                }
+            }
+        case .chips:
+            let tags = Array(Set(viewModel.projectItems.flatMap(\.tags)))
+            if tags.isEmpty { Text("No tags").font(.subheadline).foregroundStyle(.secondary).padding(16) }
+            else {
+                ScrollView {
+                    ChipFlowLayout(spacing: 8) {
+                        ForEach(Array(tags), id: \.self) { tag in
+                            Text(tag).font(.caption).padding(.horizontal, 8).padding(.vertical, 4)
+                                .background(.quaternary).clipShape(Capsule())
+                        }
+                    }.padding(16)
+                }
+            }
+        default:
+            let items = viewModel.projectItems
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(items) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.title).font(.headline)
+                            if let body = item.bodyText { Text(body.prefix(200)).font(.caption).foregroundStyle(.secondary).lineLimit(3) }
+                        }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(.secondarySystemGroupedBackground)).clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                }.padding(16)
+            }
+        }
     }
 
     private var instructionsEditorSheet: some View {

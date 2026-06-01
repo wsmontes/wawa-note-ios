@@ -57,7 +57,7 @@ final class JSONImporter: FormatImporter, @unchecked Sendable {
         let dateStr = imported.item?.createdAt ?? imported.meeting?.createdAt ?? ""
         let createdAt = ISO8601DateFormatter().date(from: dateStr) ?? Date()
 
-        let itemType = KnowledgeItemType(rawValue: imported.item?.type ?? "meeting") ?? .meeting
+        let itemType = KnowledgeItemType(rawValue: imported.item?.type ?? "audio") ?? .audio
 
         let bodyText = imported.item?.body ?? imported.item?.summary
             ?? imported.meeting?.body ?? imported.meeting?.summary

@@ -124,5 +124,5 @@ struct ChatCitation: Codable {
     let itemId: UUID
     let title: String
     let snippet: String
-    let itemType: String
+    let itemType: KnowledgeItemType
 }

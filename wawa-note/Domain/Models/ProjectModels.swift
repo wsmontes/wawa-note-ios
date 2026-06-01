@@ -10,6 +10,8 @@ final class Project {
     var slug: String
     var summary: String?
     var customInstructions: String?
+    var frameworkId: String?
+    var frameworkJSON: String?
     var statusRaw: String
     var colorHex: String?
     var iconName: String?
@@ -27,6 +29,8 @@ final class Project {
         slug: String? = nil,
         summary: String? = nil,
         customInstructions: String? = nil,
+        frameworkId: String? = nil,
+        frameworkJSON: String? = nil,
         status: ProjectStatus = .active,
         colorHex: String? = nil,
         iconName: String? = "folder.fill",
@@ -38,6 +42,8 @@ final class Project {
         self.slug = slug ?? name.lowercased().replacingOccurrences(of: " ", with: "-")
         self.summary = summary
         self.customInstructions = customInstructions
+        self.frameworkId = frameworkId
+        self.frameworkJSON = frameworkJSON
         self.statusRaw = status.rawValue
         self.colorHex = colorHex
         self.iconName = iconName
@@ -249,4 +255,85 @@ enum EntityKind: String, Codable, CaseIterable {
     case ticket
     case location
     case other
+}
+
+// MARK: - Project Framework (stored as JSON in Project.frameworkJSON)
+
+struct ProjectFramework: Codable, Sendable {
+    let id: String
+    let name: String
+    let description: String
+    let itemAnalysis: AnalysisConfig
+    let projectSynthesis: SynthesisConfig
+    let views: [ViewDefinition]
+    let entityKinds: [String]
+    let edgeTypes: [String]
+}
+
+struct AnalysisConfig: Codable, Sendable {
+    let systemPrompt: String
+    let outputSchema: AnalysisOutputSchema
+    let renderAs: [FieldRenderer]
+}
+
+struct AnalysisOutputSchema: Codable, Sendable {
+    let type: String          // "object"
+    let properties: [String: SchemaProperty]
+    let required: [String]?
+}
+
+struct SchemaProperty: Codable, Sendable {
+    let type: String          // "string", "array", "object"
+    let items: SchemaItems?   // for array types
+    let properties: [String: SchemaProperty]? // for object types
+    let description: String?
+}
+
+struct SchemaItems: Codable, Sendable {
+    let type: String
+    let properties: [String: SchemaProperty]?
+
+    init(type: String, properties: [String: SchemaProperty]? = nil) {
+        self.type = type
+        self.properties = properties
+    }
+}
+
+struct SynthesisConfig: Codable, Sendable {
+    let systemPrompt: String
+    let outputSchema: AnalysisOutputSchema
+}
+
+struct FieldRenderer: Codable, Sendable {
+    let field: String
+    let type: RenderType
+    let title: String
+    let icon: String?
+}
+
+enum RenderType: String, Codable, Sendable {
+    case card
+    case list
+    case table
+    case markdown
+    case chips
+    case timeline
+}
+
+struct ViewDefinition: Codable, Sendable {
+    let id: String
+    let title: String
+    let type: ViewType
+    let source: String
+}
+
+enum ViewType: String, Codable, Sendable {
+    case list
+    case kanban
+    case timeline
+    case graph
+    case cards
+    case table
+    case markdown
+    case chips
 }

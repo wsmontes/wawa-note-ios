@@ -19,7 +19,7 @@ final class ICSImporter: FormatImporter, @unchecked Sendable {
 
     func importFromURL(_ url: URL) async throws -> ImportResult {
         let text = try String(contentsOf: url, encoding: .utf8)
-        let warnings: [String] = []
+        var warnings: [String] = []
 
         var title = url.deletingPathExtension().lastPathComponent
         var startDate = Date()
@@ -28,7 +28,18 @@ final class ICSImporter: FormatImporter, @unchecked Sendable {
         var location: String?
         var description: String?
 
-        for line in text.split(separator: "\n") {
+        // Unfold folded lines (RFC 5545: CRLF followed by whitespace = continuation)
+        var unfolded: [String] = []
+        for raw in text.split(separator: "\n") {
+            let line = String(raw)
+            if let first = line.first, first.isWhitespace, !unfolded.isEmpty {
+                unfolded[unfolded.count - 1] += line
+            } else {
+                unfolded.append(line)
+            }
+        }
+
+        for line in unfolded {
             let trimmed = String(line)
             if trimmed.hasPrefix("SUMMARY:") { title = String(trimmed.dropFirst(8)).trimmingCharacters(in: .whitespaces) }
             if trimmed.hasPrefix("UID:") { eventUID = String(trimmed.dropFirst(4)).trimmingCharacters(in: .whitespaces) }
@@ -53,7 +64,7 @@ final class ICSImporter: FormatImporter, @unchecked Sendable {
         if let desc = description, !desc.isEmpty { bodyParts.append(desc) }
         let bodyText = bodyParts.isEmpty ? nil : bodyParts.joined(separator: "\n\n")
 
-        let item = KnowledgeItem(type: .meeting, title: title, createdAt: startDate, status: .recorded, durationSeconds: duration)
+        let item = KnowledgeItem(type: .audio, title: title, createdAt: startDate, status: .recorded, durationSeconds: duration)
         item.bodyText = bodyText
         item.scheduledDate = startDate
         if let uid = eventUID { item.calendarEventIdentifier = uid }

@@ -98,6 +98,51 @@ final class AnalysisService: @unchecked Sendable {
         return try await mapReduceAnalysis(chunks: chunks, provider: provider, model: model, systemPrompt: systemPrompt, meetingId: meetingId, sourceContext: sourceCtx)
     }
 
+    /// Framework-driven analysis: accepts a dynamic output schema and returns
+    /// a DynamicAnalysis whose results conform to that schema.
+    func analyzeDynamic(
+        transcript: Transcript,
+        using provider: any AIProvider,
+        model: String,
+        meetingId: UUID = UUID(),
+        sourceContext: SourceContext,
+        schema: AnalysisOutputSchema,
+        systemPrompt: String
+    ) async throws -> DynamicAnalysis {
+        let prefix = sourceContext.userPromptPrefix()
+        let segmentsText = transcript.segments.map { "[\($0.id.uuidString)|\(formatTime($0.startTime))] \($0.text)" }
+        let body = segmentsText.joined(separator: "\n")
+
+        // Serialize schema so the LLM knows what JSON structure to produce
+        let schemaJSON: String
+        if let schemaData = try? JSONEncoder().encode(schema),
+           let json = String(data: schemaData, encoding: .utf8) {
+            schemaJSON = json
+        } else {
+            schemaJSON = "{\"type\":\"object\",\"properties\":{\"short_summary\":{\"type\":\"string\"}},\"required\":[\"short_summary\"]}"
+        }
+
+        let userPrompt = "\(prefix)Analyze the following content. Return ONLY valid JSON matching this schema:\n\n\(schemaJSON)\n\nCONTENT:\n\(body)"
+
+        let params = configService.requestParams(for: "analysis", model: model)
+        let request = AIRequest(model: model, messages: [
+            AIMessage(role: .system, content: [.text(systemPrompt)]),
+            AIMessage(role: .user, content: [.text(userPrompt)])
+        ], temperature: params.temperature, maxTokens: params.maxTokens, responseFormat: .jsonObject)
+
+        let response = try await provider.send(request)
+        let cleaned = ProviderAdapter.normalizeJSON(response.content)
+
+        guard let data = cleaned.data(using: .utf8) else {
+            throw ProviderError.decodingFailed
+        }
+
+        let results = try JSONDecoder().decode(AnalysisResults.self, from: data)
+        // schemaId tracks which framework generated this analysis
+        let schemaId = sourceContext.sourceType == .recording ? "dynamic/recording" : "dynamic/\(sourceContext.sourceType.rawValue)"
+        return DynamicAnalysis(itemId: meetingId, providerId: provider.id, model: model, schemaId: schemaId, results: results)
+    }
+
     // MARK: - Direct (single request)
 
     private func singleAnalysis(provider: any AIProvider, model: String, systemPrompt: String, userPrompt: String, meetingId: UUID) async throws -> MeetingAnalysis {

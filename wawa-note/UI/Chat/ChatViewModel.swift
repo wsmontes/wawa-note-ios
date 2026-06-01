@@ -12,6 +12,9 @@ final class ChatViewModel: ObservableObject {
     @Published var currentConversation: ChatConversation?
     @Published var conversations: [ChatConversation] = []
     @Published var selectedModel: String = ""
+    @Published var mode: AgentMode = .auto
+    @Published var activeProjectID: UUID?
+    @Published var activeProjectName: String?
 
     enum ChatState {
         case idle
@@ -69,15 +72,19 @@ final class ChatViewModel: ObservableObject {
         let registry = AgentToolRegistry(tools: [
             SearchKnowledgeTool(), GetItemTool(), ListItemsTool(),
             GetProjectTool(), GetConnectionsTool(), GetTasksTool(),
-            CreateNoteTool(), CreateTaskTool(), SummarizeDayTool()
+            CreateNoteTool(), CreateTaskTool(), SummarizeDayTool(),
+            GetAnalysisTool(), UpdateTaskTool(), CreateEdgeTool(),
+            SetAnnotationTool(), TrashItemTool(), ThinkTool()
         ])
 
-        let toolContext = ToolContext(modelContext: ctx)
-        let loop = AgentLoop(registry: registry, toolContext: toolContext, model: model)
+        let toolContext = ToolContext(modelContext: ctx, activeProjectID: activeProjectID, activeProjectName: activeProjectName)
+        let execModel = selectedModel.isEmpty ? "gpt-5-nano" : selectedModel
+        let advModel = "gpt-5.5"
+        let loop = AgentLoop(registry: registry, toolContext: toolContext, mode: mode, executorModel: execModel, advisorModel: advModel)
 
         streamTask = Task {
             do {
-                let stream = loop.runStreaming(userMessage: text, history: messages, provider: provider, model: model)
+                let stream = loop.runStreaming(userMessage: text, history: messages, provider: provider)
 
                 var fullContent = ""
                 var currentToolId = ""

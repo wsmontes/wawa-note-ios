@@ -134,7 +134,7 @@ struct ProjectTimelineView: View {
 
     private func eventColor(_ kind: TimelineEventKind) -> Color {
         switch kind {
-        case .meeting: .blue
+        case .audio: .blue
         case .note: .orange
         case .journalEntry: .purple
         case .webBookmark: .green
@@ -148,7 +148,7 @@ struct ProjectTimelineView: View {
 
     private func eventIcon(_ kind: TimelineEventKind) -> String {
         switch kind {
-        case .meeting: "recordingtape"
+        case .audio: "recordingtape"
         case .note: "note.text"
         case .journalEntry: "book"
         case .webBookmark: "bookmark"
@@ -164,11 +164,11 @@ struct ProjectTimelineView: View {
 // MARK: - Models
 
 enum TimelineEventKind {
-    case meeting, note, journalEntry, webBookmark, image, task, decision, person, done
+    case audio, note, journalEntry, webBookmark, image, task, decision, person, done
 
     static func from(itemType: KnowledgeItemType) -> TimelineEventKind {
         switch itemType {
-        case .meeting: .meeting
+        case .audio: .audio
         case .note: .note
         case .journalEntry: .journalEntry
         case .webBookmark: .webBookmark

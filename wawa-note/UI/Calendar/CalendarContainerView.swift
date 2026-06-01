@@ -50,6 +50,7 @@ struct TimelineExplorerView: View {
                 withAnimation { displayedMonth = Calendar.current.date(byAdding: .month, value: -1, to: displayedMonth) ?? displayedMonth }
             } label: {
                 Image(systemName: "chevron.left")
+                    .accessibilityLabel("Previous month")
             }
 
             Spacer()
@@ -61,6 +62,7 @@ struct TimelineExplorerView: View {
                 withAnimation { displayedMonth = Calendar.current.date(byAdding: .month, value: 1, to: displayedMonth) ?? displayedMonth }
             } label: {
                 Image(systemName: "chevron.right")
+                    .accessibilityLabel("Next month")
             }
         }
         .padding(.horizontal, 12)
@@ -111,6 +113,7 @@ struct TimelineExplorerView: View {
         } label: {
             HStack {
                 Image(systemName: "calendar.badge.plus")
+                    .accessibilityLabel("Connect Calendar")
                 Text("Connect iPhone Calendar")
                     .font(.subheadline).fontWeight(.medium)
                 Spacer()

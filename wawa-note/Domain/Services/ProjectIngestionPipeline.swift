@@ -122,18 +122,21 @@ final class ProjectIngestionPipeline: ObservableObject {
         )
         let itemContext = buildItemContext(item: newItem, fileStore: fileStore)
 
-        // 2. Prompt: dual-perspective analysis
-        let prompt = buildIngestionPrompt(projectContext: projectContext, newItemContext: itemContext)
-        let model = AutomationSettings.shared.resolveAutoAnalysisModel(context: context) ?? AutomationSettings.shared.autoAnalysisModel
+        // 2. Resolve framework for domain-aware synthesis
+        let framework = FrameworkService.shared.resolve(for: project)
+        // 3. Prompt: dual-perspective, framework-aware
+        let systemPrompt = buildSystemPrompt(for: project, framework: framework)
+        let prompt = buildIngestionPrompt(projectContext: projectContext, newItemContext: itemContext, framework: framework)
+        let model = ModelTierResolver.resolveForIngestion(projectID: projectID, context: context)
         let params = AIConfigService.shared.requestParams(for: "project_ingestion", model: model)
+        AppLog.provider.info("ProjectIngestion: using model=\(model) for project \(project.name) (\(allItems.count) items)")
 
-        // Snapshot summary before AI call to avoid race condition on read-modify-write
         let previousSummary = project.summary ?? ""
 
         let request = AIRequest(
             model: model,
             messages: [
-                AIMessage(role: .system, content: [.text(buildSystemPrompt(for: project))]),
+                AIMessage(role: .system, content: [.text(systemPrompt)]),
                 AIMessage(role: .user, content: [.text(prompt)])
             ],
             temperature: params.temperature,
@@ -149,34 +152,16 @@ final class ProjectIngestionPipeline: ObservableObject {
             if let json = parseIngestionJSON(rawContent) {
                 applyResults(response: json, newItem: newItem, project: project, allItems: allItems,
                             existingTasks: existingTasks, edgeSvc: edgeSvc, taskSvc: taskSvc,
-                            context: context, previousSummary: previousSummary)
+                            context: context, previousSummary: previousSummary, framework: framework)
                 AppLog.provider.info("ProjectIngestion: SUCCESS — \(json.new_tasks?.count ?? 0) new tasks, \(json.connections?.count ?? 0) connections for project \(project.name)")
                 postIngestionCompleted(itemID: itemID, projectID: projectID)
                 return
             }
 
-            // JSON fix retry: include original schema context so model knows target format
             saveRawIngestionResponse(rawContent, itemID: itemID, label: "raw")
             AppLog.provider.warning("ProjectIngestion: initial parse failed. Retrying with JSON fix prompt...")
 
-            let fixPrompt = """
-            Original task: \(prompt.prefix(1000))...
-
-            Your previous response was not valid JSON. Fix it to match this schema:
-
-            {
-              "connections": [{"from_title":"...","to_title":"...","type":"supports|contradicts|references|relates_to","explanation":"..."}],
-              "task_updates": [{"task_title":"...","new_status":"done|cancelled","reason":"..."}],
-              "new_tasks": [{"title":"...","priority":"low|medium|high","reason":"...","confidence":0.8}],
-              "edge_reinforcements": [{"from_title":"...","to_title":"...","note":"..."}],
-              "insights": [{"text":"...","confidence":0.8}],
-              "project_summary_contribution": "..."
-            }
-
-            Your broken response: \(ProviderAdapter.normalizeJSON(rawContent).prefix(1500))
-
-            Return ONLY valid JSON matching the schema. No markdown, no code fences.
-            """
+            let fixPrompt = buildFixPrompt(originalPrompt: prompt, rawContent: rawContent, framework: framework)
 
             let fixRequest = AIRequest(
                 model: model,
@@ -194,7 +179,7 @@ final class ProjectIngestionPipeline: ObservableObject {
                     AppLog.provider.info("ProjectIngestion: JSON fix retry succeeded")
                     applyResults(response: json, newItem: newItem, project: project, allItems: allItems,
                                 existingTasks: existingTasks, edgeSvc: edgeSvc, taskSvc: taskSvc,
-                                context: context, previousSummary: previousSummary)
+                                context: context, previousSummary: previousSummary, framework: framework)
                     postIngestionCompleted(itemID: itemID, projectID: projectID)
                     return
                 }
@@ -220,18 +205,25 @@ final class ProjectIngestionPipeline: ObservableObject {
 
     // MARK: - System Prompt
 
-    private func buildSystemPrompt(for project: Project) -> String {
-        var prompt = """
-        You are a project knowledge analyst. You analyze how a new item relates to a project.
+    private func buildSystemPrompt(for project: Project, framework: ProjectFramework) -> String {
+        // Use framework's synthesis prompt for custom frameworks
+        let basePrompt: String
+        if framework.id != "builtin/meeting" {
+            basePrompt = framework.projectSynthesis.systemPrompt
+        } else {
+            basePrompt = """
+            You are a project knowledge analyst. You analyze how a new item relates to a project.
 
-        KEY PRINCIPLES:
-        - A new item does NOT make you rethink the entire project. It ADDS to existing knowledge.
-        - Read the new item THROUGH the project's eyes: how does it fit, connect, extend?
-        - Read the project THROUGH the new item's eyes: what does it reveal, confirm, or change?
-        - NEVER suggest deleting tasks or connections. Tasks can change status (done/cancelled). Connections can be added.
-        - Be conservative. Only report what is clearly supported. Flag uncertainty.
+            KEY PRINCIPLES:
+            - A new item does NOT make you rethink the entire project. It ADDS to existing knowledge.
+            - Read the new item THROUGH the project's eyes: how does it fit, connect, extend?
+            - Read the project THROUGH the new item's eyes: what does it reveal, confirm, or change?
+            - NEVER suggest deleting tasks or connections. Tasks can change status (done/cancelled). Connections can be added.
+            - Be conservative. Only report what is clearly supported. Flag uncertainty.
+            """
+        }
 
-        """
+        var prompt = basePrompt + "\n\n"
 
         if let instructions = project.customInstructions, !instructions.trimmingCharacters(in: .whitespaces).isEmpty {
             prompt += """
@@ -243,23 +235,25 @@ final class ProjectIngestionPipeline: ObservableObject {
             """
         }
 
+        let edgeTypeList = framework.edgeTypes.joined(separator: "|")
+
         prompt += """
         Return JSON with these fields:
         {
           "item_project_view": "one sentence: how this item fits into the project's existing knowledge",
           "project_item_view": "one sentence: what this item reveals about the project that was not clear before",
-          "connections": [{"from_title": "...", "to_title": "...", "type": "supports|contradicts|references|relates_to", "explanation": "..."}],
+          "connections": [{"from_title": "...", "to_title": "...", "type": "\(edgeTypeList)", "explanation": "..."}],
           "task_updates": [{"task_title": "...", "new_status": "done|cancelled", "reason": "..."}],
           "new_tasks": [{"title": "...", "priority": "low|medium|high", "reason": "..."}],
           "edge_reinforcements": [{"from_title": "...", "to_title": "...", "note": "this connection is confirmed by the new item"}],
           "insights": [{"text": "...", "confidence": 0.8}],
-          "project_summary_contribution": "REQUIRED. One paragraph summarizing what new knowledge this item contributes to the project. Even if the item just confirms existing knowledge, state that. Never leave this field empty."
+          "project_summary_contribution": "REQUIRED. One paragraph summarizing what new knowledge this item contributes to the project."
         }
 
         RULES:
         - project_summary_contribution is REQUIRED. Always return it, even if just one sentence.
         - task_updates: ONLY update status if the new item CLEARLY indicates a task is done or no longer relevant. Never delete.
-        - connections: report genuine relationships. If a connection already exists, use edge_reinforcements instead to confirm it.
+        - connections: report genuine relationships. Use types: \(edgeTypeList). If a connection already exists, use edge_reinforcements.
         - new_tasks: only tasks explicitly implied. Max 3.
         """
 
@@ -343,7 +337,7 @@ final class ProjectIngestionPipeline: ObservableObject {
 
     // MARK: - Prompt
 
-    private func buildIngestionPrompt(projectContext: String, newItemContext: String) -> String {
+    private func buildIngestionPrompt(projectContext: String, newItemContext: String, framework: ProjectFramework) -> String {
         """
         Analyze this new item in the context of this project.
 
@@ -365,6 +359,31 @@ final class ProjectIngestionPipeline: ObservableObject {
         """
     }
 
+    private func buildFixPrompt(originalPrompt: String, rawContent: String, framework: ProjectFramework) -> String {
+        let edgeTypeList = framework.edgeTypes.joined(separator: "|")
+        let schema = """
+        {
+          "connections": [{"from_title":"...","to_title":"...","type":"\(edgeTypeList)","explanation":"..."}],
+          "task_updates": [{"task_title":"...","new_status":"done|cancelled","reason":"..."}],
+          "new_tasks": [{"title":"...","priority":"low|medium|high","reason":"...","confidence":0.8}],
+          "edge_reinforcements": [{"from_title":"...","to_title":"...","note":"..."}],
+          "insights": [{"text":"...","confidence":0.8}],
+          "project_summary_contribution": "..."
+        }
+        """
+        return """
+        Original task: \(originalPrompt.prefix(1000))...
+
+        Your previous response was not valid JSON. Fix it to match this schema:
+
+        \(schema)
+
+        Your broken response: \(ProviderAdapter.normalizeJSON(rawContent).prefix(1500))
+
+        Return ONLY valid JSON matching the schema. No markdown, no code fences.
+        """
+    }
+
     // MARK: - Apply results
 
     private func applyResults(
@@ -376,7 +395,8 @@ final class ProjectIngestionPipeline: ObservableObject {
         edgeSvc: GraphEdgeService,
         taskSvc: TaskService,
         context: ModelContext,
-        previousSummary: String
+        previousSummary: String,
+        framework: ProjectFramework
     ) {
         // Task status updates (never delete)
         if let updates = response.task_updates {
@@ -487,13 +507,7 @@ final class ProjectIngestionPipeline: ObservableObject {
     }
 
     private func edgeType(from string: String) -> EdgeType {
-        switch string {
-        case "supports": return .supports
-        case "contradicts": return .contradicts
-        case "references": return .references
-        case "extends", "relates_to": return .relatesTo
-        default: return .relatesTo
-        }
+        EdgeType(rawValue: string) ?? .relatesTo
     }
 
     // MARK: - Helpers

@@ -252,7 +252,7 @@ struct HomeView: View {
             }
         }
         .onOpenURL { if $0.scheme == "wawanote" { Task { await importVM.scanSharedDirectoryAndImport() } } }
-        .alert("Import Error", isPresented: .constant(importVM.importError != nil)) { Button("OK") { importVM.importError = nil } } message: { Text(importVM.importError ?? "") }
+        .alert("Import Error", isPresented: Binding(get: { importVM.importError != nil }, set: { if !$0 { importVM.importError = nil } })) { Button("OK") { importVM.importError = nil } } message: { Text(importVM.importError ?? "") }
         .sheet(isPresented: $showCreationSheet) { CreationSheetView() }
         .fullScreenCover(isPresented: $showScanner) {
             ScannerView(scannedImages: $scannerVM.scannedImages)
@@ -349,8 +349,12 @@ struct HomeView: View {
 
     // MARK: Project row
 
+    private var itemsByProject: [UUID: [KnowledgeItem]] {
+        Dictionary(grouping: allItems, by: { $0.projectID ?? UUID() })
+    }
+
     private func projectRow(_ project: Project) -> some View {
-        let projectItems = allItems.filter { $0.projectID == project.id }
+        let projectItems = itemsByProject[project.id] ?? []
         let isExpanded = expandedProjectIDs.contains(project.id)
 
         return VStack(spacing: 0) {
@@ -443,6 +447,9 @@ struct HomeView: View {
                 .foregroundStyle(isPaused ? .orange : .primary)
             Text(isPaused ? "Paused" : "Recording")
                 .font(.subheadline).foregroundStyle(isPaused ? .orange : .secondary)
+            if let error = captureVM.errorMessage {
+                Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 32).multilineTextAlignment(.center)
+            }
             Spacer()
             HStack(spacing: 40) {
                 if isPaused {
@@ -452,7 +459,7 @@ struct HomeView: View {
                             Image(systemName: "record.circle.fill").font(.system(size: 28)).foregroundStyle(.white)
                         }
                     }
-                    Button(action: { captureVM.stopRecording() }) {
+                    Button(action: { UINotificationFeedbackGenerator().notificationOccurred(.success); captureVM.stopRecording() }) {
                         Text("Finish").font(.headline).foregroundStyle(.primary)
                             .frame(width: 80, height: 44)
                             .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 22))

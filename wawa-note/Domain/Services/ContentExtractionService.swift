@@ -120,9 +120,6 @@ final class ContentExtractionService {
             request.recognitionLevel = .accurate
             request.usesLanguageCorrection = true
             try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
-            if request.results == nil {
-                continuation.resume(returning: nil)
-            }
         }
     }
 
@@ -142,14 +139,18 @@ final class ContentExtractionService {
             let parts = [analysis.shortSummary, analysis.detailedSummary].filter { !$0.isEmpty }
             if !parts.isEmpty { return parts.joined(separator: "\n") }
         }
+        if let dynamic = try? fileStore.readArtifact(DynamicAnalysis.self, fileName: "analysis.dynamic.json", meetingId: item.id),
+           let summary = dynamic.results.stringField("short_summary") {
+            return summary
+        }
         return nil
     }
 
     // MARK: - Analyze text (source-aware)
 
-    /// Runs AI analysis on extracted text. The system prompt and user prompt structure
-    /// adapt to the item's source type so the LLM understands context: a recording gets
-    /// meeting-analysis framing, a scan gets document-structure framing, etc.
+    /// Runs AI analysis on extracted text. Uses an iterative agent pattern:
+    /// the model can call tools (search, get_item, get_project) to gather context
+    /// before producing the final analysis. The model decides when it has enough.
     func analyze(text: String, item: KnowledgeItem) async -> Bool {
         guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
             AppLog.provider.warning("ContentExtraction.analyze: no provider configured")
@@ -157,41 +158,113 @@ final class ContentExtractionService {
         }
 
         let settings = AutomationSettings.shared
-        let model = settings.resolveAutoAnalysisModel(context: modelContext) ?? settings.autoAnalysisModel
-
+        let model = ModelTierResolver.resolveForAnalysis(item: item)
         let sourceCtx = SourceContext.from(item)
 
-        // Build synthetic transcript from text chunks for AnalysisService
         let segments = chunkText(text, itemID: item.id)
-        let sourceId = segments.count > 1 ? "text-chunked" : "text-direct"
-        let transcript = Transcript(meetingId: item.id, languageCode: nil, segments: segments, sourceEngineId: sourceId)
+        let transcript = Transcript(meetingId: item.id, languageCode: nil, segments: segments, sourceEngineId: "text-direct")
 
-        AppLog.provider.info("ContentExtraction.analyze: source=\(sourceCtx.sourceType.rawValue), \(segments.count) segments, model \(model)")
+        AppLog.provider.info("ContentExtraction.analyze: source=\(sourceCtx.sourceType.rawValue), model=\(model), iterative")
 
         do {
-            let result = try await AnalysisService().analyze(
-                transcript: transcript,
-                using: provider,
-                model: model,
-                meetingId: item.id,
-                sourceContext: sourceCtx
+            // Build the iterative prompt — model has tools to explore context
+            let systemPrompt = sourceCtx.analysisSystemPrompt()
+            let prefix = sourceCtx.userPromptPrefix()
+            let body = segments.map { $0.text }.joined(separator: "\n")
+            let userPrompt = """
+            \(prefix)Analyze the following content. You may call tools (search_knowledge, get_item, get_project) to gather additional context before producing your analysis. When you have enough information, return the final analysis JSON. Do not guess — if you're uncertain about something, search for related items to confirm.
+
+            CONTENT TO ANALYZE:
+            \(body.prefix(12000))
+
+            Return a complete analysis JSON with short_summary, detailed_summary, decisions, action_items, risks, open_questions, important_dates, mentioned_people, mentioned_systems, mentioned_organizations, mentioned_locations.
+            """
+
+            // Use iterative agent loop with analysis tools
+            let toolContext = ToolContext(modelContext: modelContext)
+            let analysisTools: [any AgentTool] = [
+                SearchKnowledgeTool(), GetItemTool(), GetProjectTool()
+            ]
+            let registry = AgentToolRegistry(tools: analysisTools)
+            let loop = AgentLoop(registry: registry, toolContext: toolContext, maxIterations: 4, mode: .auto, executorModel: model, advisorModel: ModelTierResolver.advisorModel)
+
+            var fullResponse = ""
+            let stream = loop.runStreaming(userMessage: userPrompt, history: [], provider: provider)
+            for try await event in stream {
+                if case .textDelta(let d) = event { fullResponse += d }
+            }
+
+            // The iterative agent produces the analysis as its final text output.
+            // Save raw text and run structured parse for the artifact.
+            try fileStore.createMeetingDirectory(for: item.id)
+            let rawURL = fileStore.itemDirectoryURL(for: item.id).appendingPathComponent("analysis.iterative.txt")
+            try fullResponse.data(using: .utf8)?.write(to: rawURL)
+            AppLog.provider.info("ContentExtraction.analyze: iterative complete (\(fullResponse.count) chars)")
+
+            // Parse through AnalysisService for structured output
+            let segments2 = chunkText(fullResponse, itemID: item.id)
+            let iterTranscript = Transcript(meetingId: item.id, languageCode: nil, segments: segments2, sourceEngineId: "iterative-analysis")
+            return await analyzeStructured(transcript: iterTranscript, item: item, sourceCtx: sourceCtx, provider: provider, model: model)
+        } catch {
+            AppLog.provider.error("ContentExtraction.analyze: failed for item \(item.id): \(error)")
+            return false
+        }
+    }
+
+    /// Parses agent output into structured MeetingAnalysis artifact.
+    private func analyzeStructured(transcript: Transcript, item: KnowledgeItem, sourceCtx: SourceContext, provider: any AIProvider, model: String) async -> Bool {
+        do {
+            let result = try await AnalysisService().analyze(transcript: transcript, using: provider, model: model, meetingId: item.id, sourceContext: sourceCtx)
+            try fileStore.createMeetingDirectory(for: item.id)
+            try fileStore.writeArtifact(result, fileName: "analysis.json", meetingId: item.id)
+            item.status = .analyzed
+            item.analysisProviderId = model
+            try modelContext.save()
+            AppLog.provider.info("ContentExtraction.analyze: done — \(result.shortSummary.prefix(80))")
+            NotificationCenter.default.post(name: .analysisReady, object: item.id.uuidString)
+            await EmbeddingPipelineService().ensureEmbedding(for: item, using: provider)
+            return true
+        } catch { return false }
+    }
+
+    /// Framework-driven analysis: uses the project's framework to determine
+    /// the output schema and system prompt. Returns DynamicAnalysis.
+    func analyzeDynamic(text: String, item: KnowledgeItem, framework: ProjectFramework) async -> Bool {
+        guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
+            AppLog.provider.warning("ContentExtraction.analyzeDynamic: no provider configured")
+            return false
+        }
+
+        let model = ModelTierResolver.resolveForAnalysis(item: item)
+        let sourceCtx = SourceContext.from(item)
+        let segments = chunkText(text, itemID: item.id)
+        let transcript = Transcript(meetingId: item.id, languageCode: nil, segments: segments, sourceEngineId: "text-direct")
+
+        AppLog.provider.info("ContentExtraction.analyzeDynamic: framework=\(framework.id), source=\(sourceCtx.sourceType.rawValue), model=\(model)")
+
+        do {
+            let result = try await AnalysisService().analyzeDynamic(
+                transcript: transcript, using: provider, model: model,
+                meetingId: item.id, sourceContext: sourceCtx,
+                schema: framework.itemAnalysis.outputSchema,
+                systemPrompt: framework.itemAnalysis.systemPrompt
             )
 
             try fileStore.createMeetingDirectory(for: item.id)
-            try fileStore.writeArtifact(result, fileName: "analysis.json", meetingId: item.id)
+            let resultData = try JSONEncoder().encode(result)
+            try resultData.write(to: fileStore.itemDirectoryURL(for: item.id).appendingPathComponent("analysis.dynamic.json"))
 
             item.status = .analyzed
             item.analysisProviderId = model
             try modelContext.save()
 
-            AppLog.provider.info("ContentExtraction.analyze: done — \(result.shortSummary.prefix(80))")
+            AppLog.provider.info("ContentExtraction.analyzeDynamic: done for item \(item.id)")
             NotificationCenter.default.post(name: .analysisReady, object: item.id.uuidString)
 
             await EmbeddingPipelineService().ensureEmbedding(for: item, using: provider)
-
             return true
         } catch {
-            AppLog.provider.error("ContentExtraction.analyze: failed for item \(item.id): \(error)")
+            AppLog.provider.error("ContentExtraction.analyzeDynamic: failed for item \(item.id): \(error)")
             return false
         }
     }
@@ -298,9 +371,11 @@ struct SourceContext: Sendable {
         } else if item.imageFileRelativePath != nil {
             sourceType = .scan
             if let pages = item.imagePageCount { metadata["pageCount"] = String(pages) }
-        } else if item.isImported, let source = item.importSourceURL {
+        } else if item.isImported {
             sourceType = .import_
-            metadata["filename"] = URL(string: source)?.lastPathComponent ?? source
+            if let source = item.importSourceURL {
+                metadata["filename"] = URL(string: source)?.lastPathComponent ?? source
+            }
         } else {
             sourceType = .note
         }
@@ -355,5 +430,42 @@ struct SourceContext: Sendable {
         let m = Int(seconds) / 60
         let s = Int(seconds) % 60
         return "\(m)m \(s)s"
+    }
+}
+
+// MARK: - Model Tier Resolver
+
+/// Decides which model tier to use for analysis and ingestion based on content complexity,
+/// project size, and framework type. Cheap models (nano/haiku) handle simple extraction
+/// and small projects; expensive models (opus/gpt-5.5) handle complex analysis and large projects.
+@MainActor
+enum ModelTierResolver {
+    /// Executor model — cheap, fast, good at extraction.
+    static var executorModel: String {
+        AIConfigService.shared.featureConfig(for: "agent")?.model
+            ?? "gpt-5-nano"
+    }
+
+    /// Advisor model — expensive, smart, good at reasoning.
+    /// Validated against active provider's available models, falls back to executor.
+    static var advisorModel: String {
+        let chatModel = AIConfigService.shared.featureConfig(for: "chat")?.model ?? "gpt-5.5"
+        let analysisModel = AIConfigService.shared.featureConfig(for: "analysis")?.model
+        return analysisModel ?? chatModel
+    }
+
+    /// Resolve which model to use for item analysis based on content complexity.
+    static func resolveForAnalysis(item: KnowledgeItem) -> String {
+        if item.durationSeconds.map({ $0 > 600 }) ?? false { return advisorModel }
+        if item.imagePageCount.map({ $0 > 2 }) ?? false { return advisorModel }
+        if let body = item.bodyText, body.count > 15000 { return advisorModel }
+        return executorModel
+    }
+
+    /// Resolve which model to use for project ingestion based on project complexity.
+    static func resolveForIngestion(projectID: UUID, context: ModelContext) -> String {
+        let itemCount = (try? ProjectService(context: context).items(in: projectID).count) ?? 0
+        if itemCount >= 3 { return advisorModel }
+        return executorModel
     }
 }

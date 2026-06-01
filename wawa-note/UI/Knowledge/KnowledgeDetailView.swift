@@ -47,9 +47,17 @@ struct KnowledgeDetailView: View {
                 }
 
                 if let error = transcriptionError {
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
-                        Text(error).font(.subheadline)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                            Text(error).font(.subheadline)
+                        }
+                        if error.contains("Settings") {
+                            Button("Open Settings") {
+                                guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                                UIApplication.shared.open(url)
+                            }.font(.subheadline)
+                        }
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -238,32 +246,20 @@ struct KnowledgeDetailView: View {
     @ViewBuilder
     private var artifactSections: some View {
         if let analysis {
-            sectionHeader("Summary", icon: "sparkles").padding(.horizontal, 16)
-
-            VStack(alignment: .leading, spacing: 16) {
-                if !analysis.shortSummary.isEmpty {
-                    card(title: "Summary", systemImage: "doc.text") {
-                        Text(analysis.shortSummary).font(.body)
+            // Use dynamic rendering when a non-meeting framework is active
+            if let fw = resolvedFramework, fw.id != "builtin/meeting" {
+                dynamicAnalysisSection(framework: fw)
+            } else {
+                // Meeting framework: render all analysis fields using the framework's renderAs
+                let meetingFW = FrameworkService.meetingFramework
+                sectionHeader("Summary", icon: "sparkles").padding(.horizontal, 16)
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(meetingFW.itemAnalysis.renderAs, id: \.field) { renderer in
+                        meetingAnalysisCard(for: renderer, analysis: analysis)
                     }
                 }
-                if !analysis.actionItems.isEmpty {
-                    card(title: "Action Items", systemImage: "checklist") {
-                        ForEach(analysis.actionItems) { action in
-                            HStack(alignment: .top, spacing: 8) {
-                                Image(systemName: "circle").font(.caption).padding(.top, 3)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(action.task).font(.body)
-                                    if let owner = action.owner {
-                                        Text(owner).font(.caption).foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                            .padding(.vertical, 2)
-                        }
-                    }
-                }
+                .padding(.horizontal, 16)
             }
-            .padding(.horizontal, 16)
         }
 
         if let transcript {
@@ -386,6 +382,182 @@ struct KnowledgeDetailView: View {
                 .font(.headline)
         }
         .padding(.bottom, 8)
+    }
+
+    // MARK: - Framework resolution
+
+    private var resolvedFramework: ProjectFramework? {
+        guard let projectID = item.projectID else { return nil }
+        let projSvc = ProjectService(context: modelContext)
+        guard let project = try? projSvc.fetch(id: projectID) else { return nil }
+        return FrameworkService.shared.resolve(for: project)
+    }
+
+    // MARK: - Dynamic analysis section (framework-driven)
+
+    @ViewBuilder
+    private func dynamicAnalysisSection(framework: ProjectFramework) -> some View {
+        sectionHeader("Analysis", icon: "sparkles").padding(.horizontal, 16).padding(.top, 16)
+
+        VStack(alignment: .leading, spacing: 16) {
+            if let dynamicAnalysis = try? fileStore.readArtifact(DynamicAnalysis.self, fileName: "analysis.dynamic.json", meetingId: item.id) {
+                ForEach(framework.itemAnalysis.renderAs, id: \.field) { renderer in
+                    dynamicCard(for: renderer, data: dynamicAnalysis.results)
+                }
+            } else if let analysis {
+                // Fallback: MeetingAnalysis rendered through framework's renderAs
+                ForEach(framework.itemAnalysis.renderAs, id: \.field) { renderer in
+                    meetingAnalysisCard(for: renderer, analysis: analysis)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+    }
+
+    @ViewBuilder
+    private func dynamicCard(for renderer: FieldRenderer, data: AnalysisResults) -> some View {
+        switch renderer.type {
+        case .card:
+            if let text = data.stringField(renderer.field), !text.isEmpty {
+                card(title: renderer.title, systemImage: renderer.icon ?? "doc.text") {
+                    Text(text).font(.body)
+                }
+            }
+        case .list:
+            if let items = data.arrayField(renderer.field), !items.isEmpty {
+                card(title: renderer.title, systemImage: renderer.icon ?? "list.bullet") {
+                    ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                        renderItemValue(item.value)
+                    }
+                }
+            }
+        case .chips:
+            if let items = data.arrayField(renderer.field), !items.isEmpty {
+                card(title: renderer.title, systemImage: renderer.icon ?? "tag") {
+                    ChipFlowLayout(spacing: 8) {
+                        ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                            Text(formatItemLabel(item.value)).font(.caption)
+                                .padding(.horizontal, 8).padding(.vertical, 4)
+                                .background(.quaternary).clipShape(Capsule())
+                        }
+                    }
+                }
+            }
+        case .markdown:
+            if let text = data.stringField(renderer.field), !text.isEmpty {
+                Text(text).font(.body).padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.secondarySystemGroupedBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+        case .table, .timeline:
+            if let text = data.stringField(renderer.field), !text.isEmpty {
+                card(title: renderer.title, systemImage: renderer.icon ?? "tablecells") {
+                    Text(text).font(.body)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func renderItemValue(_ value: Any) -> some View {
+        if let str = value as? String {
+            Text(str).font(.body).padding(.vertical, 2)
+        } else if let dict = value as? [String: AnyCodable] {
+            VStack(alignment: .leading, spacing: 1) {
+                ForEach(Array(dict.keys.sorted()), id: \.self) { key in
+                    if let v = dict[key]?.value {
+                        HStack(spacing: 4) {
+                            Text("\(key):").font(.caption).foregroundStyle(.secondary)
+                            Text(formatItemLabel(v)).font(.body).lineLimit(2)
+                        }
+                    }
+                }
+            }.padding(.vertical, 2)
+        } else {
+            Text(formatItemLabel(value)).font(.body).padding(.vertical, 2)
+        }
+    }
+
+    private func formatItemLabel(_ value: Any) -> String {
+        if let str = value as? String { return str }
+        if let dict = value as? [String: AnyCodable] {
+            if let name = dict["name"]?.value as? String { return name }
+            if let title = dict["title"]?.value as? String { return title }
+            if let task = dict["task"]?.value as? String { return task }
+            if let first = dict.values.first { return String(describing: first.value) }
+            return ""
+        }
+        if let num = value as? Double { return String(format: "%.2f", num) }
+        if let num = value as? Int { return String(num) }
+        return String(describing: value)
+    }
+
+    @ViewBuilder
+    private func meetingAnalysisCard(for renderer: FieldRenderer, analysis: MeetingAnalysis) -> some View {
+        switch renderer.field {
+        case "short_summary":
+            if !analysis.shortSummary.isEmpty {
+                card(title: renderer.title, systemImage: renderer.icon ?? "doc.text") {
+                    Text(analysis.shortSummary).font(.body)
+                }
+            }
+        case "decisions":
+            if !analysis.decisions.isEmpty {
+                card(title: renderer.title, systemImage: renderer.icon ?? "checkmark.seal") {
+                    ForEach(analysis.decisions) { d in Text(d.title).font(.body).padding(.vertical, 2) }
+                }
+            }
+        case "action_items":
+            if !analysis.actionItems.isEmpty {
+                card(title: renderer.title, systemImage: renderer.icon ?? "checklist") {
+                    ForEach(analysis.actionItems) { a in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "circle").font(.caption).padding(.top, 3)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(a.task).font(.body)
+                                if let o = a.owner { Text(o).font(.caption).foregroundStyle(.secondary) }
+                            }
+                        }.padding(.vertical, 2)
+                    }
+                }
+            }
+        case "risks":
+            if !analysis.risks.isEmpty {
+                card(title: renderer.title, systemImage: renderer.icon ?? "exclamationmark.triangle") {
+                    ForEach(analysis.risks) { r in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(r.risk).font(.body)
+                            if !r.details.isEmpty { Text(r.details).font(.caption).foregroundStyle(.secondary) }
+                        }.padding(.vertical, 2)
+                    }
+                }
+            }
+        case "open_questions":
+            if !analysis.openQuestions.isEmpty {
+                card(title: renderer.title, systemImage: renderer.icon ?? "questionmark.bubble") {
+                    ForEach(analysis.openQuestions) { q in Text(q.question).font(.body).padding(.vertical, 2) }
+                }
+            }
+        case "entities":
+            if !analysis.entities.isEmpty {
+                card(title: renderer.title, systemImage: renderer.icon ?? "person.3") {
+                    ForEach(analysis.entities.prefix(10)) { e in
+                        HStack { Text(e.name).font(.body); Spacer(); Text(e.type.rawValue).font(.caption).foregroundStyle(.secondary) }
+                    }
+                }
+            }
+        case "important_dates":
+            if !analysis.importantDates.isEmpty {
+                card(title: renderer.title, systemImage: renderer.icon ?? "calendar") {
+                    ForEach(analysis.importantDates) { d in
+                        HStack { Text(d.date).font(.caption).foregroundStyle(.secondary); Text(d.meaning).font(.body) }
+                    }
+                }
+            }
+        default:
+            EmptyView()
+        }
     }
 
     // MARK: - Analysis cards (for notes, journals)
@@ -859,6 +1031,7 @@ struct KnowledgeDetailView: View {
         // Delete stale artifacts
         let dir = fileStore.itemDirectoryURL(for: item.id)
         try? FileManager.default.removeItem(at: dir.appendingPathComponent("analysis.json"))
+        try? FileManager.default.removeItem(at: dir.appendingPathComponent("analysis.dynamic.json"))
         try? FileManager.default.removeItem(at: dir.appendingPathComponent("provider.response.raw.txt"))
 
         // Clear local state so UI refreshes
@@ -920,15 +1093,15 @@ struct KnowledgeDetailView: View {
 
     private func edgeColor(for type: EdgeType) -> Color {
         switch type {
-        case .relatesTo: .blue
         case .mentions: .purple
-        case .supports: .green
+        case .belongsTo: .blue
+        case .produced: .green
         case .assignedTo: .orange
+        case .supports: .teal
+        case .precedes: .indigo
         case .blockedBy: .red
-        case .belongsTo: .brown
-        case .produced: .indigo
-        case .precedes: .gray
-        case .references: .teal
+        case .relatesTo: .gray
+        case .references: .cyan
         case .contradicts: .pink
         }
     }
@@ -1001,4 +1174,52 @@ struct KnowledgeDetailView: View {
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
+}
+
+// MARK: - Chip Flow Layout
+
+struct ChipFlowLayout: Layout {
+    let spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(proposal: proposal, subviews: subviews)
+        let height = rows.last?.maxY ?? 0
+        return CGSize(width: proposal.width ?? 0, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let rows = arrange(proposal: ProposedViewSize(width: bounds.width, height: nil), subviews: subviews)
+        for row in rows {
+            for item in row.items {
+                subviews[item.index].place(at: CGPoint(x: bounds.minX + item.x, y: bounds.minY + row.y), proposal: .unspecified)
+            }
+        }
+    }
+
+    private func arrange(proposal: ProposedViewSize, subviews: Subviews) -> [LayoutRow] {
+        let maxWidth = proposal.width ?? .infinity
+        var rows: [LayoutRow] = []
+        var currentRow: [LayoutItem] = []
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+
+        for (idx, subview) in subviews.enumerated() {
+            let size = subview.sizeThatFits(.unspecified)
+            if !currentRow.isEmpty && x + size.width > maxWidth {
+                rows.append(LayoutRow(items: currentRow, y: y))
+                currentRow = []
+                x = 0
+                y += size.height + spacing
+            }
+            currentRow.append(LayoutItem(index: idx, x: x, width: size.width, height: size.height))
+            x += size.width + spacing
+        }
+        if !currentRow.isEmpty {
+            rows.append(LayoutRow(items: currentRow, y: y))
+        }
+        return rows
+    }
+
+    struct LayoutItem { let index: Int; let x: CGFloat; let width: CGFloat; let height: CGFloat }
+    struct LayoutRow { let items: [LayoutItem]; let y: CGFloat; var maxY: CGFloat { (items.map(\.height).max() ?? 0) + y } }
 }

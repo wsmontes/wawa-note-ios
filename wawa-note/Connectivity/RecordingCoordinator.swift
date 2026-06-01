@@ -22,7 +22,7 @@ final class RecordingCoordinator: ObservableObject {
     private var recordingStartDate: Date?
     private var pausedDuration: TimeInterval = 0
     private var pauseStartDate: Date?
-    private var meetingTitle: String = ""
+    private var recordingTitle: String = ""
     private var observationTimer: Timer?
     private var nowPlayingTimer: Timer?
 
@@ -67,10 +67,10 @@ final class RecordingCoordinator: ObservableObject {
         errorMessage = nil
         savedItemId = nil
 
-        let meetingTitle = title ?? "Meeting \(Date().formatted(date: .abbreviated, time: .shortened))"
-        self.meetingTitle = meetingTitle
+        let recordingTitle = title ?? "Recording \(Date().formatted(date: .abbreviated, time: .shortened))"
+        self.recordingTitle = recordingTitle
 
-        let item = KnowledgeItem(type: .meeting, title: meetingTitle, status: .recording)
+        let item = KnowledgeItem(type: .audio, title: recordingTitle, status: .recording)
         item.scheduledDate = scheduledDate
         item.calendarEventIdentifier = calendarEventIdentifier
         if let projectID { item.projectID = projectID; item.inboxDate = nil }
@@ -80,7 +80,7 @@ final class RecordingCoordinator: ObservableObject {
             try context.save()
         } catch {
             AppLog.audio.error("Failed to save knowledge item: \(error)")
-            errorMessage = "Could not save meeting. Try again."
+            errorMessage = "Could not save recording. Try again."
             notifyStatusChange()
             return
         }
@@ -98,7 +98,7 @@ final class RecordingCoordinator: ObservableObject {
                 notifyStatusChange()
                 captureContextSafely(for: itemId)
             } catch AudioCaptureError.permissionDenied {
-                errorMessage = "Microphone access is off. Turn it on in Settings to record meetings."
+                errorMessage = "Microphone access is off. Turn it on in Settings to record audio."
                 rollbackItem(item, context: context)
             } catch {
                 errorMessage = "Could not start recording."
@@ -127,16 +127,15 @@ final class RecordingCoordinator: ObservableObject {
     func createItemFromImport(
         title: String,
         date: Date,
-        duration: TimeInterval
+        duration: TimeInterval,
+        projectID: UUID? = nil
     ) -> KnowledgeItem? {
         let context = modelContext
-
-        let item = KnowledgeItem(type: .meeting, title: title, createdAt: date, updatedAt: date,
-                                  status: .recorded, durationSeconds: duration)
+        let item = KnowledgeItem(type: .audio, title: title, createdAt: date, updatedAt: date, status: .recorded, durationSeconds: duration)
         item.audioFileRelativePath = AppFileConstants.audioFileName
         item.isImported = true
+        if let pid = projectID { item.projectID = pid; item.inboxDate = nil }
         context.insert(item)
-
         try? context.save()
         return item
     }
@@ -148,7 +147,7 @@ final class RecordingCoordinator: ObservableObject {
         pauseStartDate = Date()
         observationTimer?.invalidate()
         nowPlayingTimer?.invalidate()
-        nowPlayingController.update(title: meetingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: false)
+        nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: false)
         notifyStatusChange()
     }
 
@@ -160,7 +159,7 @@ final class RecordingCoordinator: ObservableObject {
             pausedDuration += Date().timeIntervalSince(pauseStart)
         }
         pauseStartDate = nil
-        nowPlayingController.update(title: meetingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: true)
+        nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: true)
         startObservation()
         notifyStatusChange()
     }
@@ -209,7 +208,7 @@ final class RecordingCoordinator: ObservableObject {
             elapsedTime: elapsedTime - pausedDuration,
             audioLevel: audioLevel,
             errorMessage: errorMessage,
-            meetingTitle: meetingTitle,
+            recordingTitle: recordingTitle,
             isActive: state == .recording || state == .paused
         )
     }
@@ -230,7 +229,7 @@ final class RecordingCoordinator: ObservableObject {
             shared.set(status.state, forKey: "recordingState")
             shared.set(status.elapsedTime, forKey: "elapsedTime")
             shared.set(status.isActive, forKey: "isActive")
-            shared.set(status.meetingTitle, forKey: "meetingTitle")
+            shared.set(status.recordingTitle, forKey: "recordingTitle")
         }
     }
 
@@ -257,7 +256,7 @@ final class RecordingCoordinator: ObservableObject {
             }
         }
         nowPlayingController.activate()
-        nowPlayingController.update(title: meetingTitle, elapsedTime: 0, isPlaying: true)
+        nowPlayingController.update(title: recordingTitle, elapsedTime: 0, isPlaying: true)
         startLiveActivity()
     }
 
@@ -290,7 +289,7 @@ final class RecordingCoordinator: ObservableObject {
                 guard self.state == .recording || self.state == .paused else { return }
                 let effective = self.elapsedTime - self.pausedDuration
                 self.nowPlayingController.update(
-                    title: self.meetingTitle,
+                    title: self.recordingTitle,
                     elapsedTime: effective,
                     isPlaying: self.state == .recording
                 )
@@ -335,7 +334,7 @@ final class RecordingCoordinator: ObservableObject {
         let state = RecordingActivityAttributes.ContentState(
             elapsedTimeFormatted: "00:00",
             isPaused: false,
-            title: meetingTitle
+            title: recordingTitle
         )
         do {
             liveActivity = try Activity<RecordingActivityAttributes>.request(
@@ -356,7 +355,7 @@ final class RecordingCoordinator: ObservableObject {
         let state = RecordingActivityAttributes.ContentState(
             elapsedTimeFormatted: formatted,
             isPaused: state == .paused,
-            title: meetingTitle
+            title: recordingTitle
         )
         Task { @MainActor [activity] in await activity.update(using: state) }
     }

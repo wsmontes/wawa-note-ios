@@ -9,11 +9,20 @@ struct ChatView: View {
     @State private var showConversations = false
     @FocusState private var isInputFocused: Bool
     @State private var isDictating = false
+    @State private var dictationError: String?
     @State private var dictationTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
             messageList
+            if let dictErr = dictationError {
+                HStack {
+                    Image(systemName: "mic.slash").foregroundStyle(.red)
+                    Text(dictErr).font(.caption).foregroundStyle(.red)
+                    Spacer()
+                    Button("Dismiss") { dictationError = nil }.font(.caption)
+                }.padding(.horizontal, 12).padding(.vertical, 4).background(Color.red.opacity(0.08))
+            }
             Divider()
             chatInputBar
         }
@@ -25,15 +34,24 @@ struct ChatView: View {
                     showConversations = true
                 } label: {
                     Image(systemName: "list.bullet.rectangle")
+                        .accessibilityLabel("Conversations")
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 12) {
+                    Picker("Mode", selection: $viewModel.mode) {
+                        Image(systemName: "circle.grid.3x3").tag(AgentMode.auto)
+                        Image(systemName: "brain.head.profile").tag(AgentMode.deep)
+                        Image(systemName: "bolt").tag(AgentMode.fast)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 110)
                     ActiveModelPicker(selectedModel: $viewModel.selectedModel, label: "Model")
                     Button {
                         viewModel.createNewConversation()
                     } label: {
                         Image(systemName: "square.and.pencil")
+                            .accessibilityLabel("New conversation")
                     }
                 }
             }
@@ -107,13 +125,13 @@ struct ChatView: View {
             .scrollDismissesKeyboard(.interactively)
             .onTapGesture { isInputFocused = false }
             .onChange(of: viewModel.streamingText) { _, _ in
-                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                proxy.scrollTo("bottom", anchor: .bottom)
             }
             .onChange(of: viewModel.messages.count) { _, _ in
-                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                proxy.scrollTo("bottom", anchor: .bottom)
             }
             .onChange(of: viewModel.activeToolCalls.count) { _, _ in
-                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                proxy.scrollTo("bottom", anchor: .bottom)
             }
         }
     }
@@ -124,6 +142,7 @@ struct ChatView: View {
             Image(systemName: "bubble.left.and.bubble.right")
                 .font(.system(size: 48))
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             Text("Ask anything about your knowledge")
                 .font(.title3).fontWeight(.medium)
             Text("Your AI assistant can search, read, and explore your meetings, notes, projects, and connections.")
@@ -146,7 +165,7 @@ struct ChatView: View {
                 Image(systemName: isDictating ? "mic.fill" : "mic")
                     .font(.body)
                     .foregroundStyle(isDictating ? .red : .secondary)
-                    .frame(width: 36, height: 36)
+                    .frame(width: 44, height: 44)
                     .background(isDictating ? Color.red.opacity(0.1) : Color.clear)
                     .clipShape(Circle())
             }
@@ -205,6 +224,9 @@ struct ChatView: View {
             await MainActor.run {
                 if let text, !text.isEmpty {
                     viewModel.inputText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    dictationError = nil
+                } else if isDictating {
+                    dictationError = "Dictation failed. Check microphone permission in Settings."
                 }
                 isDictating = false
             }
@@ -448,26 +470,33 @@ struct ConversationListView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                ForEach(viewModel.conversations) { conv in
-                    Button {
-                        viewModel.selectConversation(conv)
-                        dismiss()
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(conv.title.isEmpty ? "New conversation" : conv.title)
-                                .font(.subheadline).fontWeight(.medium).lineLimit(1)
-                            HStack {
-                                if let preview = conv.lastMessagePreview {
-                                    Text(preview).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Group {
+                if viewModel.conversations.isEmpty {
+                    VStack(spacing: 16) {
+                        Spacer().frame(height: 60)
+                        Image(systemName: "bubble.left.and.bubble.right").font(.system(size: 40)).foregroundStyle(.secondary).accessibilityHidden(true)
+                        Text("No conversations yet").font(.headline)
+                        Text("Start a new conversation in the Chat tab.").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                } else {
+                    List {
+                        ForEach(viewModel.conversations) { conv in
+                            Button {
+                                viewModel.selectConversation(conv)
+                                dismiss()
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(conv.title.isEmpty ? "New conversation" : conv.title).font(.subheadline).fontWeight(.medium).lineLimit(1)
+                                    HStack {
+                                        if let preview = conv.lastMessagePreview { Text(preview).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                                        Spacer()
+                                        Text(conv.updatedAt.formatted(date: .abbreviated, time: .shortened)).font(.caption2).foregroundStyle(.tertiary)
+                                    }
                                 }
-                                Spacer()
-                                Text(conv.updatedAt.formatted(date: .abbreviated, time: .shortened))
-                                    .font(.caption2).foregroundStyle(.tertiary)
                             }
+                            .swipeActions { Button("Delete", role: .destructive) { viewModel.deleteConversation(conv) } }
                         }
                     }
-                    .swipeActions { Button("Delete", role: .destructive) { viewModel.deleteConversation(conv) } }
                 }
             }
             .navigationTitle("Conversations")

@@ -368,7 +368,10 @@ struct InboxView: View {
                         }
                     }
                     if projects.isEmpty {
-                        Text("No projects yet").font(.caption).foregroundStyle(.secondary)
+                        VStack(spacing: 8) {
+                            Text("No projects yet").font(.headline)
+                            Text("Promote a knowledge item from the Explore tab to create your first project.").font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        }.padding(.vertical, 24)
                     }
                 }
                 Section("Actions") {
@@ -408,23 +411,5 @@ struct InboxView: View {
         let m = Int(seconds) / 60
         if m >= 60 { return "\(m / 60)h \(m % 60)m" }
         return "\(m)m"
-    }
-}
-
-// MARK: - Color hex helper
-
-private extension Color {
-    init?(hex: String) {
-        guard let color = Color(hexString: hex) else { return nil }
-        self = color
-    }
-
-    init?(hexString: String) {
-        let hex = hexString.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        guard let int = UInt64(hex, radix: 16) else { return nil }
-        let r = Double((int >> 16) & 0xFF) / 255.0
-        let g = Double((int >> 8) & 0xFF) / 255.0
-        let b = Double(int & 0xFF) / 255.0
-        self.init(red: r, green: g, blue: b)
     }
 }

@@ -46,7 +46,7 @@ struct SearchKnowledgeTool: AgentTool {
             content += ToolFormatting.formatItemLine(item, index: idx + 1)
             content += "   Matched in: \(r.matchedField.rawValue)\n"
             content += "   Snippet: \"\(r.snippet)\"\n\n"
-            citations.append(ChatCitation(itemId: r.itemID, title: item.title, snippet: r.snippet, itemType: item.typeRaw))
+            citations.append(ChatCitation(itemId: r.itemID, title: item.title, snippet: r.snippet, itemType: item.type))
         }
 
         content += "To read a full item, use get_item with its UUID."

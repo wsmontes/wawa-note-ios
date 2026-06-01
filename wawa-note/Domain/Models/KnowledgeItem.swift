@@ -15,7 +15,7 @@ enum ItemStatus: String, Codable, CaseIterable {
 }
 
 enum KnowledgeItemType: String, Codable, CaseIterable, Hashable {
-    case meeting
+    case audio = "audio"
     case note
     case journalEntry
     case webBookmark
@@ -27,7 +27,7 @@ enum KnowledgeItemType: String, Codable, CaseIterable, Hashable {
 extension KnowledgeItemType {
     var icon: String {
         switch self {
-        case .meeting: "recordingtape"
+        case .audio: "recordingtape"
         case .note: "note.text"
         case .journalEntry: "book"
         case .webBookmark: "bookmark"
@@ -37,7 +37,7 @@ extension KnowledgeItemType {
 
     var color: Color {
         switch self {
-        case .meeting: .blue
+        case .audio: .blue
         case .note: .orange
         case .journalEntry: .purple
         case .webBookmark: .green
@@ -93,7 +93,11 @@ final class KnowledgeItem {
     var importSourceURL: String?
 
     var type: KnowledgeItemType {
-        get { KnowledgeItemType(rawValue: typeRaw) ?? .meeting }
+        get {
+            // Migration: "meeting" was renamed to "audio"
+            if typeRaw == "meeting" { return .audio }
+            return KnowledgeItemType(rawValue: typeRaw) ?? .audio
+        }
         set { typeRaw = newValue.rawValue }
     }
 
@@ -104,7 +108,7 @@ final class KnowledgeItem {
 
     init(
         id: UUID = UUID(),
-        type: KnowledgeItemType = .meeting,
+        type: KnowledgeItemType = .audio,
         title: String = "",
         createdAt: Date = Date(),
         updatedAt: Date = Date(),

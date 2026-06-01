@@ -211,19 +211,24 @@ struct EvidenceInspectorView: View {
     // MARK: - Helpers
 
     private var relationshipSentence: String {
-        let fromName = findItem(edge.fromID)?.title ?? "Item"
-        let toName = findItem(edge.toID)?.title ?? "another item"
-        switch edge.edgeType {
-        case .supports: return "\(fromName) supports \(toName)"
-        case .contradicts: return "\(fromName) contradicts \(toName)"
-        case .produced: return "\(fromName) produced \(toName)"
-        case .mentions: return "\(fromName) mentions \(toName)"
-        case .assignedTo: return "\(fromName) assigned to \(toName)"
-        case .blockedBy: return "\(fromName) blocked by \(toName)"
-        case .belongsTo: return "\(fromName) belongs to \(toName)"
-        case .precedes: return "\(fromName) precedes \(toName)"
-        case .references: return "\(fromName) references \(toName)"
-        case .relatesTo: return "\(fromName) relates to \(toName)"
+        let fromName = findItem(edge.fromID)?.title ?? String(localized: "Item")
+        let toName = findItem(edge.toID)?.title ?? String(localized: "another item")
+        let verb = edgeVerb(edge.edgeType)
+        return "\(fromName) \(verb) \(toName)"
+    }
+
+    private func edgeVerb(_ type: EdgeType) -> String {
+        switch type {
+        case .supports: String(localized: "supports")
+        case .contradicts: String(localized: "contradicts")
+        case .produced: String(localized: "produced")
+        case .mentions: String(localized: "mentions")
+        case .assignedTo: String(localized: "assigned to")
+        case .blockedBy: String(localized: "blocked by")
+        case .belongsTo: String(localized: "belongs to")
+        case .precedes: String(localized: "precedes")
+        case .references: String(localized: "references")
+        case .relatesTo: String(localized: "relates to")
         }
     }
 

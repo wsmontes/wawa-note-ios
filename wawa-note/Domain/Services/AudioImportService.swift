@@ -216,7 +216,7 @@ extension AudioImportService: FormatImporter {
         let metadata = try await extractMetadata(url: url)
 
         let item = KnowledgeItem(
-            type: .meeting,
+            type: .audio,
             title: metadata.suggestedTitle,
             createdAt: metadata.creationDate ?? Date(),
             status: .recorded,

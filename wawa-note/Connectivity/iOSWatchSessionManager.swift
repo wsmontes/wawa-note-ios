@@ -43,7 +43,7 @@ final class iOSWatchSessionManager: NSObject, WCSessionDelegate, @unchecked Send
             WatchMessageKey.elapsedTime: status.elapsedTime,
             WatchMessageKey.audioLevel: status.audioLevel,
             WatchMessageKey.isActive: status.isActive,
-            WatchMessageKey.meetingTitle: status.meetingTitle ?? NSNull(),
+            WatchMessageKey.recordingTitle: status.recordingTitle ?? NSNull(),
             WatchMessageKey.errorMessage: status.errorMessage ?? NSNull(),
         ]
 

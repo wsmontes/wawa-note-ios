@@ -74,7 +74,7 @@ struct ConnectionsFeedView: View {
                 .foregroundStyle(.secondary)
             Text("No connections yet")
                 .font(.headline)
-            Text("Promote meetings to projects or ask questions to discover relationships between your knowledge items.")
+            Text("Add items to a project and the AI will discover connections automatically. Use the Chat tab to explore relationships.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

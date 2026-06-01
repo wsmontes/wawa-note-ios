@@ -13,6 +13,7 @@ struct ContentView: View {
                                 showSettings = true
                             } label: {
                                 Image(systemName: "gearshape")
+                                    .accessibilityLabel("Settings")
                             }
                         }
                     }

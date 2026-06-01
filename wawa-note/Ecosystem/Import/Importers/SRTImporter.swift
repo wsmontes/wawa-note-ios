@@ -19,9 +19,10 @@ final class SRTImporter: FormatImporter, @unchecked Sendable {
 
     func importFromURL(_ url: URL) async throws -> ImportResult {
         let text = try String(contentsOf: url, encoding: .utf8)
-        let warnings: [String] = []
+        var warnings: [String] = []
 
         var segments: [TranscriptSegment] = []
+        let itemId = UUID()
         let blocks = text.components(separatedBy: "\n\n")
 
         for block in blocks {
@@ -41,7 +42,7 @@ final class SRTImporter: FormatImporter, @unchecked Sendable {
 
             if !segmentText.isEmpty {
                 segments.append(TranscriptSegment(
-                    meetingId: UUID(),
+                    meetingId: itemId,
                     startTime: startTime,
                     endTime: endTime,
                     text: segmentText,
@@ -51,7 +52,8 @@ final class SRTImporter: FormatImporter, @unchecked Sendable {
         }
 
         let item = KnowledgeItem(
-            type: .meeting,
+            id: itemId,
+            type: .audio,
             title: url.deletingPathExtension().lastPathComponent,
             status: .transcribed,
             durationSeconds: segments.last?.endTime

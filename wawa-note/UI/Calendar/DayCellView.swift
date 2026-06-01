@@ -45,7 +45,7 @@ struct DayCellView: View {
                 Color.clear.frame(width: 4, height: 4)
             }
         }
-        .frame(height: 42)
+        .frame(minHeight: 44)
         .padding(.vertical, 2)
     }
 }

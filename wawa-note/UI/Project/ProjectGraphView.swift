@@ -25,7 +25,7 @@ struct ProjectGraphView: View {
                         .foregroundStyle(.secondary)
                     Text("No connections yet")
                         .font(.headline)
-                    Text("Graph relationships will appear when tasks are created and entities are linked to this project.")
+                    Text("Add items and tasks to this project. The AI will discover connections between them.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 // MARK: - Get Connections
 
@@ -101,7 +102,7 @@ struct CreateNoteTool: AgentTool {
             return ToolFormatting.error(tool: name, reason: "Failed to create note.", fix: "Check that the knowledge base is accessible and try again.")
         }
 
-        return ToolResult(content: "Note created successfully.\nTitle: \(item.title)\nUUID: \(item.id.uuidString)\nType: note\nUse get_item with this UUID to read it.", citations: [ChatCitation(itemId: item.id, title: item.title, snippet: title, itemType: "note")], isError: false, displaySummary: "Created note: \(title)")
+        return ToolResult(content: "Note created successfully.\nTitle: \(item.title)\nUUID: \(item.id.uuidString)\nType: note\nUse get_item with this UUID to read it.", citations: [ChatCitation(itemId: item.id, title: item.title, snippet: title, itemType: .note)], isError: false, displaySummary: "Created note: \(title)")
     }
 }
 
@@ -196,5 +197,159 @@ struct GetProjectTool: AgentTool {
         for (idx, t) in tasks.enumerated() { content += ToolFormatting.formatTaskLine(t, index: idx + 1) + "\n" }
 
         return ToolFormatting.success(summary: "Project: \(project.name) (\(allTasks.count) tasks)", content: content, citations: [], totalFound: allTasks.count, shown: tasks.count)
+    }
+}
+
+// MARK: - Update Task Tool
+
+struct UpdateTaskTool: AgentTool {
+    let name = "update_task"
+    let description = "Update a task's status, priority, owner, or due date. Provide the task title and only the fields you want to change."
+    let parameters = AIToolParameters(properties: [
+        "task_title": AIToolProperty(type: "string", description: "Exact title of the task to update", enum: nil),
+        "new_status": AIToolProperty(type: "string", description: "todo|inProgress|done|cancelled", enum: nil),
+        "new_priority": AIToolProperty(type: "string", description: "low|medium|high|critical", enum: nil),
+        "new_due_date": AIToolProperty(type: "string", description: "ISO 8601 date", enum: nil)
+    ], required: ["task_title"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let title = args["task_title"] as? String else { return ToolResult(content: "Missing task_title", citations: [], isError: true, displaySummary: "Error") }
+        let taskSvc = TaskService(context: context.modelContext)
+        let tasks: [TaskItem] = {
+            if let pid = context.activeProjectID { return (try? taskSvc.tasks(for: pid)) ?? [] }
+            return (try? context.modelContext.fetch(FetchDescriptor<TaskItem>())) ?? []
+        }()
+        guard let task = tasks.first(where: { $0.title.localizedCaseInsensitiveCompare(title) == .orderedSame }) else {
+            return ToolResult(content: "Task not found: \(title)", citations: [], isError: true, displaySummary: "Not found")
+        }
+        if let s = args["new_status"] as? String, let st = TaskStatus(rawValue: s) { try? taskSvc.updateStatus(task, to: st) }
+        if let p = args["new_priority"] as? String, let pr = TaskPriority(rawValue: p) { task.priority = pr }
+        if let d = args["new_due_date"] as? String, let date = ISO8601DateFormatter().date(from: d) { task.dueAt = date }
+        try? context.modelContext.save()
+        return ToolResult(content: "Task updated: \(task.title)", citations: [], isError: false, displaySummary: "Updated: \(title)")
+    }
+}
+
+// MARK: - Create Edge Tool
+
+struct CreateEdgeTool: AgentTool {
+    let name = "create_edge"
+    let description = "Create a connection between two items. Types: supports, contradicts, references, relates_to."
+    let parameters = AIToolParameters(properties: [
+        "from_title": AIToolProperty(type: "string", description: "Title of the source item", enum: nil),
+        "to_title": AIToolProperty(type: "string", description: "Title of the target item", enum: nil),
+        "type": AIToolProperty(type: "string", description: "supports|contradicts|references|relates_to", enum: nil)
+    ], required: ["from_title", "to_title", "type"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let fromTitle = args["from_title"] as? String,
+              let toTitle = args["to_title"] as? String,
+              let typeStr = args["type"] as? String else {
+            return ToolResult(content: "Missing required arguments", citations: [], isError: true, displaySummary: "Error")
+        }
+        let svc = KnowledgeItemService(context: context.modelContext)
+        let items = (try? svc.allItems()) ?? []
+        guard let from = items.first(where: { $0.title.localizedCaseInsensitiveCompare(fromTitle) == .orderedSame }),
+              let to = items.first(where: { $0.title.localizedCaseInsensitiveCompare(toTitle) == .orderedSame }) else {
+            return ToolResult(content: "Could not find both items", citations: [], isError: true, displaySummary: "Not found")
+        }
+        let edgeSvc = GraphEdgeService(context: context.modelContext)
+        let et = EdgeType(rawValue: typeStr) ?? .relatesTo
+        try edgeSvc.create(fromID: from.id, toID: to.id, edgeType: et, provenanceItemID: from.id)
+        return ToolResult(content: "Edge created: \(from.title) → [\(et.rawValue)] → \(to.title)", citations: [], isError: false, displaySummary: "Connected: \(from.title) → \(to.title)")
+    }
+}
+
+// MARK: - Set Annotation Tool
+
+struct SetAnnotationTool: AgentTool {
+    let name = "set_annotation"
+    let description = "Add or update a key-value annotation on an item."
+    let parameters = AIToolParameters(properties: [
+        "item_title": AIToolProperty(type: "string", description: "Title of the item", enum: nil),
+        "key": AIToolProperty(type: "string", description: "Annotation key", enum: nil),
+        "value": AIToolProperty(type: "string", description: "Annotation value", enum: nil)
+    ], required: ["item_title", "key", "value"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let title = args["item_title"] as? String,
+              let key = args["key"] as? String,
+              let value = args["value"] as? String else {
+            return ToolResult(content: "Missing arguments", citations: [], isError: true, displaySummary: "Error")
+        }
+        let items = (try? KnowledgeItemService(context: context.modelContext).allItems()) ?? []
+        guard let item = items.first(where: { $0.title.localizedCaseInsensitiveCompare(title) == .orderedSame }) else {
+            return ToolResult(content: "Item not found: \(title)", citations: [], isError: true, displaySummary: "Not found")
+        }
+        let annotation = Annotation(source: "agent", key: key, value: value, itemID: item.id)
+        context.modelContext.insert(annotation)
+        try context.modelContext.save()
+        return ToolResult(content: "Annotation set: \(key) = \(value)", citations: [], isError: false, displaySummary: "Annotated: \(key)")
+    }
+}
+
+// MARK: - Trash Item Tool
+
+struct TrashItemTool: AgentTool {
+    let name = "trash_item"
+    let description = "Move an item to the trash. Does not destroy the original audio or image."
+    let parameters = AIToolParameters(properties: [
+        "item_title": AIToolProperty(type: "string", description: "Title of the item to trash", enum: nil)
+    ], required: ["item_title"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let title = args["item_title"] as? String else { return ToolResult(content: "Missing item_title", citations: [], isError: true, displaySummary: "Error") }
+        let items = (try? KnowledgeItemService(context: context.modelContext).allItems()) ?? []
+        guard let item = items.first(where: { $0.title.localizedCaseInsensitiveCompare(title) == .orderedSame }) else {
+            return ToolResult(content: "Item not found: \(title)", citations: [], isError: true, displaySummary: "Not found")
+        }
+        try TrashService(context: context.modelContext).moveToTrash(item)
+        return ToolResult(content: "Trashed: \(item.title)", citations: [], isError: false, displaySummary: "Trashed: \(title)")
+    }
+}
+
+// MARK: - Get Analysis Tool
+
+struct GetAnalysisTool: AgentTool {
+    let name = "get_analysis"
+    let description = "Get the full analysis (summary, decisions, actions, risks, entities) for an item."
+    let parameters = AIToolParameters(properties: [
+        "item_id": AIToolProperty(type: "string", description: "UUID of the item", enum: nil)
+    ], required: ["item_id"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let idStr = args["item_id"] as? String, let id = UUID(uuidString: idStr) else { return ToolResult(content: "Invalid UUID", citations: [], isError: true, displaySummary: "Error") }
+        let svc = KnowledgeItemService(context: context.modelContext)
+        guard let item = try? svc.fetchItem(id: id) else { return ToolResult(content: "Item not found", citations: [], isError: true, displaySummary: "Not found") }
+
+        // Try MeetingAnalysis first, then DynamicAnalysis
+        if let analysis = try? context.fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: id) {
+            var content = "## Analysis: \(item.title)\nSummary: \(analysis.shortSummary)\n"
+            if !analysis.decisions.isEmpty { content += "\nDecisions:\n" + analysis.decisions.map { "- \($0.title)" }.joined(separator: "\n") }
+            if !analysis.actionItems.isEmpty { content += "\nActions:\n" + analysis.actionItems.map { "- \($0.task)" }.joined(separator: "\n") }
+            if !analysis.risks.isEmpty { content += "\nRisks:\n" + analysis.risks.map { "- \($0.risk)" }.joined(separator: "\n") }
+            return ToolFormatting.success(summary: "Analysis: \(item.title)", content: content, citations: [ChatCitation(itemId: item.id, title: item.title, snippet: analysis.shortSummary, itemType: item.type)], totalFound: 1, shown: 1)
+        }
+        return ToolResult(content: "No analysis found for item \(item.title)", citations: [], isError: true, displaySummary: "No analysis")
+    }
+}
+
+// MARK: - Think Tool (Advisor Escalation)
+
+struct ThinkTool: AgentTool {
+    let name = "think"
+    let description = "Ask a more capable reasoning model for help with complex analysis. Use for comparing items, finding patterns, or multi-step reasoning. Provide structured context, not raw data."
+    let parameters = AIToolParameters(properties: [
+        "question": AIToolProperty(type: "string", description: "Focused question requiring complex reasoning", enum: nil),
+        "context": AIToolProperty(type: "string", description: "Structured data to reason about (not raw transcripts)", enum: nil)
+    ], required: ["question", "context"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        // The AgentLoop routes think calls to the advisor model automatically.
+        // This tool's execute is a no-op — the real work happens in the LLM's response.
+        // We just return the context so the advisor can work with it.
+        let question = args["question"] as? String ?? ""
+        let ctx = args["context"] as? String ?? ""
+        return ToolResult(content: "Think requested:\n\(question)\n\nContext:\n\(ctx.prefix(2000))", citations: [], isError: false, displaySummary: "Asking advisor...")
     }
 }
