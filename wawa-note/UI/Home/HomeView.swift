@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 import AVFoundation
 import Vision
 import VisionKit
+import PhotosUI
 
 // MARK: - HomeViewModel
 
@@ -203,6 +204,10 @@ struct HomeView: View {
     @State private var navigateToProject: Project?
     @State private var showCreationSheet = false
     @State private var showScanner = false
+    @State private var showPhotoPicker = false
+    @State private var showCamera = false
+    @State private var showPhotoSourceMenu = false
+    @State private var capturedPhoto: UIImage?
     @State private var expandedProjectIDs: Set<UUID> = []
 
     var body: some View {
@@ -259,6 +264,28 @@ struct HomeView: View {
         .fullScreenCover(isPresented: $showScanner) {
             ScannerView(scannedImages: $scannerVM.scannedImages)
         }
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraCaptureView(capturedImage: $capturedPhoto)
+        }
+        .sheet(isPresented: $showPhotoPicker) {
+            PhotoPickerView(selectedImage: $capturedPhoto)
+        }
+        .confirmationDialog("Photo Source", isPresented: $showPhotoSourceMenu) {
+            Button("Take Photo") { showCamera = true }
+            Button("Choose from Gallery") { showPhotoPicker = true }
+            Button("Cancel", role: .cancel) {}
+        }
+        .onChange(of: capturedPhoto) { _, photo in
+            guard let photo else { return }
+            Task {
+                let items = await processPhotoItem(photo)
+                for item in items {
+                    await contentPipeline.process(item.id, using: modelContext)
+                }
+                capturedPhoto = nil
+                navigateToItem = items.first
+            }
+        }
         .onChange(of: scannerVM.scannedImages) { _, images in
             guard !images.isEmpty else { return }
             Task {
@@ -311,20 +338,27 @@ struct HomeView: View {
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 0) {
                 Divider()
-                HStack(spacing: 16) {
+                HStack(spacing: 10) {
                     Button(action: { captureVM.startRecording() }) {
-                        HStack(spacing: 8) {
+                        VStack(spacing: 2) {
                             Image(systemName: "record.circle.fill").font(.title3).symbolRenderingMode(.hierarchical)
-                            Text("Record").font(.headline)
+                            Text("Record").font(.caption2)
                         }
                         .foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 52)
                         .background(LinearGradient(colors: [.red, .red.opacity(0.85)], startPoint: .leading, endPoint: .trailing))
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
                     }
                     Button(action: { showScanner = true }) {
                         VStack(spacing: 4) {
                             Image(systemName: "doc.text.viewfinder").font(.subheadline)
                             Text("Scan").font(.caption2)
+                        }.foregroundStyle(.primary).frame(width: 60, height: 52)
+                        .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                    Button(action: { showPhotoSourceMenu = true }) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "photo").font(.subheadline)
+                            Text("Photo").font(.caption2)
                         }.foregroundStyle(.primary).frame(width: 60, height: 52)
                         .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
                     }
@@ -343,7 +377,7 @@ struct HomeView: View {
                         .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
                     }
                 }
-                .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 8).background(.bar)
+                .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 6).background(.bar)
                 .shadow(color: .black.opacity(0.08), radius: 4, y: -2)
             }
         }
@@ -478,6 +512,45 @@ struct HomeView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(.systemGroupedBackground))
     }
+
+    private func processPhotoItem(_ image: UIImage) async -> [KnowledgeItem] {
+        let itemService = KnowledgeItemService(context: modelContext)
+        guard let item = try? itemService.createItem(type: .image, title: "Photo", bodyText: nil) else { return [] }
+        let store = FileArtifactStore()
+        let dir = store.itemDirectoryURL(for: item.id)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        if let data = image.jpegData(compressionQuality: 0.85) {
+            try? data.write(to: dir.appendingPathComponent("scan_0.jpg"))
+        }
+        item.imageFileRelativePath = "scan_0.jpg"
+        item.imagePageCount = 1
+        var parts: [String] = []
+        if let ocr = await recognizeText(from: image), !ocr.isEmpty { parts.append("OCR TEXT:\n\(ocr)") }
+        if let provider = try? ProviderRouter.resolveActive(context: modelContext) {
+            let model = AIConfigService.shared.featureConfig(for: "analysis")?.model ?? "gpt-5.5"
+            if let vision = try? await ImageAnalysisService().analyzeImage(dir.appendingPathComponent("scan_0.jpg"), llmProvider: provider, model: model), !vision.isEmpty {
+                parts.append("LLM VISION:\n\(vision)")
+            }
+        }
+        item.bodyText = parts.joined(separator: "\n\n---\n\n")
+        try? modelContext.save()
+        return [item]
+    }
+
+    private func recognizeText(from image: UIImage) async -> String? {
+        guard let cgImage = image.cgImage else { return nil }
+        return await withCheckedContinuation { continuation in
+            let request = VNRecognizeTextRequest { request, _ in
+                let text = (request.results as? [VNRecognizedTextObservation] ?? [])
+                    .compactMap { $0.topCandidates(1).first?.string }
+                    .joined(separator: "\n")
+                continuation.resume(returning: text.isEmpty ? nil : text)
+            }
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = true
+            try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
+        }
+    }
 }
 
 // MARK: - Waveform
@@ -597,6 +670,16 @@ final class ScannerViewModel: ObservableObject {
             }
         }
 
+        // LLM vision analysis for richer understanding (first page only for multi-page)
+        if let provider = try? ProviderRouter.resolveActive(context: context) {
+            let model = AIConfigService.shared.featureConfig(for: "analysis")?.model ?? "gpt-5.5"
+            let firstPageURL = dir.appendingPathComponent("scan_0.jpg")
+            if let visionText = try? await ImageAnalysisService().analyzeImage(firstPageURL, llmProvider: provider, model: model),
+               !visionText.isEmpty {
+                allText.insert("LLM VISION ANALYSIS:\n\(visionText)", at: 0)
+            }
+        }
+
         item.imageFileRelativePath = "scan_0.jpg"
         item.imagePageCount = images.count
         item.bodyText = allText.joined(separator: "\n\n---\n\n")
@@ -622,7 +705,74 @@ final class ScannerViewModel: ObservableObject {
             request.recognitionLevel = .accurate
             request.usesLanguageCorrection = true
             try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
-            if request.results == nil { continuation.resume(returning: nil) }
+        }
+    }
+}
+
+// MARK: - Camera Capture
+
+struct CameraCaptureView: UIViewControllerRepresentable {
+    @Binding var capturedImage: UIImage?
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate, @unchecked Sendable {
+        let parent: CameraCaptureView
+        init(_ parent: CameraCaptureView) { self.parent = parent }
+
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            if let image = info[.originalImage] as? UIImage {
+                Task { @MainActor [weak self] in self?.parent.capturedImage = image }
+            }
+            parent.dismiss()
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { parent.dismiss() }
+    }
+}
+
+// MARK: - Photo Gallery Picker
+
+struct PhotoPickerView: UIViewControllerRepresentable {
+    @Binding var selectedImage: UIImage?
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> PHPickerViewController {
+        var config = PHPickerConfiguration()
+        config.filter = .images
+        config.selectionLimit = 1
+        let picker = PHPickerViewController(configuration: config)
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, PHPickerViewControllerDelegate, @unchecked Sendable {
+        let parent: PhotoPickerView
+        init(_ parent: PhotoPickerView) { self.parent = parent }
+
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            guard let result = results.first else { parent.dismiss(); return }
+            result.itemProvider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
+                guard let data, let image = UIImage(data: data) else { return }
+                Task { @MainActor [weak self] in
+                    self?.parent.selectedImage = image
+                    self?.parent.dismiss()
+                }
+            }
         }
     }
 }

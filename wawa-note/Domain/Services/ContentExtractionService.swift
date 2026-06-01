@@ -2,6 +2,8 @@ import Foundation
 import SwiftData
 import UIKit
 import Vision
+import CoreLocation
+import ImageIO
 
 // MARK: - Text extraction from any content type
 
@@ -445,3 +447,195 @@ enum ModelTierResolver {
         return executorModel
     }
 }
+
+// MARK: - Image Analysis (OCR + LLM Vision)
+
+/// Combines Apple OCR with LLM vision analysis for comprehensive image understanding.
+/// OCR extracts exact text; the LLM describes visual content, layout, document type, and context.
+@MainActor
+final class ImageAnalysisService {
+
+    /// Analyze an image file: run OCR + LLM vision, return combined enriched text.
+    func analyzeImage(_ imageURL: URL, llmProvider: any AIProvider, model: String) async throws -> String {
+        guard let image = UIImage(contentsOfFile: imageURL.path),
+              let cgImage = image.cgImage else {
+            throw ImageAnalysisError.invalidImage
+        }
+
+        // Phase 1: Apple OCR for exact text extraction
+        let ocrText: String = await withCheckedContinuation { continuation in
+            let request = VNRecognizeTextRequest { request, _ in
+                let text = (request.results as? [VNRecognizedTextObservation] ?? [])
+                    .compactMap { $0.topCandidates(1).first?.string }
+                    .joined(separator: "\n")
+                continuation.resume(returning: text)
+            }
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = true
+            try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
+        }
+
+        // Phase 2: LLM vision analysis for visual understanding
+        let visualDescription: String
+        do {
+            let params = AIConfigService.shared.requestParams(for: "analysis", model: model)
+            let request = AIRequest(
+                model: model,
+                messages: [
+                    AIMessage(role: .system, content: [.text("You are a document image analyst. Describe what you see in the image — document type, layout, visual elements, handwriting, diagrams. Be concise but thorough. Return only the description, no JSON.")]),
+                    AIMessage(role: .user, content: [
+                        .text("Analyze this document image. Describe its type, content, layout, and any notable visual elements."),
+                        .imageFile(imageURL)
+                    ])
+                ],
+                temperature: params.temperature,
+                maxTokens: min(params.maxTokens ?? 4096, 2048)
+            )
+            let response = try await llmProvider.send(request)
+            visualDescription = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            visualDescription = ""
+        }
+
+        // Combine OCR + visual description
+        var parts: [String] = []
+        if !ocrText.isEmpty { parts.append("OCR TEXT:\n\(ocrText)") }
+        if !visualDescription.isEmpty { parts.append("VISUAL ANALYSIS:\n\(visualDescription)") }
+        return parts.isEmpty ? "" : parts.joined(separator: "\n\n---\n\n")
+    }
+}
+
+enum ImageAnalysisError: Error, LocalizedError {
+    case invalidImage
+    case noProviderConfigured
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidImage: return "The image file could not be read."
+        case .noProviderConfigured: return "No AI provider configured. Go to Settings to add one."
+        }
+    }
+}
+
+// MARK: - Location Intelligence
+
+/// Resolves coordinates to human-readable addresses and vice versa.
+/// Enriches items with location context for LLM analysis.
+/// Handles GPS from recordings, EXIF from images/videos, and text mentions.
+@MainActor
+final class LocationIntelligenceService {
+    private let geocoder = CLGeocoder()
+
+    /// Extract coordinates from an image file via EXIF metadata.
+    /// Works with JPEG, HEIC, TIFF, and RAW formats that embed GPS tags.
+    static func extractGPSFromImage(_ imageURL: URL) -> CLLocationCoordinate2D? {
+        guard let source = CGImageSourceCreateWithURL(imageURL as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let gps = props[kCGImagePropertyGPSDictionary] as? [CFString: Any],
+              let lat = gps[kCGImagePropertyGPSLatitude] as? Double,
+              let lon = gps[kCGImagePropertyGPSLongitude] as? Double,
+              let latRef = gps[kCGImagePropertyGPSLatitudeRef] as? String,
+              let lonRef = gps[kCGImagePropertyGPSLongitudeRef] as? String
+        else { return nil }
+
+        let latitude = latRef == "S" ? -lat : lat
+        let longitude = lonRef == "W" ? -lon : lon
+        return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+
+    /// Reverse-geocode coordinates into a human-readable address string.
+    func resolveToAddress(latitude: Double, longitude: Double) async -> String? {
+        let location = CLLocation(latitude: latitude, longitude: longitude)
+        return await withCheckedContinuation { continuation in
+            geocoder.reverseGeocodeLocation(location) { placemarks, _ in
+                guard let place = placemarks?.first else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                let parts = [
+                    place.name,
+                    place.thoroughfare,
+                    place.locality,
+                    place.administrativeArea,
+                    place.country
+                ].compactMap { $0 }.filter { !$0.isEmpty }
+                let address = parts.joined(separator: ", ")
+                continuation.resume(returning: address.isEmpty ? nil : address)
+            }
+        }
+    }
+
+    /// Forward-geocode a text query into coordinates.
+    func resolveToCoordinates(_ query: String) async -> CLLocationCoordinate2D? {
+        await withCheckedContinuation { continuation in
+            geocoder.geocodeAddressString(query) { placemarks, _ in
+                guard let loc = placemarks?.first?.location else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                continuation.resume(returning: loc.coordinate)
+            }
+        }
+    }
+
+    /// Enrich a KnowledgeItem with location context for LLM analysis.
+    /// Uses recorded GPS or EXIF metadata from attached images.
+    func enrichItem(_ item: KnowledgeItem) async -> String? {
+        var lat: Double?
+        var lon: Double?
+
+        // Priority 1: Already captured context coordinates
+        if let clat = item.contextLatitude, let clon = item.contextLongitude {
+            lat = clat
+            lon = clon
+        }
+
+        // Priority 2: EXIF from scanned images
+        if lat == nil, let relativePath = item.imageFileRelativePath {
+            let store = FileArtifactStore()
+            let url = store.itemDirectoryURL(for: item.id).appendingPathComponent(relativePath)
+            if let coord = Self.extractGPSFromImage(url) {
+                lat = coord.latitude
+                lon = coord.longitude
+                // Persist for future use
+                item.contextLatitude = lat
+                item.contextLongitude = lon
+            }
+        }
+
+        guard let lat, let lon else { return nil }
+
+        let address = await resolveToAddress(latitude: lat, longitude: lon)
+        if let address {
+            item.contextPlaceName = address
+        }
+        return address
+    }
+
+    /// Build a location-aware context string for LLM prompts.
+    func locationContextString(for item: KnowledgeItem) async -> String {
+        guard let address = await enrichItem(item) else {
+            // Fall back to existing place_name annotation
+            if let place = item.contextPlaceName, !place.isEmpty {
+                return "Location: \(place)"
+            }
+            return ""
+        }
+        var parts: [String] = ["Location: \(address)"]
+        if let city = item.contextPlaceName?.components(separatedBy: ", ").dropFirst().first {
+            parts.append("City: \(city)")
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    /// Find items near a given coordinate within a radius (meters).
+    static func nearbyItems(to coordinate: CLLocationCoordinate2D, radiusMeters: Double, in items: [KnowledgeItem]) -> [KnowledgeItem] {
+        let center = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        return items.filter { item in
+            guard let ilat = item.contextLatitude, let ilon = item.contextLongitude else { return false }
+            let loc = CLLocation(latitude: ilat, longitude: ilon)
+            return loc.distance(from: center) <= radiusMeters
+        }
+    }
+}
+
