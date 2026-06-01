@@ -74,7 +74,8 @@ final class ChatViewModel: ObservableObject {
             GetProjectTool(), GetConnectionsTool(), GetTasksTool(),
             CreateNoteTool(), CreateTaskTool(), SummarizeDayTool(),
             GetAnalysisTool(), UpdateTaskTool(), CreateEdgeTool(),
-            SetAnnotationTool(), TrashItemTool(), ThinkTool()
+            SetAnnotationTool(), TrashItemTool(), ThinkTool(),
+            CreateProjectFrameworkTool(), UpdateProjectFrameworkTool()
         ])
 
         let toolContext = ToolContext(modelContext: ctx, activeProjectID: activeProjectID, activeProjectName: activeProjectName)

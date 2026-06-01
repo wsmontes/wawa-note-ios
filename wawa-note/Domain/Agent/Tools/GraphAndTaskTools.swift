@@ -353,3 +353,100 @@ struct ThinkTool: AgentTool {
         return ToolResult(content: "Think requested:\n\(question)\n\nContext:\n\(ctx.prefix(2000))", citations: [], isError: false, displaySummary: "Asking advisor...")
     }
 }
+
+// MARK: - Framework Management Tools
+
+struct CreateProjectFrameworkTool: AgentTool {
+    let name = "create_project_framework"
+    let description = "Generate a custom analysis framework for a project. Define what fields to extract from items, how to synthesize the project, and what views to show. Use this when creating a project for a specific domain (research, brainstorm, legal, etc.) that doesn't fit the default meeting/audio template."
+    let parameters = AIToolParameters(properties: [
+        "project_id": AIToolProperty(type: "string", description: "UUID of the project to configure", enum: nil),
+        "domain_description": AIToolProperty(type: "string", description: "What kind of project is this? e.g. 'bird migration research', 'product launch', 'legal contract review'", enum: nil),
+        "special_instructions": AIToolProperty(type: "string", description: "Any specific analysis preferences or focus areas", enum: nil)
+    ], required: ["project_id", "domain_description"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let idStr = args["project_id"] as? String, let pid = UUID(uuidString: idStr) else {
+            return ToolResult(content: "Missing or invalid project_id", citations: [], isError: true, displaySummary: "Error")
+        }
+        guard let domain = args["domain_description"] as? String else {
+            return ToolResult(content: "Missing domain_description", citations: [], isError: true, displaySummary: "Error")
+        }
+        let instructions = args["special_instructions"] as? String ?? ""
+
+        let projSvc = ProjectService(context: context.modelContext)
+        guard let project = try? projSvc.fetch(id: pid) else {
+            return ToolResult(content: "Project not found: \(idStr)", citations: [], isError: true, displaySummary: "Not found")
+        }
+
+        // Try to match a built-in framework based on domain keywords
+        let lower = domain.lowercased()
+        let fw: ProjectFramework
+        if lower.contains("research") || lower.contains("study") || lower.contains("paper") || lower.contains("investigation") {
+            fw = FrameworkService.researchFramework
+        } else if lower.contains("brainstorm") || lower.contains("idea") || lower.contains("ideation") || lower.contains("creative") {
+            fw = FrameworkService.brainstormFramework
+        } else if lower.contains("journal") || lower.contains("diary") || lower.contains("personal") || lower.contains("reflection") {
+            fw = FrameworkService.journalFramework
+        } else {
+            fw = FrameworkService.blankFramework
+        }
+
+        let svc = FrameworkService.shared
+        svc.apply(to: project, framework: fw)
+        try? context.modelContext.save()
+
+        let views = fw.views.map(\.title).joined(separator: ", ")
+        return ToolResult(content: "Framework applied to project '\(project.name)': \(fw.name)\nViews: \(views)\nIf this doesn't fit, use update_project_framework to customize.", citations: [], isError: false, displaySummary: "Framework: \(fw.name)")
+    }
+}
+
+struct UpdateProjectFrameworkTool: AgentTool {
+    let name = "update_project_framework"
+    let description = "Update the analysis framework for a project. Switch to a different built-in framework or provide a custom JSON framework definition."
+    let parameters = AIToolParameters(properties: [
+        "project_id": AIToolProperty(type: "string", description: "UUID of the project", enum: nil),
+        "framework_id": AIToolProperty(type: "string", description: "Built-in framework ID: builtin/meeting, builtin/research, builtin/brainstorm, builtin/journal, builtin/blank", enum: nil),
+        "framework_json": AIToolProperty(type: "string", description: "Custom framework JSON definition (advanced)", enum: nil)
+    ], required: ["project_id"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let idStr = args["project_id"] as? String, let pid = UUID(uuidString: idStr) else {
+            return ToolResult(content: "Missing or invalid project_id", citations: [], isError: true, displaySummary: "Error")
+        }
+        let projSvc = ProjectService(context: context.modelContext)
+        guard let project = try? projSvc.fetch(id: pid) else {
+            return ToolResult(content: "Project not found: \(idStr)", citations: [], isError: true, displaySummary: "Not found")
+        }
+
+        // Try custom JSON first, then built-in ID, then error
+        if let json = args["framework_json"] as? String {
+            let svc = FrameworkService.shared
+            switch svc.validate(json) {
+            case .success(let fw):
+                svc.apply(to: project, framework: fw)
+                try? context.modelContext.save()
+                return ToolResult(content: "Custom framework applied to '\(project.name)'.", citations: [], isError: false, displaySummary: "Framework updated")
+            case .failure(let e):
+                return ToolResult(content: "Invalid framework JSON: \(e.localizedDescription)", citations: [], isError: true, displaySummary: "Invalid JSON")
+            }
+        }
+
+        if let fwId = args["framework_id"] as? String {
+            let fw: ProjectFramework
+            switch fwId {
+            case "builtin/meeting": fw = FrameworkService.meetingFramework
+            case "builtin/research": fw = FrameworkService.researchFramework
+            case "builtin/brainstorm": fw = FrameworkService.brainstormFramework
+            case "builtin/journal": fw = FrameworkService.journalFramework
+            case "builtin/blank": fw = FrameworkService.blankFramework
+            default: return ToolResult(content: "Unknown framework ID: \(fwId). Use: builtin/meeting, builtin/research, builtin/brainstorm, builtin/journal, builtin/blank", citations: [], isError: true, displaySummary: "Unknown framework")
+            }
+            FrameworkService.shared.apply(to: project, framework: fw)
+            try? context.modelContext.save()
+            return ToolResult(content: "Project '\(project.name)' now uses the \(fw.name) framework.", citations: [], isError: false, displaySummary: "Framework: \(fw.name)")
+        }
+
+        return ToolResult(content: "Specify either framework_id (built-in) or framework_json (custom).", citations: [], isError: true, displaySummary: "Missing args")
+    }
+}
