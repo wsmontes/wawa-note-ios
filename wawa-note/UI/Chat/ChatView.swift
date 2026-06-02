@@ -36,6 +36,9 @@ struct ChatView: View {
                 .background(Color.blue.opacity(0.04))
             }
             messageList
+                .navigationDestination(for: UUID.self) { itemID in
+                    KnowledgeItemNavigationView(itemID: itemID)
+                }
             if let dictErr = dictationError {
                 HStack {
                     Image(systemName: "mic.slash").foregroundStyle(.red)
@@ -857,6 +860,20 @@ struct CodeBlockView: View {
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+/// Wraps KnowledgeDetailView for NavigationLink destination, loading the item from context.
+struct KnowledgeItemNavigationView: View {
+    let itemID: UUID
+    @Environment(\.modelContext) private var modelContext
+
+    var body: some View {
+        if let item = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+            KnowledgeDetailView(item: item)
+        } else {
+            Text("Item not found").font(.headline).foregroundStyle(.secondary)
+        }
     }
 }
 

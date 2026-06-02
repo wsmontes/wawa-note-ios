@@ -204,9 +204,14 @@ struct ProjectTaskBoardView: View {
 
     // MARK: - Priority
 
+    @State private var sourceItemCache: [UUID: KnowledgeItem] = [:]
+
     private func findSourceItem(_ id: UUID) -> KnowledgeItem? {
-        let all = (try? modelContext.fetch(FetchDescriptor<KnowledgeItem>())) ?? []
-        return all.first { $0.id == id }
+        if let cached = sourceItemCache[id] { return cached }
+        if sourceItemCache.isEmpty, let all = try? modelContext.fetch(FetchDescriptor<KnowledgeItem>()) {
+            for item in all { sourceItemCache[item.id] = item }
+        }
+        return sourceItemCache[id]
     }
 
     private func priorityBadge(_ priority: TaskPriority) -> some View {

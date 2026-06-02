@@ -90,6 +90,7 @@ struct ProjectGraphView: View {
     @State private var visibleEdgeTypes: Set<String> = []
     @State private var scale: CGFloat = 1.0
     @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
     @State private var canvasSize: CGSize = .zero
 
     var body: some View {
@@ -163,13 +164,16 @@ struct ProjectGraphView: View {
             }
             .scaleEffect(scale).offset(offset)
             .gesture(MagnificationGesture().onChanged { scale = $0 }.onEnded { _ in if scale < 0.3 { scale = 0.3 }; if scale > 3 { scale = 3 } })
-            .simultaneousGesture(DragGesture().onChanged { offset = $0.translation }.onEnded { _ in })
-            .onTapGesture(count: 2) { withAnimation(.spring) { scale = 1.0; offset = .zero } }
+            .simultaneousGesture(DragGesture().onChanged { offset = CGSize(width: lastOffset.width + $0.translation.width, height: lastOffset.height + $0.translation.height) }.onEnded { _ in lastOffset = offset })
+            .onTapGesture(count: 2) { withAnimation(.spring) { scale = 1.0; offset = .zero; lastOffset = .zero } }
             .onAppear {
                 canvasSize = geo.size
-                var mutable = nodes
-                ForceLayout.compute(nodes: &mutable, edges: edges, size: geo.size)
-                nodes = mutable
+                let capturedNodes = nodes; let capturedEdges = edges; let gSize = geo.size
+                Task { @GraphLayoutActor in
+                    var mutable = capturedNodes
+                    ForceLayout.compute(nodes: &mutable, edges: capturedEdges, size: gSize)
+                    await MainActor.run { nodes = mutable }
+                }
             }
             .onTapGesture { location in handleTap(location) }
         }
@@ -271,4 +275,9 @@ struct ProjectGraphView: View {
         case .blockedBy: .pink; case .belongsTo: .mint; case .produced: .indigo; case .relatesTo: .secondary
         }
     }
+}
+
+// MARK: - Background layout actor
+@globalActor actor GraphLayoutActor {
+    static let shared = GraphLayoutActor()
 }

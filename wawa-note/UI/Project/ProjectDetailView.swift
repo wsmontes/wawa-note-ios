@@ -565,13 +565,25 @@ struct ProjectOverviewCards: View {
 
     @State private var health: ProjectHealthEngine.HealthResult?
     @State private var healthTask: Task<Void, Never>?
+    @State private var cachedRisks: [(String, String, Double)] = []
+    @State private var cachedSuggestions: [AgentSuggestion] = []
 
     private func refreshHealth() {
         guard let ctx = viewModel.modelContext else { return }
         healthTask?.cancel()
         healthTask = Task { @MainActor in
             health = ProjectHealthEngine.compute(for: project.id, context: ctx)
+            cachedRisks = computeRisks() // Cache disk reads
+            cachedSuggestions = fetchPendingSuggestions(ctx)
         }
+    }
+
+    private func computeRisks() -> [(String, String, Double)] {
+        let store = FileArtifactStore()
+        return items.compactMap { item -> [(String, String, Double)]? in
+            guard let analysis = try? store.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) else { return nil }
+            return analysis.risks.filter { ($0.confidence ?? 0) > 0.7 }.map { ($0.risk, item.title, $0.confidence ?? 0) }
+        }.flatMap { $0 }
     }
 
     private var overdueTasks: [TaskItem] {
@@ -580,12 +592,7 @@ struct ProjectOverviewCards: View {
         }
     }
 
-    private var openRisks: [(String, String, Double)] {
-        items.compactMap { item -> [(String, String, Double)]? in
-            guard let analysis = try? FileArtifactStore().readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) else { return nil }
-            return analysis.risks.filter { ($0.confidence ?? 0) > 0.7 }.map { ($0.risk, item.title, $0.confidence ?? 0) }
-        }.flatMap { $0 }
-    }
+    private var openRisks: [(String, String, Double)] { cachedRisks }
 
     var body: some View {
         VStack(spacing: 12) {
@@ -701,8 +708,9 @@ struct ProjectOverviewCards: View {
 
     // MARK: Suggestions (Phase G)
 
-    private var pendingSuggestions: [AgentSuggestion] {
-        guard let ctx = viewModel.modelContext else { return [] }
+    private var pendingSuggestions: [AgentSuggestion] { cachedSuggestions }
+
+    private func fetchPendingSuggestions(_ ctx: ModelContext) -> [AgentSuggestion] {
         let all = (try? ctx.fetch(FetchDescriptor<AgentSuggestion>())) ?? []
         return all.filter { $0.projectID == project.id && $0.status == "pending" }
     }

@@ -269,8 +269,9 @@ final class ContentPipelineService: ObservableObject {
                     itemType: item.type.rawValue, phase: "error",
                     currentTool: nil, toolSummary: error, toolLog: toolLog)
             }
+            // Update project health after agent completes
+            if let pid = item.projectID { ProjectHealthEngine.updateProject(pid, context: modelContext) }
             // Keep status visible so user can see agent trace
-            // pipelineStatus = nil only on next pipeline start
         }
     }
 
