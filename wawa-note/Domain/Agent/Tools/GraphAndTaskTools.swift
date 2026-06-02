@@ -258,7 +258,7 @@ struct CreateEdgeTool: AgentTool {
         let edgeSvc = GraphEdgeService(context: context.modelContext)
         let et = EdgeType(rawValue: typeStr) ?? .relatesTo
         let segmentIDs = (args["source_segment_ids"] as? [String]) ?? []
-        let conf = (args["confidence"] as? Double) ?? 0.8
+        let conf = (args["confidence"] as? Double) ?? 0.5
         try edgeSvc.create(fromID: from.id, toID: to.id, edgeType: et, weight: conf,
             provenanceItemID: from.id, provenanceSegmentIDs: segmentIDs)
         let prov = segmentIDs.isEmpty ? "item-level" : "\(segmentIDs.count) segment(s)"

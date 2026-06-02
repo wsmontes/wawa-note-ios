@@ -711,7 +711,7 @@ enum ProjectHealthEngine {
         let totalTasks = tasks.count; let openTasks = tasks.filter { $0.status == .todo || $0.status == .inProgress }.count
         let actionDebtRatio = totalTasks > 0 ? Double(openTasks) / Double(totalTasks) : 0
         let now = Date(); let ages = items.map { now.timeIntervalSince($0.createdAt) / 86400 }.sorted()
-        let medianAge: Double = ages.isEmpty ? 999 : (ages.count % 2 == 0 ? (ages[ages.count/2-1]+ages[ages.count/2])/2 : ages[ages.count/2])
+        let medianAge: Double = ages.isEmpty ? -1 : (ages.count % 2 == 0 ? (ages[ages.count/2-1]+ages[ages.count/2])/2 : ages[ages.count/2])
         let entityCount = Set(allEdges.flatMap { [$0.fromID, $0.toID] }).count
         let graphDensity = entityCount > 1 ? Double(allEdges.count) / Double(entityCount * (entityCount - 1)) : 0
         let dv = min(decisionVelocity / 2.0, 1.0) * 25; let ad = (1.0 - actionDebtRatio) * 25.0
@@ -720,7 +720,8 @@ enum ProjectHealthEngine {
         let re = (1.0 - riskExposure) * 15.0; let score = Int((dv + ad + ef + gd + re).rounded())
         let status = score >= 70 ? "healthy" : score >= 40 ? "stale" : score >= 30 ? "atRisk" : "dormant"
         var anomalies: [String] = []
-        if medianAge > 7 { anomalies.append("Silence burst: \(Int(medianAge))d") }
+        if medianAge < 0 { anomalies.append("No items in project") }
+        else if medianAge > 7 { anomalies.append("Silence burst: \(Int(medianAge))d") }
         if decisionVelocity < 0.5 && items.count >= 3 { anomalies.append("Decision drought") }
         if actionDebtRatio > 0.7 && totalTasks > 0 { anomalies.append("Action debt: \(Int(actionDebtRatio*100))%") }
         if riskExposure > 0.5 { anomalies.append("High risk exposure") }

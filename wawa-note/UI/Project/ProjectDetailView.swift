@@ -618,6 +618,7 @@ struct ProjectOverviewCards: View {
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
         .onAppear { refreshHealth() }
+        .onDisappear { healthTask?.cancel() }
         .onChange(of: viewModel.projectItems.count) { _ in refreshHealth() }
         .padding(.bottom, 8)
     }
@@ -693,7 +694,7 @@ struct ProjectOverviewCards: View {
                     Text("Updated \(updated.formatted(.relative(presentation: .numeric)))").font(.caption2).foregroundStyle(.tertiary)
                 }
             }
-            Text(project.synthesis ?? project.summary ?? "No synthesis yet. Add items to this project to generate insights.")
+            Text(project.synthesis ?? project.summary ?? "Add items to this project to generate insights.")
                 .font(.subheadline).foregroundStyle(.secondary).lineLimit(6)
             if let sourceID = project.synthesisSourceItemID {
                 let snippet = project.summary.map { String($0.prefix(120)) } ?? "No summary"

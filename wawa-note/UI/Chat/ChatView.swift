@@ -896,7 +896,6 @@ struct EvidenceCardView: View {
                 }
             }
             Spacer()
-            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
         }
         .padding(8).background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 8))
     }

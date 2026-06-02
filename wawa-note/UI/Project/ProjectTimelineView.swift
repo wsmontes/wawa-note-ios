@@ -37,7 +37,6 @@ struct TimelineEvent: Identifiable {
     var riskTitles: [String] = []
     var actionItems: [String] = []
     var connectedTo: [UUID] = []  // IDs of connected events via GraphEdges
-    var weekNumber: Int = 0
 }
 
 struct TimelineCluster: Identifiable {
@@ -281,13 +280,8 @@ struct ProjectTimelineView: View {
             }
         }
 
-        // Sort and compute week numbers
+        // Sort and build clusters by week
         allEvents.sort { $0.date > $1.date }
-        for i in 0..<allEvents.count {
-            allEvents[i].weekNumber = calendar.component(.weekOfYear, from: allEvents[i].date)
-        }
-
-        // Build clusters by week
         let grouped = Dictionary(grouping: allEvents) { calendar.startOfWeek(for: $0.date) }
         self.clusters = grouped.map { start, evts in
             let formatter = DateFormatter(); formatter.dateFormat = "MMM d"
