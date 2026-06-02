@@ -817,24 +817,32 @@ struct ProjectOverviewCards: View {
     // MARK: Activity Feed
 
     private var activityFeed: some View {
-        let recentItems = items.sorted { $0.createdAt > $1.createdAt }.prefix(5)
+        var entries: [(icon: String, color: Color, text: String, date: Date)] = []
+        for item in items.prefix(5) {
+            entries.append((item.type == .audio ? "mic.fill" : item.type == .image ? "photo" : "doc.text.fill",
+                item.type.color, item.title, item.createdAt))
+        }
+        for task in tasks.filter({ $0.status == .done }).prefix(3) {
+            entries.append(("checkmark.circle.fill", .green, "Completed: \(task.title)", task.updatedAt))
+        }
+        entries.sort { $0.date > $1.date }
+        let recent = Array(entries.prefix(5))
+
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Image(systemName: "clock.arrow.2.circlepath").font(.caption).foregroundStyle(.green)
                 Text("Recent activity").font(.caption).fontWeight(.semibold)
             }
-            if recentItems.isEmpty {
+            if recent.isEmpty {
                 Text("No activity yet").font(.caption2).foregroundStyle(.tertiary).padding(.vertical, 4)
             } else {
-                ForEach(Array(recentItems), id: \.id) { item in
+                ForEach(Array(recent.enumerated()), id: \.offset) { _, entry in
                     HStack(spacing: 8) {
-                        Image(systemName: item.type == .audio ? "mic.fill" : item.type == .image ? "photo" : "doc.text.fill")
-                            .font(.caption2).foregroundStyle(item.type.color)
-                        Text(item.title).font(.caption).lineLimit(1)
+                        Image(systemName: entry.icon).font(.caption2).foregroundStyle(entry.color)
+                        Text(entry.text).font(.caption).lineLimit(1)
                         Spacer()
-                        Text(item.createdAt.formatted(.relative(presentation: .numeric))).font(.caption2).foregroundStyle(.tertiary)
-                    }
-                    .padding(6)
+                        Text(entry.date.formatted(.relative(presentation: .numeric))).font(.caption2).foregroundStyle(.tertiary)
+                    }.padding(6)
                 }
             }
         }

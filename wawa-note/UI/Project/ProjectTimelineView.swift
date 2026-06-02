@@ -4,7 +4,7 @@ import SwiftData
 // MARK: - Enriched Timeline Models
 
 enum TimelineEventKind: String, CaseIterable {
-    case audio, note, journalEntry, webBookmark, image, task, decision, risk, question, done, meeting
+    case audio, note, journalEntry, webBookmark, image, task, decision, risk, question, done
 
     static func from(itemType: KnowledgeItemType) -> TimelineEventKind {
         switch itemType {
@@ -21,7 +21,7 @@ enum TimelineEventKind: String, CaseIterable {
         case .audio: .blue; case .note: .orange; case .journalEntry: .purple
         case .webBookmark: .green; case .image: .pink; case .task: .teal
         case .decision: .indigo; case .risk: .red; case .question: .orange
-        case .done: .gray; case .meeting: .blue
+        case .done: .gray
         }
     }
 }
@@ -47,7 +47,7 @@ struct TimelineCluster: Identifiable {
     var decisionCount: Int { events.filter { $0.kind == .decision }.count }
     var riskCount: Int { events.filter { $0.kind == .risk }.count }
     var actionCount: Int { events.filter { !$0.actionItems.isEmpty }.count + events.filter { $0.kind == .task }.count }
-    var meetingCount: Int { events.filter { $0.kind == .meeting || $0.kind == .audio }.count }
+    var recordingCount: Int { events.filter { $0.kind == .audio }.count }
 }
 
 struct TimelineConnector: Identifiable {
@@ -310,7 +310,6 @@ struct ProjectTimelineView: View {
         case .webBookmark: "bookmark.fill"; case .image: "photo.fill"; case .task: "checklist"
         case .decision: "lightbulb.fill"; case .risk: "exclamationmark.shield.fill"
         case .question: "questionmark.circle.fill"; case .done: "checkmark.circle.fill"
-        case .meeting: "person.2.fill"
         }
     }
 }

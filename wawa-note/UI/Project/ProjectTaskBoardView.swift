@@ -118,21 +118,11 @@ struct ProjectTaskBoardView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(task.title)
-                            .font(.subheadline)
-                            .foregroundStyle(task.statusRaw == "cancelled" ? .secondary : .primary)
-                            .strikethrough(task.statusRaw == "cancelled")
-                            .lineLimit(2)
-                        // Confidence ring for AI-generated tasks
-                        if let conf = task.confidence, conf > 0 {
-                            ZStack {
-                                Circle().stroke(.blue.opacity(0.2), lineWidth: 2).frame(width: 18, height: 18)
-                                Circle().trim(from: 0, to: conf).stroke(.blue, lineWidth: 2)
-                                    .frame(width: 18, height: 18).rotationEffect(.degrees(-90))
-                            }
-                        }
-                    }
+                    Text(task.title)
+                        .font(.subheadline)
+                        .foregroundStyle(task.statusRaw == "cancelled" ? .secondary : .primary)
+                        .strikethrough(task.statusRaw == "cancelled")
+                        .lineLimit(2)
 
                     HStack(spacing: 6) {
                         if let owner = task.ownerName {
