@@ -151,9 +151,27 @@ struct ProjectDetailView: View {
     @EnvironmentObject private var contentPipeline: ContentPipelineService
     @StateObject private var viewModel: ProjectDetailViewModel
     @State private var selectedDynamicTab = 0
+    @State private var overviewExpanded = true
 
     private var framework: ProjectFramework {
         FrameworkService.shared.resolve(for: project)
+    }
+
+    private var collapsedOverview: some View {
+        HStack(spacing: 8) {
+            Circle().fill(healthColor).frame(width: 8, height: 8)
+            Text(project.name).font(.caption).fontWeight(.medium).lineLimit(1)
+            if let score = project.healthScore { Text("· \(Int(score))").font(.caption2).foregroundStyle(healthColor) }
+            Spacer()
+            Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 8).background(Color(.systemBackground))
+        .contentShape(Rectangle())
+        .onTapGesture { withAnimation(.easeInOut(duration: 0.25)) { overviewExpanded = true } }
+    }
+
+    private var healthColor: Color {
+        switch project.healthStatus { case "healthy": .mint; case "stale": .orange; case "atRisk": .red; case "dormant": .gray; default: .blue }
     }
 
     init(project: Project) {
@@ -165,9 +183,13 @@ struct ProjectDetailView: View {
         VStack(spacing: 0) {
             headerSection
 
-            // Overview dashboard (always visible, above tabs)
-            ProjectOverviewCards(project: project, items: viewModel.projectItems,
-                                 tasks: viewModel.tasks, viewModel: viewModel)
+            // Overview: expanded by default, collapses to strip when tab selected
+            if overviewExpanded {
+                ProjectOverviewCards(project: project, items: viewModel.projectItems,
+                                     tasks: viewModel.tasks, viewModel: viewModel)
+            } else {
+                collapsedOverview
+            }
 
             Picker("View", selection: $selectedDynamicTab) {
                 ForEach(Array(framework.views.enumerated()), id: \.offset) { idx, view in
@@ -176,19 +198,26 @@ struct ProjectDetailView: View {
             }
             .pickerStyle(.segmented)
             .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            .padding(.vertical, 6)
+            .onChange(of: selectedDynamicTab) { _ in
+                withAnimation(.easeInOut(duration: 0.25)) { overviewExpanded = false }
+            }
 
             if selectedDynamicTab < framework.views.count {
                 let viewDef = framework.views[selectedDynamicTab]
                 switch viewDef.type {
                 case .kanban:
                     ProjectTaskBoardView(tasks: viewModel.tasks, projectID: project.id)
+                        .frame(maxHeight: .infinity)
                 case .list:
                     projectItemsList
+                        .frame(maxHeight: .infinity)
                 case .graph:
                     ProjectGraphView(projectID: project.id)
+                        .frame(maxHeight: .infinity)
                 case .timeline:
                     ProjectTimelineView(projectID: project.id)
+                        .frame(maxHeight: .infinity)
                 case .cards, .table, .markdown, .chips:
                     dynamicFrameworkView(viewDef)
                 }
