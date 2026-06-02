@@ -245,8 +245,7 @@ struct ChatView: View {
                 .disabled(viewModel.inputText.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 12).padding(.vertical, 8)
         .background(.bar)
     }
 

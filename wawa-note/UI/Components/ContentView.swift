@@ -51,12 +51,13 @@ struct ContentView: View {
     @ViewBuilder
     private var chatOverlay: some View {
         VStack(spacing: 0) {
-            Color.clear.contentShape(Rectangle()).onTapGesture { dismissChat() }
+            Spacer()
             ChatView(autoFocus: true, compact: true)
-                .frame(maxHeight: UIScreen.main.bounds.height * 0.5)
                 .background(Color(.systemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .frame(maxHeight: UIScreen.main.bounds.height * 0.5)
         }
+        .ignoresSafeArea(.keyboard)
         .transition(.move(edge: .bottom))
     }
 
