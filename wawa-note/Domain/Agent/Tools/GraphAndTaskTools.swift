@@ -1123,9 +1123,8 @@ struct SearchSemanticTool: AgentTool {
             return ToolFormatting.error(tool: name, reason: "No provider for embeddings.", fix: "Configure a provider in Settings.")
         }
         let queryEmbedding: [Float]
+        let tmpID = UUID()
         do {
-            // Use a temporary UUID for the query embedding
-            let tmpID = UUID()
             queryEmbedding = try await embeddingSvc.generateAndStore(for: tmpID, text: query, using: provider)
         } catch {
             // Fallback to FTS
@@ -1143,6 +1142,9 @@ struct SearchSemanticTool: AgentTool {
                 scored.append((item, sim, snippet))
             }
         }
+
+        // Clean up temporary embedding
+        try? FileManager.default.removeItem(at: embeddingSvc.embeddingURL(for: tmpID))
 
         scored.sort { $0.score > $1.score }
         let top = scored.prefix(limit)

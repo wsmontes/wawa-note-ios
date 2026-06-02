@@ -792,6 +792,10 @@ struct ProjectOverviewCards: View {
                let typeStr = dict["type"] as? String, let edgeType = EdgeType(rawValue: typeStr) {
                 let edge = GraphEdge(fromID: fromID, toID: toID, edgeType: edgeType, weight: sug.confidence ?? 0.7)
                 edge.provenanceItemID = sug.sourceItemID
+                if let segJSON = sug.sourceSegmentIDs, let segData = segJSON.data(using: .utf8),
+                   let segs = try? JSONDecoder().decode([String].self, from: segData) {
+                    edge.provenanceSegmentIDs = segs.isEmpty ? nil : (try? JSONEncoder().encode(segs)).flatMap { String(data: $0, encoding: .utf8) }
+                }
                 ctx.insert(edge)
             }
         default: break

@@ -692,21 +692,28 @@ enum ProjectHealthEngine {
         let edgeSvc = GraphEdgeService(context: context)
         let itemIDs = Set(items.map(\.id))
         let allEdges = (try? edgeSvc.recentEdges(limit: 500))?.filter { itemIDs.contains($0.fromID) || itemIDs.contains($0.toID) } ?? []
-        var decisionCount = 0; var riskCount = 0; var totalRiskWeight = 0.0
-        let store = FileArtifactStore()
+        var decisionCount = 0; var riskCount = 0; var totalRiskSeverity = 0.0
+        let store = FileArtifactStore(); let fourWeeksAgo = Date().addingTimeInterval(-28*86400)
+        var recentDecisionCount = 0
         for item in items {
             guard let a = try? store.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) else { continue }
             decisionCount += a.decisions.count; riskCount += a.risks.count
-            totalRiskWeight += a.risks.map { ($0.confidence ?? 0.5) * 2.0 }.reduce(0, +)
+            let isRecent = item.createdAt >= fourWeeksAgo
+            if isRecent { recentDecisionCount += a.decisions.count }
+            totalRiskSeverity += a.risks.map { ($0.confidence ?? 0.5) }.reduce(0, +)
         }
-        let decisionVelocity = items.count >= 4 ? Double(decisionCount) / (Double(items.count) / 4.0) : Double(decisionCount)
+        // Decisions per week over last 4 weeks (temporal)
+        let decisionVelocity = Double(recentDecisionCount) / 4.0
+        // Risk exposure: magnitude (count × avg severity), normalized 0-1
+        let avgSeverity = riskCount > 0 ? totalRiskSeverity / Double(riskCount) : 0
+        let maxRisks = 20.0; let riskMagnitude = min(Double(riskCount) / maxRisks, 1.0)
+        let riskExposure = riskMagnitude * avgSeverity
         let totalTasks = tasks.count; let openTasks = tasks.filter { $0.status == .todo || $0.status == .inProgress }.count
         let actionDebtRatio = totalTasks > 0 ? Double(openTasks) / Double(totalTasks) : 0
         let now = Date(); let ages = items.map { now.timeIntervalSince($0.createdAt) / 86400 }.sorted()
         let medianAge: Double = ages.isEmpty ? 999 : (ages.count % 2 == 0 ? (ages[ages.count/2-1]+ages[ages.count/2])/2 : ages[ages.count/2])
         let entityCount = Set(allEdges.flatMap { [$0.fromID, $0.toID] }).count
         let graphDensity = entityCount > 1 ? Double(allEdges.count) / Double(entityCount * (entityCount - 1)) : 0
-        let riskExposure = riskCount > 0 ? totalRiskWeight / Double(riskCount * 2) : 0
         let dv = min(decisionVelocity / 2.0, 1.0) * 25; let ad = (1.0 - actionDebtRatio) * 25.0
         let ef = medianAge < 7 ? 20.0 : medianAge < 14 ? 15.0 : medianAge < 30 ? 10.0 : 5.0
         let gd = graphDensity > 0.10 ? 15.0 : graphDensity > 0.05 ? 10.0 : 5.0
