@@ -4,6 +4,7 @@ import SwiftData
 struct InboxView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var contentPipeline: ContentPipelineService
+    @EnvironmentObject private var chatState: ChatOverlayState
     @Query(sort: \KnowledgeItem.updatedAt, order: .reverse) private var allItems: [KnowledgeItem]
     @Query(sort: \Folder.name) private var folders: [Folder]
     @Query(sort: \Project.name) private var projects: [Project]
@@ -54,7 +55,7 @@ struct InboxView: View {
                 if newValue.isEmpty { matchingIDs = []; searchResults = [] }
                 else { performSearch() }
             }
-            .onAppear { loadTrashFolder() }
+            .onAppear { chatState.context = .inbox; loadTrashFolder() }
             .sheet(item: $showFolderPicker) { item in
                 folderPickerSheet(for: item)
             }

@@ -5,6 +5,7 @@ struct KnowledgeDetailView: View {
     let item: KnowledgeItem
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var contentPipeline: ContentPipelineService
+    @EnvironmentObject private var chatState: ChatOverlayState
     @State private var transcript: Transcript?
     @State private var analysis: MeetingAnalysis?
     @State private var annotations: [Annotation] = []
@@ -149,6 +150,7 @@ struct KnowledgeDetailView: View {
             }
         }
         .onAppear {
+            chatState.context = .item(item.id)
             isPipelineProcessing = contentPipeline.isProcessingItem(item.id)
             Task { @MainActor in
                 await Task.yield()

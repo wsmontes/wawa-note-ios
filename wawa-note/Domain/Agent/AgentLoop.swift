@@ -286,14 +286,41 @@ final class AgentLoop: @unchecked Sendable {
 
         var dynamicPrompt = "Today's date: \(Date().formatted(date: .complete, time: .omitted))."
 
+        // Context-aware guidance
+        if let ck = toolContext.contextKey {
+            dynamicPrompt += "\n\nCURRENT CONTEXT: \(toolContext.contextDisplayName ?? ck)"
+            switch ck {
+            case "inbox":
+                dynamicPrompt += "\n- The user is browsing their inbox. Use list_items to show unprocessed items."
+                dynamicPrompt += "\n- Help triage: suggest archiving, assigning to projects, or flagging."
+            case "explore:projects":
+                dynamicPrompt += "\n- The user is browsing projects. Use get_project to explore specific ones."
+                dynamicPrompt += "\n- Help compare projects, identify stalled ones, or suggest new project ideas."
+            default:
+                if ck.hasPrefix("project:") {
+                    dynamicPrompt += "\n- The user is viewing this project. Use get_project to see tasks, items, and connections."
+                    dynamicPrompt += "\n- Answer about status, risks, and progress. Suggest next steps."
+                } else if ck.hasPrefix("item:") {
+                    dynamicPrompt += "\n- The user is viewing this item. Use get_item to retrieve its full content."
+                    dynamicPrompt += "\n- Answer detailed questions about this item's content."
+                }
+            }
+        }
+
         if let projectID = toolContext.activeProjectID {
-            dynamicPrompt += "\n\nCURRENT PROJECT CONTEXT:\n"
+            dynamicPrompt += "\n\nCURRENT PROJECT:\n"
             if let name = toolContext.activeProjectName { dynamicPrompt += "- Project: \(name)\n" }
             dynamicPrompt += "- Project ID: \(projectID.uuidString)\n"
             dynamicPrompt += "- Use get_project to see tasks, items, and connections.\n"
             dynamicPrompt += "- Use create_task and create_edge to add to this project.\n"
             dynamicPrompt += "- When referencing items from this project, cite them by title and ID.\n"
             dynamicPrompt += "- Prioritize this project's context in all searches and answers."
+        }
+
+        if let itemID = toolContext.activeItemID {
+            dynamicPrompt += "\n\nFOCUSED ITEM:\n- Item ID: \(itemID.uuidString)"
+            dynamicPrompt += "\n- Use get_item to read its full content."
+            dynamicPrompt += "\n- Prioritize information from this item when answering."
         }
 
         return (static: staticPrompt, dynamic: dynamicPrompt)

@@ -149,6 +149,7 @@ struct ProjectDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var ingestionState: ProjectIngestionState
     @EnvironmentObject private var contentPipeline: ContentPipelineService
+    @EnvironmentObject private var chatState: ChatOverlayState
     @StateObject private var viewModel: ProjectDetailViewModel
     @State private var selectedDynamicTab = 0
     @State private var overviewExpanded = true
@@ -265,6 +266,7 @@ struct ProjectDetailView: View {
             }
         }
         .onAppear {
+            chatState.context = .project(project.id)
             viewModel.configure(modelContext: modelContext, ingestionState: ingestionState)
         }
         .alert("Reminders", isPresented: Binding(

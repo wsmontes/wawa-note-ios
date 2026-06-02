@@ -193,7 +193,7 @@ final class HomeViewModel: ObservableObject {
 struct HomeView: View {
     @EnvironmentObject private var coordinator: RecordingCoordinator
     @EnvironmentObject private var contentPipeline: ContentPipelineService
-    @EnvironmentObject private var chatState: ChatState
+    @EnvironmentObject private var chatState: ChatOverlayState
     @Query(sort: \Project.updatedAt, order: .reverse) private var projects: [Project]
     @Query(sort: \KnowledgeItem.updatedAt, order: .reverse) private var allItems: [KnowledgeItem]
     @Environment(\.modelContext) private var modelContext
@@ -299,6 +299,7 @@ struct HomeView: View {
             }
         }
         .onAppear {
+            chatState.context = .global
             captureVM.bind(coordinator: coordinator)
             captureVM.modelContext = modelContext
             captureVM.contentPipeline = contentPipeline

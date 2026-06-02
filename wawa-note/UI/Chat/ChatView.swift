@@ -10,6 +10,7 @@ struct ChatView: View {
 
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var contentPipeline: ContentPipelineService
+    @EnvironmentObject private var chatOverlay: ChatOverlayState
     @StateObject private var viewModel = ChatViewModel()
     @State private var showConversations = false
     @FocusState private var isInputFocused: Bool
@@ -133,6 +134,7 @@ struct ChatView: View {
         .onAppear {
             viewModel.setup(modelContext: modelContext)
             viewModel.loadConversations()
+            viewModel.observeContext(from: chatOverlay)
             if autoFocus { isInputFocused = true }
         }
         .onChange(of: autoFocus) { _, focus in

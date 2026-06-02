@@ -1,8 +1,9 @@
 import SwiftUI
 import Combine
 
-final class ChatState: ObservableObject {
+final class ChatOverlayState: ObservableObject {
     @Published var isActive = false
+    @Published var context: ChatContext = .global
 }
 
 struct ContentView: View {
@@ -10,7 +11,7 @@ struct ContentView: View {
     @State private var showChat = false
     @State private var selectedTab = 0
     @State private var keyboardHeight: CGFloat = 0
-    @StateObject private var chatState = ChatState()
+    @StateObject private var chatState = ChatOverlayState()
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -53,7 +54,6 @@ struct ContentView: View {
                     .tag(3)
             }
             .ignoresSafeArea(.keyboard, edges: .bottom)
-            .environmentObject(chatState)
 
             Color.black.opacity(showChat ? 0.3 : 0)
                 .ignoresSafeArea()
@@ -65,7 +65,7 @@ struct ContentView: View {
                 showChat = false
                 chatState.isActive = false
             })
-                .background(.ultraThinMaterial.opacity(0.6), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .padding(.horizontal, 8)
                 .frame(maxHeight: UIScreen.main.bounds.height * 0.6, alignment: .bottom)
                 .padding(.bottom, showChat ? max(0, keyboardHeight - 6) : 0)
@@ -75,6 +75,7 @@ struct ContentView: View {
                 .animation(.easeInOut(duration: 0.25), value: keyboardHeight)
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
+        .environmentObject(chatState)
         .sheet(isPresented: $showSettings) { SettingsView() }
         .onReceive(keyboardPublisher) { keyboardHeight = $0 }
     }
@@ -92,6 +93,7 @@ struct ContentView: View {
 }
 
 struct ExploreView: View {
+    @EnvironmentObject private var chatState: ChatOverlayState
     @State private var selectedTab: ExploreTab = .projects
 
     enum ExploreTab: String, CaseIterable {
@@ -124,5 +126,6 @@ struct ExploreView: View {
                 TimelineExplorerView()
             }
         }
+        .onAppear { chatState.context = .exploreProjects }
     }
 }

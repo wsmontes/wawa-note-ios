@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import Combine
 
 @MainActor
 final class ChatViewModel: ObservableObject {
@@ -15,6 +16,7 @@ final class ChatViewModel: ObservableObject {
     @Published var mode: AgentMode = .auto
     @Published var activeProjectID: UUID?
     @Published var activeProjectName: String?
+    @Published var activeContext: ChatContext = .global
 
     enum ChatState {
         case idle
@@ -26,6 +28,8 @@ final class ChatViewModel: ObservableObject {
     private let chatService = ChatService()
     private var modelContext: ModelContext?
     private var streamTask: Task<Void, Never>?
+    private var cancellables = Set<AnyCancellable>()
+    private var hasObservedContext = false
 
     init() {
         loadConversations()
@@ -33,6 +37,116 @@ final class ChatViewModel: ObservableObject {
 
     func setup(modelContext: ModelContext) {
         self.modelContext = modelContext
+    }
+
+    // MARK: - Context
+
+    func observeContext(from overlay: ChatOverlayState) {
+        guard !hasObservedContext else { return }
+        hasObservedContext = true
+        switchToContext(overlay.context)
+        overlay.$context
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] newContext in
+                self?.switchToContext(newContext)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func switchToContext(_ context: ChatContext) {
+        guard context != activeContext else { return }
+        activeContext = context
+
+        guard let conv = try? chatService.findOrCreateConversation(for: context) else { return }
+        currentConversation = conv
+        messages = (try? chatService.messages(for: conv.id)) ?? []
+        streamingText = ""
+        activeToolCalls = []
+        state = .idle
+
+        switch context {
+        case .project(let id):
+            activeProjectID = id
+            activeProjectName = (try? ProjectService(context: modelContext!).fetch(id: id))?.name
+        case .item(let itemID):
+            if let ctx = modelContext,
+               let item = try? KnowledgeItemService(context: ctx).fetchItem(id: itemID),
+               let pid = item.projectID {
+                activeProjectID = pid
+                activeProjectName = (try? ProjectService(context: ctx).fetch(id: pid))?.name
+            } else {
+                activeProjectID = nil
+                activeProjectName = nil
+            }
+        default:
+            activeProjectID = nil
+            activeProjectName = nil
+        }
+        loadConversations()
+
+        if messages.isEmpty {
+            sendWelcome(for: context)
+        }
+    }
+
+    private func sendWelcome(for context: ChatContext) {
+        guard let ctx = modelContext,
+              let provider = try? ProviderRouter.resolveActive(context: ctx),
+              let conv = currentConversation else { return }
+        let model = selectedModel.isEmpty ? "gpt-5-nano" : selectedModel
+
+        let welcomePrompt: String = {
+            switch context {
+            case .global:
+                return "Greet the user briefly. One line. They just opened Wawa Note."
+            case .inbox:
+                return "Greet the user. One line. They're in their inbox reviewing captured items. Be warm."
+            case .item:
+                return "Acknowledge the user is viewing an item. One line. Offer to help analyze it."
+            case .exploreProjects:
+                return "Greet the user. One line. They're browsing projects. Offer to help navigate."
+            case .project:
+                let name = activeProjectName ?? "this project"
+                return "Greet the user. One line. They're viewing \(name). Offer to help."
+            }
+        }()
+
+        let systemPrompt = "You are a concise assistant. Respond with EXACTLY one short line. No tools, no follow-up, no questions. Just a warm, contextual welcome."
+        let conversationId = conv.id
+
+        let userMsg = ChatMessage(conversationId: conversationId, role: .user, content: welcomePrompt)
+        messages.append(userMsg)
+        try? chatService.appendMessage(userMsg)
+        state = .thinking
+
+        streamTask = Task.detached { [weak self] in
+            let request = AIRequest(
+                model: model,
+                messages: [
+                    AIMessage(role: .system, content: [.text(systemPrompt)]),
+                    AIMessage(role: .user, content: [.text(welcomePrompt)])
+                ],
+                temperature: 0.7
+            )
+            do {
+                let response = try await provider.send(request)
+                let assistantMsg = ChatMessage(
+                    conversationId: conversationId, role: .assistant,
+                    content: response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+                await MainActor.run {
+                    self?.messages.append(assistantMsg)
+                    try? self?.chatService.appendMessage(assistantMsg)
+                    self?.state = .idle
+                }
+            } catch {
+                await MainActor.run {
+                    self?.messages.removeLast()
+                    self?.state = .idle
+                }
+            }
+        }
     }
 
     // MARK: - Actions
@@ -51,7 +165,10 @@ final class ChatViewModel: ObservableObject {
 
         // Ensure conversation exists
         if currentConversation == nil {
-            currentConversation = try? chatService.createConversation(title: String(text.prefix(60)))
+            currentConversation = try? chatService.createConversation(
+                title: String(text.prefix(60)),
+                contextKey: activeContext.key
+            )
             loadConversations()
         }
 
@@ -95,7 +212,14 @@ final class ChatViewModel: ObservableObject {
             ExecuteJavaScriptTool()
         ])
 
-        let toolContext = ToolContext(modelContext: ctx, activeProjectID: activeProjectID, activeProjectName: activeProjectName)
+        let toolContext = ToolContext(
+            modelContext: ctx,
+            activeProjectID: activeProjectID,
+            activeProjectName: activeProjectName,
+            activeItemID: activeContext.associatedID,
+            contextKey: activeContext.key,
+            contextDisplayName: activeContext.displayName
+        )
         let execModel = selectedModel.isEmpty ? "gpt-5-nano" : selectedModel
         let advModel = "gpt-5.5"
         let loop = AgentLoop(registry: registry, toolContext: toolContext, mode: mode, executorModel: execModel, advisorModel: advModel)
@@ -219,7 +343,7 @@ final class ChatViewModel: ObservableObject {
     }
 
     func createNewConversation() {
-        currentConversation = try? chatService.createConversation()
+        currentConversation = try? chatService.createConversation(contextKey: activeContext.key)
         messages = []
         streamingText = ""
         activeToolCalls = []
