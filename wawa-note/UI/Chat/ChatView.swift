@@ -18,42 +18,46 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Project context banner (Phase H)
-            if let projectName = viewModel.activeProjectName {
-                HStack(spacing: 10) {
-                    Image(systemName: "tray.full").font(.caption).foregroundStyle(.blue)
-                    Text(projectName).font(.caption).fontWeight(.semibold).lineLimit(1)
-                    Spacer()
-                    Button {
-                        viewModel.inputText = "Tell me about the status of project '\(projectName)'"
-                        viewModel.sendMessage()
-                    } label: {
-                        Text("Ask").font(.caption2).padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(Color.blue.opacity(0.1)).clipShape(Capsule())
-                    }.buttonStyle(.plain)
-                    Button { viewModel.activeProjectID = nil; viewModel.activeProjectName = nil } label: {
-                        Image(systemName: "xmark.circle.fill").font(.caption).foregroundStyle(.tertiary)
-                    }.buttonStyle(.plain)
+            if !compact {
+                // Project context banner
+                if let projectName = viewModel.activeProjectName {
+                    HStack(spacing: 10) {
+                        Image(systemName: "tray.full").font(.caption).foregroundStyle(.blue)
+                        Text(projectName).font(.caption).fontWeight(.semibold).lineLimit(1)
+                        Spacer()
+                        Button {
+                            viewModel.inputText = "Tell me about the status of project '\(projectName)'"
+                            viewModel.sendMessage()
+                        } label: {
+                            Text("Ask").font(.caption2).padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(Color.blue.opacity(0.1)).clipShape(Capsule())
+                        }.buttonStyle(.plain)
+                        Button { viewModel.activeProjectID = nil; viewModel.activeProjectName = nil } label: {
+                            Image(systemName: "xmark.circle.fill").font(.caption).foregroundStyle(.tertiary)
+                        }.buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(Color.blue.opacity(0.04))
                 }
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(Color.blue.opacity(0.04))
             }
             messageList
                 .navigationDestination(for: UUID.self) { itemID in
                     KnowledgeItemNavigationView(itemID: itemID)
                 }
-            if let dictErr = dictationError {
-                HStack {
-                    Image(systemName: "mic.slash").foregroundStyle(.red)
-                    Text(dictErr).font(.caption).foregroundStyle(.red)
-                    Spacer()
-                    Button("Dismiss") { dictationError = nil }.font(.caption)
-                }.padding(.horizontal, 12).padding(.vertical, 4).background(Color.red.opacity(0.08))
+            if !compact {
+                if let dictErr = dictationError {
+                    HStack {
+                        Image(systemName: "mic.slash").foregroundStyle(.red)
+                        Text(dictErr).font(.caption).foregroundStyle(.red)
+                        Spacer()
+                        Button("Dismiss") { dictationError = nil }.font(.caption)
+                    }.padding(.horizontal, 12).padding(.vertical, 4).background(Color.red.opacity(0.08))
+                }
             }
             Divider()
             chatInputBar
         }
-        .navigationTitle(viewModel.currentConversation?.title.isEmpty != false ? "Chat" : viewModel.currentConversation?.title ?? "Chat")
+        .navigationTitle(compact ? "" : (viewModel.currentConversation?.title.isEmpty != false ? "Chat" : viewModel.currentConversation?.title ?? "Chat"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
