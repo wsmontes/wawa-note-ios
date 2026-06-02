@@ -31,6 +31,7 @@ final class ChatViewModel: ObservableObject {
     private var streamTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
     private var hasObservedContext = false
+    private var pendingContext: ChatContext?
     private var projectColorCache: [UUID: String] = [:]
 
     func projectColorHex(for projectID: UUID) -> String? {
@@ -60,13 +61,23 @@ final class ChatViewModel: ObservableObject {
             .removeDuplicates()
             .dropFirst()
             .sink { [weak self] newContext in
-                self?.switchToContext(newContext)
+                self?.pendingContext = newContext
             }
             .store(in: &cancellables)
     }
 
+    /// Call when chat overlay opens to apply any pending context change.
+    func syncContextIfNeeded() {
+        if let pending = pendingContext, pending != activeContext {
+            switchToContext(pending)
+            pendingContext = nil
+        }
+    }
+
     private func switchToContext(_ context: ChatContext) {
         guard context != activeContext else { return }
+        streamTask?.cancel()
+        streamTask = nil
         activeContext = context
 
         guard let conv = try? chatService.findOrCreateConversation(for: context) else { return }
@@ -79,8 +90,18 @@ final class ChatViewModel: ObservableObject {
         switch context {
         case .project(let id):
             activeProjectID = id
-            activeProjectName = (try? ProjectService(context: modelContext!).fetch(id: id))?.name
-            activeProjectColorHex = projectColorHex(for: id)
+            guard let ctx = modelContext else { break }
+            let svc = ProjectService(context: ctx)
+            if let project = try? svc.fetch(id: id) {
+                activeProjectName = project.name
+                if let hex = project.colorHex {
+                    activeProjectColorHex = hex
+                } else {
+                    let fallback = ProjectPalette.allHexes.first!
+                    try? svc.setColor(id, hex: fallback)
+                    activeProjectColorHex = fallback
+                }
+            }
         case .item(let itemID):
             if let ctx = modelContext,
                let item = try? KnowledgeItemService(context: ctx).fetchItem(id: itemID),

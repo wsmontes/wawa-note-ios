@@ -4,14 +4,13 @@ import Speech
 import AVFoundation
 
 struct ChatView: View {
+    @ObservedObject var viewModel: ChatViewModel
     var compact: Bool = false
     var autoFocus: Bool = false
     var onDismiss: (() -> Void)?
 
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var contentPipeline: ContentPipelineService
-    @EnvironmentObject private var chatOverlay: ChatOverlayState
-    @StateObject private var viewModel = ChatViewModel()
     @State private var showConversations = false
     @FocusState private var isInputFocused: Bool
     @State private var isDictating = false
@@ -134,7 +133,6 @@ struct ChatView: View {
         .onAppear {
             viewModel.setup(modelContext: modelContext)
             viewModel.loadConversations()
-            viewModel.observeContext(from: chatOverlay)
             if autoFocus { isInputFocused = true }
         }
         .onChange(of: autoFocus) { _, focus in
@@ -290,14 +288,6 @@ struct ChatView: View {
         .padding(.top, compact ? 4 : 8)
         .padding(.bottom, compact ? 0 : 8)
         .background(.bar)
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 20)
-                .onEnded { value in
-                    if value.translation.height > 50, abs(value.translation.width) < 30 {
-                        onDismiss?()
-                    }
-                }
-        )
     }
 
     // MARK: - Dictation

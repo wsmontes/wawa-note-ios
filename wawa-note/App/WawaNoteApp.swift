@@ -51,6 +51,7 @@ struct WawaNoteApp: App {
 
         // Run one-time data migrations
         KnowledgeItemService.migrateMeetingToAudio(context: ModelContext(modelContainer))
+        ProjectService.migrateProjectColors(context: ModelContext(modelContainer))
     }
 
     var body: some Scene {

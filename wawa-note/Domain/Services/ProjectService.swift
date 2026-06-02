@@ -35,6 +35,20 @@ final class ProjectService {
 
     // MARK: - Private
 
+    /// One-time: assign palette colors to all projects with nil colorHex.
+    static func migrateProjectColors(context: ModelContext) {
+        let service = ProjectService(context: context)
+        guard let all = try? service.allProjects() else { return }
+        let needColor = all.filter { $0.colorHex == nil }
+        guard !needColor.isEmpty else { return }
+        for project in needColor {
+            project.colorHex = service.assignColor()
+        }
+        try? context.save()
+    }
+
+    // MARK: - Private
+
     private func assignColor() -> String {
         let active = (try? activeProjects()) ?? []
         var usage: [String: Int] = [:]
