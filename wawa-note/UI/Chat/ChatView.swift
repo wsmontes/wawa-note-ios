@@ -4,6 +4,8 @@ import Speech
 import AVFoundation
 
 struct ChatView: View {
+    var autoFocus: Bool = false
+
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var contentPipeline: ContentPipelineService
     @StateObject private var viewModel = ChatViewModel()
@@ -86,6 +88,7 @@ struct ChatView: View {
         .onAppear {
             viewModel.setup(modelContext: modelContext)
             viewModel.loadConversations()
+            if autoFocus { isInputFocused = true }
         }
     }
 

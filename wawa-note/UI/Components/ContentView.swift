@@ -48,29 +48,22 @@ struct ContentView: View {
 
     // MARK: Chat Overlay
 
+    @State private var chatFocusTrigger = false
+
     @ViewBuilder
     private var chatOverlay: some View {
         ZStack(alignment: .bottom) {
-            Color.black.opacity(0.3).ignoresSafeArea()
+            Color.black.opacity(0.2).ignoresSafeArea()
                 .onTapGesture { dismissChat() }
 
             VStack(spacing: 0) {
-                // Drag handle
-                Capsule().fill(Color(.tertiaryLabel)).frame(width: 36, height: 5).padding(.top, 8)
-
-                // Chat content — starts at prompt, grows to half screen, then scrolls
-                ChatView()
-                    .frame(maxHeight: UIScreen.main.bounds.height * 0.5)
+                ChatView(autoFocus: true)
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: UIScreen.main.bounds.height * 0.5)
             .background(Color(.systemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             .transition(.move(edge: .bottom))
-            .gesture(
-                DragGesture().onEnded { v in
-                    if v.translation.height > 80 { dismissChat() }
-                }
-            )
+            .onAppear { chatFocusTrigger.toggle() }
         }
     }
 
