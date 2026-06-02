@@ -121,6 +121,7 @@ struct ChatMessage: Identifiable, Codable {
     var toolCallId: String?
     var citations: [ChatCitation]?
     var isThinking: Bool?
+    var projectColorHex: String?
 
     init(
         id: UUID = UUID(),
@@ -131,7 +132,8 @@ struct ChatMessage: Identifiable, Codable {
         toolCalls: [PersistedToolCall]? = nil,
         toolCallId: String? = nil,
         citations: [ChatCitation]? = nil,
-        isThinking: Bool? = nil
+        isThinking: Bool? = nil,
+        projectColorHex: String? = nil
     ) {
         self.id = id
         self.conversationId = conversationId
@@ -142,6 +144,7 @@ struct ChatMessage: Identifiable, Codable {
         self.toolCallId = toolCallId
         self.citations = citations
         self.isThinking = isThinking
+        self.projectColorHex = projectColorHex
     }
 }
 
@@ -182,4 +185,6 @@ struct ChatCitation: Codable {
     let title: String
     let snippet: String
     let itemType: KnowledgeItemType
+    var projectID: UUID?
+    var projectColorHex: String?
 }

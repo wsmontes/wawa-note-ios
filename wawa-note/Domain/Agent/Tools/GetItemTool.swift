@@ -67,7 +67,8 @@ struct GetItemTool: AgentTool {
         return ToolFormatting.success(
             summary: "get_item: \(item.title)",
             content: content,
-            citations: [ChatCitation(itemId: item.id, title: item.title, snippet: String(content.prefix(100)), itemType: item.type)],
+            citations: [ChatCitation(itemId: item.id, title: item.title, snippet: String(content.prefix(100)), itemType: item.type,
+                projectID: item.projectID, projectColorHex: item.projectID.flatMap { context.projectColorHex(for: $0) })],
             totalFound: 1, shown: 1
         )
     }

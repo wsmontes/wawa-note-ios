@@ -1,5 +1,40 @@
 import SwiftUI
 
+// MARK: - Color from Hex
+
+extension Color {
+    init(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+        let r = Double((int >> 16) & 0xFF) / 255
+        let g = Double((int >> 8) & 0xFF) / 255
+        let b = Double(int & 0xFF) / 255
+        self.init(red: r, green: g, blue: b)
+    }
+
+    static let defaultProjectColor = Color(hex: ProjectPalette.allHexes.first!)
+}
+
+// MARK: - Project Color Palette
+
+enum ProjectPalette {
+    static let allHexes = [
+        "#64748B",  // slateGray  — neutral, professional
+        "#0D9488",  // teal       — calm, structured
+        "#B45379",  // rose       — warm, creative
+        "#B45309",  // amber      — vibrant, earthy
+        "#7C3AED",  // lavender   — elegant
+        "#4D7C0F",  // sage       — natural, grounded
+        "#C2410C",  // terracotta — warm, active
+        "#2563EB",  // steelBlue  — trustworthy (default)
+        "#6B21A8",  // plum       — sophisticated, deep
+        "#5B8C2A",  // moss       — organic
+        "#DB2777",  // coral      — energetic, personal
+        "#9A3412",  // copper     — rich, archival
+    ]
+}
+
 enum AppColor {
     // Semantic
     static let recording = Color.red

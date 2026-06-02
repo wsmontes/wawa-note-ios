@@ -10,10 +10,39 @@ final class ProjectService {
     }
 
     func create(name: String, summary: String? = nil, iconName: String? = nil) throws -> Project {
-        let project = Project(name: name, summary: summary, iconName: iconName)
+        let project = Project(name: name, summary: summary, colorHex: assignColor(), iconName: iconName)
         context.insert(project)
         try context.save()
         return project
+    }
+
+    func setColor(_ projectID: UUID, hex: String) throws {
+        guard let project = try fetch(id: projectID) else { return }
+        project.colorHex = hex
+        try context.save()
+    }
+
+    func colorsForItems(_ items: [KnowledgeItem]) -> [UUID: String] {
+        var result: [UUID: String] = [:]
+        let projectIDs = Set(items.compactMap(\.projectID))
+        for pid in projectIDs {
+            if let project = try? fetch(id: pid), let hex = project.colorHex {
+                result[pid] = hex
+            }
+        }
+        return result
+    }
+
+    // MARK: - Private
+
+    private func assignColor() -> String {
+        let active = (try? activeProjects()) ?? []
+        var usage: [String: Int] = [:]
+        for hex in ProjectPalette.allHexes { usage[hex] = 0 }
+        for p in active {
+            if let hex = p.colorHex { usage[hex, default: 0] += 1 }
+        }
+        return ProjectPalette.allHexes.min(by: { usage[$0]! < usage[$1]! }) ?? ProjectPalette.allHexes[0]
     }
 
     func fetch(id: UUID) throws -> Project? {

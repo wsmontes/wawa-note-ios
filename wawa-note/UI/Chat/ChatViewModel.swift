@@ -17,6 +17,7 @@ final class ChatViewModel: ObservableObject {
     @Published var activeProjectID: UUID?
     @Published var activeProjectName: String?
     @Published var activeContext: ChatContext = .global
+    @Published var activeProjectColorHex: String?
 
     enum ChatState {
         case idle
@@ -30,6 +31,16 @@ final class ChatViewModel: ObservableObject {
     private var streamTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
     private var hasObservedContext = false
+    private var projectColorCache: [UUID: String] = [:]
+
+    func projectColorHex(for projectID: UUID) -> String? {
+        if let cached = projectColorCache[projectID] { return cached }
+        guard let ctx = modelContext,
+              let project = try? ProjectService(context: ctx).fetch(id: projectID),
+              let hex = project.colorHex else { return nil }
+        projectColorCache[projectID] = hex
+        return hex
+    }
 
     init() {
         loadConversations()
@@ -69,19 +80,23 @@ final class ChatViewModel: ObservableObject {
         case .project(let id):
             activeProjectID = id
             activeProjectName = (try? ProjectService(context: modelContext!).fetch(id: id))?.name
+            activeProjectColorHex = projectColorHex(for: id)
         case .item(let itemID):
             if let ctx = modelContext,
                let item = try? KnowledgeItemService(context: ctx).fetchItem(id: itemID),
                let pid = item.projectID {
                 activeProjectID = pid
                 activeProjectName = (try? ProjectService(context: ctx).fetch(id: pid))?.name
+                activeProjectColorHex = projectColorHex(for: pid)
             } else {
                 activeProjectID = nil
                 activeProjectName = nil
+                activeProjectColorHex = nil
             }
         default:
             activeProjectID = nil
             activeProjectName = nil
+            activeProjectColorHex = nil
         }
         loadConversations()
 
@@ -115,7 +130,7 @@ final class ChatViewModel: ObservableObject {
         let systemPrompt = "You are a concise assistant. Respond with EXACTLY one short line. No tools, no follow-up, no questions. Just a warm, contextual welcome."
         let conversationId = conv.id
 
-        let userMsg = ChatMessage(conversationId: conversationId, role: .user, content: welcomePrompt)
+        let userMsg = ChatMessage(conversationId: conversationId, role: .user, content: welcomePrompt, projectColorHex: activeProjectColorHex)
         messages.append(userMsg)
         try? chatService.appendMessage(userMsg)
         state = .thinking
@@ -174,7 +189,7 @@ final class ChatViewModel: ObservableObject {
 
         guard let conv = currentConversation else { return }
 
-        let userMsg = ChatMessage(conversationId: conv.id, role: .user, content: text)
+        let userMsg = ChatMessage(conversationId: conv.id, role: .user, content: text, projectColorHex: activeProjectColorHex)
         messages.append(userMsg)
         try? chatService.appendMessage(userMsg)
 
@@ -218,7 +233,9 @@ final class ChatViewModel: ObservableObject {
             activeProjectName: activeProjectName,
             activeItemID: activeContext.associatedID,
             contextKey: activeContext.key,
-            contextDisplayName: activeContext.displayName
+            contextDisplayName: activeContext.displayName,
+            activeProjectColorHex: activeProjectColorHex,
+            projectColorHexes: projectColorCache
         )
         let execModel = selectedModel.isEmpty ? "gpt-5-nano" : selectedModel
         let advModel = "gpt-5.5"
@@ -254,7 +271,8 @@ final class ChatViewModel: ObservableObject {
                             conversationId: conversationId,
                             role: .assistant,
                             content: fullContent,
-                            citations: citations
+                            citations: citations,
+                            projectColorHex: activeProjectColorHex
                         )
                         messages.append(assistantMsg)
                         try? chatService.appendMessage(assistantMsg)

@@ -158,10 +158,10 @@ struct ChatView: View {
 
                     ForEach(viewModel.messages) { msg in
                         if msg.role == .assistant || msg.role == .tool {
-                            ParsedMessageView(message: msg)
+                            ParsedMessageView(message: msg, projectColorHex: viewModel.activeProjectColorHex)
                                 .id(msg.id)
                         } else {
-                            ChatMessageBubbleView(message: msg)
+                            ChatMessageBubbleView(message: msg, projectColorHex: viewModel.activeProjectColorHex)
                                 .id(msg.id)
                         }
                     }
@@ -178,7 +178,7 @@ struct ChatView: View {
 
                     // Streaming text
                     if !viewModel.streamingText.isEmpty {
-                        StreamingMessageView(text: viewModel.streamingText)
+                        StreamingMessageView(text: viewModel.streamingText, projectColorHex: viewModel.activeProjectColorHex)
                             .id("streaming")
                     }
 
@@ -462,6 +462,14 @@ struct ChatView: View {
 
 struct ChatMessageBubbleView: View {
     let message: ChatMessage
+    var projectColorHex: String? = nil
+
+    private var effectiveColor: Color {
+        if let hex = projectColorHex ?? message.projectColorHex {
+            return Color(hex: hex)
+        }
+        return .blue
+    }
 
     var body: some View {
         VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
@@ -485,6 +493,11 @@ struct ChatMessageBubbleView: View {
                                 ForEach(citations, id: \.itemId) { c in
                                     NavigationLink(value: c.itemId) {
                                         HStack(spacing: 4) {
+                                            if let hex = c.projectColorHex {
+                                                Circle()
+                                                    .fill(Color(hex: hex))
+                                                    .frame(width: 6, height: 6)
+                                            }
                                             Image(systemName: c.itemType.icon).font(.caption2).foregroundStyle(c.itemType.color)
                                             Text(c.title).font(.caption2).lineLimit(1)
                                             Image(systemName: "arrow.up.right").font(.system(size: 7))
@@ -499,8 +512,17 @@ struct ChatMessageBubbleView: View {
                     }
                 }
                 .padding(12)
-                .background(message.role == .user ? Color.blue : Color(.systemBackground))
+                .background(message.role == .user ? effectiveColor : Color(.systemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 16))
+                .overlay(alignment: .leading) {
+                    if message.role == .assistant, projectColorHex ?? message.projectColorHex != nil {
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(effectiveColor.opacity(0.4))
+                            .frame(width: 3)
+                            .padding(.vertical, 10)
+                            .padding(.leading, 1)
+                    }
+                }
                 if message.role != .user { Spacer(minLength: 60) }
             }
         }
@@ -539,6 +561,12 @@ struct ToolCallCardView: View {
 
 struct StreamingMessageView: View {
     let text: String
+    var projectColorHex: String? = nil
+
+    private var cursorColor: Color {
+        if let hex = projectColorHex { return Color(hex: hex) }
+        return .blue
+    }
 
     var body: some View {
         HStack {
@@ -548,7 +576,7 @@ struct StreamingMessageView: View {
                         .font(.body)
                         .textSelection(.enabled)
                     Text(" ▌")
-                        .foregroundColor(.blue)
+                        .foregroundColor(cursorColor)
                 }
             }
             .padding(12)
@@ -668,12 +696,12 @@ struct PipelineProgressCardView: View {
 /// Falls back to plain text if no blocks are extracted.
 struct ParsedMessageView: View {
     let message: ChatMessage
+    var projectColorHex: String? = nil
 
     var body: some View {
         let (blocks, _) = ContentParser.parse(message.content)
         if blocks.isEmpty || (blocks.count == 1 && message.role == .assistant) {
-            // Single text block or no blocks parsed → render as plain text bubble
-            ChatMessageBubbleView(message: message)
+            ChatMessageBubbleView(message: message, projectColorHex: projectColorHex)
         } else {
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(blocks) { block in
