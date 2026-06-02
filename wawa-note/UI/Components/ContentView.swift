@@ -2,84 +2,110 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var showSettings = false
-    @State private var showChatOverlay = false
-    @State private var chatOffset: CGFloat = UIScreen.main.bounds.height
+    @State private var showChat = false
+    @State private var chatDetent: ChatDetent = .prompt
+    @State private var chatContext: String = "global"
+
+    enum ChatDetent { case prompt, half, full }
 
     var body: some View {
-        ZStack {
-            TabView {
-                NavigationStack {
-                    HomeView()
-                        .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
-                                Button { showSettings = true } label: {
-                                    Image(systemName: "gearshape").accessibilityLabel("Settings")
-                                }
-                            }
-                        }
-                }
-                .tabItem { Label("Capture", systemImage: "mic.badge.plus") }
+        TabView {
+            NavigationStack {
+                HomeView()
+            }
+            .tabItem { Label("Capture", systemImage: "mic.badge.plus") }
 
+            NavigationStack {
                 InboxView()
-                    .tabItem { Label("Inbox", systemImage: "tray") }
-
-                NavigationStack {
-                    ExploreView()
-                }
-                .tabItem { Label("Explore", systemImage: "rectangle.grid.1x2") }
-
-                NavigationStack {
-                    ChatView()
-                }
-                .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }
             }
+            .tabItem { Label("Inbox", systemImage: "tray") }
 
-            // Floating chat button (visible on all tabs)
-            VStack { Spacer()
-                HStack { Spacer()
-                    Button {
-                        withAnimation(.spring(duration: 0.35)) { chatOffset = 60 }
-                        showChatOverlay = true
-                    } label: {
-                        Image(systemName: "bubble.left.and.bubble.right.fill")
-                            .font(.title3)
-                            .foregroundStyle(.white)
-                            .frame(width: 48, height: 48)
-                            .background(.blue, in: Circle())
-                            .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
+            NavigationStack {
+                ExploreView()
+            }
+            .tabItem { Label("Explore", systemImage: "rectangle.grid.1x2") }
+        }
+        .overlay(alignment: .bottom) { chatOverlay }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                HStack(spacing: 12) {
+                    Button { withAnimation(.spring) { showChat = true; chatDetent = .prompt } } label: {
+                        Image(systemName: "bubble.left.and.bubble.right")
+                            .accessibilityLabel("Chat")
                     }
-                    .padding(.trailing, 20).padding(.bottom, 90)
+                    Button { showSettings = true } label: {
+                        Image(systemName: "gearshape").accessibilityLabel("Settings")
+                    }
                 }
-            }
-
-            // Chat overlay
-            if showChatOverlay {
-                Color.black.opacity(0.3).ignoresSafeArea()
-                    .onTapGesture { dismissChat() }
-                    .transition(.opacity)
-
-                VStack(spacing: 0) {
-                    // Drag handle
-                    Capsule().fill(Color(.tertiaryLabel)).frame(width: 36, height: 5).padding(.top, 8)
-                    ChatOverlayView(onDismiss: dismissChat)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .offset(y: chatOffset)
-                .transition(.move(edge: .bottom))
             }
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
     }
 
+    // MARK: Chat Overlay
+
+    @ViewBuilder
+    private var chatOverlay: some View {
+        if showChat {
+            ZStack(alignment: .bottom) {
+                Color.black.opacity(chatDetent == .full ? 0 : 0.3).ignoresSafeArea()
+                    .onTapGesture { dismissChat() }
+
+                VStack(spacing: 0) {
+                    // Drag handle
+                    Capsule().fill(Color(.tertiaryLabel)).frame(width: 36, height: 5).padding(.top, 8)
+
+                    // Chat content
+                    ChatView()
+
+                    // Prompt bar (always visible at bottom of overlay)
+                    if chatDetent != .full {
+                        Divider()
+                        promptBar
+                    }
+                }
+                .frame(
+                    maxWidth: .infinity,
+                    maxHeight: chatDetent == .prompt ? 88 :
+                               chatDetent == .half ? UIScreen.main.bounds.height * 0.5 :
+                               UIScreen.main.bounds.height
+                )
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .gesture(
+                    DragGesture()
+                        .onEnded { value in
+                            let v = value.translation.height
+                            if v > 80 { showChat = false } // swipe down = dismiss
+                            else if v < -80 && chatDetent == .prompt { chatDetent = .half } // swipe up = expand
+                            else if v < -80 && chatDetent == .half { chatDetent = .full }
+                        }
+                )
+            }
+            .transition(.move(edge: .bottom))
+        }
+    }
+
+    private var promptBar: some View {
+        HStack(spacing: 8) {
+            TextField("Ask about anything...", text: .constant(""))
+                .font(.subheadline)
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 20))
+            Button {
+                withAnimation(.spring) { chatDetent = .half }
+            } label: {
+                Image(systemName: "arrow.up.circle.fill").font(.title2).foregroundStyle(.blue)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
     private func dismissChat() {
-        withAnimation(.spring(duration: 0.35)) { chatOffset = UIScreen.main.bounds.height }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showChatOverlay = false }
+        withAnimation(.spring) { showChat = false }
     }
 }
-
-// MARK: - Chat Overlay
 
 struct ChatOverlayView: View {
     let onDismiss: () -> Void
@@ -104,7 +130,6 @@ struct ExploreView: View {
     enum ExploreTab: String, CaseIterable {
         case projects = "Projects"
         case timeline = "Timeline"
-
         var icon: String {
             switch self {
             case .projects: "folder"
@@ -120,15 +145,11 @@ struct ExploreView: View {
                     Label(tab.rawValue, systemImage: tab.icon).tag(tab)
                 }
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.vertical, 8)
+            .pickerStyle(.segmented).padding(.horizontal).padding(.vertical, 8)
 
             switch selectedTab {
-            case .projects:
-                ProjectListView()
-            case .timeline:
-                TimelineExplorerView()
+            case .projects: ProjectListView()
+            case .timeline: TimelineExplorerView()
             }
         }
     }
