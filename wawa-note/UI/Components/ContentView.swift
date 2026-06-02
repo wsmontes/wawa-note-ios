@@ -6,36 +6,26 @@ struct ContentView: View {
     @State private var selectedTab = 0
 
     var body: some View {
-        ZStack {
-            TabView(selection: Binding(
-                get: { selectedTab },
-                set: { newValue in
-                    if newValue == 3 {
-                        showChat = true  // Chat tab opens overlay, not tab switch
-                    } else {
-                        selectedTab = newValue
-                    }
-                }
-            )) {
-                NavigationStack { HomeView() }
-                    .tabItem { Label("Capture", systemImage: "mic.badge.plus") }.tag(0)
-
-                NavigationStack { InboxView() }
-                    .tabItem { Label("Inbox", systemImage: "tray") }.tag(1)
-
-                NavigationStack { ExploreView() }
-                    .tabItem { Label("Explore", systemImage: "rectangle.grid.1x2") }.tag(2)
-
-                // Chat tab — intercepted to open overlay instead
-                Color.clear
-                    .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }.tag(3)
+        TabView(selection: Binding(
+            get: { selectedTab },
+            set: { newValue in
+                if newValue == 3 { showChat = true }
+                else { selectedTab = newValue }
             }
+        )) {
+            NavigationStack { HomeView() }
+                .tabItem { Label("Capture", systemImage: "mic.badge.plus") }.tag(0)
 
-            // Chat overlay
-            if showChat {
-                chatOverlay
-            }
+            NavigationStack { InboxView() }
+                .tabItem { Label("Inbox", systemImage: "tray") }.tag(1)
+
+            NavigationStack { ExploreView() }
+                .tabItem { Label("Explore", systemImage: "rectangle.grid.1x2") }.tag(2)
+
+            Color.clear
+                .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }.tag(3)
         }
+        .overlay(alignment: .bottom) { if showChat { chatOverlay } }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showSettings = true } label: {
@@ -46,8 +36,6 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) { SettingsView() }
     }
 
-    // MARK: Chat Overlay
-
     @ViewBuilder
     private var chatOverlay: some View {
         VStack(spacing: 0) {
@@ -57,38 +45,22 @@ struct ContentView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .frame(maxHeight: UIScreen.main.bounds.height * 0.5)
         }
-        .ignoresSafeArea(.keyboard)
         .transition(.move(edge: .bottom))
-    }
-
-    private func dismissChat() {
-        withAnimation(.spring) { showChat = false }
     }
 }
 
 struct ExploreView: View {
     @State private var selectedTab: ExploreTab = .projects
-
     enum ExploreTab: String, CaseIterable {
-        case projects = "Projects"
-        case timeline = "Timeline"
-        var icon: String {
-            switch self {
-            case .projects: "folder"
-            case .timeline: "calendar.day.timeline.leading"
-            }
-        }
+        case projects = "Projects"; case timeline = "Timeline"
+        var icon: String { switch self { case .projects: "folder"; case .timeline: "calendar.day.timeline.leading" } }
     }
-
     var body: some View {
         VStack(spacing: 0) {
             Picker("View", selection: $selectedTab) {
-                ForEach(ExploreTab.allCases, id: \.self) { tab in
-                    Label(tab.rawValue, systemImage: tab.icon).tag(tab)
-                }
+                ForEach(ExploreTab.allCases, id: \.self) { tab in Label(tab.rawValue, systemImage: tab.icon).tag(tab) }
             }
             .pickerStyle(.segmented).padding(.horizontal).padding(.vertical, 8)
-
             switch selectedTab {
             case .projects: ProjectListView()
             case .timeline: TimelineExplorerView()
