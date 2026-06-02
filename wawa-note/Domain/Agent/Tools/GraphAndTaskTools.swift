@@ -234,11 +234,13 @@ struct UpdateTaskTool: AgentTool {
 
 struct CreateEdgeTool: AgentTool {
     let name = "create_edge"
-    let description = "Create a connection between two items. Types: supports, contradicts, references, relates_to."
+    let description = "Create a typed connection between two items. Include source_segment_ids to link the edge to specific transcript segments or note paragraphs."
     let parameters = AIToolParameters(properties: [
         "from_title": AIToolProperty(type: "string", description: "Title of the source item", enum: nil),
         "to_title": AIToolProperty(type: "string", description: "Title of the target item", enum: nil),
-        "type": AIToolProperty(type: "string", description: "supports|contradicts|references|relates_to", enum: nil)
+        "type": AIToolProperty(type: "string", description: "supports|contradicts|references|relates_to|mentions|precedes|produces", enum: nil),
+        "source_segment_ids": AIToolProperty(type: "array", description: "Optional segment IDs that prove this connection"),
+        "confidence": AIToolProperty(type: "number", description: "Confidence 0.0-1.0 for this edge. AI-inferred edges should include this.")
     ], required: ["from_title", "to_title", "type"])
 
     func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
@@ -255,8 +257,12 @@ struct CreateEdgeTool: AgentTool {
         }
         let edgeSvc = GraphEdgeService(context: context.modelContext)
         let et = EdgeType(rawValue: typeStr) ?? .relatesTo
-        try edgeSvc.create(fromID: from.id, toID: to.id, edgeType: et, provenanceItemID: from.id)
-        return ToolResult(content: "Edge created: \(from.title) → [\(et.rawValue)] → \(to.title)", citations: [], isError: false, displaySummary: "Connected: \(from.title) → \(to.title)")
+        let segmentIDs = (args["source_segment_ids"] as? [String]) ?? []
+        let conf = (args["confidence"] as? Double) ?? 0.8
+        try edgeSvc.create(fromID: from.id, toID: to.id, edgeType: et, weight: conf,
+            provenanceItemID: from.id, provenanceSegmentIDs: segmentIDs)
+        let prov = segmentIDs.isEmpty ? "item-level" : "\(segmentIDs.count) segment(s)"
+        return ToolResult(content: "Edge created: \(from.title) → [\(et.rawValue)] → \(to.title) (provenance: \(prov))", citations: [], isError: false, displaySummary: "Connected: \(from.title) → \(to.title)")
     }
 }
 
@@ -1085,5 +1091,71 @@ struct ExecuteJavaScriptTool: AgentTool {
             citations: [], isError: false,
             displaySummary: "JS: \(desc.isEmpty ? code.prefix(40) : desc.prefix(60))"
         )
+    }
+}
+
+// MARK: - Semantic Search Tool (Phase I)
+
+struct SearchSemanticTool: AgentTool {
+    let name = "search_semantic"
+    let description = "Semantic search across knowledge items using embeddings. Finds conceptually similar content even when keywords don't match. Use for broad research questions, thematic exploration, and finding related items by meaning."
+
+    let parameters = AIToolParameters(properties: [
+        "query": AIToolProperty(type: "string", description: "Natural language question or concept to search for"),
+        "limit": AIToolProperty(type: "integer", description: "Max results (default 10)")
+    ], required: ["query"])
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let query = arguments["query"] as? String, !query.isEmpty else {
+            return ToolFormatting.error(tool: name, reason: "Missing query.", fix: "Provide a search query.")
+        }
+        let limit = min((arguments["limit"] as? Int) ?? 10, 20)
+        let itemSvc = KnowledgeItemService(context: context.modelContext)
+        let items = (try? itemSvc.allItems()) ?? []
+
+        // Try semantic search first (embeddings), fall back to FTS
+        let embeddingSvc = EmbeddingService()
+        let embStore = FileArtifactStore()
+        var scored: [(item: KnowledgeItem, score: Double, snippet: String)] = []
+
+        // Generate embedding for query
+        guard let provider = try? ProviderRouter.resolveActive(context: context.modelContext) else {
+            return ToolFormatting.error(tool: name, reason: "No provider for embeddings.", fix: "Configure a provider in Settings.")
+        }
+        let queryEmbedding: [Float]
+        do {
+            // Use a temporary UUID for the query embedding
+            let tmpID = UUID()
+            queryEmbedding = try await embeddingSvc.generateAndStore(for: tmpID, text: query, using: provider)
+        } catch {
+            // Fallback to FTS
+            let ftsResults = SearchService().searchNow(query: query, in: items).prefix(limit)
+            let lines = ftsResults.map { r in "- \(items.first(where: {$0.id == r.itemID})?.title ?? "??"): \(r.snippet)" }
+            return ToolResult(content: "FTS results (embeddings unavailable):\n" + lines.joined(separator: "\n"), citations: [], isError: false, displaySummary: "search: \(ftsResults.count) FTS")
+        }
+
+        // Score items by cosine similarity
+        for item in items {
+            guard let emb = embeddingSvc.load(for: item.id), !emb.isEmpty else { continue }
+            let sim = Double(SemanticSearchService().cosineSimilarity(queryEmbedding, emb))
+            if sim > 0.3 { // Minimum relevance threshold
+                let snippet: String = item.bodyText.map { String($0.prefix(200)) } ?? item.title
+                scored.append((item, sim, snippet))
+            }
+        }
+
+        scored.sort { $0.score > $1.score }
+        let top = scored.prefix(limit)
+        guard !top.isEmpty else {
+            return ToolResult(content: "No semantically relevant items found for \"\(query)\". Try different wording or use search_knowledge for keyword search.", citations: [], isError: false, displaySummary: "semantic: 0 results")
+        }
+
+        var content = "Semantic search results for \"\(query)\":\n\n"
+        var citations: [ChatCitation] = []
+        for (i, r) in top.enumerated() {
+            content += "\(i+1). **\(r.item.title)** (score: \(String(format: "%.0f", r.score * 100))%)\n   \(r.snippet)\n\n"
+            citations.append(ChatCitation(itemId: r.item.id, title: r.item.title, snippet: r.snippet, itemType: r.item.type))
+        }
+        return ToolResult(content: content, citations: citations, isError: false, displaySummary: "semantic: \(top.count) results")
     }
 }

@@ -15,6 +15,26 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Project context banner (Phase H)
+            if let projectName = viewModel.activeProjectName {
+                HStack(spacing: 10) {
+                    Image(systemName: "tray.full").font(.caption).foregroundStyle(.blue)
+                    Text(projectName).font(.caption).fontWeight(.semibold).lineLimit(1)
+                    Spacer()
+                    Button {
+                        viewModel.inputText = "Tell me about the status of project '\(projectName)'"
+                        viewModel.sendMessage()
+                    } label: {
+                        Text("Ask").font(.caption2).padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Color.blue.opacity(0.1)).clipShape(Capsule())
+                    }.buttonStyle(.plain)
+                    Button { viewModel.activeProjectID = nil; viewModel.activeProjectName = nil } label: {
+                        Image(systemName: "xmark.circle.fill").font(.caption).foregroundStyle(.tertiary)
+                    }.buttonStyle(.plain)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(Color.blue.opacity(0.04))
+            }
             messageList
             if let dictErr = dictationError {
                 HStack {
@@ -399,13 +419,16 @@ struct ChatMessageBubbleView: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 6) {
                                 ForEach(citations, id: \.itemId) { c in
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "doc.text").font(.caption2)
-                                        Text(c.title).font(.caption2).lineLimit(1)
+                                    NavigationLink(value: c.itemId) {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: c.itemType.icon).font(.caption2).foregroundStyle(c.itemType.color)
+                                            Text(c.title).font(.caption2).lineLimit(1)
+                                            Image(systemName: "arrow.up.right").font(.system(size: 7))
+                                        }
+                                        .padding(.horizontal, 8).padding(.vertical, 4)
+                                        .background(.ultraThinMaterial)
+                                        .clipShape(Capsule())
                                     }
-                                    .padding(.horizontal, 8).padding(.vertical, 4)
-                                    .background(.ultraThinMaterial)
-                                    .clipShape(Capsule())
                                 }
                             }
                         }
@@ -834,5 +857,55 @@ struct CodeBlockView: View {
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Phase F: Evidence & Confidence
+
+struct EvidenceCardView: View {
+    let itemTitle: String; let itemID: UUID; let snippet: String
+    let segmentID: String?; let confidence: Double?; let edgeType: String?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "arrow.turn.down.right").font(.system(size: 9)).foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(itemTitle).font(.caption).fontWeight(.medium).lineLimit(1)
+                Text(snippet.prefix(120)).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                HStack(spacing: 6) {
+                    if let seg = segmentID { Text("Seg \(seg.prefix(8))").font(.system(size: 9)).foregroundStyle(.tertiary) }
+                    if let conf = confidence { ConfidenceBadge(value: conf) }
+                    if let et = edgeType { Text(et).font(.system(size: 9)).padding(.horizontal,4).padding(.vertical,1).background(Color.blue.opacity(0.1)).clipShape(Capsule()) }
+                }
+            }
+            Spacer()
+            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+        }
+        .padding(8).background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+struct ConfidenceBadge: View {
+    let value: Double
+    private var color: Color { value >= 0.8 ? .green : value >= 0.5 ? .orange : .gray }
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text("\(Int(value * 100))%").font(.system(size: 9)).foregroundStyle(color)
+        }
+    }
+}
+
+struct AIGeneratedBadge: View {
+    let confidence: Double?; let source: String?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "sparkles").font(.system(size: 8))
+            Text(source ?? "AI").font(.system(size: 9))
+            if let conf = confidence { ConfidenceBadge(value: conf) }
+        }
+        .padding(.horizontal, 6).padding(.vertical, 2).background(Color.blue.opacity(0.08)).clipShape(Capsule())
     }
 }

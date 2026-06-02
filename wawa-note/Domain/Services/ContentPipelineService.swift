@@ -533,6 +533,119 @@ final class FrameworkService {
         )
     }
 
+    static var coachingFramework: ProjectFramework {
+        ProjectFramework(
+            id: "builtin/coaching", name: "Coaching",
+            description: "Tracks competency demonstrations, behavioral shifts, and session outcomes across coaching engagements.",
+            itemAnalysis: AnalysisConfig(
+                systemPrompt: "You are a leadership coach analyst. Extract competency demonstrations, behavioral shifts, commitment follow-through, and breakthrough insights. Return only valid JSON.",
+                outputSchema: AnalysisOutputSchema(type: "object", properties: [
+                    "short_summary": SchemaProperty(type: "string", items: nil, properties: nil, description: "One-line session summary"),
+                    "competency_demonstrations": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
+                        "competency": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                        "evidence": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                        "level": SchemaProperty(type: "string", items: nil, properties: nil, description: "demonstrated|developing|absent")
+                    ]), properties: nil, description: "Competencies observed"),
+                    "commitments": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
+                        "description": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                        "deadline": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                        "follow_through": SchemaProperty(type: "string", items: nil, properties: nil, description: "pending|in_progress|completed|abandoned")
+                    ]), properties: nil, description: "Commitments made"),
+                    "aha_moments": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Breakthrough insights"),
+                    "next_session": SchemaProperty(type: "string", items: nil, properties: nil, description: "What to prepare for next session")
+                ], required: ["short_summary"]),
+                renderAs: [FieldRenderer(field: "short_summary", type: .card, title: "Summary", icon: "text.alignleft"),
+                    FieldRenderer(field: "competency_demonstrations", type: .list, title: "Competencies", icon: "star"),
+                    FieldRenderer(field: "commitments", type: .list, title: "Commitments", icon: "checklist"),
+                    FieldRenderer(field: "aha_moments", type: .chips, title: "Breakthroughs", icon: "lightbulb")]
+            ),
+            projectSynthesis: SynthesisConfig(systemPrompt: "Track competency growth, commitment completion rates, and emerging themes across coaching sessions.", outputSchema: AnalysisOutputSchema(type: "object", properties: [:], required: nil)),
+            views: [ViewDefinition(id: "sessions", title: "Sessions", type: .list, source: "items"),
+                ViewDefinition(id: "competencies", title: "Competencies", type: .cards, source: "analysis.competency_demonstrations"),
+                ViewDefinition(id: "growth", title: "Growth", type: .timeline, source: "items")],
+            entityKinds: ["competency", "commitment", "feedback_type", "behavioral_shift"],
+            edgeTypes: ["supports", "contradicts", "references", "relates_to", "precedes", "mentions"]
+        )
+    }
+
+    static var legalFramework: ProjectFramework {
+        ProjectFramework(
+            id: "builtin/legal", name: "Legal Brief",
+            description: "Connects case citations, statutes, depositions, and party positions with full provenance chains.",
+            itemAnalysis: AnalysisConfig(
+                systemPrompt: "You are a legal analyst. Extract case citations, statute references, party positions, deposition quotes, and privilege indicators. Flag uncertain readings. Return only valid JSON.",
+                outputSchema: AnalysisOutputSchema(type: "object", properties: [
+                    "short_summary": SchemaProperty(type: "string", items: nil, properties: nil, description: "One-line summary"),
+                    "case_citations": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
+                        "case_name": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                        "citation": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                        "relevance": SchemaProperty(type: "string", items: nil, properties: nil, description: "supports|contradicts|distinguishes")
+                    ]), properties: nil, description: "Cases cited"),
+                    "deposition_quotes": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
+                        "quote": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                        "witness": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                        "significance": SchemaProperty(type: "string", items: nil, properties: nil, description: nil)
+                    ]), properties: nil, description: "Key deposition quotes"),
+                    "statutes": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Statutes referenced"),
+                    "privilege_concerns": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Potential privilege issues")
+                ], required: ["short_summary"]),
+                renderAs: [FieldRenderer(field: "short_summary", type: .card, title: "Summary", icon: "text.alignleft"),
+                    FieldRenderer(field: "case_citations", type: .list, title: "Cases", icon: "building.columns"),
+                    FieldRenderer(field: "deposition_quotes", type: .list, title: "Depositions", icon: "quote.bubble"),
+                    FieldRenderer(field: "statutes", type: .chips, title: "Statutes", icon: "book.pages"),
+                    FieldRenderer(field: "privilege_concerns", type: .list, title: "Privilege", icon: "lock.shield")]
+            ),
+            projectSynthesis: SynthesisConfig(systemPrompt: "Synthesize legal strategy. Identify conflicting testimonies, supporting precedents, and gaps in evidence.", outputSchema: AnalysisOutputSchema(type: "object", properties: [:], required: nil)),
+            views: [ViewDefinition(id: "documents", title: "Documents", type: .list, source: "items"),
+                ViewDefinition(id: "cases", title: "Cases", type: .cards, source: "analysis.case_citations"),
+                ViewDefinition(id: "timeline", title: "Timeline", type: .timeline, source: "items"),
+                ViewDefinition(id: "graph", title: "Graph", type: .graph, source: "edges")],
+            entityKinds: ["case", "statute", "party", "jurisdiction", "court", "witness"],
+            edgeTypes: ["supports", "contradicts", "references", "relates_to", "precedes", "mentions", "distinguishes"]
+        )
+    }
+
+    static var productFramework: ProjectFramework {
+        ProjectFramework(
+            id: "builtin/product", name: "Product Spec",
+            description: "Connects user stories, requirements, constraints, and bugs with full traceability.",
+            itemAnalysis: AnalysisConfig(
+                systemPrompt: "You are a product analyst. Extract user stories, requirements, technical constraints, bug references, and design decisions. Return only valid JSON.",
+                outputSchema: AnalysisOutputSchema(type: "object", properties: [
+                    "short_summary": SchemaProperty(type: "string", items: nil, properties: nil, description: "One-line summary"),
+                    "user_stories": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
+                        "story": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                        "role": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                        "criteria": SchemaProperty(type: "string", items: nil, properties: nil, description: "Acceptance criteria")
+                    ]), properties: nil, description: "User stories"),
+                    "requirements": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
+                        "description": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                        "priority": SchemaProperty(type: "string", items: nil, properties: nil, description: "P0/P1/P2/P3"),
+                        "source": SchemaProperty(type: "string", items: nil, properties: nil, description: nil)
+                    ]), properties: nil, description: "Requirements"),
+                    "constraints": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Technical constraints"),
+                    "bugs": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Bug IDs referenced"),
+                    "design_decisions": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
+                        "decision": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                        "rationale": SchemaProperty(type: "string", items: nil, properties: nil, description: nil)
+                    ]), properties: nil, description: "Design decisions")
+                ], required: ["short_summary"]),
+                renderAs: [FieldRenderer(field: "short_summary", type: .card, title: "Summary", icon: "text.alignleft"),
+                    FieldRenderer(field: "user_stories", type: .list, title: "Stories", icon: "person.text.rectangle"),
+                    FieldRenderer(field: "requirements", type: .list, title: "Requirements", icon: "list.bullet.clipboard"),
+                    FieldRenderer(field: "constraints", type: .chips, title: "Constraints", icon: "hammer"),
+                    FieldRenderer(field: "design_decisions", type: .list, title: "Decisions", icon: "paintpalette")]
+            ),
+            projectSynthesis: SynthesisConfig(systemPrompt: "Synthesize product specs. Identify requirement conflicts, missing criteria, and cross-component dependencies.", outputSchema: AnalysisOutputSchema(type: "object", properties: [:], required: nil)),
+            views: [ViewDefinition(id: "specs", title: "Specs", type: .list, source: "items"),
+                ViewDefinition(id: "stories", title: "Stories", type: .cards, source: "analysis.user_stories"),
+                ViewDefinition(id: "requirements", title: "Reqs", type: .table, source: "analysis.requirements"),
+                ViewDefinition(id: "graph", title: "Deps", type: .graph, source: "edges")],
+            entityKinds: ["story", "requirement", "constraint", "component", "bug"],
+            edgeTypes: ["supports", "contradicts", "references", "relates_to", "precedes", "blockedBy", "produces"]
+        )
+    }
+
     static var blankFramework: ProjectFramework {
         ProjectFramework(
             id: "builtin/blank",
@@ -558,6 +671,58 @@ final class FrameworkService {
             entityKinds: [],
             edgeTypes: ["relates_to", "references"]
         )
+    }
+}
+
+// MARK: - Project Health Engine (Phase A)
+
+enum ProjectHealthEngine {
+    struct HealthResult {
+        let score: Int; let status: String
+        let decisionVelocity: Double; let actionDebtRatio: Double
+        let evidenceFreshnessDays: Double; let graphDensity: Double
+        let riskExposure: Double; let anomalies: [String]
+    }
+    @MainActor
+    static func compute(for projectID: UUID, context: ModelContext) -> HealthResult? {
+        guard let _ = try? ProjectService(context: context).fetch(id: projectID) else { return nil }
+        let items = (try? ProjectService(context: context).items(in: projectID)) ?? []
+        let tasks = (try? TaskService(context: context).tasks(for: projectID)) ?? []
+        let edgeSvc = GraphEdgeService(context: context)
+        let itemIDs = Set(items.map(\.id))
+        let allEdges = (try? edgeSvc.recentEdges(limit: 500))?.filter { itemIDs.contains($0.fromID) || itemIDs.contains($0.toID) } ?? []
+        var decisionCount = 0; var riskCount = 0; var totalRiskWeight = 0.0
+        let store = FileArtifactStore()
+        for item in items {
+            guard let a = try? store.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) else { continue }
+            decisionCount += a.decisions.count; riskCount += a.risks.count
+            totalRiskWeight += a.risks.map { ($0.confidence ?? 0.5) * 2.0 }.reduce(0, +)
+        }
+        let decisionVelocity = items.count >= 4 ? Double(decisionCount) / (Double(items.count) / 4.0) : Double(decisionCount)
+        let totalTasks = tasks.count; let openTasks = tasks.filter { $0.status == .todo || $0.status == .inProgress }.count
+        let actionDebtRatio = totalTasks > 0 ? Double(openTasks) / Double(totalTasks) : 0
+        let now = Date(); let ages = items.map { now.timeIntervalSince($0.createdAt) / 86400 }.sorted()
+        let medianAge: Double = ages.isEmpty ? 999 : (ages.count % 2 == 0 ? (ages[ages.count/2-1]+ages[ages.count/2])/2 : ages[ages.count/2])
+        let entityCount = Set(allEdges.flatMap { [$0.fromID, $0.toID] }).count
+        let graphDensity = entityCount > 1 ? Double(allEdges.count) / Double(entityCount * (entityCount - 1)) : 0
+        let riskExposure = riskCount > 0 ? totalRiskWeight / Double(riskCount * 2) : 0
+        let dv = min(decisionVelocity / 2.0, 1.0) * 25; let ad = (1.0 - actionDebtRatio) * 25.0
+        let ef = medianAge < 7 ? 20.0 : medianAge < 14 ? 15.0 : medianAge < 30 ? 10.0 : 5.0
+        let gd = graphDensity > 0.10 ? 15.0 : graphDensity > 0.05 ? 10.0 : 5.0
+        let re = (1.0 - riskExposure) * 15.0; let score = Int((dv + ad + ef + gd + re).rounded())
+        let status = score >= 70 ? "healthy" : score >= 40 ? "stale" : score >= 30 ? "atRisk" : "dormant"
+        var anomalies: [String] = []
+        if medianAge > 7 { anomalies.append("Silence burst: \(Int(medianAge))d") }
+        if decisionVelocity < 0.5 && items.count >= 3 { anomalies.append("Decision drought") }
+        if actionDebtRatio > 0.7 && totalTasks > 0 { anomalies.append("Action debt: \(Int(actionDebtRatio*100))%") }
+        if riskExposure > 0.5 { anomalies.append("High risk exposure") }
+        return HealthResult(score: score, status: status, decisionVelocity: decisionVelocity, actionDebtRatio: actionDebtRatio, evidenceFreshnessDays: medianAge, graphDensity: graphDensity, riskExposure: riskExposure, anomalies: anomalies)
+    }
+    @MainActor
+    static func updateProject(_ pid: UUID, context: ModelContext) {
+        guard let r = compute(for: pid, context: context), let p = try? ProjectService(context: context).fetch(id: pid) else { return }
+        p.healthScore = Double(r.score); p.healthStatus = r.status; p.lastActivityAt = Date()
+        try? context.save()
     }
 }
 

@@ -1,170 +1,253 @@
 import SwiftUI
 import SwiftData
 
+// MARK: - Graph Node
+
+enum NodeKind: String, CaseIterable { case project, task, item, person, entity, related }
+
+struct GraphNode: Identifiable {
+    let id: UUID
+    let label: String
+    let subtitle: String
+    let kind: NodeKind
+    var x: CGFloat = 0; var y: CGFloat = 0
+    var vx: CGFloat = 0; var vy: CGFloat = 0
+    var degree: Int = 0
+
+    var color: Color {
+        switch kind { case .project: .blue; case .task: .teal; case .item: .gray; case .person: .purple; case .entity: .orange; case .related: .mint }
+    }
+    var radius: CGFloat { min(40, max(16, 14 + CGFloat(degree) * 3)) }
+}
+
+struct GraphEdgeItem: Identifiable {
+    let id = UUID()
+    let fromID: UUID; let toID: UUID
+    let type: EdgeType; let weight: Double; let provenance: String?
+}
+
+// MARK: - Force-Directed Layout
+
+enum ForceLayout {
+    static let iterations = 80
+    static let repulsion: CGFloat = 6000
+    static let attraction: CGFloat = 0.01
+    static let damping: CGFloat = 0.85
+    static let centerGravity: CGFloat = 0.001
+
+    static func compute(nodes: inout [GraphNode], edges: [GraphEdgeItem], size: CGSize) {
+        let centerX = size.width / 2; let centerY = size.height / 2
+        for _ in 0..<iterations {
+            var forces: [(CGFloat, CGFloat)] = Array(repeating: (0, 0), count: nodes.count)
+            // Repulsion between all pairs
+            for i in 0..<nodes.count {
+                for j in (i+1)..<nodes.count {
+                    let dx = nodes[i].x - nodes[j].x; let dy = nodes[i].y - nodes[j].y
+                    let dist = max(1, sqrt(dx*dx + dy*dy))
+                    let force = repulsion / (dist * dist)
+                    let fx = (dx / dist) * force; let fy = (dy / dist) * force
+                    forces[i].0 += fx; forces[i].1 += fy
+                    forces[j].0 -= fx; forces[j].1 -= fy
+                }
+            }
+            // Attraction along edges
+            for edge in edges {
+                guard let i = nodes.firstIndex(where: { $0.id == edge.fromID }),
+                      let j = nodes.firstIndex(where: { $0.id == edge.toID }) else { continue }
+                let dx = nodes[j].x - nodes[i].x; let dy = nodes[j].y - nodes[i].y
+                let dist = max(1, sqrt(dx*dx + dy*dy))
+                let force = attraction * dist * Double(edge.weight)
+                let fx = (dx / dist) * CGFloat(force); let fy = (dy / dist) * CGFloat(force)
+                forces[i].0 += fx; forces[i].1 += fy
+                forces[j].0 -= fx; forces[j].1 -= fy
+            }
+            // Center gravity + apply
+            for i in 0..<nodes.count {
+                forces[i].0 += (centerX - nodes[i].x) * centerGravity
+                forces[i].1 += (centerY - nodes[i].y) * centerGravity
+                nodes[i].vx = (nodes[i].vx + forces[i].0) * damping
+                nodes[i].vy = (nodes[i].vy + forces[i].1) * damping
+                nodes[i].x += nodes[i].vx
+                nodes[i].y += nodes[i].vy
+                nodes[i].x = nodes[i].x.clamped(to: 20...(size.width - 20))
+                nodes[i].y = nodes[i].y.clamped(to: 20...(size.height - 20))
+            }
+        }
+    }
+}
+
+extension CGFloat { func clamped(to range: ClosedRange<CGFloat>) -> CGFloat { Swift.min(Swift.max(self, range.lowerBound), range.upperBound) } }
+
+// MARK: - Graph View
+
 struct ProjectGraphView: View {
     let projectID: UUID
-
     @Environment(\.modelContext) private var modelContext
-    @State private var edges: [GraphEdge] = []
     @State private var nodes: [GraphNode] = []
+    @State private var edges: [GraphEdgeItem] = []
     @State private var isLoading = true
-
-    init(projectID: UUID) {
-        self.projectID = projectID
-    }
+    @State private var selectedNode: GraphNode?
+    @State private var visibleEdgeTypes: Set<String> = []
+    @State private var scale: CGFloat = 1.0
+    @State private var offset: CGSize = .zero
+    @State private var canvasSize: CGSize = .zero
 
     var body: some View {
-        Group {
+        VStack(spacing: 0) {
+            filterChips
+            Divider()
             if isLoading {
-                ProgressView("Loading graph...")
+                Spacer(); ProgressView("Building graph..."); Spacer()
             } else if nodes.isEmpty {
+                Spacer()
                 VStack(spacing: 12) {
-                    Spacer().frame(height: 40)
-                    Image(systemName: "circle.hexagonpath")
-                        .font(.title)
-                        .foregroundStyle(.secondary)
-                    Text("No connections yet")
-                        .font(.headline)
-                    Text("Add items and tasks to this project. The AI will discover connections between them.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 40)
+                    Image(systemName: "circle.hexagonpath").font(.title).foregroundStyle(.secondary)
+                    Text("No connections yet").font(.headline)
                 }
+                Spacer()
             } else {
-                graphContent
+                graphCanvas
             }
         }
         .task { await loadGraph() }
+        .sheet(item: $selectedNode) { nodeDetailSheet($0) }
     }
 
-    // MARK: - Graph visualization
+    // MARK: Filter chips
 
-    private var graphContent: some View {
-        ScrollView([.horizontal, .vertical]) {
-            VStack(alignment: .leading, spacing: 16) {
-                // Project node (center)
-                projectNode
-
-                // Connected nodes by type
-                connectedNodesSection("Tasks", icon: "checklist", color: .green, kind: .task)
-                connectedNodesSection("Items", icon: "doc.text", color: .blue, kind: .item)
-                connectedNodesSection("People", icon: "person", color: .purple, kind: .person)
-                connectedNodesSection("Entities", icon: "cube", color: .orange, kind: .entity)
-            }
-            .padding(16)
-        }
-    }
-
-    private var projectNode: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(Color.blue)
-                .frame(width: 12, height: 12)
-            Text("Project")
-                .font(.headline)
-            Spacer()
-            Text("\(edges.count) connections")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(12)
-        .background(Color.blue.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-
-    private func connectedNodesSection(_ title: String, icon: String, color: Color, kind: NodeKind) -> some View {
-        let filtered = nodes.filter { $0.kind == kind }
-        guard !filtered.isEmpty else { return AnyView(EmptyView()) }
-
-        return AnyView(
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: icon)
-                        .foregroundStyle(color)
-                        .font(.caption)
-                    Text(title)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .textCase(.uppercase)
-                    Text("\(filtered.count)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                ForEach(filtered) { node in
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(color)
-                            .frame(width: 8, height: 8)
-                        Text(node.label)
-                            .font(.subheadline)
-                        Spacer()
-                        Text(node.subtitle)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+    private var filterChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(Array(EdgeType.allCases), id: \.rawValue) { et in
+                    let selected = visibleEdgeTypes.contains(et.rawValue)
+                    Button {
+                        if selected { visibleEdgeTypes.remove(et.rawValue) }
+                        else { visibleEdgeTypes.insert(et.rawValue) }
+                    } label: {
+                        Text(et.rawValue.replacingOccurrences(of: "_", with: " ")).font(.caption2)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(selected ? edgeColor(et).opacity(0.15) : Color(.tertiarySystemFill))
+                            .foregroundStyle(selected ? edgeColor(et) : .secondary)
+                            .clipShape(Capsule())
                     }
-                    .padding(10)
-                    .background(Color(.systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
-            }
-        )
+            }.padding(.horizontal, 12).padding(.vertical, 6)
+        }
     }
 
-    // MARK: - Load
+    // MARK: Canvas
+
+    private var graphCanvas: some View {
+        let filteredEdges = visibleEdgeTypes.isEmpty ? edges : edges.filter { visibleEdgeTypes.contains($0.type.rawValue) }
+
+        return GeometryReader { geo in
+            Canvas { ctx, size in
+                // Edges
+                for edge in filteredEdges {
+                    guard let from = nodes.first(where: { $0.id == edge.fromID }),
+                          let to = nodes.first(where: { $0.id == edge.toID }) else { continue }
+                    var path = Path(); path.move(to: CGPoint(x: from.x, y: from.y))
+                    path.addLine(to: CGPoint(x: to.x, y: to.y))
+                    ctx.stroke(path, with: .color(edgeColor(edge.type).opacity(0.4)), lineWidth: max(1, CGFloat(edge.weight) * 2))
+                }
+                // Nodes
+                for node in nodes {
+                    let rect = CGRect(x: node.x - node.radius, y: node.y - node.radius, width: node.radius * 2, height: node.radius * 2)
+                    ctx.fill(Circle().path(in: rect), with: .color(node.color.opacity(0.8)))
+                    if node.degree >= 3 {
+                        ctx.stroke(Circle().path(in: rect.insetBy(dx: -2, dy: -2)), with: .color(.white.opacity(0.6)), lineWidth: 2)
+                    }
+                    // Label
+                    ctx.draw(Text(node.label.prefix(12)).font(.system(size: 9)).foregroundColor(.primary), at: CGPoint(x: node.x, y: node.y + node.radius + 10))
+                }
+            }
+            .scaleEffect(scale).offset(offset)
+            .gesture(MagnificationGesture().onChanged { scale = $0 }.onEnded { _ in if scale < 0.3 { scale = 0.3 }; if scale > 3 { scale = 3 } })
+            .simultaneousGesture(DragGesture().onChanged { offset = $0.translation }.onEnded { _ in })
+            .onTapGesture(count: 2) { withAnimation(.spring) { scale = 1.0; offset = .zero } }
+            .onAppear {
+                canvasSize = geo.size
+                var mutable = nodes
+                ForceLayout.compute(nodes: &mutable, edges: edges, size: geo.size)
+                nodes = mutable
+            }
+            .onTapGesture { location in handleTap(location) }
+        }
+    }
+
+    private func handleTap(_ location: CGPoint) {
+        let adjusted = CGPoint(x: (location.x - offset.width) / scale, y: (location.y - offset.height) / scale)
+        if let tapped = nodes.first(where: { sqrt(pow($0.x - adjusted.x, 2) + pow($0.y - adjusted.y, 2)) < $0.radius + 10 }) {
+            selectedNode = tapped
+        }
+    }
+
+    // MARK: Node detail sheet
+
+    private func nodeDetailSheet(_ node: GraphNode) -> some View {
+        NavigationStack {
+            List {
+                Section("Node") {
+                    HStack { Circle().fill(node.color).frame(width: 12, height: 12); Text(node.label).font(.headline) }
+                    Text(node.subtitle).font(.subheadline).foregroundStyle(.secondary)
+                    Text("\(node.degree) connections").font(.caption)
+                }
+                Section("Connected to") {
+                    let connectedEdges = edges.filter { $0.fromID == node.id || $0.toID == node.id }
+                    ForEach(connectedEdges) { edge in
+                        let otherID = edge.fromID == node.id ? edge.toID : edge.fromID
+                        if let other = nodes.first(where: { $0.id == otherID }) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Circle().fill(other.color).frame(width: 8, height: 8)
+                                    Text(other.label).font(.subheadline)
+                                    Spacer()
+                                    Text(edge.type.rawValue).font(.caption2).foregroundStyle(edgeColor(edge.type))
+                                    ConfidenceBadge(value: edge.weight)
+                                }
+                                if let prov = edge.provenance, let provID = UUID(uuidString: prov) {
+                                    EvidenceCardView(itemTitle: "Source item", itemID: provID, snippet: "Edge derived from analysis", segmentID: nil, confidence: edge.weight, edgeType: edge.type.rawValue)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Node Details").navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    // MARK: Load
 
     private func loadGraph() async {
-        let svc = GraphEdgeService(context: modelContext)
-        let edges = (try? svc.neighborhood(of: projectID, radius: 2)) ?? []
-        var loadedNodes: [GraphNode] = []
+        let edgeSvc = GraphEdgeService(context: modelContext)
+        let loadedEdges = (try? edgeSvc.neighborhood(of: projectID, radius: 2)) ?? []
+        var nodeMap: [UUID: GraphNode] = [:]
 
-        for edge in edges {
-            // Look up connected items
-            if let fromItem = findItem(edge.fromID) {
-                loadedNodes.append(GraphNode(
-                    id: edge.fromID, label: fromItem.title, subtitle: fromItem.type.label,
-                    kind: fromItem.projectID == projectID ? .item : .related
-                ))
-            }
-            if let toItem = findItem(edge.toID) {
-                loadedNodes.append(GraphNode(
-                    id: edge.toID, label: toItem.title, subtitle: toItem.type.label,
-                    kind: toItem.projectID == projectID ? .item : .related
-                ))
-            }
-
-            // Look up people
-            let allPeople = (try? modelContext.fetch(FetchDescriptor<Person>())) ?? []
-            if let person = allPeople.first(where: { $0.id == edge.toID }) {
-                loadedNodes.append(GraphNode(
-                    id: person.id, label: person.displayName, subtitle: person.role ?? "Person",
-                    kind: .person
-                ))
-            }
-
-            // Look up tasks
-            let allTasks = (try? modelContext.fetch(FetchDescriptor<TaskItem>())) ?? []
-            if let task = allTasks.first(where: { $0.id == edge.toID }) {
-                loadedNodes.append(GraphNode(
-                    id: task.id, label: task.title, subtitle: task.status.rawValue.capitalized,
-                    kind: .task
-                ))
+        for edge in loadedEdges {
+            for nid in [edge.fromID, edge.toID] {
+                guard nodeMap[nid] == nil else { continue }
+                if let item = findItem(nid) {
+                    nodeMap[nid] = GraphNode(id: nid, label: item.title, subtitle: item.type.label, kind: .item, degree: 1)
+                } else if let task = findTask(nid) {
+                    nodeMap[nid] = GraphNode(id: nid, label: task.title, subtitle: task.status.rawValue.capitalized, kind: .task, degree: 1)
+                } else if let person = findPerson(nid) {
+                    nodeMap[nid] = GraphNode(id: nid, label: person.displayName, subtitle: person.role ?? "Person", kind: .person, degree: 1)
+                }
             }
         }
-
-        // Deduplicate nodes by ID
-        var seen: Set<UUID> = []
-        var unique: [GraphNode] = []
-        for node in loadedNodes {
-            if !seen.contains(node.id) {
-                seen.insert(node.id)
-                unique.append(node)
-            }
+        // Compute degree
+        for edge in loadedEdges {
+            nodeMap[edge.fromID]?.degree += 1
+            nodeMap[edge.toID]?.degree += 1
+        }
+        // Add project root
+        if let proj = try? ProjectService(context: modelContext).fetch(id: projectID) {
+            nodeMap[projectID] = GraphNode(id: projectID, label: proj.name, subtitle: "Project", kind: .project, degree: nodeMap.count)
         }
 
-        self.edges = edges
-        self.nodes = unique
+        self.edges = loadedEdges.map { GraphEdgeItem(fromID: $0.fromID, toID: $0.toID, type: $0.edgeType, weight: $0.weight, provenance: $0.provenanceItemID?.uuidString) }
+        self.nodes = Array(nodeMap.values)
         self.isLoading = false
     }
 
@@ -172,23 +255,20 @@ struct ProjectGraphView: View {
         let all = (try? modelContext.fetch(FetchDescriptor<KnowledgeItem>())) ?? []
         return all.first { $0.id == id }
     }
+    private func findTask(_ id: UUID) -> TaskItem? {
+        let all = (try? modelContext.fetch(FetchDescriptor<TaskItem>())) ?? []
+        return all.first { $0.id == id }
+    }
+    private func findPerson(_ id: UUID) -> Person? {
+        let all = (try? modelContext.fetch(FetchDescriptor<Person>())) ?? []
+        return all.first { $0.id == id }
+    }
+
+    private func edgeColor(_ type: EdgeType) -> Color {
+        switch type {
+        case .supports: .blue; case .contradicts: .red; case .references: .gray
+        case .precedes: .orange; case .mentions: .purple; case .assignedTo: .teal
+        case .blockedBy: .pink; case .belongsTo: .mint; case .produced: .indigo; case .relatesTo: .secondary
+        }
+    }
 }
-
-// MARK: - Graph node model
-
-enum NodeKind {
-    case project
-    case task
-    case item
-    case person
-    case entity
-    case related
-}
-
-struct GraphNode: Identifiable {
-    let id: UUID
-    let label: String
-    let subtitle: String
-    let kind: NodeKind
-}
-

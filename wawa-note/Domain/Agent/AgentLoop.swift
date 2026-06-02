@@ -290,7 +290,10 @@ final class AgentLoop: @unchecked Sendable {
             dynamicPrompt += "\n\nCURRENT PROJECT CONTEXT:\n"
             if let name = toolContext.activeProjectName { dynamicPrompt += "- Project: \(name)\n" }
             dynamicPrompt += "- Project ID: \(projectID.uuidString)\n"
-            dynamicPrompt += "- Use get_project to see details. Prioritize this project's context."
+            dynamicPrompt += "- Use get_project to see tasks, items, and connections.\n"
+            dynamicPrompt += "- Use create_task and create_edge to add to this project.\n"
+            dynamicPrompt += "- When referencing items from this project, cite them by title and ID.\n"
+            dynamicPrompt += "- Prioritize this project's context in all searches and answers."
         }
 
         return (static: staticPrompt, dynamic: dynamicPrompt)

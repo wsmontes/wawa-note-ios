@@ -118,24 +118,49 @@ struct ProjectTaskBoardView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(task.title)
-                        .font(.subheadline)
-                        .foregroundStyle(task.statusRaw == "cancelled" ? .secondary : .primary)
-                        .strikethrough(task.statusRaw == "cancelled")
-                        .lineLimit(3)
+                    HStack(spacing: 6) {
+                        Text(task.title)
+                            .font(.subheadline)
+                            .foregroundStyle(task.statusRaw == "cancelled" ? .secondary : .primary)
+                            .strikethrough(task.statusRaw == "cancelled")
+                            .lineLimit(2)
+                        // Confidence ring for AI-generated tasks
+                        if let conf = task.confidence, conf > 0 {
+                            ZStack {
+                                Circle().stroke(.blue.opacity(0.2), lineWidth: 2).frame(width: 18, height: 18)
+                                Circle().trim(from: 0, to: conf).stroke(.blue, lineWidth: 2)
+                                    .frame(width: 18, height: 18).rotationEffect(.degrees(-90))
+                            }
+                        }
+                    }
 
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         if let owner = task.ownerName {
-                            Label(owner, systemImage: "person")
-                                .font(.caption2).foregroundStyle(.secondary)
+                            Label(owner, systemImage: "person").font(.caption2).foregroundStyle(.secondary)
                         }
                         priorityBadge(task.priority)
                         if let due = task.dueAt {
+                            let urgency = due.timeIntervalSinceNow
                             Text(due.formatted(date: .abbreviated, time: .omitted))
-                                .font(.caption2).foregroundStyle(due < Date() ? .red : .secondary)
+                                .font(.caption2)
+                                .foregroundStyle(urgency < 0 ? .red : urgency < 259200 ? .orange : .secondary)
                         }
                     }
+
+                    // Provenance footer
+                    if let sourceID = task.sourceItemID, let sourceItem = findSourceItem(sourceID) {
+                        HStack(spacing: 3) {
+                            Image(systemName: "arrow.turn.down.right").font(.system(size: 7))
+                            Text(sourceItem.title).font(.system(size: 9)).foregroundStyle(.tertiary).lineLimit(1)
+                        }
+                    }
+
+                    // Stale indicator
+                    if task.status == .todo, task.createdAt.timeIntervalSinceNow < -14 * 86400 {
+                        Text("Stale — \(Int(-task.createdAt.timeIntervalSinceNow / 86400))d").font(.system(size: 8)).foregroundStyle(.orange)
+                    }
                 }
+                .opacity(task.status == .todo && task.createdAt.timeIntervalSinceNow < -14 * 86400 ? 0.6 : 1.0)
                 Spacer()
                 Menu {
                     ForEach(columns, id: \.rawValue) { col in
@@ -178,6 +203,11 @@ struct ProjectTaskBoardView: View {
     }
 
     // MARK: - Priority
+
+    private func findSourceItem(_ id: UUID) -> KnowledgeItem? {
+        let all = (try? modelContext.fetch(FetchDescriptor<KnowledgeItem>())) ?? []
+        return all.first { $0.id == id }
+    }
 
     private func priorityBadge(_ priority: TaskPriority) -> some View {
         Text(priority.rawValue.capitalized)

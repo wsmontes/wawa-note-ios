@@ -9,6 +9,7 @@ final class Project {
     var name: String
     var slug: String
     var summary: String?
+    var synthesis: String?
     var customInstructions: String?
     var frameworkId: String?
     var frameworkJSON: String?
@@ -17,6 +18,12 @@ final class Project {
     var iconName: String?
     var createdAt: Date
     var updatedAt: Date
+    // Health & activity (Phase A)
+    var healthScore: Double?
+    var healthStatus: String?
+    var lastActivityAt: Date?
+    var synthesisUpdatedAt: Date?
+    var synthesisSourceItemID: UUID?
 
     var status: ProjectStatus {
         get { ProjectStatus(rawValue: statusRaw) ?? .active }
@@ -28,6 +35,7 @@ final class Project {
         name: String,
         slug: String? = nil,
         summary: String? = nil,
+        synthesis: String? = nil,
         customInstructions: String? = nil,
         frameworkId: String? = nil,
         frameworkJSON: String? = nil,
@@ -35,12 +43,18 @@ final class Project {
         colorHex: String? = nil,
         iconName: String? = "folder.fill",
         createdAt: Date = Date(),
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        healthScore: Double? = nil,
+        healthStatus: String? = nil,
+        lastActivityAt: Date? = nil,
+        synthesisUpdatedAt: Date? = nil,
+        synthesisSourceItemID: UUID? = nil
     ) {
         self.id = id
         self.name = name
         self.slug = slug ?? name.lowercased().replacingOccurrences(of: " ", with: "-")
         self.summary = summary
+        self.synthesis = synthesis
         self.customInstructions = customInstructions
         self.frameworkId = frameworkId
         self.frameworkJSON = frameworkJSON
@@ -49,6 +63,11 @@ final class Project {
         self.iconName = iconName
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.healthScore = healthScore
+        self.healthStatus = healthStatus
+        self.lastActivityAt = lastActivityAt
+        self.synthesisUpdatedAt = synthesisUpdatedAt
+        self.synthesisSourceItemID = synthesisSourceItemID
     }
 }
 
@@ -337,3 +356,33 @@ enum ViewType: String, Codable, Sendable {
     case markdown
     case chips
 }
+
+// MARK: - Agent Suggestion (Phase G)
+
+@Model
+final class AgentSuggestion {
+    @Attribute(.unique) var id: UUID
+    var projectID: UUID?
+    var type: String       // "task", "edge", "annotation", "decision"
+    var title: String
+    var body: String?
+    var status: String     // "pending", "approved", "rejected"
+    var confidence: Double?
+    var sourceItemID: UUID?
+    var sourceSegmentIDs: String?  // JSON array
+    var payloadJSON: String?       // JSON for the actual action (task fields, edge fields, etc)
+    var createdAt: Date
+    var resolvedAt: Date?
+
+    init(id: UUID = UUID(), projectID: UUID? = nil, type: String, title: String,
+         body: String? = nil, status: String = "pending", confidence: Double? = nil,
+         sourceItemID: UUID? = nil, sourceSegmentIDs: [String]? = nil,
+         payloadJSON: String? = nil, createdAt: Date = Date(), resolvedAt: Date? = nil) {
+        self.id = id; self.projectID = projectID; self.type = type; self.title = title
+        self.body = body; self.status = status; self.confidence = confidence
+        self.sourceItemID = sourceItemID
+        self.sourceSegmentIDs = sourceSegmentIDs.flatMap { try? JSONEncoder().encode($0) }.flatMap { String(data: $0, encoding: .utf8) }
+        self.payloadJSON = payloadJSON; self.createdAt = createdAt; self.resolvedAt = resolvedAt
+    }
+}
+

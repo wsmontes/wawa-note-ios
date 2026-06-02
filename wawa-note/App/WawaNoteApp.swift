@@ -28,7 +28,8 @@ struct WawaNoteApp: App {
                 TaskItem.self,
                 Person.self,
                 GraphEdge.self,
-                Entity.self
+                Entity.self,
+                AgentSuggestion.self
             )
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
