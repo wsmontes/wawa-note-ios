@@ -5,6 +5,7 @@ import AVFoundation
 
 struct ChatView: View {
     var autoFocus: Bool = false
+    var compact: Bool = false
 
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var contentPipeline: ContentPipelineService
@@ -102,7 +103,7 @@ struct ChatView: View {
                     Color.clear.frame(height: 0)
                         .contentShape(Rectangle())
                         .onTapGesture { isInputFocused = false }
-                    if viewModel.messages.isEmpty && viewModel.streamingText.isEmpty {
+                    if viewModel.messages.isEmpty && viewModel.streamingText.isEmpty && !compact {
                         emptyState
                     }
 

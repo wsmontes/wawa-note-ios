@@ -48,23 +48,18 @@ struct ContentView: View {
 
     // MARK: Chat Overlay
 
-    @State private var chatFocusTrigger = false
-
     @ViewBuilder
     private var chatOverlay: some View {
-        ZStack(alignment: .bottom) {
-            Color.black.opacity(0.2).ignoresSafeArea()
+        VStack(spacing: 0) {
+            Color.clear.contentShape(Rectangle())
                 .onTapGesture { dismissChat() }
-
-            VStack(spacing: 0) {
-                ChatView(autoFocus: true)
-            }
-            .frame(maxWidth: .infinity, maxHeight: UIScreen.main.bounds.height * 0.5)
-            .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .transition(.move(edge: .bottom))
-            .onAppear { chatFocusTrigger.toggle() }
+            ChatView(autoFocus: true, compact: true)
+                .frame(maxHeight: UIScreen.main.bounds.height * 0.5)
+                .background(.regularMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .shadow(color: .black.opacity(0.15), radius: 16, y: -4)
         }
+        .transition(.move(edge: .bottom))
     }
 
     private func dismissChat() {
