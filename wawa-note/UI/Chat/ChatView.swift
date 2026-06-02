@@ -40,10 +40,13 @@ struct ChatView: View {
                     .background(Color.blue.opacity(0.04))
                 }
             }
-            messageList
-                .navigationDestination(for: UUID.self) { itemID in
-                    KnowledgeItemNavigationView(itemID: itemID)
-                }
+            // In compact mode, only show messageList if there are messages
+            if !compact || !viewModel.messages.isEmpty || !viewModel.streamingText.isEmpty {
+                messageList
+                    .navigationDestination(for: UUID.self) { itemID in
+                        KnowledgeItemNavigationView(itemID: itemID)
+                    }
+            }
             if !compact {
                 if let dictErr = dictationError {
                     HStack {
@@ -54,7 +57,7 @@ struct ChatView: View {
                     }.padding(.horizontal, 12).padding(.vertical, 4).background(Color.red.opacity(0.08))
                 }
             }
-            Divider()
+            if !compact || !viewModel.messages.isEmpty || !viewModel.streamingText.isEmpty { Divider() }
             chatInputBar
         }
         .navigationTitle(compact ? "" : (viewModel.currentConversation?.title.isEmpty != false ? "Chat" : viewModel.currentConversation?.title ?? "Chat"))

@@ -55,9 +55,9 @@ struct ContentView: View {
                 .onTapGesture { dismissChat() }
             ChatView(autoFocus: true, compact: true)
                 .frame(maxHeight: UIScreen.main.bounds.height * 0.5)
-                .background(.regularMaterial)
+                .background(.ultraThinMaterial)
                 .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .shadow(color: .black.opacity(0.15), radius: 16, y: -4)
+                .shadow(color: .black.opacity(0.1), radius: 16, y: -4)
         }
         .transition(.move(edge: .bottom))
     }
