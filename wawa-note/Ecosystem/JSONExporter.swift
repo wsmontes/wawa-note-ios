@@ -22,7 +22,8 @@ struct JSONExporter: Sendable {
                 status: item.status.rawValue
             ),
             transcript: transcript,
-            analysis: analysis
+            analysis: analysis,
+            bodyText: item.bodyText
         )
         return try JSONEncoder().encode(export)
     }
@@ -38,6 +39,7 @@ struct KnowledgeItemExport: Encodable {
     let item: ItemSummary
     let transcript: Transcript?
     let analysis: MeetingAnalysis?
+    let bodyText: String?
 
     struct ItemSummary: Encodable {
         let id: String

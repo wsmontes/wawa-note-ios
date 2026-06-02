@@ -450,3 +450,640 @@ struct UpdateProjectFrameworkTool: AgentTool {
         return ToolResult(content: "Specify either framework_id (built-in) or framework_json (custom).", citations: [], isError: true, displaySummary: "Missing args")
     }
 }
+
+// MARK: - Content Processing Tools (Pipeline)
+
+struct ExtractContentTool: AgentTool {
+    let name = "extract_content"
+    let description = """
+    Extract text content from a knowledge item. For audio items, returns the transcript. \
+    For images, returns OCR text. For notes/journal entries, returns the body text. \
+    Use this before analyze_content to get the raw text to analyze.
+    """
+
+    let parameters = AIToolParameters(
+        properties: [
+            "item_id": AIToolProperty(type: "string", description: "UUID of the knowledge item to extract content from")
+        ],
+        required: ["item_id"]
+    )
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let itemIdStr = arguments["item_id"] as? String,
+              let itemId = UUID(uuidString: itemIdStr) else {
+            return ToolFormatting.error(tool: name, reason: "Missing or invalid item_id.", fix: "Provide a valid UUID string.")
+        }
+
+        let itemService = KnowledgeItemService(context: context.modelContext)
+        guard let item = try? itemService.fetchItem(id: itemId) else {
+            return ToolFormatting.error(tool: name, reason: "Item not found: \(itemIdStr)", fix: "Check the item_id and try again.")
+        }
+
+        let extraction = ContentExtractionService(modelContext: context.modelContext)
+        let text: String?
+
+        if item.audioFileRelativePath != nil {
+            text = await extraction.extractTextFromAudio(item)
+        } else {
+            text = await extraction.extractTextFromDocument(item)
+        }
+
+        let effectiveText = text ?? extraction.bestAvailableText(for: item)
+        guard let content = effectiveText, !content.isEmpty else {
+            return ToolResult(
+                content: "No extractable content found for item \(itemIdStr) (type: \(item.type.rawValue)). The item may need transcription first.",
+                citations: [], isError: false,
+                displaySummary: "extract: no content for \(item.title)"
+            )
+        }
+
+        let truncated = String(content.prefix(ToolFormatting.maxContentChars))
+        return ToolResult(
+            content: truncated + (content.count > ToolFormatting.maxContentChars ? "\n\n[Content truncated at \(ToolFormatting.maxContentChars) chars. \(content.count - ToolFormatting.maxContentChars) more available.]" : ""),
+            citations: [ChatCitation(itemId: item.id, title: item.title, snippet: String(content.prefix(200)), itemType: item.type)],
+            isError: false,
+            displaySummary: "extract: \(content.count) chars from \"\(item.title)\""
+        )
+    }
+}
+
+struct AnalyzeContentTool: AgentTool {
+    let name = "analyze_content"
+    let description = """
+    Run structured AI analysis on text content. Extracts summary, decisions, action items, \
+    risks, open questions, dates, and entities. For long content, uses map-reduce internally. \
+    Returns the analysis as structured JSON.
+    """
+
+    let parameters = AIToolParameters(
+        properties: [
+            "item_id": AIToolProperty(type: "string", description: "UUID of the knowledge item to analyze"),
+            "text": AIToolProperty(type: "string", description: "Text content to analyze. If omitted, extracts from the item first."),
+            "model": AIToolProperty(type: "string", description: "Model: 'nano' for simple, 'gpt-5.5' for complex. Default: auto-select.")
+        ],
+        required: ["item_id"]
+    )
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let itemIdStr = arguments["item_id"] as? String,
+              let itemId = UUID(uuidString: itemIdStr) else {
+            return ToolFormatting.error(tool: name, reason: "Missing or invalid item_id.", fix: "Provide a valid UUID string.")
+        }
+
+        let itemService = KnowledgeItemService(context: context.modelContext)
+        guard let item = try? itemService.fetchItem(id: itemId) else {
+            return ToolFormatting.error(tool: name, reason: "Item not found: \(itemIdStr)", fix: "Check the item_id.")
+        }
+
+        let text: String
+        if let provided = arguments["text"] as? String, !provided.isEmpty {
+            text = provided
+        } else {
+            let extraction = ContentExtractionService(modelContext: context.modelContext)
+            let extracted = await extraction.extractTextFromDocument(item)
+                ?? extraction.bestAvailableText(for: item)
+            guard let ext = extracted, !ext.isEmpty else {
+                return ToolFormatting.error(tool: name, reason: "No text content for item.", fix: "Use extract_content first.")
+            }
+            text = ext
+        }
+
+        guard let provider = try? ProviderRouter.resolveActive(context: context.modelContext) else {
+            return ToolFormatting.error(tool: name, reason: "No AI provider configured.", fix: "Configure a provider in Settings.")
+        }
+
+        let model: String
+        if let requested = arguments["model"] as? String, !requested.isEmpty {
+            model = requested
+        } else {
+            model = ModelTierResolver.resolveForAnalysis(item: item)
+        }
+
+        let extraction = ContentExtractionService(modelContext: context.modelContext)
+        let sourceCtx = SourceContext.from(item)
+        let segments = extraction.chunkText(text, itemID: item.id)
+        let transcript = Transcript(meetingId: item.id, languageCode: nil, segments: segments, sourceEngineId: "agent-tool")
+
+        do {
+            let result = try await AnalysisService().analyze(
+                transcript: transcript, using: provider, model: model,
+                meetingId: item.id, sourceContext: sourceCtx
+            )
+
+            // Persist analysis to disk so exports and UI can read it
+            let store = FileArtifactStore()
+            try? store.createMeetingDirectory(for: item.id)
+            try? store.writeArtifact(result, fileName: "analysis.json", meetingId: item.id)
+
+            // Write agent trace — proves the agent orchestrated this
+            let trace: [String: Any] = [
+                "agent_version": "2.0",
+                "pipeline": "autonomous_agent",
+                "model": model,
+                "tool": "analyze_content",
+                "timestamp": ISO8601DateFormatter().string(from: Date())
+            ]
+            if let traceData = try? JSONSerialization.data(withJSONObject: trace),
+               let traceJSON = String(data: traceData, encoding: .utf8) {
+                try? traceJSON.write(to: store.itemDirectoryURL(for: item.id).appendingPathComponent("agent_trace.json"), atomically: true, encoding: .utf8)
+            }
+
+            // Update item status
+            item.status = .analyzed
+            item.analysisProviderId = model
+            try? context.modelContext.save()
+
+            let parts: [String] = [
+                "**Analysis complete** (model: \(model))",
+                "",
+                "Short Summary: \(result.shortSummary)",
+                result.detailedSummary.isEmpty ? "" : "Detailed: \(result.detailedSummary.prefix(500))",
+                "Decisions: \(result.decisions.count)",
+                "Action Items: \(result.actionItems.count)",
+                "Risks: \(result.risks.count)",
+                "Open Questions: \(result.openQuestions.count)",
+                "Entities: \(result.entities.count)"
+            ]
+            return ToolResult(
+                content: parts.filter { !$0.isEmpty }.joined(separator: "\n"),
+                citations: [ChatCitation(itemId: item.id, title: item.title, snippet: result.shortSummary, itemType: item.type)],
+                isError: false,
+                displaySummary: "analyze: \"\(result.shortSummary.prefix(80))\""
+            )
+        } catch {
+            return ToolResult(content: "Analysis failed: \(error.localizedDescription)", citations: [], isError: true, displaySummary: "analyze: failed")
+        }
+    }
+}
+
+struct DescribeImageTool: AgentTool {
+    let name = "describe_image"
+    let description = """
+    Analyze an image file visually using AI vision. Returns OCR text (if any) and a visual \
+    description of what's in the image. Use before analyze_content for image items.
+    """
+
+    let parameters = AIToolParameters(
+        properties: [
+            "item_id": AIToolProperty(type: "string", description: "UUID of the image item to describe"),
+            "model": AIToolProperty(type: "string", description: "Model for vision. Default: gpt-5.5.")
+        ],
+        required: ["item_id"]
+    )
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let itemIdStr = arguments["item_id"] as? String,
+              let itemId = UUID(uuidString: itemIdStr) else {
+            return ToolFormatting.error(tool: name, reason: "Missing or invalid item_id.", fix: "Provide a valid UUID string.")
+        }
+
+        let itemService = KnowledgeItemService(context: context.modelContext)
+        guard let item = try? itemService.fetchItem(id: itemId),
+              let relativePath = item.imageFileRelativePath else {
+            return ToolFormatting.error(tool: name, reason: "Item not found or not an image.", fix: "Provide the UUID of an image item.")
+        }
+
+        let imageURL = context.fileStore.itemDirectoryURL(for: itemId).appendingPathComponent(relativePath)
+        guard FileManager.default.fileExists(atPath: imageURL.path) else {
+            return ToolFormatting.error(tool: name, reason: "Image file not found on disk.", fix: "The image may have been deleted.")
+        }
+
+        guard let provider = try? ProviderRouter.resolveActive(context: context.modelContext) else {
+            return ToolFormatting.error(tool: name, reason: "No AI provider configured.", fix: "Configure a provider in Settings.")
+        }
+
+        let model = (arguments["model"] as? String) ?? AIConfigService.shared.featureConfig(for: "analysis")?.model ?? "gpt-5.5"
+
+        do {
+            let description = try await ImageAnalysisService().analyzeImage(imageURL, llmProvider: provider, model: model)
+            guard !description.isEmpty else {
+                return ToolResult(content: "Image analysis returned empty result.", citations: [], isError: false, displaySummary: "describe: empty")
+            }
+            let truncated = String(description.prefix(ToolFormatting.maxContentChars))
+            return ToolResult(
+                content: truncated,
+                citations: [ChatCitation(itemId: item.id, title: item.title, snippet: String(description.prefix(200)), itemType: item.type)],
+                isError: false,
+                displaySummary: "describe: \(description.count) chars for \"\(item.title)\""
+            )
+        } catch {
+            return ToolResult(content: "Image analysis failed: \(error.localizedDescription)", citations: [], isError: true, displaySummary: "describe: failed")
+        }
+    }
+}
+
+// MARK: - Prompt Management Tools (Phase 2)
+
+struct ListPromptsTool: AgentTool {
+    let name = "list_prompts"
+    let description = "List all available prompt templates. Use 'category' to filter by type: analysis, chat, pipeline, system, custom."
+
+    let parameters = AIToolParameters(
+        properties: [
+            "category": AIToolProperty(type: "string", description: "Filter by category: analysis, chat, pipeline, system, custom")
+        ],
+        required: []
+    )
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        let category = arguments["category"] as? String
+        let all = PromptStore.shared.prompts(in: category)
+        let lines = all.map { p in
+            "- `\(p.name)` [\(p.category)]\(p.isUserEdited ? " (edited)" : ""): \(p.description ?? "")"
+        }
+        return ToolResult(
+            content: lines.joined(separator: "\n"),
+            citations: [], isError: false,
+            displaySummary: "prompts: \(all.count) templates"
+        )
+    }
+}
+
+struct ReadPromptTool: AgentTool {
+    let name = "read_prompt"
+    let description = "Read the full content of a prompt template by name. Use list_prompts first to discover available templates."
+
+    let parameters = AIToolParameters(
+        properties: [
+            "name": AIToolProperty(type: "string", description: "Prompt name, e.g. 'analysis_system', 'pipeline_standard'")
+        ],
+        required: ["name"]
+    )
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let name = arguments["name"] as? String else {
+            return ToolFormatting.error(tool: self.name, reason: "Missing 'name' parameter.", fix: "Provide a prompt name from list_prompts.")
+        }
+        guard let prompt = PromptStore.shared.prompt(named: name) else {
+            return ToolFormatting.error(tool: self.name, reason: "Prompt '\(name)' not found.", fix: "Use list_prompts to see available templates.")
+        }
+        let status = prompt.isUserEdited ? " (user edited, \(prompt.updatedAt.formatted(date: .abbreviated, time: .shortened)))" : " (base)"
+        let header = "**\(prompt.name)**\(status)\nCategory: \(prompt.category)\nVariables: \(prompt.variables.joined(separator: ", "))\n\n"
+        return ToolResult(
+            content: header + prompt.content,
+            citations: [], isError: false,
+            displaySummary: "read: \(prompt.name) (\(prompt.content.count) chars)"
+        )
+    }
+}
+
+struct EditPromptTool: AgentTool {
+    let name = "edit_prompt"
+    let description = "Update the content of a prompt template. Changes are persisted and take effect immediately. Use read_prompt first to see current content. Always confirm with the user before editing."
+
+    let parameters = AIToolParameters(
+        properties: [
+            "name": AIToolProperty(type: "string", description: "Prompt name to edit"),
+            "content": AIToolProperty(type: "string", description: "New prompt content (full replacement, not a diff)")
+        ],
+        required: ["name", "content"]
+    )
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let name = arguments["name"] as? String else {
+            return ToolFormatting.error(tool: self.name, reason: "Missing 'name'.", fix: "Provide the prompt name to edit.")
+        }
+        guard let content = arguments["content"] as? String, !content.isEmpty else {
+            return ToolFormatting.error(tool: self.name, reason: "Missing 'content'.", fix: "Provide the new prompt content.")
+        }
+        guard PromptStore.shared.prompt(named: name) != nil else {
+            return ToolFormatting.error(tool: self.name, reason: "Prompt '\(name)' not found.", fix: "Use list_prompts first.")
+        }
+        PromptStore.shared.updatePrompt(named: name, content: content)
+        return ToolResult(
+            content: "Prompt '\(name)' updated successfully (\(content.count) chars).",
+            citations: [], isError: false,
+            displaySummary: "edit_prompt: '\(name)' updated"
+        )
+    }
+}
+
+// MARK: - Agent Memory Tools (Phase 3)
+
+struct WriteMemoryTool: AgentTool {
+    let name = "write_memory"
+    let description = """
+    Record a learned pattern or strategy so future pipeline runs can benefit. \
+    After successfully processing an item, write what worked. \
+    Provide: pattern (what you observed), strategy (what worked), and optional \
+    item_type, language, min_duration, content_type for future matching.
+    """
+
+    let parameters = AIToolParameters(
+        properties: [
+            "pattern": AIToolProperty(type: "string", description: "What was observed, e.g. 'audio > 60min in Portuguese'"),
+            "strategy": AIToolProperty(type: "string", description: "What worked, e.g. 'chunk 5k chars with nano, reduce with gpt-5.5'"),
+            "item_type": AIToolProperty(type: "string", description: "audio, image, note"),
+            "language": AIToolProperty(type: "string", description: "Language code: pt, en, etc."),
+            "min_duration": AIToolProperty(type: "number", description: "Duration threshold in seconds"),
+            "content_type": AIToolProperty(type: "string", description: "meeting, interview, document, photo")
+        ],
+        required: ["pattern", "strategy"]
+    )
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let pattern = arguments["pattern"] as? String,
+              let strategy = arguments["strategy"] as? String else {
+            return ToolFormatting.error(tool: name, reason: "Missing pattern or strategy.", fix: "Provide both the observed pattern and the strategy that worked.")
+        }
+        let mem = AgentMemoryStore.shared.write(
+            pattern: pattern, strategy: strategy,
+            itemType: arguments["item_type"] as? String,
+            language: arguments["language"] as? String,
+            minDuration: arguments["min_duration"] as? Double
+        )
+        return ToolResult(
+            content: "Memory recorded: \(mem.id.uuidString.prefix(8)) — \"\(pattern.prefix(80))\"",
+            citations: [], isError: false,
+            displaySummary: "memory: \"\(pattern.prefix(60))\""
+        )
+    }
+}
+
+struct SearchMemoryTool: AgentTool {
+    let name = "search_memory"
+    let description = "Search agent memories for patterns that match the current content. Use before processing to find proven strategies."
+
+    let parameters = AIToolParameters(
+        properties: [
+            "item_type": AIToolProperty(type: "string", description: "Filter by item type: audio, image, note"),
+            "language": AIToolProperty(type: "string", description: "Filter by language: pt, en"),
+            "content_type": AIToolProperty(type: "string", description: "Filter by content type: meeting, interview, document, photo")
+        ],
+        required: []
+    )
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        let results = AgentMemoryStore.shared.search(
+            itemType: arguments["item_type"] as? String,
+            language: arguments["language"] as? String,
+            contentType: arguments["content_type"] as? String
+        )
+        guard !results.isEmpty else {
+            return ToolResult(content: "No relevant memories found for these criteria.", citations: [], isError: false, displaySummary: "memory search: 0 results")
+        }
+        let lines = results.map { m in
+            "- [\(m.relevance > 0.8 ? "HIGH" : "MED")] \(m.pattern) → \(m.strategy) (success: \(m.successCount), fail: \(m.failCount))"
+        }
+        return ToolResult(
+            content: "Found \(results.count) relevant memories:\n\n" + lines.joined(separator: "\n"),
+            citations: [], isError: false,
+            displaySummary: "memory search: \(results.count) results"
+        )
+    }
+}
+
+struct ListMemoriesTool: AgentTool {
+    let name = "list_memories"
+    let description = "List all agent memories (learned patterns and strategies)."
+
+    let parameters = AIToolParameters(properties: [:], required: [])
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        let all = AgentMemoryStore.shared.listAll()
+        guard !all.isEmpty else {
+            return ToolResult(content: "No memories recorded yet.", citations: [], isError: false, displaySummary: "memories: 0")
+        }
+        let lines = all.map { m in
+            "- \(m.isStale ? "[STALE] " : "")\(m.pattern) → \(m.strategy.prefix(80)) (\(m.successCount)S/\(m.failCount)F)"
+        }
+        return ToolResult(
+            content: "\(all.count) agent memories:\n\n" + lines.joined(separator: "\n"),
+            citations: [], isError: false,
+            displaySummary: "memories: \(all.count)"
+        )
+    }
+}
+
+// MARK: - Plan Mode Tools (Phase 5)
+
+struct PlanCreateTool: AgentTool {
+    let name = "plan_create"
+    let description = "Create a structured plan before executing a complex task. Use for multi-step operations like processing large items or research."
+
+    let parameters = AIToolParameters(
+        properties: [
+            "steps": AIToolProperty(type: "array", description: "Array of step descriptions, e.g. [\"Extract content\", \"Analyze with nano\", \"Review and synthesize\"]"),
+            "goal": AIToolProperty(type: "string", description: "What this plan aims to accomplish")
+        ],
+        required: ["steps", "goal"]
+    )
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        let goal = arguments["goal"] as? String ?? "Unnamed plan"
+        let steps = arguments["steps"] as? [String] ?? []
+        var content = "**Plan: \(goal)**\n\n"
+        for (i, step) in steps.enumerated() {
+            content += "\(i + 1). [ ] \(step)\n"
+        }
+        return ToolResult(content: content, citations: [], isError: false, displaySummary: "plan: \(steps.count) steps")
+    }
+}
+
+struct PlanUpdateTool: AgentTool {
+    let name = "plan_update"
+    let description = "Mark a plan step as completed. Use after finishing each step."
+
+    let parameters = AIToolParameters(
+        properties: [
+            "step_index": AIToolProperty(type: "integer", description: "1-based index of the completed step"),
+            "note": AIToolProperty(type: "string", description: "Optional note about the step outcome")
+        ],
+        required: ["step_index"]
+    )
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        let idx = arguments["step_index"] as? Int ?? 0
+        let note = arguments["note"] as? String ?? ""
+        return ToolResult(
+            content: "Step \(idx) completed.\(note.isEmpty ? "" : " Note: \(note)")",
+            citations: [], isError: false,
+            displaySummary: "plan: step \(idx) done"
+        )
+    }
+}
+
+// MARK: - Output Block Tools
+
+/// Validates and returns a table block for native rendering.
+struct RenderTableTool: AgentTool {
+    let name = "render_table"
+    let description = "Render tabular data as a native sortable table. Each row must have exactly the same number of cells as headers. Use for comparisons, inventories, decision matrices, etc."
+
+    let parameters = AIToolParameters(properties: [
+        "headers": AIToolProperty(type: "array", description: "Column headers"),
+        "rows": AIToolProperty(type: "array", description: "Array of row arrays. Each row must match header count."),
+        "title": AIToolProperty(type: "string", description: "Optional table title")
+    ], required: ["headers", "rows"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let headers = args["headers"] as? [String], !headers.isEmpty else {
+            return ToolResult(content: "render_table: headers required.", citations: [], isError: true, displaySummary: "render_table: bad headers")
+        }
+        guard let rows = args["rows"] as? [[String]] else {
+            return ToolResult(content: "render_table: rows required as array of string arrays.", citations: [], isError: true, displaySummary: "render_table: bad rows")
+        }
+        // Validate row lengths
+        for (i, row) in rows.enumerated() {
+            if row.count != headers.count {
+                return ToolResult(content: "render_table: row \(i+1) has \(row.count) columns, expected \(headers.count). Fix: each row must match: | \(headers.joined(separator: " | ")) |", citations: [], isError: true, displaySummary: "render_table: column mismatch")
+            }
+        }
+        let title = args["title"] as? String
+        // Persist as annotation so the table is recoverable
+        if let itemId = context.activeProjectID {
+            let annotationSvc = AnnotationService(context: context.modelContext)
+            try? annotationSvc.upsert([
+                CapturedAnnotation(source: "render_table", key: "headers", value: headers.joined(separator: "|"), confidence: nil),
+                CapturedAnnotation(source: "render_table", key: "rowCount", value: String(rows.count), confidence: nil)
+            ], itemID: itemId, source: "render_table")
+        }
+        return ToolResult(content: "render_table: \(headers.count) cols × \(rows.count) rows rendered.\(title.map { " Title: \"\($0)\"." } ?? "")", citations: [], isError: false, displaySummary: "table: \(headers.count)×\(rows.count)")
+    }
+}
+
+/// Validates and renders action items with checkboxes. Items are persisted as TaskItems.
+struct RenderActionsTool: AgentTool {
+    let name = "render_actions"
+    let description = "Render action items as native checkboxes. Each item can have owner, due date, and priority. Items are persisted as tasks. Use for todos, commitments, and follow-ups."
+
+    let parameters = AIToolParameters(properties: [
+        "items": AIToolProperty(type: "array", description: "Array of {task, owner?, due?, priority?} objects"),
+        "title": AIToolProperty(type: "string", description: "Optional section title")
+    ], required: ["items"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let items = args["items"] as? [[String: Any]] else {
+            return ToolResult(content: "render_actions: items required as array of {task, owner?, due?, priority?}.", citations: [], isError: true, displaySummary: "render_actions: bad items")
+        }
+        var created = 0
+        let taskSvc = TaskService(context: context.modelContext)
+        for item in items {
+            guard let taskTitle = item["task"] as? String else { continue }
+            let owner = item["owner"] as? String
+            let dueStr = item["due"] as? String
+            let priorityStr = item["priority"] as? String
+            let due: Date? = dueStr.flatMap { ISO8601DateFormatter().date(from: $0) }
+            let priority = priorityStr.flatMap { TaskPriority(rawValue: $0) } ?? .medium
+            let task = TaskItem(title: taskTitle, priority: priority, ownerName: owner, dueAt: due)
+            context.modelContext.insert(task)
+            created += 1
+        }
+        try? context.modelContext.save()
+        return ToolResult(content: "render_actions: \(created) tasks created\(created > 0 ? " and rendered" : "").", citations: [], isError: false, displaySummary: "actions: \(created) tasks")
+    }
+}
+
+/// Renders a card with title, body, entity chips, and optional badge.
+struct RenderCardTool: AgentTool {
+    let name = "render_card"
+    let description = "Render a summary card with title, body text, entity tags, and an optional badge. Use for key findings, executive summaries, or item overviews."
+
+    let parameters = AIToolParameters(properties: [
+        "title": AIToolProperty(type: "string", description: "Card title"),
+        "body": AIToolProperty(type: "string", description: "Card body text (markdown)"),
+        "entities": AIToolProperty(type: "array", description: "Entity names to show as chips"),
+        "badge": AIToolProperty(type: "string", description: "Optional badge text (e.g. 'HIGH', 'DONE')")
+    ], required: ["title", "body"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        let title = args["title"] as? String ?? ""
+        let body = args["body"] as? String ?? ""
+        let entities = args["entities"] as? [String] ?? []
+        let badge = args["badge"] as? String
+        return ToolResult(content: "render_card: \"\(title)\" rendered with \(entities.count) entities.\(badge.map { " Badge: \($0)." } ?? "")", citations: [], isError: false, displaySummary: "card: \(title)")
+    }
+}
+
+/// Renders a code block with syntax highlighting and copy button.
+struct RenderCodeTool: AgentTool {
+    let name = "render_code"
+    let description = "Render a code block with syntax highlighting and a copy button. Use for scripts, queries, config examples, or structured data."
+
+    let parameters = AIToolParameters(properties: [
+        "code": AIToolProperty(type: "string", description: "Code content"),
+        "language": AIToolProperty(type: "string", description: "Programming language for syntax highlighting"),
+        "caption": AIToolProperty(type: "string", description: "Optional caption below the code block")
+    ], required: ["code"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        let code = args["code"] as? String ?? ""
+        let lang = args["language"] as? String
+        let caption = args["caption"] as? String
+        return ToolResult(content: "render_code: \(code.count) chars\(lang.map { " (\($0))" } ?? "").", citations: [], isError: false, displaySummary: "code: \(code.count) chars")
+    }
+}
+
+/// Renders a chart using native Swift Charts. Supports bar, line, pie, and scatter.
+struct RenderChartTool: AgentTool {
+    let name = "render_chart"
+    let description = "Render a native chart. Supported types: bar, line, pie, scatter. Labels array for X axis. Data as array of {label, value} or {label, values:[]} for multi-series."
+
+    let parameters = AIToolParameters(properties: [
+        "type": AIToolProperty(type: "string", description: "Chart type: bar, line, pie, scatter"),
+        "labels": AIToolProperty(type: "array", description: "X-axis labels"),
+        "data": AIToolProperty(type: "array", description: "Array of {label, value} or {label, values:[]} for multi-series")
+    ], required: ["type", "labels", "data"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        let type = args["type"] as? String ?? "bar"
+        let labels = args["labels"] as? [String] ?? []
+        let _ = args["data"] as? [[String: Any]] ?? []
+        guard !labels.isEmpty else {
+            return ToolResult(content: "render_chart: labels required.", citations: [], isError: true, displaySummary: "chart: bad labels")
+        }
+        return ToolResult(content: "render_chart: \(type) chart with \(labels.count) data points rendered.", citations: [], isError: false, displaySummary: "chart: \(type) (\(labels.count) pts)")
+    }
+}
+
+// MARK: - JavaScript Execution Tool
+
+/// Executes JavaScript code in a sandboxed JSContext with access to native APIs.
+/// The code runs with a 5-second timeout. Use `native.getAllItems()` etc.
+struct ExecuteJavaScriptTool: AgentTool {
+    let name = "execute_javascript"
+    let description = """
+    Execute JavaScript code in a secure sandbox with access to native APIs via `native.*`. \
+    Available APIs: native.getAllItems(), native.searchItems(query), native.getItem(id), \
+    native.getItemAnalysis(id), native.getProject(id), native.getProjectTasks(projectId), \
+    native.createTask(title, owner, due, projectId), native.jsLog(msg), native.jsNow(). \
+    Use console.log() for debugging. 5-second timeout. No network, no fs, no require.
+    """
+
+    let parameters = AIToolParameters(properties: [
+        "code": AIToolProperty(type: "string", description: "JavaScript code to execute"),
+        "description": AIToolProperty(type: "string", description: "Brief description of what this script does")
+    ], required: ["code"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let code = args["code"] as? String, !code.isEmpty else {
+            return ToolFormatting.error(tool: name, reason: "Missing 'code'.", fix: "Provide JavaScript code to execute.")
+        }
+        let desc = args["description"] as? String ?? ""
+
+        let bridge = WawaJSBridge(modelContext: context.modelContext, fileStore: context.fileStore)
+        let result = JSSandbox.execute(code, bridge: bridge)
+
+        if let error = result.error {
+            let msg = """
+            JavaScript execution failed:
+
+            **Description:** \(desc)
+            **Error:** \(error)
+
+            Fix the code and retry. Check for:
+            - Syntax errors (missing brackets, semicolons)
+            - API misuse (check `native.*` function signatures)
+            - Infinite loops (5s timeout)
+            """
+            return ToolResult(content: msg, citations: [], isError: true, displaySummary: "JS: error — \(error.prefix(60))")
+        }
+
+        let logSection = result.logs.isEmpty ? "" : "\n\n**Console output:**\n\(result.logs.map { "  > \($0)" }.joined(separator: "\n"))"
+        return ToolResult(
+            content: "**JS result** (\(desc)):\n\(result.output)\(logSection)",
+            citations: [], isError: false,
+            displaySummary: "JS: \(desc.isEmpty ? code.prefix(40) : desc.prefix(60))"
+        )
+    }
+}

@@ -43,6 +43,12 @@ final class ChatViewModel: ObservableObject {
         inputText = ""
         error = nil
 
+        // Handle commands (Phase 4)
+        if text.hasPrefix("/") {
+            handleCommand(text)
+            return
+        }
+
         // Ensure conversation exists
         if currentConversation == nil {
             currentConversation = try? chatService.createConversation(title: String(text.prefix(60)))
@@ -75,7 +81,18 @@ final class ChatViewModel: ObservableObject {
             CreateNoteTool(), CreateTaskTool(), SummarizeDayTool(),
             GetAnalysisTool(), UpdateTaskTool(), CreateEdgeTool(),
             SetAnnotationTool(), TrashItemTool(), ThinkTool(),
-            CreateProjectFrameworkTool(), UpdateProjectFrameworkTool()
+            CreateProjectFrameworkTool(), UpdateProjectFrameworkTool(),
+            // Prompt management (Phase 2)
+            ListPromptsTool(), ReadPromptTool(), EditPromptTool(),
+            // Agent memory (Phase 3)
+            WriteMemoryTool(), SearchMemoryTool(), ListMemoriesTool(),
+            // Plan mode (Phase 5)
+            PlanCreateTool(), PlanUpdateTool(),
+            // Output blocks
+            RenderTableTool(), RenderActionsTool(), RenderCardTool(), RenderCodeTool(),
+            RenderChartTool(),
+            // JavaScript sandbox
+            ExecuteJavaScriptTool()
         ])
 
         let toolContext = ToolContext(modelContext: ctx, activeProjectID: activeProjectID, activeProjectName: activeProjectName)
@@ -131,6 +148,67 @@ final class ChatViewModel: ObservableObject {
                     state = .error
                 }
             }
+        }
+    }
+
+    // MARK: - Commands (Phase 4)
+
+    private func handleCommand(_ text: String) {
+        let parts = text.dropFirst().split(separator: " ", maxSplits: 1)
+        let cmd = parts.first.map(String.init) ?? ""
+        let arg = parts.count > 1 ? String(parts[1]) : ""
+
+        let response: String
+        switch cmd {
+        case "help":
+            response = """
+            **Commands:**
+            - `/analyze <itemID>` — Run content pipeline on an item
+            - `/prompt <name>` — Show a prompt template (use `list_prompts` for names)
+            - `/search <query>` — Search the knowledge base
+            - `/memories` — List agent memories
+            - `/prompts` — List all prompt templates
+            - `/help` — Show this help
+            """
+        case "analyze":
+            guard !arg.isEmpty else { response = "Usage: /analyze <itemID>"; break }
+            guard let itemId = UUID(uuidString: arg) else { response = "Invalid UUID: `\(arg)`."; break }
+            NotificationCenter.default.post(name: .pipelineCompleted, object: itemId.uuidString,
+                userInfo: ["action": "reprocess"])
+            response = "Re-analysis triggered for item `\(arg)`. Check the Knowledge detail view for progress."
+        case "prompt":
+            guard !arg.isEmpty else { response = "Usage: /prompt <name>. Use /prompts to list names."; break }
+            if let p = PromptStore.shared.prompt(named: arg) {
+                response = "**\(p.name)** [\(p.category)]\(p.isUserEdited ? " (edited)" : "")\n\n\(p.content)"
+            } else {
+                response = "Prompt `\(arg)` not found. Use /prompts to list available templates."
+            }
+        case "prompts":
+            let all = PromptStore.shared.prompts()
+            response = all.map { "- `\($0.name)` [\($0.category)]\($0.isUserEdited ? " (edited)" : "")" }.joined(separator: "\n")
+        case "memories":
+            let all = AgentMemoryStore.shared.listAll()
+            guard !all.isEmpty else { response = "No memories recorded yet."; break }
+            response = all.map { "- \($0.isStale ? "[STALE] " : "")\($0.pattern) (\($0.successCount)S/\($0.failCount)F)" }.joined(separator: "\n")
+        case "search":
+            guard !arg.isEmpty else { response = "Usage: /search <query>"; break }
+            guard let ctx = modelContext else { response = "Model context not available."; break }
+            let items = (try? KnowledgeItemService(context: ctx).allItems()) ?? []
+            let results = SearchService().searchNow(query: arg, in: items).prefix(5)
+            guard !results.isEmpty else { response = "No results for \"\(arg)\"."; break }
+            response = results.map { r in
+                guard let item = items.first(where: { $0.id == r.itemID }) else { return "- Unknown item" }
+                return "- \(item.title) (\(item.type.label)) — \(r.snippet)"
+            }.joined(separator: "\n")
+        default:
+            response = "Unknown command: `\(cmd)`. Use `/help` to see available commands."
+        }
+
+        // Display response as system message (no agent involved)
+        if let conv = currentConversation {
+            let sysMsg = ChatMessage(conversationId: conv.id, role: .assistant, content: response)
+            messages.append(sysMsg)
+            try? chatService.appendMessage(sysMsg)
         }
     }
 

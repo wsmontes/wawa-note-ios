@@ -524,15 +524,19 @@ struct HomeView: View {
         }
         item.imageFileRelativePath = "scan_0.jpg"
         item.imagePageCount = 1
-        var parts: [String] = []
-        if let ocr = await recognizeText(from: image), !ocr.isEmpty { parts.append("OCR TEXT:\n\(ocr)") }
+
+        // ImageAnalysisService handles both OCR and LLM vision in one call.
         if let provider = try? ProviderRouter.resolveActive(context: modelContext) {
             let model = AIConfigService.shared.featureConfig(for: "analysis")?.model ?? "gpt-5.5"
-            if let vision = try? await ImageAnalysisService().analyzeImage(dir.appendingPathComponent("scan_0.jpg"), llmProvider: provider, model: model), !vision.isEmpty {
-                parts.append("LLM VISION:\n\(vision)")
-            }
+            item.bodyText = try? await ImageAnalysisService().analyzeImage(
+                dir.appendingPathComponent("scan_0.jpg"),
+                llmProvider: provider, model: model
+            )
         }
-        item.bodyText = parts.joined(separator: "\n\n---\n\n")
+        // Fallback: local OCR only if no provider configured
+        if item.bodyText == nil {
+            item.bodyText = await recognizeText(from: image)
+        }
         try? modelContext.save()
         return [item]
     }
@@ -658,31 +662,43 @@ final class ScannerViewModel: ObservableObject {
         let dir = fileStore.itemDirectoryURL(for: item.id)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
-        // Save all pages and collect OCR text
-        var allText: [String] = []
+        // Save all pages
         for (idx, image) in images.enumerated() {
             let filename = "scan_\(idx).jpg"
             if let data = image.jpegData(compressionQuality: 0.85) {
                 try? data.write(to: dir.appendingPathComponent(filename))
             }
-            if let text = await recognizeText(from: image), !text.isEmpty {
-                allText.append(text)
-            }
         }
 
-        // LLM vision analysis for richer understanding (first page only for multi-page)
+        var contentParts: [String] = []
+
+        // Page 1: ImageAnalysisService handles OCR + LLM vision together (no duplication)
         if let provider = try? ProviderRouter.resolveActive(context: context) {
             let model = AIConfigService.shared.featureConfig(for: "analysis")?.model ?? "gpt-5.5"
             let firstPageURL = dir.appendingPathComponent("scan_0.jpg")
-            if let visionText = try? await ImageAnalysisService().analyzeImage(firstPageURL, llmProvider: provider, model: model),
-               !visionText.isEmpty {
-                allText.insert("LLM VISION ANALYSIS:\n\(visionText)", at: 0)
+            if let analysis = try? await ImageAnalysisService().analyzeImage(firstPageURL, llmProvider: provider, model: model),
+               !analysis.isEmpty {
+                contentParts.append(analysis)
+            }
+        } else {
+            // Fallback: local OCR only
+            if !images.isEmpty, let ocr = await recognizeText(from: images[0]), !ocr.isEmpty {
+                contentParts.append("OCR TEXT:\n\(ocr)")
+            }
+        }
+
+        // Pages 2+: local OCR only (LLM vision on every page would be too expensive)
+        if images.count > 1 {
+            for idx in 1..<images.count {
+                if let ocr = await recognizeText(from: images[idx]), !ocr.isEmpty {
+                    contentParts.append("PAGE \(idx + 1):\n\(ocr)")
+                }
             }
         }
 
         item.imageFileRelativePath = "scan_0.jpg"
         item.imagePageCount = images.count
-        item.bodyText = allText.joined(separator: "\n\n---\n\n")
+        item.bodyText = contentParts.joined(separator: "\n\n---\n\n")
 
         do {
             try context.save()

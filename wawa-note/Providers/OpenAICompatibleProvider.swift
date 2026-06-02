@@ -219,7 +219,8 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
                 parts.append(["type": "text", "text": textContent])
             }
             for imgURL in imageBlocks {
-                parts.append(["type": "image_url", "image_url": ["url": imgURL.absoluteString]])
+                let urlString = Self.base64DataURL(from: imgURL) ?? imgURL.absoluteString
+                parts.append(["type": "image_url", "image_url": ["url": urlString]])
             }
             return ["role": msg.role.apiName, "content": parts]
         }
@@ -358,10 +359,11 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
             parts.append(ChatCompletionRequest.Message.ContentPart(type: "text", text: text, imageUrl: nil))
         }
         for imageURL in imageBlocks {
+            let urlString = Self.base64DataURL(from: imageURL) ?? imageURL.absoluteString
             parts.append(ChatCompletionRequest.Message.ContentPart(
                 type: "image_url",
                 text: nil,
-                imageUrl: ChatCompletionRequest.Message.ContentPart.ImageURL(url: imageURL.absoluteString)
+                imageUrl: ChatCompletionRequest.Message.ContentPart.ImageURL(url: urlString)
             ))
         }
         return .parts(parts)
@@ -416,5 +418,26 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
         }
         let decoded = try JSONDecoder().decode(UnifiedModelsResponse.self, from: data)
         return decoded.modelIDs.sorted()
+    }
+
+    // MARK: - Image helpers
+
+    /// Converts a local file:// URL to a base64 data URL the remote API can read.
+    /// Returns nil if the file cannot be read or is not a local file.
+    static func base64DataURL(from url: URL) -> String? {
+        guard url.isFileURL else { return nil }
+        guard let data = try? Data(contentsOf: url), !data.isEmpty else { return nil }
+        let mime: String = {
+            switch url.pathExtension.lowercased() {
+            case "jpg", "jpeg": return "image/jpeg"
+            case "png": return "image/png"
+            case "gif": return "image/gif"
+            case "webp": return "image/webp"
+            case "heic", "heif": return "image/heic"
+            default: return "image/jpeg"
+            }
+        }()
+        let base64 = data.base64EncodedString()
+        return "data:\(mime);base64,\(base64)"
     }
 }

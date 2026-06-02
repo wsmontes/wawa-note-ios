@@ -54,7 +54,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     // MARK: - Recording lifecycle
 
     func startRecording(meetingId: UUID) async throws {
-        guard state == .idle else { return }
+        guard state == .idle else {
+            AppLog.audio.warning("startRecording called while state is \(String(describing: self.state)) — ignoring")
+            return
+        }
         let granted = await sessionManager.requestPermission()
         guard granted else { throw AudioCaptureError.permissionDenied }
 
@@ -76,10 +79,15 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             }
         }
 
+        engine.prepare()
+
         do {
             try engine.start()
         } catch {
             AppLog.audio.error("Failed to start audio engine: \(error.localizedDescription)")
+            engine.inputNode.removeTap(onBus: 0)
+            fileWriter.finishRecording()
+            try? sessionManager.deactivate()
             throw AudioCaptureError.engineStartFailed
         }
 
@@ -124,6 +132,11 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         elapsedTime = 0.0
         recordingStartTime = nil
         AppLog.audio.info("Recording stopped")
+    }
+
+    func resetToIdle() {
+        guard state == .stopped else { return }
+        state = .idle
     }
 
     // MARK: - Timer

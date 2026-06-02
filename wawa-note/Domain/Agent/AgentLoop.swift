@@ -51,6 +51,8 @@ final class AgentLoop: @unchecked Sendable {
         self.contextManager = ContextWindowManager(modelContextLimit: contextLimit)
     }
 
+    // MARK: - Interactive mode (user chat)
+
     func runStreaming(
         userMessage: String,
         history: [ChatMessage],
@@ -59,7 +61,15 @@ final class AgentLoop: @unchecked Sendable {
         AsyncThrowingStream { continuation in
             Task {
                 do {
-                    try await self.runLoop(userMessage: userMessage, history: history, provider: provider, continuation: continuation)
+                    try await self.runLoop(
+                        initialMessage: userMessage,
+                        initialRole: .user,
+                        systemPrompt: self.buildSystemPrompt(),
+                        tools: self.registry.allDefinitions(),
+                        history: history,
+                        provider: provider,
+                        continuation: continuation
+                    )
                 } catch {
                     continuation.yield(.error(error))
                     continuation.finish()
@@ -68,19 +78,65 @@ final class AgentLoop: @unchecked Sendable {
         }
     }
 
+    // MARK: - Autonomous mode (pipeline / sub-agent)
+
+    /// Runs the agent loop autonomously — no user interaction.
+    /// The `task` is the initial instruction (e.g. "Process item X through the content pipeline").
+    /// `systemPrompt` is the pipeline template (defines the agent's behavior and rules).
+    /// `tools` restricts which tools are available (pipeline may use fewer tools than chat).
+    func runAutonomous(
+        task: String,
+        systemPrompt: String,
+        tools: [any AgentTool],
+        history: [ChatMessage] = [],
+        provider: any AIProvider,
+        maxIterations overrideIterations: Int? = nil
+    ) -> AsyncThrowingStream<AgentStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    let toolDefs = tools.map { tool in
+                        AIToolDefinition(name: tool.name, description: tool.description, parameters: tool.parameters)
+                    }
+                    try await self.runLoop(
+                        initialMessage: task,
+                        initialRole: .system,
+                        systemPrompt: systemPrompt,
+                        tools: toolDefs,
+                        history: history,
+                        provider: provider,
+                        continuation: continuation,
+                        maxIterations: overrideIterations ?? self.maxIterations,
+                        toolRegistry: AgentToolRegistry(tools: tools)
+                    )
+                } catch {
+                    continuation.yield(.error(error))
+                    continuation.finish()
+                }
+            }
+        }
+    }
+
+    // MARK: - Core loop
+
     private func runLoop(
-        userMessage: String,
+        initialMessage: String,
+        initialRole: AIRole,
+        systemPrompt: String,
+        tools: [AIToolDefinition],
         history: [ChatMessage],
         provider: any AIProvider,
-        continuation: AsyncThrowingStream<AgentStreamEvent, Error>.Continuation
+        continuation: AsyncThrowingStream<AgentStreamEvent, Error>.Continuation,
+        maxIterations: Int? = nil,
+        toolRegistry customRegistry: AgentToolRegistry? = nil
     ) async throws {
-        let systemPrompt = buildSystemPrompt()
-        let tools = registry.allDefinitions()
+        let effectiveRegistry = customRegistry ?? registry
+        let iterations = maxIterations ?? self.maxIterations
         var messages = history
-        messages.append(ChatMessage(conversationId: UUID(), role: .user, content: userMessage))
+        messages.append(ChatMessage(conversationId: UUID(), role: initialRole, content: initialMessage))
         var allCitations: [ChatCitation] = []
 
-        for iteration in 0..<maxIterations {
+        for iteration in 0..<iterations {
             continuation.yield(.thinking)
             let model = resolveModel(for: iteration)
 
@@ -128,7 +184,7 @@ final class AgentLoop: @unchecked Sendable {
                 for tc in pendingToolCalls {
                     continuation.yield(.toolCallStarted(name: tc.name, id: tc.id, arguments: tc.arguments))
 
-                    guard let tool = registry.tool(named: tc.name) else {
+                    guard let tool = effectiveRegistry.tool(named: tc.name) else {
                         messages.append(ChatMessage(conversationId: UUID(), role: .tool,
                             content: "TOOL ERROR: unknown tool '\(tc.name)'", toolCallId: tc.id))
                         continuation.yield(.toolCallCompleted(name: tc.name, id: tc.id, summary: "Error"))
@@ -163,24 +219,45 @@ final class AgentLoop: @unchecked Sendable {
 
     // MARK: - Model resolution
 
+    /// Dynamic model routing based on mode and iteration phase.
+    /// Early iterations (tool calls, extraction) use executor model.
+    /// Later iterations (synthesis, analysis) use advisor model.
+    /// In .deep mode, advisor is used for all iterations.
+    /// In .fast mode, executor is used for all iterations.
+    /// In .auto mode, executor is used for iterations 0-2, advisor for 3+.
     private func resolveModel(for iteration: Int) -> String {
         switch mode {
         case .deep: return advisorModel
         case .fast: return executorModel
-        case .auto: return executorModel
+        case .auto:
+            // First 3 iterations: cheap model for tool calls and extraction
+            // Later iterations: expensive model for synthesis and complex reasoning
+            return iteration < 3 ? executorModel : advisorModel
         }
     }
 
-    // MARK: - System prompt
+    // MARK: - System prompt (with cache-aware fragments)
 
+    /// Builds the system prompt as a fragment array. The prompt-cache boundary
+    /// separates static content (tools, rules — cached between requests) from
+    /// dynamic content (project context, date — changes per request).
+    /// Providers that support prompt caching can reuse the static portion.
     private func buildSystemPrompt() -> String {
+        let fragments = buildPromptFragments()
+        return fragments.static + "\n\n" + fragments.dynamic
+    }
+
+    /// Returns separated static and dynamic prompt fragments.
+    /// Static: tool definitions, behavior rules (cacheable across requests).
+    /// Dynamic: project context, current date (changes per request).
+    func buildPromptFragments() -> (static: String, dynamic: String) {
         let tools = registry.allDefinitions()
         let toolList = tools.map { t in
             let params = t.parameters.properties.keys.sorted().joined(separator: ", ")
             return "- `\(t.name)`\(params.isEmpty ? "" : "(\(params))"): \(t.description)"
         }.joined(separator: "\n")
 
-        var prompt = """
+        let staticPrompt = """
         You are Wawa, an AI assistant with access to the user's personal knowledge workspace.
 
         AVAILABLE TOOLS:
@@ -194,27 +271,29 @@ final class AgentLoop: @unchecked Sendable {
         - Use get_project to see a project's tasks and connected items.
         - Use get_connections to explore how items relate to each other.
         - Use think to ask a more capable reasoning model for help with complex analysis. Provide structured context, not raw data. The advisor returns only guidance.
-        
         - Use create_note and create_task ONLY when the user explicitly asks. Confirm first.
+        - Use list_prompts, read_prompt, and edit_prompt to inspect and modify system behavior. Always confirm before editing prompts.
 
         RULES:
         1. NEVER guess or make up facts. Always search or fetch before answering.
         2. Cite items by their title and ID when referencing them.
         3. If search returns no results, tell the user honestly and suggest alternatives.
         4. Be concise. Answer directly, then offer to explore further.
-        5. For date-based queries, use today's date: \(Date().formatted(date: .complete, time: .omitted)).
+        5. For date-based queries, use today's date: see dynamic context below.
         6. Item IDs are UUIDs. Use exact IDs from search or list results.
         7. If you need clarification, ask.
         """
 
+        var dynamicPrompt = "Today's date: \(Date().formatted(date: .complete, time: .omitted))."
+
         if let projectID = toolContext.activeProjectID {
-            prompt += "\n\nCURRENT PROJECT CONTEXT:\n"
-            if let name = toolContext.activeProjectName { prompt += "- Project: \(name)\n" }
-            prompt += "- Project ID: \(projectID.uuidString)\n"
-            prompt += "- Use get_project to see details. Prioritize this project's context."
+            dynamicPrompt += "\n\nCURRENT PROJECT CONTEXT:\n"
+            if let name = toolContext.activeProjectName { dynamicPrompt += "- Project: \(name)\n" }
+            dynamicPrompt += "- Project ID: \(projectID.uuidString)\n"
+            dynamicPrompt += "- Use get_project to see details. Prioritize this project's context."
         }
 
-        return prompt
+        return (static: staticPrompt, dynamic: dynamicPrompt)
     }
 
     private func buildRequest(

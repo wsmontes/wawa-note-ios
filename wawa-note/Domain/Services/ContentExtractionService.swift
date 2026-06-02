@@ -251,7 +251,7 @@ final class ContentExtractionService {
 
     private static let maxChunkChars = 8000
 
-    private func chunkText(_ text: String, itemID: UUID) -> [TranscriptSegment] {
+    func chunkText(_ text: String, itemID: UUID) -> [TranscriptSegment] {
         let paragraphs = text.components(separatedBy: "\n\n")
         var segments: [TranscriptSegment] = []
         var currentChunk = ""
@@ -375,7 +375,7 @@ struct SourceContext: Sendable {
         case .import_:
             return "You are a document analyst. Analyze this imported file. Identify its structure, key points, decisions if any, action items, risks, mentioned entities, and dates. Consider the filename and metadata for context. Return only valid JSON."
         case .scan:
-            return "You are a document analyst. Analyze this scanned document (OCR text). Identify document structure, key clauses, dates, parties mentioned, obligations, risks, and action items if applicable. Note that OCR may have errors — flag uncertain readings. Return only valid JSON."
+            return "You are a visual content analyst. Analyze this image description (which may include OCR text and/or an AI-generated visual description). Identify what is depicted, key objects, text content, context, and any action items or insights. Note that this is NOT a meeting transcript — focus on visual content. Return only valid JSON."
         case .note:
             return "You are a knowledge analyst. Analyze this note. Extract key themes, questions being explored, references to other topics, action items if any, and people/systems mentioned. Return only valid JSON."
         }
@@ -394,7 +394,7 @@ struct SourceContext: Sendable {
             lines.append("The following is the content of an imported file.")
             if let fn = metadata["filename"] { lines.append("Filename: \(fn)") }
         case .scan:
-            lines.append("The following is OCR-extracted text from a scanned document.")
+            lines.append("The following describes an image (may include OCR text and/or visual scene description).")
             if let pages = metadata["pageCount"] { lines.append("Pages: \(pages)") }
         case .note:
             lines.append("The following is a user note.")

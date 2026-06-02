@@ -69,6 +69,12 @@ final class AnalysisService: @unchecked Sendable {
 
     nonisolated(unsafe) var onProgress: (@Sendable (AnalysisProgress) -> Void)?
 
+    /// Reasoning models (o1, o3, gpt-5.5, etc.) don't support response_format: json_object.
+    /// The prompt already instructs JSON output, so we omit the parameter for them.
+    private func jsonResponseFormat(for model: String) -> AIRequest.AIResponseFormat? {
+        configService.isReasoningModel(model) ? nil : .jsonObject
+    }
+
     func analyze(
         transcript: Transcript,
         using provider: any AIProvider,
@@ -128,7 +134,7 @@ final class AnalysisService: @unchecked Sendable {
         let request = AIRequest(model: model, messages: [
             AIMessage(role: .system, content: [.text(systemPrompt)]),
             AIMessage(role: .user, content: [.text(userPrompt)])
-        ], temperature: params.temperature, maxTokens: params.maxTokens, responseFormat: .jsonObject)
+        ], temperature: params.temperature, maxTokens: params.maxTokens, responseFormat: jsonResponseFormat(for: model))
 
         let response = try await provider.send(request)
         let cleaned = ProviderAdapter.normalizeJSON(response.content)
@@ -155,7 +161,7 @@ final class AnalysisService: @unchecked Sendable {
             ],
             temperature: params.temperature,
             maxTokens: params.maxTokens,
-            responseFormat: .jsonObject
+            responseFormat: jsonResponseFormat(for: model)
         )
         let response = try await provider.send(request)
         return await parseResponse(response.content, meetingId: meetingId, providerId: provider.id, model: model, provider: provider)
@@ -205,7 +211,7 @@ final class AnalysisService: @unchecked Sendable {
             ],
             temperature: params.temperature,
             maxTokens: params.maxTokens,
-            responseFormat: .jsonObject
+            responseFormat: jsonResponseFormat(for: model)
         )
         let response = try await sendWithRetry(provider: provider, request: request, maxRetries: Self.maxRetries)
         return await parseResponse(response.content, meetingId: meetingId, providerId: provider.id, model: model, provider: provider)
@@ -334,13 +340,14 @@ final class AnalysisService: @unchecked Sendable {
         // Attempt 1: direct parse
         let cleaned = ProviderAdapter.normalizeJSON(content)
         if let data = cleaned.data(using: .utf8),
-           let parsed = tryDecode(AnalysisResponse.self, from: data) {
+           let parsed = tryDecode(AnalysisResponse.self, from: data),
+           parsed.shortSummary?.isEmpty == false {
             return buildAnalysis(from: parsed, meetingId: meetingId, providerId: providerId, model: model)
         }
 
         // Attempt 2: retry with a "fix your JSON" prompt (save the failed response first)
         saveRawResponse(content, meetingId: meetingId)
-        AppLog.provider.warning("Initial parse failed. Requesting JSON fix from provider...")
+        AppLog.provider.warning("Initial parse failed or empty shortSummary. Requesting JSON fix from provider...")
 
         if let parsed = await tryRetryWithFix(provider: provider, model: model, failedJSON: cleaned, meetingId: meetingId) {
             return buildAnalysis(from: parsed, meetingId: meetingId, providerId: providerId, model: model)
@@ -366,7 +373,7 @@ final class AnalysisService: @unchecked Sendable {
                 AIMessage(role: .system, content: [.text("You are a JSON repair assistant. Output ONLY valid JSON. No markdown, no code fences.")]),
                 AIMessage(role: .user, content: [.text(fixPrompt)])
             ],
-            responseFormat: .jsonObject
+            responseFormat: jsonResponseFormat(for: model)
         )
 
         do {

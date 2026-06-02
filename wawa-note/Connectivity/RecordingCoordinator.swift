@@ -193,6 +193,7 @@ final class RecordingCoordinator: ObservableObject {
         audioLevel = 0
         savedItemId = nil
         errorMessage = nil
+        captureService.resetToIdle()
     }
 
     // MARK: - Status

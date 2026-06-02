@@ -335,8 +335,8 @@ struct KnowledgeDetailView: View {
                         Text(error).font(.caption).foregroundStyle(.red)
                     }
                     ActiveModelPicker(selectedModel: $selectedModel, label: "Model")
-                    Button("Analyze Now") {
-                        Task { await runAnalysis() }
+                    Button("Analyze via Agent") {
+                        Task { await reprocessItem() }
                     }
                     .buttonStyle(.borderedProminent)
                 }
@@ -1003,9 +1003,10 @@ struct KnowledgeDetailView: View {
                 await pipeline.ensureEmbedding(for: item, using: provider)
             }
 
-            // Auto-run analysis after transcription if provider is configured
-            if let provider = try? ProviderRouter.resolveActive(context: modelContext) {
-                await runAnalysisWithProvider(provider)
+            // Auto-run pipeline (agent-based) after transcription
+            if (try? ProviderRouter.resolveActive(context: modelContext)) != nil {
+                isPipelineProcessing = true
+                await contentPipeline.process(item.id, using: modelContext)
             }
         } catch let error as TranscriptionError {
             switch error {
@@ -1156,48 +1157,7 @@ struct KnowledgeDetailView: View {
         }
     }
 
-    // MARK: - Analysis
-
-    private func runAnalysis() async {
-        guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
-            analysisError = "No AI provider configured. Go to Settings."
-            return
-        }
-        await runAnalysisWithProvider(provider)
-    }
-
-    private func runAnalysisWithProvider(_ provider: any AIProvider) async {
-        guard transcript != nil else {
-            analysisError = "No transcript available. Transcribe first."
-            return
-        }
-
-        isAnalyzing = true
-        analysisError = nil
-
-        do {
-            let svc = AnalysisService()
-            let model = selectedModel.isEmpty
-                ? ActiveModelPicker.effectiveModel(context: modelContext, feature: "analysis")
-                : selectedModel
-
-            guard let t = transcript else { return }
-            let result = try await svc.analyze(transcript: t, using: provider, model: model)
-
-            // Show immediately, then save
-            analysis = result
-            item.status = .analyzed
-
-            try? fileStore.createMeetingDirectory(for: item.id)
-            try? fileStore.writeArtifact(result, fileName: "analysis.json", meetingId: item.id)
-        } catch let error as ProviderError {
-            analysisError = "[Provider] \(error.userMessage)"
-        } catch {
-            analysisError = "[Error] \(error.localizedDescription)"
-        }
-
-        isAnalyzing = false
-    }
+    // MARK: - Analysis (all via agent pipeline)
 
     private var typeIcon: String { item.type.icon }
     private var typeColor: Color { item.type.color }

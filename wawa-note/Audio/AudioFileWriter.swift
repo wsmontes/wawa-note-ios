@@ -27,7 +27,7 @@ final class AudioFileWriter: @unchecked Sendable {
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVSampleRateKey: format.sampleRate,
-            AVNumberOfChannelsKey: min(format.channelCount, 1),
+            AVNumberOfChannelsKey: format.channelCount,
             AVEncoderBitRateKey: 128000,
             AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
         ]

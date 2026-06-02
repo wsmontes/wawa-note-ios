@@ -5,6 +5,7 @@ import AVFoundation
 
 struct ChatView: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var contentPipeline: ContentPipelineService
     @StateObject private var viewModel = ChatViewModel()
     @State private var showConversations = false
     @FocusState private var isInputFocused: Bool
@@ -80,8 +81,18 @@ struct ChatView: View {
                     }
 
                     ForEach(viewModel.messages) { msg in
-                        ChatMessageBubbleView(message: msg)
-                            .id(msg.id)
+                        if msg.role == .assistant || msg.role == .tool {
+                            ParsedMessageView(message: msg)
+                                .id(msg.id)
+                        } else {
+                            ChatMessageBubbleView(message: msg)
+                                .id(msg.id)
+                        }
+                    }
+
+                    // Pipeline progress (from ContentPipelineService)
+                    if let status = contentPipeline.pipelineStatus {
+                        PipelineProgressCardView(status: status)
                     }
 
                     // Active tool calls
@@ -504,5 +515,324 @@ struct ConversationListView: View {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
             }
         }
+    }
+}
+
+// MARK: - Pipeline Progress Card
+
+struct PipelineProgressCardView: View {
+    let status: PipelineProgress
+
+    private var icon: String {
+        switch status.phase {
+        case "completed": return "checkmark.circle.fill"
+        case "error": return "xmark.circle.fill"
+        default: return "arrow.triangle.2.circlepath"
+        }
+    }
+
+    private var color: Color {
+        switch status.phase {
+        case "completed": return .green
+        case "error": return .red
+        default: return .blue
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ProgressView()
+                .tint(color)
+                .opacity(status.phase == "processing" ? 1 : 0)
+
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundStyle(color)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Agente: \(status.itemTitle)")
+                    .font(.subheadline).fontWeight(.medium)
+                if let tool = status.currentTool {
+                    Text("Running \(tool)...")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if let summary = status.toolSummary, !summary.isEmpty {
+                    Text(summary).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                }
+                ForEach(status.toolLog, id: \.self) { entry in
+                    Text(entry).font(.caption2).foregroundStyle(.blue).lineLimit(1)
+                }
+            }
+            Spacer()
+        }
+        .padding(12)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(color.opacity(0.3)))
+        .padding(.horizontal, 8)
+        .transition(.opacity.combined(with: .scale))
+        .animation(.easeInOut(duration: 0.2), value: status.phase)
+    }
+}
+
+// MARK: - Parsed Message View
+
+/// Parses message content through ContentParser and renders as native blocks.
+/// Falls back to plain text if no blocks are extracted.
+struct ParsedMessageView: View {
+    let message: ChatMessage
+
+    var body: some View {
+        let (blocks, _) = ContentParser.parse(message.content)
+        if blocks.isEmpty || (blocks.count == 1 && message.role == .assistant) {
+            // Single text block or no blocks parsed → render as plain text bubble
+            ChatMessageBubbleView(message: message)
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(blocks) { block in
+                    OutputBlockRenderer(block: block)
+                }
+            }
+            .padding(12)
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 16)
+        }
+    }
+}
+
+// MARK: - Output Block Renderer
+
+/// Renders parsed OutputBlocks as native SwiftUI components.
+/// Falls back to text if the block type is unknown.
+struct OutputBlockRenderer: View {
+    let block: OutputBlock
+
+    var body: some View {
+        switch block {
+        case .text(let content):
+            Text(content).font(.body)
+
+        case .table(let table):
+            TableBlockView(table: table)
+
+        case .actions(let actions):
+            ActionBlockView(actions: actions)
+
+        case .card(let card):
+            CardBlockView(card: card)
+
+        case .bulletList(let items):
+            BulletListView(items: items)
+
+        case .orderedList(let items):
+            OrderedListView(items: items)
+
+        case .code(let codeBlock):
+            CodeBlockView(codeBlock: codeBlock)
+        }
+    }
+}
+
+// MARK: - Table View
+
+struct TableBlockView: View {
+    let table: TableBlock
+    @State private var sortColumn: Int? = nil
+    @State private var sortAscending = true
+
+    private var sortedRows: [[String]] {
+        guard let col = sortColumn, col < table.headers.count else { return table.rows }
+        return table.rows.sorted {
+            let a = col < $0.count ? $0[col] : ""
+            let b = col < $1.count ? $1[col] : ""
+            return sortAscending ? a < b : a > b
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let title = table.title {
+                Text(title).font(.headline)
+            }
+            ScrollView(.horizontal) {
+                VStack(spacing: 0) {
+                    // Header
+                    HStack(spacing: 0) {
+                        ForEach(Array(table.headers.enumerated()), id: \.offset) { idx, header in
+                            Button {
+                                if sortColumn == idx { sortAscending.toggle() }
+                                else { sortColumn = idx; sortAscending = true }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text(header).font(.caption).fontWeight(.bold)
+                                    if sortColumn == idx {
+                                        Image(systemName: sortAscending ? "chevron.up" : "chevron.down").font(.system(size: 8))
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 8).padding(.vertical, 6)
+                                .background(Color(.secondarySystemBackground))
+                            }
+                            .buttonStyle(.plain)
+                            if idx < table.headers.count - 1 {
+                                Divider().frame(width: 1)
+                            }
+                        }
+                    }
+                    Divider()
+                    // Rows
+                    ForEach(Array(sortedRows.enumerated()), id: \.offset) { _, row in
+                        HStack(spacing: 0) {
+                            ForEach(Array(row.enumerated()), id: \.offset) { idx, cell in
+                                Text(cell).font(.caption).foregroundStyle(.primary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 8).padding(.vertical, 4)
+                                if idx < row.count - 1 {
+                                    Divider().frame(width: 1)
+                                }
+                            }
+                        }
+                        Divider()
+                    }
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(.separator)))
+            HStack { Spacer(); Text("\(table.rows.count) rows").font(.caption2).foregroundStyle(.tertiary) }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Action Block View
+
+struct ActionBlockView: View {
+    let actions: ActionBlock
+    @State private var checked: Set<Int> = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let title = actions.title {
+                Text(title).font(.headline)
+            }
+            ForEach(Array(actions.items.enumerated()), id: \.offset) { idx, item in
+                HStack(spacing: 8) {
+                    Button { checked.insert(idx) } label: {
+                        Image(systemName: checked.contains(idx) ? "checkmark.circle.fill" : "circle")
+                            .font(.title3).foregroundStyle(checked.contains(idx) ? .green : .secondary)
+                    }.buttonStyle(.plain)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(item.task).font(.subheadline).strikethrough(checked.contains(idx))
+                        HStack(spacing: 8) {
+                            if let owner = item.owner { Label(owner, systemImage: "person").font(.caption2).foregroundStyle(.secondary) }
+                            if let due = item.dueDate { Label(due, systemImage: "calendar").font(.caption2).foregroundStyle(.secondary) }
+                            if let pri = item.priority { Label(pri, systemImage: "flag").font(.caption2).foregroundStyle(pri == "high" ? .red : .secondary) }
+                        }
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Card Block View
+
+struct CardBlockView: View {
+    let card: CardBlock
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(card.title).font(.headline)
+                Spacer()
+                if let badge = card.badge {
+                    Text(badge).font(.caption2).fontWeight(.semibold).padding(.horizontal, 8).padding(.vertical, 2)
+                        .background(Color.blue.opacity(0.1)).clipShape(Capsule())
+                }
+            }
+            Text(card.body).font(.subheadline).foregroundStyle(.secondary)
+            if !card.entities.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) {
+                        ForEach(card.entities, id: \.self) { entity in
+                            Text(entity).font(.caption2).padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color(.secondarySystemBackground)).clipShape(Capsule())
+                        }
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator)))
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Bullet & Ordered List Views
+
+struct BulletListView: View {
+    let items: [String]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                HStack(alignment: .top, spacing: 8) {
+                    Text("•").foregroundStyle(.secondary)
+                    Text(item).font(.subheadline)
+                }
+            }
+        }.padding(.vertical, 2)
+    }
+}
+
+struct OrderedListView: View {
+    let items: [String]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(items.enumerated()), id: \.offset) { idx, item in
+                HStack(alignment: .top, spacing: 8) {
+                    Text("\(idx + 1).").foregroundStyle(.secondary).monospacedDigit()
+                    Text(item).font(.subheadline)
+                }
+            }
+        }.padding(.vertical, 2)
+    }
+}
+
+// MARK: - Code Block View
+
+struct CodeBlockView: View {
+    let codeBlock: CodeBlock
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                if let lang = codeBlock.language {
+                    Text(lang).font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    UIPasteboard.general.string = codeBlock.code
+                    copied = true
+                    Task { try? await Task.sleep(nanoseconds: 2_000_000_000); copied = false }
+                } label: {
+                    Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+                        .font(.caption2)
+                }
+            }
+            Text(codeBlock.code).font(.system(.footnote, design: .monospaced))
+                .padding(8)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            if let caption = codeBlock.caption {
+                Text(caption).font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
