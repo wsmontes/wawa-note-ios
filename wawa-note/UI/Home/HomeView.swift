@@ -193,6 +193,7 @@ final class HomeViewModel: ObservableObject {
 struct HomeView: View {
     @EnvironmentObject private var coordinator: RecordingCoordinator
     @EnvironmentObject private var contentPipeline: ContentPipelineService
+    @EnvironmentObject private var chatState: ChatState
     @Query(sort: \Project.updatedAt, order: .reverse) private var projects: [Project]
     @Query(sort: \KnowledgeItem.updatedAt, order: .reverse) private var allItems: [KnowledgeItem]
     @Environment(\.modelContext) private var modelContext
@@ -336,49 +337,51 @@ struct HomeView: View {
         }
         .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { expandedProjectIDs = [] } }
         .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 0) {
-                Divider()
-                HStack(spacing: 10) {
-                    Button(action: { captureVM.startRecording() }) {
-                        VStack(spacing: 2) {
-                            Image(systemName: "record.circle.fill").font(.title3).symbolRenderingMode(.hierarchical)
-                            Text("Record").font(.caption2)
+            if !chatState.isActive {
+                VStack(spacing: 0) {
+                    Divider()
+                    HStack(spacing: 10) {
+                        Button(action: { captureVM.startRecording() }) {
+                            VStack(spacing: 2) {
+                                Image(systemName: "record.circle.fill").font(.title3).symbolRenderingMode(.hierarchical)
+                                Text("Record").font(.caption2)
+                            }
+                            .foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 52)
+                            .background(LinearGradient(colors: [.red, .red.opacity(0.85)], startPoint: .leading, endPoint: .trailing))
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
                         }
-                        .foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 52)
-                        .background(LinearGradient(colors: [.red, .red.opacity(0.85)], startPoint: .leading, endPoint: .trailing))
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        Button(action: { showScanner = true }) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "doc.text.viewfinder").font(.subheadline)
+                                Text("Scan").font(.caption2)
+                            }.foregroundStyle(.primary).frame(width: 60, height: 52)
+                            .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
+                        }
+                        Button(action: { showPhotoSourceMenu = true }) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "photo").font(.subheadline)
+                                Text("Photo").font(.caption2)
+                            }.foregroundStyle(.primary).frame(width: 60, height: 52)
+                            .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
+                        }
+                        Button(action: { importVM.showFilePicker = true }) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "square.and.arrow.down").font(.subheadline)
+                                Text("Import").font(.caption2)
+                            }.foregroundStyle(.primary).frame(width: 60, height: 52)
+                            .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
+                        }
+                        Button(action: { showCreationSheet = true }) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "plus.circle").font(.subheadline)
+                                Text("New").font(.caption2)
+                            }.foregroundStyle(.primary).frame(width: 60, height: 52)
+                            .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
+                        }
                     }
-                    Button(action: { showScanner = true }) {
-                        VStack(spacing: 4) {
-                            Image(systemName: "doc.text.viewfinder").font(.subheadline)
-                            Text("Scan").font(.caption2)
-                        }.foregroundStyle(.primary).frame(width: 60, height: 52)
-                        .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
-                    }
-                    Button(action: { showPhotoSourceMenu = true }) {
-                        VStack(spacing: 4) {
-                            Image(systemName: "photo").font(.subheadline)
-                            Text("Photo").font(.caption2)
-                        }.foregroundStyle(.primary).frame(width: 60, height: 52)
-                        .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
-                    }
-                    Button(action: { importVM.showFilePicker = true }) {
-                        VStack(spacing: 4) {
-                            Image(systemName: "square.and.arrow.down").font(.subheadline)
-                            Text("Import").font(.caption2)
-                        }.foregroundStyle(.primary).frame(width: 60, height: 52)
-                        .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
-                    }
-                    Button(action: { showCreationSheet = true }) {
-                        VStack(spacing: 4) {
-                            Image(systemName: "plus.circle").font(.subheadline)
-                            Text("New").font(.caption2)
-                        }.foregroundStyle(.primary).frame(width: 60, height: 52)
-                        .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
-                    }
+                    .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 6).background(.bar)
+                    .shadow(color: .black.opacity(0.08), radius: 4, y: -2)
                 }
-                .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 6).background(.bar)
-                .shadow(color: .black.opacity(0.08), radius: 4, y: -2)
             }
         }
     }

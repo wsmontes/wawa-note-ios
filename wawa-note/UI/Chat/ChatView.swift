@@ -4,8 +4,9 @@ import Speech
 import AVFoundation
 
 struct ChatView: View {
-    var autoFocus: Bool = false
     var compact: Bool = false
+    var autoFocus: Bool = false
+    var onDismiss: (() -> Void)?
 
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var contentPipeline: ContentPipelineService
@@ -18,44 +19,80 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !compact {
-                // Project context banner
-                if let projectName = viewModel.activeProjectName {
-                    HStack(spacing: 10) {
-                        Image(systemName: "tray.full").font(.caption).foregroundStyle(.blue)
-                        Text(projectName).font(.caption).fontWeight(.semibold).lineLimit(1)
+            if compact {
+                let showHeader = (onDismiss != nil && !viewModel.messages.isEmpty)
+                    || viewModel.state != .idle
+                    || !viewModel.activeToolCalls.isEmpty
+                if showHeader {
+                    HStack {
+                        if let dismiss = onDismiss, !viewModel.messages.isEmpty {
+                            Button { dismiss() } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.title3)
+                                    .foregroundStyle(.primary.opacity(0.7))
+                            }
+                            .buttonStyle(.plain)
+                        }
                         Spacer()
-                        Button {
-                            viewModel.inputText = "Tell me about the status of project '\(projectName)'"
-                            viewModel.sendMessage()
-                        } label: {
-                            Text("Ask").font(.caption2).padding(.horizontal, 8).padding(.vertical, 3)
-                                .background(Color.blue.opacity(0.1)).clipShape(Capsule())
-                        }.buttonStyle(.plain)
-                        Button { viewModel.activeProjectID = nil; viewModel.activeProjectName = nil } label: {
-                            Image(systemName: "xmark.circle.fill").font(.caption).foregroundStyle(.tertiary)
-                        }.buttonStyle(.plain)
+                        if viewModel.state == .thinking {
+                            HStack(spacing: 4) {
+                                ProgressView().scaleEffect(0.7)
+                                Text("Thinking").font(.caption).foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 4)
+                            .background(.ultraThinMaterial, in: Capsule())
+                        } else if viewModel.state == .streaming {
+                            HStack(spacing: 4) {
+                                Circle().fill(.blue).frame(width: 6, height: 6)
+                                    .phaseAnimator([0, 1, 0]) { v, p in v.opacity(p) } animation: { _ in .easeInOut(duration: 0.6).repeatForever(autoreverses: true) }
+                                Text("Writing").font(.caption).foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 4)
+                            .background(.ultraThinMaterial, in: Capsule())
+                        } else if !viewModel.activeToolCalls.isEmpty {
+                            HStack(spacing: 4) {
+                                ProgressView().scaleEffect(0.6)
+                                Text(viewModel.activeToolCalls.last?.toolName ?? "Tool").font(.caption).foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 4)
+                            .background(.ultraThinMaterial, in: Capsule())
+                        }
                     }
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .background(Color.blue.opacity(0.04))
+                    .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 4)
                 }
             }
-            // In compact mode, only show messageList if there are messages
+            if !compact, let projectName = viewModel.activeProjectName {
+                HStack(spacing: 10) {
+                    Image(systemName: "tray.full").font(.caption).foregroundStyle(.blue)
+                    Text(projectName).font(.caption).fontWeight(.semibold).lineLimit(1)
+                    Spacer()
+                    Button {
+                        viewModel.inputText = "Tell me about the status of project '\(projectName)'"
+                        viewModel.sendMessage()
+                    } label: {
+                        Text("Ask").font(.caption2).padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Color.blue.opacity(0.1)).clipShape(Capsule())
+                    }.buttonStyle(.plain)
+                    Button { viewModel.activeProjectID = nil; viewModel.activeProjectName = nil } label: {
+                        Image(systemName: "xmark.circle.fill").font(.caption).foregroundStyle(.tertiary)
+                    }.buttonStyle(.plain)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(Color.blue.opacity(0.04))
+            }
             if !compact || !viewModel.messages.isEmpty || !viewModel.streamingText.isEmpty {
                 messageList
                     .navigationDestination(for: UUID.self) { itemID in
                         KnowledgeItemNavigationView(itemID: itemID)
                     }
             }
-            if !compact {
-                if let dictErr = dictationError {
-                    HStack {
-                        Image(systemName: "mic.slash").foregroundStyle(.red)
-                        Text(dictErr).font(.caption).foregroundStyle(.red)
-                        Spacer()
-                        Button("Dismiss") { dictationError = nil }.font(.caption)
-                    }.padding(.horizontal, 12).padding(.vertical, 4).background(Color.red.opacity(0.08))
-                }
+            if !compact, let dictErr = dictationError {
+                HStack {
+                    Image(systemName: "mic.slash").foregroundStyle(.red)
+                    Text(dictErr).font(.caption).foregroundStyle(.red)
+                    Spacer()
+                    Button("Dismiss") { dictationError = nil }.font(.caption)
+                }.padding(.horizontal, 12).padding(.vertical, 4).background(Color.red.opacity(0.08))
             }
             if !compact || !viewModel.messages.isEmpty || !viewModel.streamingText.isEmpty { Divider() }
             chatInputBar
@@ -98,6 +135,9 @@ struct ChatView: View {
             viewModel.loadConversations()
             if autoFocus { isInputFocused = true }
         }
+        .onChange(of: autoFocus) { _, focus in
+            isInputFocused = focus
+        }
     }
 
     // MARK: - Message list
@@ -110,7 +150,7 @@ struct ChatView: View {
                     Color.clear.frame(height: 0)
                         .contentShape(Rectangle())
                         .onTapGesture { isInputFocused = false }
-                    if viewModel.messages.isEmpty && viewModel.streamingText.isEmpty && !compact {
+                    if viewModel.messages.isEmpty && viewModel.streamingText.isEmpty {
                         emptyState
                     }
 
@@ -166,7 +206,7 @@ struct ChatView: View {
                 }
                 .padding(.vertical, 12)
             }
-            .background(Color(.systemGroupedBackground))
+            .background(compact ? Color.clear : Color(.systemGroupedBackground))
             .scrollDismissesKeyboard(.interactively)
             .onTapGesture { isInputFocused = false }
             .onChange(of: viewModel.streamingText) { _, _ in
@@ -235,7 +275,6 @@ struct ChatView: View {
                 }
             } else {
                 Button {
-                    isInputFocused = false
                     viewModel.sendMessage()
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
@@ -245,8 +284,18 @@ struct ChatView: View {
                 .disabled(viewModel.inputText.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .padding(.top, compact ? 4 : 8)
+        .padding(.bottom, compact ? 0 : 8)
         .background(.bar)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 20)
+                .onEnded { value in
+                    if value.translation.height > 50, abs(value.translation.width) < 30 {
+                        onDismiss?()
+                    }
+                }
+        )
     }
 
     // MARK: - Dictation
