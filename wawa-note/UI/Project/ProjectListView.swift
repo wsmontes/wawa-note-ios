@@ -1,38 +1,71 @@
 import SwiftUI
 import SwiftData
 
+enum ProjectSortOrder: CaseIterable { case recent, name, created }
+
 struct ProjectListView: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject var recordingCoordinator: RecordingCoordinator
     @Query(sort: \Project.updatedAt, order: .reverse) private var projects: [Project]
     @Query(sort: \KnowledgeItem.updatedAt) private var allItems: [KnowledgeItem]
     @Query(sort: \TaskItem.createdAt) private var allTasks: [TaskItem]
     @State private var showNewProject = false
     @State private var newProjectName = ""
+    @State private var searchText = ""
+    @State private var sortOrder: ProjectSortOrder = .recent
+    @State private var itemCounts: [UUID: Int] = [:]
+    @State private var taskCounts: [UUID: Int] = [:]
+    @State private var openTaskCounts: [UUID: Int] = [:]
+
+    private var sortedProjects: [Project] {
+        let filtered = searchText.isEmpty ? projects : projects.filter {
+            $0.name.localizedCaseInsensitiveContains(searchText) ||
+            ($0.summary ?? "").localizedCaseInsensitiveContains(searchText)
+        }
+        switch sortOrder {
+        case .recent: return filtered.sorted { $0.updatedAt > $1.updatedAt }
+        case .name: return filtered.sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
+        case .created: return filtered.sorted { $0.createdAt > $1.createdAt }
+        }
+    }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if projects.isEmpty {
-                    emptyState
-                } else {
-                    listView
-                }
-            }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("Projects")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showNewProject = true } label: {
-                        Label("New Project", systemImage: "plus")
-                    }
-                }
-            }
-            .alert("New Project", isPresented: $showNewProject) {
-                TextField("Project name", text: $newProjectName)
-                Button("Create") { createProject() }
-                Button("Cancel", role: .cancel) { newProjectName = "" }
+        Group {
+            if projects.isEmpty {
+                emptyState
+            } else {
+                listView
             }
         }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("Projects")
+        .searchable(text: $searchText, prompt: "Search projects")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { showNewProject = true } label: {
+                    Label("New Project", systemImage: "plus")
+                }
+            }
+            ToolbarItem(placement: .topBarLeading) {
+                Menu {
+                    ForEach(ProjectSortOrder.allCases, id: \.self) { order in
+                        Button {
+                            sortOrder = order
+                        } label: {
+                            Label(order.label, systemImage: sortOrder == order ? "checkmark" : "")
+                        }
+                    }
+                } label: {
+                    Label("Sort", systemImage: "arrow.up.arrow.down")
+                }
+            }
+        }
+        .sheet(isPresented: $showNewProject) {
+            newProjectSheet
+        }
+        .onAppear { computeCounts() }
+        .onChange(of: allItems.count) { _ in computeCounts() }
+        .onChange(of: allTasks.count) { _ in computeCounts() }
     }
 
     private var emptyState: some View {
@@ -59,7 +92,7 @@ struct ProjectListView: View {
 
     private var listView: some View {
         List {
-            ForEach(projects) { project in
+            ForEach(sortedProjects) { project in
                 NavigationLink {
                     ProjectDetailView(project: project)
                 } label: {
@@ -67,7 +100,7 @@ struct ProjectListView: View {
                 }
                 .swipeActions(edge: .leading) {
                     Button {
-                        // Quick capture into project
+                        recordingCoordinator.startRecording(projectID: project.id)
                     } label: {
                         Label("Record", systemImage: "record.circle")
                     }.tint(.red)
@@ -93,18 +126,18 @@ struct ProjectListView: View {
     }
 
     private func projectRow(_ project: Project) -> some View {
-        let itemCount = allItems.filter { $0.projectID == project.id }.count
-        let taskCount = allTasks.filter { $0.projectID == project.id }.count
-        let openTasks = allTasks.filter { $0.projectID == project.id && $0.statusRaw == "todo" }.count
+        let itemCount = itemCounts[project.id] ?? 0
+        let taskCount = taskCounts[project.id] ?? 0
+        let openTasks = openTaskCounts[project.id] ?? 0
 
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
+        return VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            HStack(spacing: AppSpacing.md) {
                 Image(systemName: project.iconName ?? "folder.fill")
                     .font(.title3)
-                    .foregroundStyle(Color.blue)
+                    .foregroundStyle(Color(hex: project.colorHex ?? ProjectPalette.allHexes.first!))
                     .frame(width: 32, height: 32)
-                    .background(Color.blue.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .background(Color(hex: project.colorHex ?? ProjectPalette.allHexes.first!).opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(project.name)
@@ -127,7 +160,7 @@ struct ProjectListView: View {
                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
 
-            HStack(spacing: 12) {
+            HStack(spacing: AppSpacing.md) {
                 Label("\(itemCount)", systemImage: "doc")
                     .font(.caption2).foregroundStyle(.secondary)
                 Label("\(taskCount)", systemImage: "checklist")
@@ -138,8 +171,17 @@ struct ProjectListView: View {
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, AppSpacing.lg)
+        .padding(.vertical, AppSpacing.md)
+    }
+
+    // MARK: Counts
+
+    private func computeCounts() {
+        itemCounts = Dictionary(grouping: allItems, by: { $0.projectID ?? UUID() }).mapValues { $0.count }
+        let taskGroups = Dictionary(grouping: allTasks, by: { $0.projectID ?? UUID() })
+        taskCounts = taskGroups.mapValues { $0.count }
+        openTaskCounts = taskGroups.mapValues { $0.filter { $0.statusRaw == "todo" }.count }
     }
 
     private func statusColor(_ status: ProjectStatus) -> Color {
@@ -150,10 +192,42 @@ struct ProjectListView: View {
         }
     }
 
+    private var newProjectSheet: some View {
+        NavigationStack {
+            Form {
+                Section("Project Name") {
+                    TextField("e.g., Q3 Product Launch", text: $newProjectName)
+                }
+            }
+            .navigationTitle("New Project")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { newProjectName = ""; showNewProject = false }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Create") { createProject(); showNewProject = false }
+                        .fontWeight(.semibold)
+                        .disabled(newProjectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+
     private func createProject() {
         guard !newProjectName.isEmpty else { return }
         let svc = ProjectService(context: modelContext)
         _ = try? svc.create(name: newProjectName)
         newProjectName = ""
+    }
+}
+
+extension ProjectSortOrder {
+    var label: String {
+        switch self {
+        case .recent: return "Recently Updated"
+        case .name: return "Name A-Z"
+        case .created: return "Created Date"
+        }
     }
 }

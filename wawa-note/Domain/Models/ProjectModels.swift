@@ -91,6 +91,7 @@ final class TaskItem {
     var sourceItemID: UUID?
     var sourceSegmentIDs: String?
     var confidence: Double?
+    var notes: String?
     var createdAt: Date
     var updatedAt: Date
 

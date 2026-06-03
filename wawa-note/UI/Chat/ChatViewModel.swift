@@ -18,6 +18,7 @@ final class ChatViewModel: ObservableObject {
     @Published var activeProjectName: String?
     @Published var activeContext: ChatContext = .global
     @Published var activeProjectColorHex: String?
+    @Published var isGreetingLoading: Bool = false
 
     enum ChatState {
         case idle
@@ -29,10 +30,12 @@ final class ChatViewModel: ObservableObject {
     private let chatService = ChatService()
     private var modelContext: ModelContext?
     private var streamTask: Task<Void, Never>?
+    private var greetingTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
     private var hasObservedContext = false
     private var pendingContext: ChatContext?
     private var projectColorCache: [UUID: String] = [:]
+    private var greetingCache: [String: String] = [:]
 
     func projectColorHex(for projectID: UUID) -> String? {
         if let cached = projectColorCache[projectID] { return cached }
@@ -44,7 +47,6 @@ final class ChatViewModel: ObservableObject {
     }
 
     init() {
-        loadConversations()
     }
 
     func setup(modelContext: ModelContext) {
@@ -78,14 +80,19 @@ final class ChatViewModel: ObservableObject {
         guard context != activeContext else { return }
         streamTask?.cancel()
         streamTask = nil
+        greetingTask?.cancel()
         activeContext = context
 
         guard let conv = try? chatService.findOrCreateConversation(for: context) else { return }
         currentConversation = conv
-        messages = (try? chatService.messages(for: conv.id)) ?? []
+        var loaded = (try? chatService.messages(for: conv.id)) ?? []
+        // Strip old greeting prompt messages (internal prompts mistakenly persisted as user messages)
+        loaded.removeAll { $0.role == .user && $0.content.hasPrefix("Greet the user") }
+        messages = loaded
         streamingText = ""
         activeToolCalls = []
         state = .idle
+        isGreetingLoading = false
 
         switch context {
         case .project(let id):
@@ -122,39 +129,83 @@ final class ChatViewModel: ObservableObject {
         loadConversations()
 
         if messages.isEmpty {
-            sendWelcome(for: context)
+            if let cached = greetingCache[context.key] {
+                insertCachedGreeting(cached, conversationId: conv.id)
+            } else {
+                generateWelcome(for: context)
+            }
         }
     }
 
-    private func sendWelcome(for context: ChatContext) {
+    // MARK: - Greeting cache
+
+    func pregenerateGreeting(for context: ChatContext) {
+        let key = context.key
+        guard greetingCache[key] == nil, let ctx = modelContext,
+              let provider = try? ProviderRouter.resolveActive(context: ctx) else { return }
+
+        let welcomePrompt = Self.welcomePrompt(for: context, projectName: activeProjectName)
+        let systemPrompt = Self.systemPrompt
+
+        greetingTask?.cancel()
+        greetingTask = Task.detached { [weak self] in
+            let request = AIRequest(
+                model: "gpt-5-nano",
+                messages: [
+                    AIMessage(role: .system, content: [.text(systemPrompt)]),
+                    AIMessage(role: .user, content: [.text(welcomePrompt)])
+                ],
+                temperature: 0.7
+            )
+            do {
+                let response = try await provider.send(request)
+                let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                await MainActor.run {
+                    self?.greetingCache[key] = text
+                }
+            } catch {
+                // Silently fail — will generate on-demand when chat opens
+            }
+        }
+    }
+
+    func invalidateGreeting(for context: ChatContext) {
+        greetingCache[context.key] = nil
+    }
+
+    private static func welcomePrompt(for context: ChatContext, projectName: String?) -> String {
+        switch context {
+        case .global:
+            return "Greet the user briefly. One line. They just opened Wawa Note."
+        case .inbox:
+            return "Greet the user. One line. They're in their inbox reviewing captured items. Be warm."
+        case .item:
+            return "Acknowledge the user is viewing an item. One line. Offer to help analyze it."
+        case .exploreProjects:
+            return "Greet the user. One line. They're browsing projects. Offer to help navigate."
+        case .project:
+            let name = projectName ?? "this project"
+            return "Greet the user. One line. They're viewing \(name). Offer to help."
+        }
+    }
+
+    private static let systemPrompt = "You are a concise assistant. Respond with EXACTLY one short line. No tools, no follow-up, no questions. Just a warm, contextual welcome."
+
+    // MARK: - Greeting generation (on-demand, no prompt in chat)
+
+    private func generateWelcome(for context: ChatContext) {
         guard let ctx = modelContext,
               let provider = try? ProviderRouter.resolveActive(context: ctx),
               let conv = currentConversation else { return }
         let model = selectedModel.isEmpty ? "gpt-5-nano" : selectedModel
 
-        let welcomePrompt: String = {
-            switch context {
-            case .global:
-                return "Greet the user briefly. One line. They just opened Wawa Note."
-            case .inbox:
-                return "Greet the user. One line. They're in their inbox reviewing captured items. Be warm."
-            case .item:
-                return "Acknowledge the user is viewing an item. One line. Offer to help analyze it."
-            case .exploreProjects:
-                return "Greet the user. One line. They're browsing projects. Offer to help navigate."
-            case .project:
-                let name = activeProjectName ?? "this project"
-                return "Greet the user. One line. They're viewing \(name). Offer to help."
-            }
-        }()
-
-        let systemPrompt = "You are a concise assistant. Respond with EXACTLY one short line. No tools, no follow-up, no questions. Just a warm, contextual welcome."
+        let welcomePrompt = Self.welcomePrompt(for: context, projectName: activeProjectName)
+        let systemPrompt = Self.systemPrompt
         let conversationId = conv.id
+        let contextKey = context.key
 
-        let userMsg = ChatMessage(conversationId: conversationId, role: .user, content: welcomePrompt, projectColorHex: activeProjectColorHex)
-        messages.append(userMsg)
-        try? chatService.appendMessage(userMsg)
-        state = .thinking
+        isGreetingLoading = true
+        streamingText = "..."
 
         streamTask = Task.detached { [weak self] in
             let request = AIRequest(
@@ -167,22 +218,31 @@ final class ChatViewModel: ObservableObject {
             )
             do {
                 let response = try await provider.send(request)
-                let assistantMsg = ChatMessage(
-                    conversationId: conversationId, role: .assistant,
-                    content: response.content.trimmingCharacters(in: .whitespacesAndNewlines)
-                )
+                let content = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
                 await MainActor.run {
-                    self?.messages.append(assistantMsg)
-                    try? self?.chatService.appendMessage(assistantMsg)
-                    self?.state = .idle
+                    self?.streamingText = ""
+                    self?.isGreetingLoading = false
+                    self?.insertCachedGreeting(content, conversationId: conversationId)
+                    self?.greetingCache[contextKey] = content
                 }
             } catch {
                 await MainActor.run {
-                    self?.messages.removeLast()
+                    self?.streamingText = ""
+                    self?.isGreetingLoading = false
                     self?.state = .idle
                 }
             }
         }
+    }
+
+    private func insertCachedGreeting(_ text: String, conversationId: UUID) {
+        let assistantMsg = ChatMessage(
+            conversationId: conversationId, role: .assistant,
+            content: text, projectColorHex: activeProjectColorHex
+        )
+        messages.append(assistantMsg)
+        try? chatService.appendMessage(assistantMsg)
+        state = .idle
     }
 
     // MARK: - Actions
@@ -262,7 +322,7 @@ final class ChatViewModel: ObservableObject {
         let advModel = "gpt-5.5"
         let loop = AgentLoop(registry: registry, toolContext: toolContext, mode: mode, executorModel: execModel, advisorModel: advModel)
 
-        streamTask = Task { [weak self] in
+        streamTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 let stream = loop.runStreaming(userMessage: text, history: messages, provider: provider)
@@ -387,6 +447,7 @@ final class ChatViewModel: ObservableObject {
         streamingText = ""
         activeToolCalls = []
         state = .idle
+        greetingCache[activeContext.key] = nil
         loadConversations()
     }
 

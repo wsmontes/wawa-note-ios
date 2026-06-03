@@ -1,12 +1,14 @@
 import SwiftUI
 import Combine
 
+@MainActor
 final class ChatOverlayState: ObservableObject {
     @Published var isActive = false
     @Published var context: ChatContext = .global
 }
 
 struct ContentView: View {
+    @Environment(\.modelContext) private var modelContext
     @State private var showSettings = false
     @State private var showChat = false
     @State private var selectedTab = 0
@@ -85,9 +87,11 @@ struct ContentView: View {
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .environmentObject(chatState)
+        .environmentObject(chatViewModel)
         .sheet(isPresented: $showSettings) { SettingsView() }
         .onReceive(keyboardPublisher) { keyboardHeight = $0 }
         .onAppear {
+            chatViewModel.setup(modelContext: modelContext)
             chatViewModel.observeContext(from: chatState)
         }
     }
@@ -106,6 +110,7 @@ struct ContentView: View {
 
 struct ExploreView: View {
     @EnvironmentObject private var chatState: ChatOverlayState
+    @EnvironmentObject private var chatViewModel: ChatViewModel
     @State private var selectedTab: ExploreTab = .projects
 
     enum ExploreTab: String, CaseIterable {
@@ -138,6 +143,6 @@ struct ExploreView: View {
                 TimelineExplorerView()
             }
         }
-        .onAppear { chatState.context = .exploreProjects }
+        .onAppear { chatState.context = .exploreProjects; chatViewModel.pregenerateGreeting(for: .exploreProjects) }
     }
 }

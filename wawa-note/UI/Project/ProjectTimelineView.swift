@@ -90,34 +90,48 @@ struct ProjectTimelineView: View {
             }
         }
         .task { loadTimeline() }
+        .onChange(of: zoomLevel) { _ in loadTimeline() }
     }
 
     // MARK: Filter Bar
 
     private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(TimelineEventKind.allCases, id: \.rawValue) { kind in
-                    Button {
-                        if selectedKinds.contains(kind) { selectedKinds.remove(kind) }
-                        else { selectedKinds.insert(kind) }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: iconFor(kind)).font(.system(size: 10))
-                            Text(kind.rawValue.capitalized).font(.caption2)
+        VStack(spacing: AppSpacing.xs) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: AppSpacing.xs) {
+                    ForEach(TimelineEventKind.allCases, id: \.rawValue) { kind in
+                        Button {
+                            if selectedKinds.contains(kind) { selectedKinds.remove(kind) }
+                            else { selectedKinds.insert(kind) }
+                        } label: {
+                            HStack(spacing: AppSpacing.xs) {
+                                Image(systemName: iconFor(kind)).font(.system(size: 10))
+                                Text(kind.rawValue.capitalized).font(.caption2)
+                            }
+                            .padding(.horizontal, AppSpacing.sm).padding(.vertical, AppSpacing.xs)
+                            .background(selectedKinds.contains(kind) ? kind.color.opacity(0.15) : Color(.tertiarySystemFill))
+                            .foregroundStyle(selectedKinds.contains(kind) ? kind.color : .secondary)
+                            .clipShape(Capsule())
                         }
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(selectedKinds.contains(kind) ? kind.color.opacity(0.15) : Color(.tertiarySystemFill))
-                        .foregroundStyle(selectedKinds.contains(kind) ? kind.color : .secondary)
-                        .clipShape(Capsule())
                     }
                 }
-                Divider().frame(height: 20)
-                Picker("Zoom", selection: $zoomLevel) {
-                    ForEach(TimelineZoom.allCases, id: \.rawValue) { z in Text(z.rawValue).tag(z) }
-                }.pickerStyle(.segmented).frame(width: 150)
+                .padding(.horizontal, AppSpacing.md)
             }
-            .padding(.horizontal, 12).padding(.vertical, 6)
+
+            Picker("Zoom", selection: $zoomLevel) {
+                ForEach(TimelineZoom.allCases, id: \.rawValue) { z in Text(zoomLabel(z)).tag(z) }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, AppSpacing.lg)
+        }
+        .padding(.vertical, AppSpacing.xs)
+    }
+
+    private func zoomLabel(_ zoom: TimelineZoom) -> String {
+        switch zoom {
+        case .week: "Week"
+        case .month: "Month"
+        case .quarter: "Quarter"
         }
     }
 
@@ -234,22 +248,24 @@ struct ProjectTimelineView: View {
     // MARK: Load
 
     private func loadTimeline() {
+        isLoading = true
+        let pid = projectID
+        let zoom = zoomLevel
+        let ctx = modelContext
+
         var allEvents: [TimelineEvent] = []
         let calendar = Calendar.current
 
-        // Items + their analysis
-        let itemDescriptor = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.projectID == projectID })
-        if let items = try? modelContext.fetch(itemDescriptor) {
+        let itemDescriptor = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.projectID == pid })
+        if let items = try? ctx.fetch(itemDescriptor) {
             for item in items {
                 var event = TimelineEvent(id: item.id, title: item.title.isEmpty ? "Untitled" : item.title,
                     subtitle: item.type.label, date: item.createdAt, kind: .from(itemType: item.type), sourceItemID: item.id)
 
-                // Enrich with analysis
                 if let analysis = try? FileArtifactStore().readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) {
                     event.decisionTitles = analysis.decisions.map { $0.title }
                     event.riskTitles = analysis.risks.map { $0.risk }
                     event.actionItems = analysis.actionItems.map { $0.task }
-                    // Add decisions as separate events
                     for d in analysis.decisions {
                         allEvents.append(TimelineEvent(id: UUID(), title: d.title, subtitle: "Decision · \(item.title)",
                             date: item.createdAt, kind: .decision, sourceItemID: item.id))
@@ -267,9 +283,8 @@ struct ProjectTimelineView: View {
             }
         }
 
-        // Tasks
-        let taskDescriptor = FetchDescriptor<TaskItem>(predicate: #Predicate { $0.projectID == projectID })
-        if let tasks = try? modelContext.fetch(taskDescriptor) {
+        let taskDescriptor = FetchDescriptor<TaskItem>(predicate: #Predicate { $0.projectID == pid })
+        if let tasks = try? ctx.fetch(taskDescriptor) {
             for task in tasks {
                 allEvents.append(TimelineEvent(id: task.id, title: task.title,
                     subtitle: "Task · \(task.status.rawValue.capitalized)", date: task.createdAt, kind: .task, sourceItemID: task.sourceItemID))
@@ -280,28 +295,43 @@ struct ProjectTimelineView: View {
             }
         }
 
-        // Sort and build clusters by week
         allEvents.sort { $0.date > $1.date }
-        let grouped = Dictionary(grouping: allEvents) { calendar.startOfWeek(for: $0.date) }
+        let grouped: [Date: [TimelineEvent]]
+        switch zoom {
+        case .week:
+            grouped = Dictionary(grouping: allEvents) { calendar.startOfWeek(for: $0.date) }
+        case .month:
+            grouped = Dictionary(grouping: allEvents) { calendar.startOfMonth(for: $0.date) }
+        case .quarter:
+            grouped = Dictionary(grouping: allEvents) { calendar.startOfQuarter(for: $0.date) }
+        }
         self.clusters = grouped.map { start, evts in
-            let formatter = DateFormatter(); formatter.dateFormat = "MMM d"
-            let label = "Week of \(formatter.string(from: start))"
+            let label: String
+            let formatter = DateFormatter()
+            switch zoom {
+            case .week:
+                formatter.dateFormat = "MMM d"
+                label = "Week of \(formatter.string(from: start))"
+            case .month:
+                formatter.dateFormat = "MMMM yyyy"
+                label = formatter.string(from: start)
+            case .quarter:
+                let q = calendar.component(.quarter, from: start)
+                let y = calendar.component(.year, from: start)
+                label = "Q\(q) \(y)"
+            }
             return TimelineCluster(weekStart: start, label: label, events: evts.sorted { $0.date > $1.date })
         }.sorted { $0.weekStart > $1.weekStart }
 
-        // Build connectors from GraphEdges
-        buildConnectors(events: allEvents)
-        self.isLoading = false
-    }
-
-    private func buildConnectors(events: [TimelineEvent]) {
         let edgeSvc = GraphEdgeService(context: modelContext)
-        let eventIDs = Set(events.map(\.id))
-        guard let allEdges = try? edgeSvc.recentEdges(limit: 500) else { return }
-        self.connectors = allEdges.compactMap { edge in
-            guard eventIDs.contains(edge.fromID) && eventIDs.contains(edge.toID) else { return nil }
-            return TimelineConnector(fromEventID: edge.fromID, toEventID: edge.toID, edgeType: edge.edgeType)
+        let eventIDs = Set(allEvents.map(\.id))
+        if let allEdges = try? edgeSvc.recentEdges(limit: 500) {
+            self.connectors = allEdges.compactMap { edge in
+                guard eventIDs.contains(edge.fromID) && eventIDs.contains(edge.toID) else { return nil }
+                return TimelineConnector(fromEventID: edge.fromID, toEventID: edge.toID, edgeType: edge.edgeType)
+            }
         }
+        self.isLoading = false
     }
 
     private func iconFor(_ kind: TimelineEventKind) -> String {
@@ -317,6 +347,18 @@ struct ProjectTimelineView: View {
 extension Calendar {
     func startOfWeek(for date: Date) -> Date {
         let components = dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
+        return self.date(from: components) ?? date
+    }
+
+    func startOfMonth(for date: Date) -> Date {
+        let components = dateComponents([.year, .month], from: date)
+        return self.date(from: components) ?? date
+    }
+
+    func startOfQuarter(for date: Date) -> Date {
+        let month = component(.month, from: date)
+        let quarterMonth = ((month - 1) / 3) * 3 + 1
+        let components = DateComponents(year: component(.year, from: date), month: quarterMonth, day: 1)
         return self.date(from: components) ?? date
     }
 }

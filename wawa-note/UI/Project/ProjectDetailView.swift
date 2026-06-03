@@ -150,23 +150,43 @@ struct ProjectDetailView: View {
     @EnvironmentObject private var ingestionState: ProjectIngestionState
     @EnvironmentObject private var contentPipeline: ContentPipelineService
     @EnvironmentObject private var chatState: ChatOverlayState
+    @EnvironmentObject private var chatViewModel: ChatViewModel
     @StateObject private var viewModel: ProjectDetailViewModel
     @State private var selectedDynamicTab = 0
-    @State private var overviewExpanded = true
+    @State private var overviewExpanded = false
 
     private var framework: ProjectFramework {
         FrameworkService.shared.resolve(for: project)
     }
 
-    private var collapsedOverview: some View {
-        HStack(spacing: 8) {
-            Circle().fill(healthColor).frame(width: 8, height: 8)
-            Text(project.name).font(.caption).fontWeight(.medium).lineLimit(1)
-            if let score = project.healthScore { Text("· \(Int(score))").font(.caption2).foregroundStyle(healthColor) }
-            Spacer()
-            Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.tertiary)
+    private func tabChip(_ title: String, tag: Int) -> some View {
+        Button {
+            selectedDynamicTab = tag
+        } label: {
+            Text(title)
+                .font(.caption2).fontWeight(selectedDynamicTab == tag ? .semibold : .regular)
+                .foregroundStyle(selectedDynamicTab == tag ? .white : .secondary)
+                .padding(.horizontal, AppSpacing.sm).padding(.vertical, AppSpacing.xs)
+                .background(selectedDynamicTab == tag ? Color.accentColor : Color(.tertiarySystemFill))
+                .clipShape(Capsule())
         }
-        .padding(.horizontal, 16).padding(.vertical, 8).background(Color(.systemBackground))
+    }
+
+    private var collapsedOverview: some View {
+        HStack(spacing: AppSpacing.sm) {
+            Circle().fill(healthColor).frame(width: 8, height: 8)
+            if let score = project.healthScore {
+                Text("\(Int(score))").font(.caption).fontWeight(.semibold).foregroundStyle(healthColor)
+            }
+            Text("·").foregroundStyle(.tertiary)
+            Text("\(viewModel.tasks.filter { $0.status == .todo || $0.status == .inProgress }.count) open").font(.caption).foregroundStyle(.secondary)
+            Text("·").foregroundStyle(.tertiary)
+            Text("\(viewModel.projectItems.count) items").font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            Image(systemName: "chevron.up").font(.caption2).foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, AppSpacing.lg).padding(.vertical, AppSpacing.sm)
+        .background(Color(.systemBackground))
         .contentShape(Rectangle())
         .onTapGesture { withAnimation(.easeInOut(duration: 0.25)) { overviewExpanded = true } }
     }
@@ -192,14 +212,19 @@ struct ProjectDetailView: View {
                 collapsedOverview
             }
 
-            Picker("View", selection: $selectedDynamicTab) {
-                ForEach(Array(framework.views.enumerated()), id: \.offset) { idx, view in
-                    Text(view.title).tag(idx)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: AppSpacing.xs) {
+                    ForEach(Array(framework.views.enumerated()), id: \.offset) { idx, view in
+                        tabChip(view.title, tag: idx)
+                    }
+                    tabChip("Decisions", tag: framework.views.count)
+                    tabChip("Risks", tag: framework.views.count + 1)
+                    tabChip("People", tag: framework.views.count + 2)
+                    tabChip("Entities", tag: framework.views.count + 3)
                 }
+                .padding(.horizontal, AppSpacing.lg)
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
+            .padding(.vertical, AppSpacing.xs)
             .onChange(of: selectedDynamicTab) { _ in
                 withAnimation(.easeInOut(duration: 0.25)) { overviewExpanded = false }
             }
@@ -222,6 +247,20 @@ struct ProjectDetailView: View {
                 case .cards, .table, .markdown, .chips:
                     dynamicFrameworkView(viewDef)
                 }
+            } else {
+                let extraIdx = selectedDynamicTab - framework.views.count
+                switch extraIdx {
+                case 0:
+                    ProjectDecisionsView(projectID: project.id).frame(maxHeight: .infinity)
+                case 1:
+                    ProjectRiskRegisterView(projectID: project.id).frame(maxHeight: .infinity)
+                case 2:
+                    ProjectPeopleView(projectID: project.id).frame(maxHeight: .infinity)
+                case 3:
+                    ProjectEntitiesView(projectID: project.id).frame(maxHeight: .infinity)
+                default:
+                    EmptyView()
+                }
             }
         }
         .background(Color(.systemGroupedBackground))
@@ -237,15 +276,6 @@ struct ProjectDetailView: View {
                             Label("Re-process All", systemImage: "arrow.triangle.2.circlepath")
                         }
                         .disabled(viewModel.isReprocessing)
-                    }
-
-                    Menu {
-                        Button { viewModel.selectedTab = 0 } label: { Label("Tasks", systemImage: "checklist") }
-                        Button { viewModel.selectedTab = 1 } label: { Label("Items", systemImage: "doc.text") }
-                        Button { viewModel.selectedTab = 2 } label: { Label("Graph", systemImage: "circle.hexagonpath") }
-                        Button { viewModel.selectedTab = 3 } label: { Label("Timeline", systemImage: "clock") }
-                    } label: {
-                        Label("View", systemImage: "ellipsis.circle")
                     }
 
                     Menu {
@@ -267,7 +297,12 @@ struct ProjectDetailView: View {
         }
         .onAppear {
             chatState.context = .project(project.id)
+            chatViewModel.pregenerateGreeting(for: .project(project.id))
             viewModel.configure(modelContext: modelContext, ingestionState: ingestionState)
+        }
+        .onChange(of: ingestionState.ingestionVersion) { _ in
+            chatViewModel.invalidateGreeting(for: .project(project.id))
+            chatViewModel.pregenerateGreeting(for: .project(project.id))
         }
         .alert("Reminders", isPresented: Binding(
             get: { viewModel.remindersExportMessage != nil },
@@ -586,7 +621,7 @@ struct ProjectDetailView: View {
     }
 }
 
-// MARK: - Project Overview Dashboard (Phase A)
+// MARK: - Project Overview Dashboard
 
 struct ProjectOverviewCards: View {
     let project: Project
@@ -604,7 +639,7 @@ struct ProjectOverviewCards: View {
         healthTask?.cancel()
         healthTask = Task { @MainActor in
             health = ProjectHealthEngine.compute(for: project.id, context: ctx)
-            cachedRisks = computeRisks() // Cache disk reads
+            cachedRisks = computeRisks()
             cachedSuggestions = fetchPendingSuggestions(ctx)
         }
     }
@@ -626,39 +661,25 @@ struct ProjectOverviewCards: View {
     private var openRisks: [(String, String, Double)] { cachedRisks }
 
     var body: some View {
-        VStack(spacing: 12) {
-            // Pulse strip
+        VStack(spacing: AppSpacing.md) {
             if let h = health {
                 pulseStrip(health: h)
             }
-
-            // Attention required
             if !overdueTasks.isEmpty || !openRisks.isEmpty {
                 attentionSection
             }
-
-            // Project synthesis
             synthesisSection
-
-            // Suggestions to review (Phase G)
             suggestionsSection
-
-            // Activity feed (last 7 days)
             activityFeed
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
+        .padding(.horizontal, AppSpacing.md)
         .onAppear { refreshHealth() }
         .onDisappear { healthTask?.cancel() }
         .onChange(of: viewModel.projectItems.count) { _ in refreshHealth() }
-        .padding(.bottom, 8)
     }
 
-    // MARK: Pulse Strip
-
     private func pulseStrip(health: ProjectHealthEngine.HealthResult) -> some View {
-        HStack(spacing: 8) {
-            // Health ring
+        HStack(spacing: AppSpacing.sm) {
             HealthRingView(score: health.score, status: health.status)
             Spacer()
             MetricTile(icon: "checkmark.seal", value: String(format: "%.0f", health.decisionVelocity * 4),
@@ -668,16 +689,12 @@ struct ProjectOverviewCards: View {
             MetricTile(icon: "circle.dotted", value: "\(items.count)",
                        label: "Items", subtitle: health.evidenceFreshnessDays < 7 ? "Active" : "\(Int(health.evidenceFreshnessDays))d old")
         }
-        .padding(12)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+        .padding(AppSpacing.md)
+        .projectCard()
     }
 
-    // MARK: Attention Section
-
     private var attentionSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
             HStack {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.caption)
                 Text("Needs attention").font(.caption).fontWeight(.semibold).foregroundStyle(.orange)
@@ -685,7 +702,7 @@ struct ProjectOverviewCards: View {
                 Text("\(overdueTasks.count + openRisks.count) items").font(.caption2).foregroundStyle(.secondary)
             }
             ForEach(overdueTasks.prefix(3)) { task in
-                HStack(spacing: 8) {
+                HStack(spacing: AppSpacing.sm) {
                     Image(systemName: "clock.badge.exclamationmark").font(.caption).foregroundStyle(.red)
                     Text(task.title).font(.caption).lineLimit(1)
                     Spacer()
@@ -693,29 +710,25 @@ struct ProjectOverviewCards: View {
                         Text(due.formatted(.relative(presentation: .numeric))).font(.caption2).foregroundStyle(.red)
                     }
                 }
-                .padding(8).background(Color.red.opacity(0.06)).clipShape(RoundedRectangle(cornerRadius: 8))
+                .padding(AppSpacing.sm).background(Color.red.opacity(0.06)).clipShape(RoundedRectangle(cornerRadius: AppRadius.sm))
             }
             ForEach(Array(openRisks.enumerated()).prefix(2), id: \.offset) { _, riskData in
                 let (risk, _, conf) = riskData
-                HStack(spacing: 8) {
+                HStack(spacing: AppSpacing.sm) {
                     Image(systemName: "exclamationmark.shield").font(.caption).foregroundStyle(.orange)
                     Text(risk).font(.caption).lineLimit(1)
                     Spacer()
                     Text("\(Int(conf * 100))%").font(.caption2).foregroundStyle(.orange)
                 }
-                .padding(8).background(Color.orange.opacity(0.06)).clipShape(RoundedRectangle(cornerRadius: 8))
+                .padding(AppSpacing.sm).background(Color.orange.opacity(0.06)).clipShape(RoundedRectangle(cornerRadius: AppRadius.sm))
             }
         }
-        .padding(12)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+        .padding(AppSpacing.md)
+        .projectCard()
     }
 
-    // MARK: Synthesis
-
     private var synthesisSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
             HStack {
                 Image(systemName: "text.alignleft").font(.caption).foregroundStyle(.blue)
                 Text("Synthesis").font(.caption).fontWeight(.semibold)
@@ -732,13 +745,9 @@ struct ProjectOverviewCards: View {
                 EvidenceCardView(itemTitle: "Generated from item", itemID: sourceID, snippet: snippet, segmentID: nil, confidence: nil, edgeType: nil)
             }
         }
-        .padding(12)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+        .padding(AppSpacing.md)
+        .projectCard()
     }
-
-    // MARK: Suggestions (Phase G)
 
     private var pendingSuggestions: [AgentSuggestion] { cachedSuggestions }
 
@@ -751,7 +760,7 @@ struct ProjectOverviewCards: View {
         let pending = pendingSuggestions
         guard !pending.isEmpty else { return AnyView(EmptyView()) }
         return AnyView(
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 HStack {
                     Image(systemName: "sparkles").font(.caption).foregroundStyle(.purple)
                     Text("Suggestions to review").font(.caption).fontWeight(.semibold)
@@ -765,16 +774,14 @@ struct ProjectOverviewCards: View {
                     Text("+\(pending.count - 3) more suggestions").font(.caption2).foregroundStyle(.blue).padding(.top, 2)
                 }
             }
-            .padding(12)
-            .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 20))
-            .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+            .padding(AppSpacing.md)
+            .projectCard()
         )
     }
 
     private func suggestionCard(_ sug: AgentSuggestion) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+            HStack(spacing: AppSpacing.xs) {
                 Image(systemName: sug.type == "task" ? "checklist" : sug.type == "edge" ? "arrow.triangle.branch" : "doc.text")
                     .font(.caption2).foregroundStyle(sug.type == "task" ? .teal : .blue)
                 Text(sug.title).font(.caption).lineLimit(2)
@@ -787,27 +794,26 @@ struct ProjectOverviewCards: View {
             if let sourceID = sug.sourceItemID {
                 EvidenceCardView(itemTitle: "Source", itemID: sourceID, snippet: sug.title, segmentID: nil, confidence: sug.confidence, edgeType: nil)
             }
-            HStack(spacing: 8) {
+            HStack(spacing: AppSpacing.sm) {
                 Button { approveSuggestion(sug) } label: {
                     Label("Approve", systemImage: "checkmark").font(.caption2)
-                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .padding(.horizontal, 10).padding(.vertical, AppSpacing.xs)
                         .background(Color.green.opacity(0.1)).clipShape(Capsule())
                 }.buttonStyle(.plain)
                 Button { rejectSuggestion(sug) } label: {
                     Label("Reject", systemImage: "xmark").font(.caption2)
-                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .padding(.horizontal, 10).padding(.vertical, AppSpacing.xs)
                         .background(Color.red.opacity(0.1)).clipShape(Capsule())
                 }.buttonStyle(.plain)
                 Spacer()
                 AIGeneratedBadge(confidence: sug.confidence, source: "AI suggestion")
             }
         }
-        .padding(8).background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 10))
+        .padding(AppSpacing.sm).background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: AppRadius.md))
     }
 
     private func approveSuggestion(_ sug: AgentSuggestion) {
         guard let ctx = viewModel.modelContext else { return }
-        // Execute the suggestion based on type
         switch sug.type {
         case "task":
             if let json = sug.payloadJSON, let data = json.data(using: .utf8),
@@ -830,6 +836,22 @@ struct ProjectOverviewCards: View {
                 }
                 ctx.insert(edge)
             }
+        case "annotation":
+            if let json = sug.payloadJSON, let data = json.data(using: .utf8),
+               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                let key = dict["key"] as? String ?? "ai_suggestion"
+                let value = dict["value"] as? String ?? sug.title
+                let itemID = sug.sourceItemID ?? project.id
+                let annotation = Annotation(source: "agent_suggestion", key: key, value: value, itemID: itemID, confidence: sug.confidence)
+                ctx.insert(annotation)
+            }
+        case "decision":
+            if let json = sug.payloadJSON, let data = json.data(using: .utf8),
+               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                let title = dict["title"] as? String ?? sug.title
+                let task = TaskItem(projectID: project.id, title: "Decision: \(title)", priority: .high, ownerName: dict["owner"] as? String)
+                ctx.insert(task)
+            }
         default: break
         }
         sug.status = "approved"; sug.resolvedAt = Date()
@@ -840,12 +862,9 @@ struct ProjectOverviewCards: View {
         guard let ctx = viewModel.modelContext else { return }
         sug.status = "rejected"; sug.resolvedAt = Date()
         try? ctx.save()
-        // Record negative feedback for future learning
         AgentMemoryStore.shared.write(pattern: "rejected_\(sug.type)", strategy: "User rejected: \(sug.title.prefix(60))",
             itemType: sug.type, contentType: nil, language: nil)
     }
-
-    // MARK: Activity Feed
 
     private var activityFeed: some View {
         var entries: [(icon: String, color: Color, text: String, date: Date)] = []
@@ -859,34 +878,32 @@ struct ProjectOverviewCards: View {
         entries.sort { $0.date > $1.date }
         let recent = Array(entries.prefix(5))
 
-        return VStack(alignment: .leading, spacing: 6) {
+        return VStack(alignment: .leading, spacing: AppSpacing.xs) {
             HStack {
                 Image(systemName: "clock.arrow.2.circlepath").font(.caption).foregroundStyle(.green)
                 Text("Recent activity").font(.caption).fontWeight(.semibold)
             }
             if recent.isEmpty {
-                Text("No activity yet").font(.caption2).foregroundStyle(.tertiary).padding(.vertical, 4)
+                Text("No activity yet").font(.caption2).foregroundStyle(.tertiary).padding(.vertical, AppSpacing.xs)
             } else {
                 ForEach(Array(recent.enumerated()), id: \.offset) { _, entry in
-                    HStack(spacing: 8) {
+                    HStack(spacing: AppSpacing.sm) {
                         Image(systemName: entry.icon).font(.caption2).foregroundStyle(entry.color)
                         Text(entry.text).font(.caption).lineLimit(1)
                         Spacer()
                         Text(entry.date.formatted(.relative(presentation: .numeric))).font(.caption2).foregroundStyle(.tertiary)
-                    }.padding(6)
+                    }.padding(AppSpacing.xs)
                 }
             }
         }
-        .padding(12)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+        .padding(AppSpacing.md)
+        .projectCard()
     }
 }
 
-// MARK: - Sub-components
+// MARK: - Health Ring
 
-private struct HealthRingView: View {
+struct HealthRingView: View {
     let score: Int
     let status: String
 
@@ -911,7 +928,9 @@ private struct HealthRingView: View {
     }
 }
 
-private struct MetricTile: View {
+// MARK: - Metric Tile
+
+struct MetricTile: View {
     let icon: String; let value: String; let label: String; let subtitle: String
 
     var body: some View {
@@ -921,5 +940,301 @@ private struct MetricTile: View {
             Text(label).font(.system(size: 9)).foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Decision Registry
+
+struct DecisionItem: Identifiable {
+    let id = UUID()
+    let title: String
+    let details: String?
+    let sourceItemID: UUID
+    let sourceItemTitle: String
+    let sourceItemDate: Date
+    let confidence: Double
+}
+
+struct ProjectDecisionsView: View {
+    let projectID: UUID
+    @Environment(\.modelContext) private var modelContext
+    @State private var decisions: [DecisionItem] = []
+    @State private var isLoading = true
+    @State private var minConfidence: Double = 0
+
+    var body: some View {
+        Group {
+            if isLoading {
+                Spacer(); ProgressView("Loading decisions..."); Spacer()
+            } else if decisions.isEmpty {
+                Spacer()
+                VStack(spacing: AppSpacing.md) {
+                    Image(systemName: "lightbulb").font(.title).foregroundStyle(.secondary)
+                    Text("No decisions yet").font(.headline)
+                }
+                Spacer()
+            } else {
+                List {
+                    ForEach(decisions.filter { $0.confidence >= minConfidence }) { d in
+                        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                            HStack(spacing: AppSpacing.sm) {
+                                Image(systemName: "lightbulb.fill").font(.caption).foregroundStyle(.indigo)
+                                Text(d.title).font(.subheadline).fontWeight(.medium)
+                                Spacer()
+                                ConfidenceBadge(value: d.confidence)
+                            }
+                            if let det = d.details { Text(det).font(.caption).foregroundStyle(.secondary).lineLimit(3) }
+                            Label(d.sourceItemTitle, systemImage: "doc.text").font(.caption2).foregroundStyle(.tertiary)
+                        }
+                        .padding(.vertical, AppSpacing.xs)
+                    }
+                }
+                .listStyle(.insetGrouped).scrollContentBackground(.hidden)
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    ForEach([0.0, 0.5, 0.7, 0.9], id: \.self) { threshold in
+                        Button { minConfidence = threshold } label: {
+                            Label(threshold == 0 ? "All" : "≥ \(Int(threshold*100))%", systemImage: minConfidence == threshold ? "checkmark" : "")
+                        }
+                    }
+                } label: { Label("Filter", systemImage: "line.3.horizontal.decrease.circle") }
+            }
+        }
+        .task { await loadDecisions() }
+    }
+
+    private func loadDecisions() async {
+        let store = FileArtifactStore()
+        let items = (try? ProjectService(context: modelContext).items(in: projectID)) ?? []
+        var result: [DecisionItem] = []
+        for item in items {
+            guard let analysis = try? store.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) else { continue }
+            for d in analysis.decisions {
+                result.append(DecisionItem(title: d.title, details: d.details, sourceItemID: item.id, sourceItemTitle: item.title, sourceItemDate: item.createdAt, confidence: d.confidence ?? 0.5))
+            }
+        }
+        decisions = result.sorted { $0.confidence > $1.confidence }
+        isLoading = false
+    }
+}
+
+// MARK: - Risk Register
+
+struct RiskItem: Identifiable {
+    let id = UUID()
+    let title: String; let details: String?; let sourceItemID: UUID
+    let sourceItemTitle: String; let sourceItemDate: Date; let confidence: Double
+}
+
+struct ProjectRiskRegisterView: View {
+    let projectID: UUID
+    @Environment(\.modelContext) private var modelContext
+    @State private var risks: [RiskItem] = []
+    @State private var isLoading = true
+
+    var body: some View {
+        Group {
+            if isLoading {
+                Spacer(); ProgressView("Loading risks..."); Spacer()
+            } else if risks.isEmpty {
+                Spacer()
+                VStack(spacing: AppSpacing.md) {
+                    Image(systemName: "exclamationmark.shield").font(.title).foregroundStyle(.secondary)
+                    Text("No risks identified").font(.headline)
+                }
+                Spacer()
+            } else {
+                List {
+                    ForEach(risks) { r in
+                        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                            HStack(spacing: AppSpacing.sm) {
+                                Image(systemName: "exclamationmark.shield.fill").font(.caption).foregroundStyle(r.confidence >= 0.8 ? .red : .orange)
+                                Text(r.title).font(.subheadline).fontWeight(.medium)
+                                Spacer()
+                                ConfidenceBadge(value: r.confidence)
+                            }
+                            if let det = r.details { Text(det).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                            Label(r.sourceItemTitle, systemImage: "doc.text").font(.caption2).foregroundStyle(.tertiary)
+                        }.padding(.vertical, AppSpacing.xs)
+                    }
+                }
+                .listStyle(.insetGrouped).scrollContentBackground(.hidden)
+            }
+        }
+        .task { await loadRisks() }
+    }
+
+    private func loadRisks() async {
+        let store = FileArtifactStore()
+        let items = (try? ProjectService(context: modelContext).items(in: projectID)) ?? []
+        var result: [RiskItem] = []
+        for item in items {
+            guard let analysis = try? store.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) else { continue }
+            for r in analysis.risks {
+                result.append(RiskItem(title: r.risk, details: r.details, sourceItemID: item.id, sourceItemTitle: item.title, sourceItemDate: item.createdAt, confidence: r.confidence ?? 0.5))
+            }
+        }
+        risks = result.sorted { $0.confidence > $1.confidence }
+        isLoading = false
+    }
+}
+
+// MARK: - People Directory
+
+struct PersonSummary: Identifiable {
+    let id: UUID; let name: String; let role: String?
+    let taskCount: Int; let openTaskCount: Int; let mentionCount: Int
+}
+
+struct ProjectPeopleView: View {
+    let projectID: UUID
+    @Environment(\.modelContext) private var modelContext
+    @State private var people: [PersonSummary] = []
+    @State private var isLoading = true
+
+    var body: some View {
+        Group {
+            if isLoading {
+                Spacer(); ProgressView("Loading people..."); Spacer()
+            } else if people.isEmpty {
+                Spacer()
+                VStack(spacing: AppSpacing.md) {
+                    Image(systemName: "person.2").font(.title).foregroundStyle(.secondary)
+                    Text("No people identified").font(.headline)
+                }
+                Spacer()
+            } else {
+                List {
+                    ForEach(people) { p in
+                        HStack(spacing: AppSpacing.md) {
+                            Image(systemName: "person.circle.fill").font(.title2).foregroundStyle(.purple)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(p.name).font(.subheadline).fontWeight(.medium)
+                                if let role = p.role { Text(role).font(.caption).foregroundStyle(.secondary) }
+                            }
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 2) {
+                                if p.openTaskCount > 0 { Text("\(p.openTaskCount) open").font(.caption2).foregroundStyle(.orange) }
+                                Text("\(p.taskCount) tasks").font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }.padding(.vertical, AppSpacing.xs)
+                    }
+                }
+                .listStyle(.insetGrouped).scrollContentBackground(.hidden)
+            }
+        }
+        .task { await loadPeople() }
+    }
+
+    private func loadPeople() async {
+        let projSvc = ProjectService(context: modelContext)
+        let taskSvc = TaskService(context: modelContext)
+        let store = FileArtifactStore()
+        guard let tasks = try? taskSvc.tasks(for: projectID), let items = try? projSvc.items(in: projectID) else { isLoading = false; return }
+        var map: [String: (UUID, String?, Int, Int, Int)] = [:]
+        for t in tasks {
+            guard let o = t.ownerName, !o.isEmpty else { continue }
+            var s = map[o] ?? (UUID(), nil, 0, 0, 0)
+            s.2 += 1; if t.status == .todo || t.status == .inProgress { s.3 += 1 }
+            map[o] = s
+        }
+        for item in items {
+            guard let a = try? store.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) else { continue }
+            for act in a.actionItems {
+                guard let o = act.owner, !o.isEmpty else { continue }
+                var s = map[o] ?? (UUID(), nil, 0, 0, 0); s.4 += 1; map[o] = s
+            }
+        }
+        for person in (try? modelContext.fetch(FetchDescriptor<Person>())) ?? [] {
+            var s = map[person.displayName] ?? (person.id, person.role, 0, 0, 0)
+            s.0 = person.id; s.1 = person.role; map[person.displayName] = s
+        }
+        people = map.map { PersonSummary(id: $1.0, name: $0, role: $1.1, taskCount: $1.2, openTaskCount: $1.3, mentionCount: $1.4) }.sorted { $0.taskCount > $1.taskCount }
+        isLoading = false
+    }
+}
+
+// MARK: - Entity Browser
+
+struct EntitySummary: Identifiable {
+    let id = UUID(); let name: String; let kind: String; let mentionCount: Int
+}
+
+struct ProjectEntitiesView: View {
+    let projectID: UUID
+    @Environment(\.modelContext) private var modelContext
+    @State private var entities: [EntitySummary] = []
+    @State private var selectedKind: String?
+    @State private var isLoading = true
+
+    var body: some View {
+        Group {
+            if isLoading {
+                Spacer(); ProgressView("Loading entities..."); Spacer()
+            } else if entities.isEmpty {
+                Spacer()
+                VStack(spacing: AppSpacing.md) {
+                    Image(systemName: "cube").font(.title).foregroundStyle(.secondary)
+                    Text("No entities identified").font(.headline)
+                }
+                Spacer()
+            } else {
+                let kinds = Array(Set(entities.map(\.kind))).sorted()
+                VStack(spacing: 0) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: AppSpacing.xs) {
+                            Button { selectedKind = nil } label: {
+                                Text("All").font(.caption2).padding(.horizontal, AppSpacing.sm).padding(.vertical, AppSpacing.xs)
+                                    .background(selectedKind == nil ? Color.accentColor.opacity(0.15) : Color(.tertiarySystemFill)).clipShape(Capsule())
+                            }
+                            ForEach(kinds, id: \.self) { kind in
+                                Button { selectedKind = kind } label: {
+                                    Text(kind.capitalized).font(.caption2).padding(.horizontal, AppSpacing.sm).padding(.vertical, AppSpacing.xs)
+                                        .background(selectedKind == kind ? Color.accentColor.opacity(0.15) : Color(.tertiarySystemFill)).clipShape(Capsule())
+                                }
+                            }
+                        }.padding(.horizontal, AppSpacing.md).padding(.vertical, AppSpacing.xs)
+                    }
+                    let filtered = selectedKind == nil ? entities : entities.filter { $0.kind == selectedKind }
+                    List(filtered) { e in
+                        HStack(spacing: AppSpacing.md) {
+                            Image(systemName: kindIcon(e.kind)).font(.caption).foregroundStyle(kindColor(e.kind)).frame(width: 24)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(e.name).font(.subheadline).fontWeight(.medium)
+                                Text(e.kind.capitalized).font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("\(e.mentionCount)").font(.caption).fontWeight(.semibold)
+                        }.padding(.vertical, AppSpacing.xs)
+                    }
+                    .listStyle(.insetGrouped).scrollContentBackground(.hidden)
+                }
+            }
+        }
+        .task { await loadEntities() }
+    }
+
+    private func loadEntities() async {
+        let store = FileArtifactStore()
+        let items = (try? ProjectService(context: modelContext).items(in: projectID)) ?? []
+        var map: [String: (String, Int)] = [:]
+        for item in items {
+            guard let a = try? store.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) else { continue }
+            for e in a.entities {
+                let key = "\(e.name)|\(e.type.rawValue)"; var v = map[key] ?? (e.type.rawValue, 0); v.1 += 1; map[key] = v
+            }
+        }
+        entities = map.map { entry in EntitySummary(name: String(entry.key.split(separator: "|")[0]), kind: entry.value.0, mentionCount: entry.value.1) }.sorted { $0.mentionCount > $1.mentionCount }
+        isLoading = false
+    }
+
+    private func kindIcon(_ k: String) -> String {
+        switch k { case "organization": "building.2"; case "system": "server.rack"; case "repository": "chevron.left.forwardslash.chevron.right"; case "ticket": "tag"; case "location": "location"; default: "cube" }
+    }
+    private func kindColor(_ k: String) -> Color {
+        switch k { case "organization": .blue; case "system": .purple; case "repository": .green; case "ticket": .orange; case "location": .teal; default: .gray }
     }
 }

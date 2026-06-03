@@ -97,6 +97,7 @@ final class FileArtifactStore: @unchecked Sendable {
     // MARK: - Artifacts
 
     func writeArtifact<T: Encodable>(_ value: T, fileName: String, meetingId: UUID) throws {
+        try createMeetingDirectory(for: meetingId)
         let url = meetingDirectoryURL(for: meetingId).appendingPathComponent(fileName)
         do {
             let data = try JSONEncoder().encode(value)

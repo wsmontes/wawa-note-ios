@@ -121,6 +121,14 @@ final class ProjectService {
         for edge in edgesOut { context.delete(edge) }
         let edgesIn = try context.fetch(FetchDescriptor<GraphEdge>(predicate: #Predicate { $0.toID == pid }))
         for edge in edgesIn { context.delete(edge) }
+        // Clean up inter-item edges from this project's items
+        let itemIDs = items.map(\.id)
+        for iid in itemIDs {
+            let out = try context.fetch(FetchDescriptor<GraphEdge>(predicate: #Predicate { $0.fromID == iid }))
+            for e in out { context.delete(e) }
+            let incoming = try context.fetch(FetchDescriptor<GraphEdge>(predicate: #Predicate { $0.toID == iid }))
+            for e in incoming { context.delete(e) }
+        }
         context.delete(project)
         try context.save()
     }

@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-struct ToolContext: @unchecked Sendable {
+struct ToolContext {
     let modelContext: ModelContext
     let fileStore: FileArtifactStore
     var activeProjectID: UUID?

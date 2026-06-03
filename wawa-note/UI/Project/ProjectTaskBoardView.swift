@@ -101,8 +101,28 @@ struct ProjectTaskBoardView: View {
                     LazyVStack(spacing: 8) {
                         ForEach(columnTasks, id: \.id) { task in
                             taskCard(task, status: status)
-                                .padding(.horizontal, 12)
-                                .onTapGesture { editingTask = task }
+                                .padding(.horizontal, AppSpacing.md)
+                                .onTapGesture {
+                                    editingTask = task
+                                }
+                                .swipeActions(edge: .leading) {
+                                    if let prev = previousStatus(status) {
+                                        Button {
+                                            moveTask(task, to: prev)
+                                        } label: {
+                                            Label("Move to \(statusLabel(prev))", systemImage: "arrow.left")
+                                        }.tint(statusColor(prev))
+                                    }
+                                }
+                                .swipeActions(edge: .trailing) {
+                                    if let next = nextStatus(status) {
+                                        Button {
+                                            moveTask(task, to: next)
+                                        } label: {
+                                            Label("Move to \(statusLabel(next))", systemImage: "arrow.right")
+                                        }.tint(statusColor(next))
+                                    }
+                                }
                         }
                     }
                     .padding(.vertical, 8)
@@ -170,9 +190,9 @@ struct ProjectTaskBoardView: View {
                 }
             }
         }
-        .padding(10)
+        .padding(AppSpacing.md)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg))
         .shadow(color: .black.opacity(0.04), radius: 2, y: 1)
     }
 
@@ -198,8 +218,11 @@ struct ProjectTaskBoardView: View {
 
     private func findSourceItem(_ id: UUID) -> KnowledgeItem? {
         if let cached = sourceItemCache[id] { return cached }
-        if sourceItemCache.isEmpty, let all = try? modelContext.fetch(FetchDescriptor<KnowledgeItem>()) {
-            for item in all { sourceItemCache[item.id] = item }
+        if sourceItemCache.isEmpty {
+            let desc = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.projectID == projectID })
+            if let items = try? modelContext.fetch(desc) {
+                for item in items { sourceItemCache[item.id] = item }
+            }
         }
         return sourceItemCache[id]
     }
@@ -226,6 +249,33 @@ struct ProjectTaskBoardView: View {
     }
 
     // MARK: - Labels
+
+    private func previousStatus(_ status: TaskStatus) -> TaskStatus? {
+        switch status {
+        case .todo: nil
+        case .inProgress: .todo
+        case .done: .inProgress
+        case .cancelled: .done
+        }
+    }
+
+    private func nextStatus(_ status: TaskStatus) -> TaskStatus? {
+        switch status {
+        case .todo: .inProgress
+        case .inProgress: .done
+        case .done: .cancelled
+        case .cancelled: nil
+        }
+    }
+
+    private func statusColor(_ status: TaskStatus) -> Color {
+        switch status {
+        case .todo: .blue
+        case .inProgress: .orange
+        case .done: .green
+        case .cancelled: .gray
+        }
+    }
 
     private func statusLabel(_ status: TaskStatus) -> String {
         switch status {

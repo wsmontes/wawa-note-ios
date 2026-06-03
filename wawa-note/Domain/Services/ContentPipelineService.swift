@@ -180,14 +180,6 @@ final class ContentPipelineService: ObservableObject {
             \(item.durationSeconds.map { "- Duration: \(Int($0))s" } ?? "")
             """
 
-            let stream = loop.runAutonomous(
-                task: taskDescription,
-                systemPrompt: PipelineTemplate.standard,
-                tools: tools,
-                provider: provider,
-                maxIterations: 15
-            )
-
             var lastError: String?
             var attemptCount = 0
             let maxAttempts = 2

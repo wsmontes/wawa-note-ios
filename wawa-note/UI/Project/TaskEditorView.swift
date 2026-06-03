@@ -17,6 +17,10 @@ struct TaskEditorView: View {
     @State private var priority: TaskPriority
     @State private var dueAt: Date?
     @State private var hasDueDate: Bool
+    @State private var notes: String
+    @State private var selectedSourceItemID: UUID?
+
+    @Query(sort: \KnowledgeItem.updatedAt, order: .reverse) private var allItems: [KnowledgeItem]
 
     init(mode: Mode) {
         self.mode = mode
@@ -27,13 +31,22 @@ struct TaskEditorView: View {
             _priority = State(initialValue: .medium)
             _dueAt = State(initialValue: nil)
             _hasDueDate = State(initialValue: false)
+            _notes = State(initialValue: "")
+            _selectedSourceItemID = State(initialValue: nil)
         case .edit(let task):
             _title = State(initialValue: task.title)
             _ownerName = State(initialValue: task.ownerName ?? "")
             _priority = State(initialValue: task.priority)
             _dueAt = State(initialValue: task.dueAt)
             _hasDueDate = State(initialValue: task.dueAt != nil)
+            _notes = State(initialValue: task.notes ?? "")
+            _selectedSourceItemID = State(initialValue: task.sourceItemID)
         }
+    }
+
+    private var projectItems: [KnowledgeItem] {
+        guard case .create(let projectID) = mode, let pid = projectID else { return [] }
+        return allItems.filter { $0.projectID == pid }
     }
 
     var body: some View {
@@ -48,10 +61,10 @@ struct TaskEditorView: View {
 
                     Picker("Priority", selection: $priority) {
                         ForEach(TaskPriority.allCases, id: \.self) { p in
-                            Label(priorityLabel(p), systemImage: priorityIcon(p))
-                                .tag(p)
+                            Text(priorityShortLabel(p)).tag(p)
                         }
                     }
+                    .pickerStyle(.segmented)
 
                     Toggle("Due date", isOn: $hasDueDate)
                     if hasDueDate {
@@ -59,6 +72,22 @@ struct TaskEditorView: View {
                             get: { dueAt ?? Date() },
                             set: { dueAt = $0 }
                         ), displayedComponents: .date)
+                    }
+                }
+
+                Section("Notes") {
+                    TextEditor(text: $notes)
+                        .frame(minHeight: 80)
+                }
+
+                if !projectItems.isEmpty {
+                    Section("Source Item") {
+                        Picker("Linked from", selection: $selectedSourceItemID) {
+                            Text("None").tag(UUID?.none)
+                            ForEach(projectItems) { item in
+                                Text(item.title).tag(item.id as UUID?)
+                            }
+                        }
                     }
                 }
             }
@@ -88,17 +117,25 @@ struct TaskEditorView: View {
         let finalTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !finalTitle.isEmpty else { return }
 
+        let finalNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sourceID = selectedSourceItemID
+
         let service = TaskService(context: modelContext)
 
         switch mode {
         case .create(let projectID):
-            let _ = try? service.create(
+            let task = try? service.create(
                 title: finalTitle,
                 projectID: projectID,
                 priority: priority,
                 ownerName: ownerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : ownerName.trimmingCharacters(in: .whitespacesAndNewlines),
-                dueAt: hasDueDate ? dueAt : nil
+                dueAt: hasDueDate ? dueAt : nil,
+                sourceItemID: sourceID
             )
+            if let task {
+                task.notes = finalNotes.isEmpty ? nil : finalNotes
+                try? modelContext.save()
+            }
 
         case .edit(let task):
             try? service.updateTask(
@@ -108,9 +145,21 @@ struct TaskEditorView: View {
                 priority: priority,
                 dueAt: hasDueDate ? dueAt : nil
             )
+            task.notes = finalNotes.isEmpty ? nil : finalNotes
+            task.sourceItemID = sourceID
+            try? modelContext.save()
         }
 
         dismiss()
+    }
+
+    private func priorityShortLabel(_ p: TaskPriority) -> String {
+        switch p {
+        case .low: "Low"
+        case .medium: "Med"
+        case .high: "High"
+        case .critical: "Crit"
+        }
     }
 
     private func priorityLabel(_ p: TaskPriority) -> String {

@@ -137,3 +137,29 @@ extension KnowledgeItemType {
 extension TimelineEntry {
     var typeColor: Color { contentType?.color ?? .blue }
 }
+
+// MARK: - Card Modifier
+
+struct ProjectCard: ViewModifier {
+    let padding: CGFloat
+    let cornerRadius: CGFloat
+
+    init(padding: CGFloat = AppSpacing.md, cornerRadius: CGFloat = AppRadius.lg) {
+        self.padding = padding
+        self.cornerRadius = cornerRadius
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .padding(padding)
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+            .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+    }
+}
+
+extension View {
+    func projectCard(padding: CGFloat = AppSpacing.md, cornerRadius: CGFloat = AppRadius.lg) -> some View {
+        modifier(ProjectCard(padding: padding, cornerRadius: cornerRadius))
+    }
+}

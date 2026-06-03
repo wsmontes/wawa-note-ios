@@ -194,6 +194,7 @@ struct HomeView: View {
     @EnvironmentObject private var coordinator: RecordingCoordinator
     @EnvironmentObject private var contentPipeline: ContentPipelineService
     @EnvironmentObject private var chatState: ChatOverlayState
+    @EnvironmentObject private var chatViewModel: ChatViewModel
     @Query(sort: \Project.updatedAt, order: .reverse) private var projects: [Project]
     @Query(sort: \KnowledgeItem.updatedAt, order: .reverse) private var allItems: [KnowledgeItem]
     @Environment(\.modelContext) private var modelContext
@@ -258,6 +259,7 @@ struct HomeView: View {
                 navigateToItem = item
                 importVM.pendingImport = nil
             }
+            .environmentObject(coordinator)
         }
         .onOpenURL { if $0.scheme == "wawanote" { Task { await importVM.scanSharedDirectoryAndImport() } } }
         .alert("Import Error", isPresented: Binding(get: { importVM.importError != nil }, set: { if !$0 { importVM.importError = nil } })) { Button("OK") { importVM.importError = nil } } message: { Text(importVM.importError ?? "") }
@@ -300,6 +302,7 @@ struct HomeView: View {
         }
         .onAppear {
             chatState.context = .global
+            chatViewModel.pregenerateGreeting(for: .global)
             captureVM.bind(coordinator: coordinator)
             captureVM.modelContext = modelContext
             captureVM.contentPipeline = contentPipeline

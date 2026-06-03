@@ -23,6 +23,7 @@ struct ChatView: View {
                 let showHeader = (onDismiss != nil && !viewModel.messages.isEmpty)
                     || viewModel.state != .idle
                     || !viewModel.activeToolCalls.isEmpty
+                    || viewModel.isGreetingLoading
                 if showHeader {
                     HStack {
                         if let dismiss = onDismiss, !viewModel.messages.isEmpty {
@@ -34,7 +35,14 @@ struct ChatView: View {
                             .buttonStyle(.plain)
                         }
                         Spacer()
-                        if viewModel.state == .thinking {
+                        if viewModel.isGreetingLoading {
+                            HStack(spacing: 4) {
+                                ProgressView().scaleEffect(0.7)
+                                Text("Preparing...").font(.caption).foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 4)
+                            .background(.ultraThinMaterial, in: Capsule())
+                        } else if viewModel.state == .thinking {
                             HStack(spacing: 4) {
                                 ProgressView().scaleEffect(0.7)
                                 Text("Thinking").font(.caption).foregroundStyle(.secondary)

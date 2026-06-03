@@ -152,6 +152,10 @@ struct KnowledgeDetailView: View {
         .onAppear {
             chatState.context = .item(item.id)
             isPipelineProcessing = contentPipeline.isProcessingItem(item.id)
+            // Load scanned pages ONCE to avoid blocking main thread on re-renders
+            if item.type == .image, scannedPages.isEmpty {
+                scannedPages = loadScannedPages(count: item.imagePageCount ?? 1)
+            }
             Task { @MainActor in
                 await Task.yield()
                 loadData()
@@ -749,14 +753,12 @@ struct KnowledgeDetailView: View {
 
     // MARK: - Image
 
+    @State private var scannedPages: [UIImage] = []
     @State private var currentPage = 0
 
     @ViewBuilder
     private var imageSection: some View {
-        let pageCount = item.imagePageCount ?? 1
-        let pages = loadScannedPages(count: pageCount)
-
-        if pages.isEmpty {
+        if scannedPages.isEmpty {
             Text("No scanned image")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -764,12 +766,12 @@ struct KnowledgeDetailView: View {
         } else {
             VStack(alignment: .leading, spacing: 16) {
                 // Page indicator above gallery
-                if pageCount > 1 {
+                if scannedPages.count > 1 {
                     HStack {
                         Image(systemName: "doc.on.doc")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Text("Page \(currentPage + 1) of \(pageCount)")
+                        Text("Page \(currentPage + 1) of \(scannedPages.count)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -778,7 +780,7 @@ struct KnowledgeDetailView: View {
 
                 // Gallery
                 TabView(selection: $currentPage) {
-                    ForEach(Array(pages.enumerated()), id: \.offset) { idx, image in
+                    ForEach(Array(scannedPages.enumerated()), id: \.offset) { idx, image in
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFit()
@@ -788,7 +790,7 @@ struct KnowledgeDetailView: View {
                             .tag(idx)
                     }
                 }
-                .tabViewStyle(.page(indexDisplayMode: pageCount > 1 ? .always : .never))
+                .tabViewStyle(.page(indexDisplayMode: scannedPages.count > 1 ? .always : .never))
                 .frame(minHeight: 350)
 
                 // OCR text

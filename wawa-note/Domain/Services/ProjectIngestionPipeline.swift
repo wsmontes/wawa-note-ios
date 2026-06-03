@@ -155,6 +155,7 @@ final class ProjectIngestionPipeline: ObservableObject {
                             context: context, previousSummary: previousSummary, framework: framework)
                 AppLog.provider.info("ProjectIngestion: SUCCESS — \(json.new_tasks?.count ?? 0) new tasks, \(json.connections?.count ?? 0) connections for project \(project.name)")
                 postIngestionCompleted(itemID: itemID, projectID: projectID)
+                scheduleGraphAnalysis(projectID: projectID, context: context)
                 return
             }
 
@@ -181,6 +182,7 @@ final class ProjectIngestionPipeline: ObservableObject {
                                 existingTasks: existingTasks, edgeSvc: edgeSvc, taskSvc: taskSvc,
                                 context: context, previousSummary: previousSummary, framework: framework)
                     postIngestionCompleted(itemID: itemID, projectID: projectID)
+                    scheduleGraphAnalysis(projectID: projectID, context: context)
                     return
                 }
             } catch {
@@ -197,6 +199,28 @@ final class ProjectIngestionPipeline: ObservableObject {
 
     private func postIngestionCompleted(itemID: UUID, projectID: UUID) {
         ingestionState.finish(projectID)
+    }
+
+    /// Schedule cross-item graph intelligence analysis after ingestion succeeds.
+    /// Runs fire-and-forget — results are persisted as annotations on project items.
+    private func scheduleGraphAnalysis(projectID: UUID, context: ModelContext) {
+        Task { @MainActor in
+            let intelligence = GraphIntelligenceService(context: context, fileStore: FileArtifactStore())
+            let hypotheses = await intelligence.analyzeGraph(for: projectID)
+            guard !hypotheses.isEmpty else { return }
+            for h in hypotheses {
+                let annotation = Annotation(
+                    source: "graph_intelligence",
+                    key: h.type.rawValue,
+                    value: h.text,
+                    itemID: projectID,
+                    confidence: h.confidence
+                )
+                context.insert(annotation)
+            }
+            try? context.save()
+            AppLog.provider.info("ProjectIngestion: graph analysis found \(hypotheses.count) hypotheses for project \(projectID)")
+        }
     }
 
     private func postIngestionFailed(itemID: UUID, projectID: UUID, error: IngestionError) {

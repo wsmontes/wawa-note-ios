@@ -336,6 +336,16 @@ struct GetAnalysisTool: AgentTool {
             if !analysis.risks.isEmpty { content += "\nRisks:\n" + analysis.risks.map { "- \($0.risk)" }.joined(separator: "\n") }
             return ToolFormatting.success(summary: "Analysis: \(item.title)", content: content, citations: [ChatCitation(itemId: item.id, title: item.title, snippet: analysis.shortSummary, itemType: item.type)], totalFound: 1, shown: 1)
         }
+        // Fallback: check for DynamicAnalysis (framework-driven analysis)
+        if let dynamic = try? context.fileStore.readArtifact(DynamicAnalysis.self, fileName: "analysis.json", meetingId: id) {
+            var content = "## Analysis: \(item.title)\nSchema: \(dynamic.schemaId)\n"
+            for key in dynamic.results.allKeys.prefix(20) {
+                if let val = dynamic.results.stringField(key) {
+                    content += "\n\(key): \(val.prefix(500))"
+                }
+            }
+            return ToolFormatting.success(summary: "Dynamic Analysis: \(item.title)", content: String(content.prefix(3000)), citations: [ChatCitation(itemId: item.id, title: item.title, snippet: "Framework: \(dynamic.schemaId)", itemType: item.type)], totalFound: 1, shown: 1)
+        }
         return ToolResult(content: "No analysis found for item \(item.title)", citations: [], isError: true, displaySummary: "No analysis")
     }
 }

@@ -72,7 +72,7 @@ final class AudioPlaybackService: NSObject, ObservableObject, @unchecked Sendabl
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             guard let self, let player = self.player else { return }
-            self.currentTime = player.currentTime
+            DispatchQueue.main.async { self.currentTime = player.currentTime }
         }
     }
 }

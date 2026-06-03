@@ -93,6 +93,11 @@ final class KnowledgeItemService {
         if let anns = try? context.fetch(annPred) {
             for ann in anns { context.delete(ann) }
         }
+        let tid = item.id
+        let outgoing = try context.fetch(FetchDescriptor<GraphEdge>(predicate: #Predicate { $0.fromID == tid }))
+        for edge in outgoing { context.delete(edge) }
+        let incoming = try context.fetch(FetchDescriptor<GraphEdge>(predicate: #Predicate { $0.toID == tid }))
+        for edge in incoming { context.delete(edge) }
         try fileStore.deleteMeetingDirectory(for: item.id)
         context.delete(item)
         try context.save()

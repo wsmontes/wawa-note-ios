@@ -5,6 +5,7 @@ struct InboxView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var contentPipeline: ContentPipelineService
     @EnvironmentObject private var chatState: ChatOverlayState
+    @EnvironmentObject private var chatViewModel: ChatViewModel
     @Query(sort: \KnowledgeItem.updatedAt, order: .reverse) private var allItems: [KnowledgeItem]
     @Query(sort: \Folder.name) private var folders: [Folder]
     @Query(sort: \Project.name) private var projects: [Project]
@@ -38,27 +39,25 @@ struct InboxView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                filterBar
-                Divider()
-                if filteredItems.isEmpty {
-                    emptyState
-                } else {
-                    itemList
-                }
+        VStack(spacing: 0) {
+            filterBar
+            Divider()
+            if filteredItems.isEmpty {
+                emptyState
+            } else {
+                itemList
             }
-            .navigationTitle("Inbox")
-            .navigationDestination(item: $navigateToProject) { ProjectDetailView(project: $0) }
-            .searchable(text: $searchText, prompt: "Search all sources...")
-            .onChange(of: searchText) { _, newValue in
-                if newValue.isEmpty { matchingIDs = []; searchResults = [] }
-                else { performSearch() }
-            }
-            .onAppear { chatState.context = .inbox; loadTrashFolder() }
-            .sheet(item: $showFolderPicker) { item in
-                folderPickerSheet(for: item)
-            }
+        }
+        .navigationTitle("Inbox")
+        .navigationDestination(item: $navigateToProject) { ProjectDetailView(project: $0) }
+        .searchable(text: $searchText, prompt: "Search all sources...")
+        .onChange(of: searchText) { _, newValue in
+            if newValue.isEmpty { matchingIDs = []; searchResults = [] }
+            else { performSearch() }
+        }
+        .onAppear { chatState.context = .inbox; chatViewModel.pregenerateGreeting(for: .inbox); loadTrashFolder() }
+        .sheet(item: $showFolderPicker) { item in
+            folderPickerSheet(for: item)
         }
     }
 
