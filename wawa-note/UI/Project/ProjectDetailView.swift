@@ -88,6 +88,19 @@ final class ProjectDetailViewModel: ObservableObject {
         }
     }
 
+    func exportProjectJSON() {
+        guard let ctx = modelContext else { return }
+        let svc = InstanceExportService()
+        let export = svc.exportSingleProject(project, context: ctx)
+        guard let data = try? JSONEncoder().encode(export),
+              let jsonStr = String(data: data, encoding: .utf8) else { return }
+        let activityVC = UIActivityViewController(activityItems: [jsonStr], applicationActivities: nil)
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let root = windowScene.windows.first?.rootViewController {
+            root.present(activityVC, animated: true)
+        }
+    }
+
     func exportTasksToReminders() async {
         let service = TaskRemindersService()
         let result = await service.exportTasks(tasks)
@@ -284,6 +297,11 @@ struct ProjectDetailView: View {
                             viewModel.exportMarkdown()
                         } label: {
                             Label("Export Markdown", systemImage: "doc.richtext")
+                        }
+                        Button {
+                            viewModel.exportProjectJSON()
+                        } label: {
+                            Label("Export Project JSON", systemImage: "doc.text")
                         }
                         Button {
                             Task { await viewModel.exportTasksToReminders() }

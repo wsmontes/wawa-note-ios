@@ -101,6 +101,29 @@ struct SettingsView: View {
                 } header: {
                     Text("Privacy & Data")
                 }
+
+                // Data Export
+                Section {
+                    if let jsonData = try? InstanceExportService().exportComplete(context: modelContext, includeHistory: false),
+                       let jsonStr = String(data: jsonData, encoding: .utf8) {
+                        let stats = InstanceExportService().exportStatistics(context: modelContext)
+                        ShareLink(item: jsonStr, preview: SharePreview("Wawa Note Export", image: Image(systemName: "doc.text"))) {
+                            HStack {
+                                Label("Export Complete JSON", systemImage: "arrow.up.doc")
+                                Spacer()
+                                VStack(alignment: .trailing) {
+                                    Text("\(stats.itemCount) items").font(.caption).foregroundStyle(.secondary)
+                                    let size = ByteCountFormatter.string(fromByteCount: Int64(jsonData.count), countStyle: .file)
+                                    Text(size).font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Data")
+                } footer: {
+                    Text("Exports all projects, items, analyses, signals, frames, prompts, and configuration as a complete JSON file. File may be large.")
+                }
             }
             .navigationTitle("Settings")
         }
