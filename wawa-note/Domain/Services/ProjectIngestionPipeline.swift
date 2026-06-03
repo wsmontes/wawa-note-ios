@@ -132,9 +132,22 @@ final class ProjectIngestionPipeline: ObservableObject {
         )
         let itemContext = buildItemContext(item: newItem, fileStore: fileStore)
 
-        // 2. Resolve framework for domain-aware synthesis
+        // 2. Check for critical doubts — hold ingestion if configured
+        if project.holdIngestionForDoubts {
+            let allSignals = (try? context.fetch(FetchDescriptor<AgentSuggestion>())) ?? []
+            let criticalDoubts = allSignals.filter {
+                $0.projectID == projectID && $0.type == "doubt" && $0.isCritical && $0.isActive
+            }
+            if !criticalDoubts.isEmpty {
+                AppLog.provider.info("ProjectIngestion: holding ingestion for project \(projectID) — \(criticalDoubts.count) critical doubt(s)")
+                ingestionState.finish(projectID)
+                return
+            }
+        }
+
+        // 3. Resolve framework for domain-aware synthesis
         let framework = FrameworkService.shared.resolve(for: project)
-        // 3. Prompt: dual-perspective, framework-aware
+        // 4. Prompt: dual-perspective, framework-aware
         let systemPrompt = buildSystemPrompt(for: project, framework: framework)
         let prompt = buildIngestionPrompt(projectContext: projectContext, newItemContext: itemContext, framework: framework)
         let model = ModelTierResolver.resolveForIngestion(projectID: projectID, context: context)

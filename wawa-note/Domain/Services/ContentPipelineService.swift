@@ -299,84 +299,26 @@ final class ContentPipelineService: ObservableObject {
         }
     }
 
-    /// Process a queue entry — called by ProcessingQueueService when the job reaches the front.
+    /// Process a queue entry — wraps the battle-tested process() with an async completion gate.
     func processEntry(itemID: UUID, projectID: UUID? = nil, using modelContext: ModelContext? = nil) async {
         let ctx = modelContext ?? ModelContext(modelContainer)
-        // Wrap the existing process() but without the duplicate guard (queue handles that)
-        // Use a fresh context for background processing
-        await withTaskCancellationHandler {
-            await processInternal(itemID: itemID, context: ctx)
-        } onCancel: {
-            AppLog.provider.info("ContentPipeline: job for item \(itemID) was cancelled")
-        }
-    }
-
-    /// Internal process that skips the duplicate guard (queue handles dedup).
-    private func processInternal(itemID: UUID, context: ModelContext) async {
-        // Same logic as process() but skips activeJobs guard
-        guard let itemSvc = try? KnowledgeItemService(context: context),
-              let item = try? itemSvc.fetchItem(id: itemID) else {
-            AppLog.provider.error("ContentPipeline: item \(itemID) not found")
-            return
-        }
-
-        try? Task.checkCancellation()
-
-        // Skip if already analyzed
-        if item.analysisProviderId != nil {
-            if let pid = item.projectID {
-                await ingestionPipeline.ingest(itemID: itemID, projectID: pid, using: context)
+        // Use the original process() which has retry logic, background tasks, notifications, and verification
+        // Wait for completion via notification
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            var token: NSObjectProtocol?
+            token = NotificationCenter.default.addObserver(forName: .pipelineCompleted, object: nil, queue: .main) { note in
+                guard let completedID = note.object as? String, completedID == itemID.uuidString else { return }
+                if let t = token { NotificationCenter.default.removeObserver(t) }
+                continuation.resume()
             }
-            return
-        }
-
-        guard let provider = try? ProviderRouter.resolveActive(context: context) else {
-            AppLog.provider.error("ContentPipeline: no provider for item \(itemID)")
-            return
-        }
-
-        try? Task.checkCancellation()
-
-        let tools: [any AgentTool] = [
-            ExtractContentTool(), AnalyzeContentTool(), DescribeImageTool(),
-            GetItemTool(), GetProjectTool(), GetConnectionsTool(),
-            CreateTaskTool(), CreateEdgeTool(), SetAnnotationTool(),
-            GetAnalysisTool(), SearchMemoryTool(), WriteMemoryTool(),
-            RaiseSignalTool()
-        ]
-        let registry = AgentToolRegistry(tools: tools)
-        let loop = AgentLoop(registry: registry, toolContext: ToolContext(
-            modelContext: context, fileStore: FileArtifactStore(),
-            activeProjectID: item.projectID,
-            activeProjectName: nil,
-            activeItemID: item.id
-        ))
-
-        let taskDesc = "Process item \"\(item.title)\" (type: \(item.type.rawValue), status: \(item.status.rawValue))"
-        let stream = loop.runAutonomous(
-            task: taskDesc,
-            systemPrompt: PipelineTemplate.standard,
-            tools: tools,
-            provider: provider
-        )
-
-        do {
-            for try await event in stream {
-                try Task.checkCancellation()
-                switch event {
-                case .finished:
-                    if let pid = item.projectID {
-                        ProjectHealthEngine.updateProject(pid, context: context)
-                    }
-                case .error(let err):
-                    AppLog.provider.error("Pipeline error for \(itemID): \(err.localizedDescription)")
-                default: break
-                }
+            // Fire the original process() — it handles everything internally
+            process(itemID, using: ctx)
+            // Safety timeout: if notification never fires, resume after 120s
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(120))
+                if let t = token { NotificationCenter.default.removeObserver(t) }
+                continuation.resume()
             }
-        } catch is CancellationError {
-            AppLog.provider.info("Pipeline cancelled for item \(itemID)")
-        } catch {
-            AppLog.provider.error("Pipeline error for \(itemID): \(error.localizedDescription)")
         }
     }
 

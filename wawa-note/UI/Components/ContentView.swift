@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import Combine
 
 @MainActor
@@ -112,6 +113,22 @@ struct ContentView: View {
         .onAppear {
             chatViewModel.setup(modelContext: modelContext)
             chatViewModel.observeContext(from: chatState)
+            autoProcessPendingItems()
+        }
+    }
+
+    /// Scan for unprocessed items and enqueue them for background processing.
+    private func autoProcessPendingItems() {
+        // Only auto-process if a provider is configured
+        guard (try? ProviderRouter.resolveActive(context: modelContext)) != nil else { return }
+        guard AutomationSettings.shared.autoAnalyze else { return }
+
+        let allItems = (try? modelContext.fetch(FetchDescriptor<KnowledgeItem>())) ?? []
+        let pending = allItems.filter { $0.inboxDate != nil && $0.analysisProviderId == nil }
+        guard !pending.isEmpty else { return }
+
+        for item in pending.prefix(5) {
+            processingQueue.enqueue(itemID: item.id, projectID: item.projectID, trigger: .backgroundBackfill)
         }
     }
 
