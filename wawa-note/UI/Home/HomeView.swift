@@ -27,11 +27,13 @@ final class HomeViewModel: ObservableObject {
     private var modelContext: ModelContext?
     private var contentPipeline: ContentPipelineService?
     private var coordinator: RecordingCoordinator?
+    private var processingQueue: ProcessingQueueService?
 
-    func configure(modelContext: ModelContext, contentPipeline: ContentPipelineService, coordinator: RecordingCoordinator) {
+    func configure(modelContext: ModelContext, contentPipeline: ContentPipelineService, coordinator: RecordingCoordinator, processingQueue: ProcessingQueueService? = nil) {
         self.modelContext = modelContext
         self.contentPipeline = contentPipeline
         self.coordinator = coordinator
+        self.processingQueue = processingQueue
     }
 
     // MARK: Import
@@ -152,7 +154,7 @@ final class HomeViewModel: ObservableObject {
             try await importService.storeAudio(sourceURL: tempURL, itemID: itemId, using: artifactStore)
             try? FileManager.default.removeItem(at: tempURL)
             if deleteSource { try? FileManager.default.removeItem(at: url) }
-            pipeline.process(itemId, using: modelContext)
+            processingQueue?.enqueue(itemID: itemId, trigger: .newCapture)
         } catch {
             await MainActor.run { coord.deleteItem(itemId) }
         }
@@ -165,10 +167,10 @@ final class HomeViewModel: ObservableObject {
             await MainActor.run {
                 modelContext.insert(item)
                 try? modelContext.save()
-                if let target = targetProjectForImport {
-                    try? ProjectService(context: modelContext).addItem(item.id, to: target.id)
+                if let t = targetProjectForImport {
+                    try? ProjectService(context: modelContext).addItem(item.id, to: t.id)
                 }
-                pipeline.process(item.id, using: modelContext)
+                processingQueue?.enqueue(itemID: item.id, projectID: targetProjectForImport?.id, trigger: .newCapture)
             }
             if deleteSource { try? FileManager.default.removeItem(at: url) }
         } catch {
@@ -193,6 +195,7 @@ final class HomeViewModel: ObservableObject {
 struct HomeView: View {
     @EnvironmentObject private var coordinator: RecordingCoordinator
     @EnvironmentObject private var contentPipeline: ContentPipelineService
+    @EnvironmentObject private var processingQueue: ProcessingQueueService
     @EnvironmentObject private var chatState: ChatOverlayState
     @EnvironmentObject private var chatViewModel: ChatViewModel
     @Query(sort: \Project.updatedAt, order: .reverse) private var projects: [Project]
@@ -252,10 +255,10 @@ struct HomeView: View {
         .fileImporter(isPresented: $importVM.showFilePicker, allowedContentTypes: importVM.importRouter.allUTTypes(), allowsMultipleSelection: true) { importVM.handleFilePick($0) }
         .sheet(item: $importVM.pendingImport) { imp in
             ImportFormView(sourceURL: imp.url, kind: imp.kind, textImporter: imp.textImporter, isFromShareExtension: imp.isFromShareExtension) { item in
-                if let target = importVM.targetProjectForImport {
-                    try? ProjectService(context: modelContext).addItem(item.id, to: target.id)
+                if let t = importVM.targetProjectForImport {
+                    try? ProjectService(context: modelContext).addItem(item.id, to: t.id)
                 }
-                contentPipeline.process(item.id, using: modelContext)
+                processingQueue.enqueue(itemID: item.id, projectID: importVM.targetProjectForImport?.id, trigger: .newCapture)
                 navigateToItem = item
                 importVM.pendingImport = nil
             }
@@ -283,7 +286,7 @@ struct HomeView: View {
             Task {
                 let items = await processPhotoItem(photo)
                 for item in items {
-                    await contentPipeline.process(item.id, using: modelContext)
+                    processingQueue.enqueue(itemID: item.id, trigger: .newCapture)
                 }
                 capturedPhoto = nil
                 navigateToItem = items.first
@@ -294,7 +297,7 @@ struct HomeView: View {
             Task {
                 let items = await scannerVM.createItems(from: images, context: modelContext)
                 for item in items {
-                    await contentPipeline.process(item.id, using: modelContext)
+                    processingQueue.enqueue(itemID: item.id, trigger: .newCapture)
                 }
                 scannerVM.scannedImages = []
                 navigateToItem = items.first
@@ -306,7 +309,8 @@ struct HomeView: View {
             captureVM.bind(coordinator: coordinator)
             captureVM.modelContext = modelContext
             captureVM.contentPipeline = contentPipeline
-            importVM.configure(modelContext: modelContext, contentPipeline: contentPipeline, coordinator: coordinator)
+            captureVM.processingQueue = processingQueue
+            importVM.configure(modelContext: modelContext, contentPipeline: contentPipeline, coordinator: coordinator, processingQueue: processingQueue)
         }
     }
 
@@ -320,7 +324,7 @@ struct HomeView: View {
                     .frame(width: 96, height: 96)
                     .shadow(color: .blue.opacity(0.15), radius: 16, y: 4)
                 Text("wawa-note").font(.title2).fontWeight(.semibold)
-                Text("Capture, organize, understand")
+                Text("A informação é sua. O processo é seu.")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
             .padding(.top, 0).padding(.bottom, 20)
@@ -535,14 +539,30 @@ struct HomeView: View {
         // ImageAnalysisService handles both OCR and LLM vision in one call.
         if let provider = try? ProviderRouter.resolveActive(context: modelContext) {
             let model = AIConfigService.shared.featureConfig(for: "analysis")?.model ?? "gpt-5.5"
-            item.bodyText = try? await ImageAnalysisService().analyzeImage(
-                dir.appendingPathComponent("scan_0.jpg"),
-                llmProvider: provider, model: model
-            )
+            let auth = FieldAuthorityService.shared
+            if auth.canModify(field: "bodyText", of: item, by: .system) {
+                item.bodyText = try? await ImageAnalysisService().analyzeImage(
+                    dir.appendingPathComponent("scan_0.jpg"),
+                    llmProvider: provider, model: model
+                )
+                if item.bodyText != nil {
+                    var prov = item.provenance
+                    prov.mark(field: "bodyText", origin: .system)
+                    item.fieldProvenanceJSON = prov.encode()
+                }
+            }
         }
         // Fallback: local OCR only if no provider configured
         if item.bodyText == nil {
-            item.bodyText = await recognizeText(from: image)
+            let auth = FieldAuthorityService.shared
+            if auth.canModify(field: "bodyText", of: item, by: .system) {
+                item.bodyText = await recognizeText(from: image)
+                if item.bodyText != nil {
+                    var prov = item.provenance
+                    prov.mark(field: "bodyText", origin: .system)
+                    item.fieldProvenanceJSON = prov.encode()
+                }
+            }
         }
         try? modelContext.save()
         return [item]
@@ -705,7 +725,13 @@ final class ScannerViewModel: ObservableObject {
 
         item.imageFileRelativePath = "scan_0.jpg"
         item.imagePageCount = images.count
-        item.bodyText = contentParts.joined(separator: "\n\n---\n\n")
+        let auth = FieldAuthorityService.shared
+        if auth.canModify(field: "bodyText", of: item, by: .system) {
+            item.bodyText = contentParts.joined(separator: "\n\n---\n\n")
+            var prov = item.provenance
+            prov.mark(field: "bodyText", origin: .system)
+            item.fieldProvenanceJSON = prov.encode()
+        }
 
         do {
             try context.save()

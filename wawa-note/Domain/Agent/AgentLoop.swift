@@ -137,6 +137,8 @@ final class AgentLoop: @unchecked Sendable {
         var allCitations: [ChatCitation] = []
 
         for iteration in 0..<iterations {
+            // Cooperative cancellation — allows ProcessingQueueService to cancel
+            if Task.isCancelled { continuation.finish(); return }
             continuation.yield(.thinking)
             let model = resolveModel(for: iteration)
 

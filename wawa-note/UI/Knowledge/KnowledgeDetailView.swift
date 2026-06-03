@@ -5,6 +5,7 @@ struct KnowledgeDetailView: View {
     let item: KnowledgeItem
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var contentPipeline: ContentPipelineService
+    @EnvironmentObject private var processingQueue: ProcessingQueueService
     @EnvironmentObject private var chatState: ChatOverlayState
     @State private var transcript: Transcript?
     @State private var analysis: MeetingAnalysis?
@@ -25,6 +26,7 @@ struct KnowledgeDetailView: View {
     @State private var isPipelineProcessing = false
     @State private var pipelineStage: String = ""
     @State private var isReprocessing = false
+    @State private var showReprocessWarning = false
 
     private let fileStore = FileArtifactStore()
 
@@ -148,6 +150,12 @@ struct KnowledgeDetailView: View {
             PromoteToProjectSheet(item: item) { _ in
                 showPromoteSheet = false
             }
+        }
+        .alert("Re-process Item", isPresented: $showReprocessWarning) {
+            Button("Cancel", role: .cancel) { }
+            Button("Continue") { Task { await reprocessItem(confirmed: true) } }
+        } message: {
+            Text("You have manually edited this item's content. Re-processing will re-analyze it. Your edits will be protected and AI may suggest changes for your review instead of overwriting them.")
         }
         .onAppear {
             chatState.context = .item(item.id)
@@ -1010,7 +1018,7 @@ struct KnowledgeDetailView: View {
             // Auto-run pipeline (agent-based) after transcription
             if (try? ProviderRouter.resolveActive(context: modelContext)) != nil {
                 isPipelineProcessing = true
-                await contentPipeline.process(item.id, using: modelContext)
+                processingQueue.enqueue(itemID: item.id, trigger: .directUserAction)
             }
         } catch let error as TranscriptionError {
             switch error {
@@ -1066,6 +1074,12 @@ struct KnowledgeDetailView: View {
             bodyText: editedBody.isEmpty ? nil : editedBody,
             tags: nil
         )
+        // Mark fields as user-edited
+        var prov = item.provenance
+        prov.mark(field: "title", origin: .user)
+        if !editedBody.isEmpty { prov.mark(field: "bodyText", origin: .user) }
+        item.fieldProvenanceJSON = prov.encode()
+        try? modelContext.save()
         isEditing = false
     }
 
@@ -1075,7 +1089,16 @@ struct KnowledgeDetailView: View {
 
     // MARK: - Reprocess
 
-    private func reprocessItem() async {
+    private func reprocessItem(confirmed: Bool = false) async {
+        // Check for user-owned fields before re-processing
+        if !confirmed {
+            let userOwned = ["title", "bodyText"].filter { item.provenance.isUserOwned(field: $0) }
+            if !userOwned.isEmpty {
+                showReprocessWarning = true
+                return
+            }
+        }
+
         isReprocessing = true
         defer { isReprocessing = false }
 

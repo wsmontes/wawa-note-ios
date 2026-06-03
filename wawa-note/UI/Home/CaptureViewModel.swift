@@ -18,6 +18,7 @@ final class CaptureViewModel: ObservableObject {
 
     var modelContext: ModelContext?
     var contentPipeline: ContentPipelineService?
+    var processingQueue: ProcessingQueueService?
 
     private var coordinator: RecordingCoordinator?
     private var cancellables: Set<AnyCancellable> = []
@@ -82,8 +83,7 @@ final class CaptureViewModel: ObservableObject {
     // MARK: - Pipeline
 
     private func launchPipeline() {
-        guard let itemId = savedItemId ?? coordinator?.savedItemId,
-              let ctx = modelContext else { return }
-        contentPipeline?.process(itemId, using: ctx)
+        guard let itemId = savedItemId ?? coordinator?.savedItemId else { return }
+        _ = processingQueue?.enqueue(itemID: itemId, trigger: .newCapture)
     }
 }

@@ -4,6 +4,7 @@ import SwiftData
 struct InboxView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var contentPipeline: ContentPipelineService
+    @EnvironmentObject private var processingQueue: ProcessingQueueService
     @EnvironmentObject private var chatState: ChatOverlayState
     @EnvironmentObject private var chatViewModel: ChatViewModel
     @Query(sort: \KnowledgeItem.updatedAt, order: .reverse) private var allItems: [KnowledgeItem]
@@ -397,7 +398,7 @@ struct InboxView: View {
         let projectID = project.id
 
         try? ProjectService(context: modelContext).addItem(itemID, to: projectID)
-        contentPipeline.process(itemID, using: modelContext)
+        processingQueue.enqueue(itemID: itemID, projectID: projectID, trigger: .projectAssignment)
 
         showFolderPicker = nil
         navigateToProject = project

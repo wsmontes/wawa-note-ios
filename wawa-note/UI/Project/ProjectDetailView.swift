@@ -99,7 +99,7 @@ final class ProjectDetailViewModel: ObservableObject {
         tasks.filter { $0.status == .done }.count
     }
 
-    func reprocessProject(using pipeline: ContentPipelineService) async {
+    func reprocessProject(using pipeline: ContentPipelineService, queue: ProcessingQueueService) async {
         guard let ctx = modelContext else { return }
         isReprocessing = true
         defer { isReprocessing = false }
@@ -115,7 +115,7 @@ final class ProjectDetailViewModel: ObservableObject {
         }
 
         for item in items {
-            pipeline.process(item.id, using: ctx)
+            queue.enqueue(itemID: item.id, projectID: project.id, trigger: .batchReprocess)
         }
 
         loadData()
@@ -149,6 +149,7 @@ struct ProjectDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var ingestionState: ProjectIngestionState
     @EnvironmentObject private var contentPipeline: ContentPipelineService
+    @EnvironmentObject private var processingQueue: ProcessingQueueService
     @EnvironmentObject private var chatState: ChatOverlayState
     @EnvironmentObject private var chatViewModel: ChatViewModel
     @StateObject private var viewModel: ProjectDetailViewModel
@@ -271,7 +272,7 @@ struct ProjectDetailView: View {
                 HStack(spacing: 16) {
                     if viewModel.projectItems.count > 0 {
                         Button {
-                            Task { await viewModel.reprocessProject(using: contentPipeline) }
+                            Task { await viewModel.reprocessProject(using: contentPipeline, queue: processingQueue) }
                         } label: {
                             Label("Re-process All", systemImage: "arrow.triangle.2.circlepath")
                         }
@@ -852,10 +853,45 @@ struct ProjectOverviewCards: View {
                 let task = TaskItem(projectID: project.id, title: "Decision: \(title)", priority: .high, ownerName: dict["owner"] as? String)
                 ctx.insert(task)
             }
+        case "field_change":
+            // Apply a field change proposed by the AI that was gated by user ownership
+            if let json = sug.payloadJSON, let data = json.data(using: .utf8),
+               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let field = dict["field"] as? String,
+               let proposedValue = dict["proposedValue"] as? String {
+                if field.hasPrefix("task.") {
+                    // Find the task by title in the project
+                    let taskField = String(field.dropFirst(5))
+                    if let task = (try? ctx.fetch(FetchDescriptor<TaskItem>()))?.first(where: {
+                        $0.projectID == project.id && sug.title.contains($0.title)
+                    }) {
+                        applyFieldChange(field: taskField, value: proposedValue, to: task)
+                    }
+                } else if field == "summary" {
+                    let datePrefix = Date().formatted(date: .abbreviated, time: .omitted)
+                    project.summary = (project.summary ?? "") + "\n\n[\(datePrefix) — approved]\n\(proposedValue)"
+                }
+                // Mark the field as user-approved (still user-owned since user approved)
+                try? ctx.save()
+            }
         default: break
         }
         sug.status = "approved"; sug.resolvedAt = Date()
         try? ctx.save()
+    }
+
+    private func applyFieldChange(field: String, value: String, to task: TaskItem) {
+        switch field {
+        case "status":
+            if let st = TaskStatus(rawValue: value) { task.status = st }
+        case "priority":
+            if let pr = TaskPriority(rawValue: value) { task.priority = pr }
+        case "dueAt":
+            task.dueAt = ISO8601DateFormatter().date(from: value)
+        case "ownerName":
+            task.ownerName = value.isEmpty ? nil : value
+        default: break
+        }
     }
 
     private func rejectSuggestion(_ sug: AgentSuggestion) {

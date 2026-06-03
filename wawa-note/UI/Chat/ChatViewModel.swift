@@ -305,7 +305,14 @@ final class ChatViewModel: ObservableObject {
             RenderTableTool(), RenderActionsTool(), RenderCardTool(), RenderCodeTool(),
             RenderChartTool(),
             // JavaScript sandbox
-            ExecuteJavaScriptTool()
+            ExecuteJavaScriptTool(),
+            // Signal detection
+            RaiseSignalTool(),
+            // Lenses
+            ListLensesTool(), ApplyLensTool(),
+            // History
+            GetHistoryTool(), AnswerDoubtTool(),
+            ExportPresetTool(), ImportPresetTool()
         ])
 
         let toolContext = ToolContext(

@@ -241,6 +241,11 @@ struct ProjectTaskBoardView: View {
     private func moveTask(_ task: TaskItem, to status: TaskStatus) {
         let svc = TaskService(context: modelContext)
         try? svc.updateStatus(task, to: status)
+        // Mark status as user-edited
+        var prov = task.provenance
+        prov.mark(field: "status", origin: .user)
+        task.fieldProvenanceJSON = prov.encode()
+        try? modelContext.save()
     }
 
     private func deleteTask(_ task: TaskItem) {

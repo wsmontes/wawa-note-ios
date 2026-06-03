@@ -8,6 +8,7 @@ struct PromoteToProjectSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var contentPipeline: ContentPipelineService
+    @EnvironmentObject private var processingQueue: ProcessingQueueService
 
     @State private var isGenerating = false
     @State private var preview: ConversionPreview?
@@ -394,7 +395,7 @@ struct PromoteToProjectSheet: View {
         )
         do {
             let project = try makeService().executeConversion(from: item, preview: filteredPreview)
-            contentPipeline.process( item.id, using: modelContext)
+            processingQueue.enqueue(itemID: item.id, trigger: .newCapture)
             dismiss()
             onComplete(project)
         } catch {

@@ -14,6 +14,7 @@ struct IngestionResponse: Codable {
     var insights: [IngestionInsight]?
     var project_summary_contribution: String?
     var project_summary_update: String? // legacy key, also checked
+    var signals: [IngestionSignal]?
 }
 
 struct IngestionConnection: Codable {
@@ -45,6 +46,15 @@ struct IngestionReinforcement: Codable {
 struct IngestionInsight: Codable {
     var text: String
     var confidence: Double?
+}
+
+struct IngestionSignal: Codable {
+    var type: String        // risk, alert, opportunity, contradiction, pattern, doubt, new_project, emerging_problem
+    var title: String
+    var body: String?
+    var impact: Double?     // 0-1
+    var urgency: Double?    // 0-1
+    var related_item_titles: [String]?
 }
 
 // MARK: - Pipeline
@@ -271,14 +281,28 @@ final class ProjectIngestionPipeline: ObservableObject {
           "new_tasks": [{"title": "...", "priority": "low|medium|high", "reason": "..."}],
           "edge_reinforcements": [{"from_title": "...", "to_title": "...", "note": "this connection is confirmed by the new item"}],
           "insights": [{"text": "...", "confidence": 0.8}],
+          "signals": [{"type": "risk|alert|opportunity|contradiction|pattern|doubt|new_project|emerging_problem", "title": "Short signal name", "body": "Why this matters", "impact": 0.7, "urgency": 0.5, "related_item_titles": ["item A"]}],
           "project_summary_contribution": "REQUIRED. One paragraph summarizing what new knowledge this item contributes to the project."
         }
+
+        SIGNAL DETECTION:
+        After analysis, detect any significant signals:
+        - risk: things that could go wrong (deadlines, missing info, blockers)
+        - alert: urgent issues needing immediate attention
+        - opportunity: things to explore, leverage, or act on
+        - contradiction: this item conflicts with an existing item or assumption
+        - pattern: a recurring theme across 3+ items
+        - doubt: something unclear that needs investigation
+        - new_project: this item hints at a separate project/initiative
+        - emerging_problem: a problem that is just starting to surface
+        Only raise signals that are clearly supported. Include impact (0-1) and urgency (0-1). Max 5 signals.
 
         RULES:
         - project_summary_contribution is REQUIRED. Always return it, even if just one sentence.
         - task_updates: ONLY update status if the new item CLEARLY indicates a task is done or no longer relevant. Never delete.
         - connections: report genuine relationships. Use types: \(edgeTypeList). If a connection already exists, use edge_reinforcements.
         - new_tasks: only tasks explicitly implied. Max 3.
+        - signals: only the most relevant signals. Max 5. Omit if nothing notable.
         """
 
         return prompt
@@ -424,10 +448,22 @@ final class ProjectIngestionPipeline: ObservableObject {
     ) {
         // Task status updates (never delete)
         if let updates = response.task_updates {
+            let auth = FieldAuthorityService.shared
+            let sugSvc = SuggestionGatingService(context: context)
             for update in updates {
                 if let task = findTask(byTitle: update.task_title, in: existingTasks),
                    let newStatus = TaskStatus(rawValue: update.new_status) {
-                    try? taskSvc.updateStatus(task, to: newStatus)
+                    if auth.canModify(field: "status", of: task, by: .llm) {
+                        try? taskSvc.updateStatus(task, to: newStatus)
+                    } else {
+                        sugSvc.proposeTaskUpdate(
+                            taskTitle: task.title, field: "status",
+                            proposedValue: update.new_status,
+                            projectID: project.id,
+                            sourceItemID: newItem.id,
+                            reason: update.reason ?? "Pipeline suggests this update"
+                        )
+                    }
                 }
             }
         }
@@ -444,7 +480,8 @@ final class ProjectIngestionPipeline: ObservableObject {
                 let priority = t.priority.flatMap(TaskPriority.init(rawValue:)) ?? .medium
                 try? taskSvc.create(
                     title: t.title, projectID: project.id, priority: priority,
-                    sourceItemID: newItem.id, confidence: t.confidence
+                    sourceItemID: newItem.id, confidence: t.confidence,
+                    createdBy: .llm
                 )
             }
         }
@@ -486,17 +523,65 @@ final class ProjectIngestionPipeline: ObservableObject {
             try? context.save()
         }
 
+        // Signals — create AgentSuggestions for detected signals
+        if let signals = response.signals {
+            for sig in signals.prefix(8) {
+                let validTypes = ["risk", "alert", "opportunity", "change", "contradiction",
+                                  "pattern", "doubt", "new_project", "emerging_problem"]
+                guard validTypes.contains(sig.type) else { continue }
+
+                var payload: [String: Any] = ["type": sig.type]
+                if let related = sig.related_item_titles { payload["related_item_ids"] = related }
+                let payloadJSON: String?
+                if let data = try? JSONSerialization.data(withJSONObject: payload),
+                   let json = String(data: data, encoding: .utf8) { payloadJSON = json }
+                else { payloadJSON = nil }
+
+                let suggestion = AgentSuggestion(
+                    projectID: project.id,
+                    type: sig.type,
+                    title: sig.title,
+                    body: sig.body,
+                    status: "visible",
+                    sourceItemID: newItem.id,
+                    payloadJSON: payloadJSON,
+                    impactScore: sig.impact,
+                    urgencyScore: sig.urgency
+                )
+                context.insert(suggestion)
+            }
+            try? context.save()
+        }
+
         // Project summary update — use snapshot to avoid race condition
         let contribution = response.project_summary_contribution ?? response.project_summary_update ?? ""
         if !contribution.isEmpty {
-            let datePrefix = Date().formatted(date: .abbreviated, time: .omitted)
-            let entry = "\n\n[\(datePrefix) — from \"\(newItem.title)\"]\n\(contribution)"
-            project.summary = previousSummary + entry
-            do { try context.save() }
-            catch { AppLog.provider.error("ProjectIngestion: failed to save summary: \(error.localizedDescription)") }
+            let auth = FieldAuthorityService.shared
+            if auth.canModify(field: "summary", of: project, by: .llm) {
+                let datePrefix = Date().formatted(date: .abbreviated, time: .omitted)
+                let entry = "\n\n[\(datePrefix) — from \"\(newItem.title)\"]\n\(contribution)"
+                project.summary = previousSummary + entry
+                do { try context.save() }
+                catch { AppLog.provider.error("ProjectIngestion: failed to save summary: \(error.localizedDescription)") }
+            } else {
+                let sugSvc = SuggestionGatingService(context: context)
+                sugSvc.proposeChange(
+                    field: "summary",
+                    proposedValue: contribution,
+                    on: project.name,
+                    projectID: project.id,
+                    sourceItemID: newItem.id,
+                    reason: "New item \"\(newItem.title)\" contributes this summary"
+                )
+            }
         } else {
             AppLog.provider.warning("ProjectIngestion: no summary contribution in AI response")
         }
+
+        // Auto-snapshot after ingestion
+        VersioningService.shared.createSnapshot(projectID: project.id,
+            label: "Ingestion: \"\(newItem.title)\"",
+            trigger: .auto_ingestion, context: context)
     }
 
     // MARK: - Fuzzy matching (exact match first, then word-boundary)
@@ -589,5 +674,72 @@ final class ProjectIngestionPipeline: ObservableObject {
             }
         }
         throw lastError ?? ProviderError.requestFailed(statusCode: 0)
+    }
+}
+
+// MARK: - SuggestionGatingService
+
+/// Converts blocked LLM write attempts into AgentSuggestions for user review.
+@MainActor
+final class SuggestionGatingService {
+    private let context: ModelContext
+
+    init(context: ModelContext) {
+        self.context = context
+    }
+
+    func proposeChange(
+        field: String,
+        proposedValue: String,
+        on itemTitle: String,
+        projectID: UUID?,
+        sourceItemID: UUID? = nil,
+        reason: String? = nil,
+        confidence: Double = 0.7
+    ) {
+        let truncated = String(proposedValue.prefix(200))
+        let payload: [String: String] = [
+            "field": field,
+            "proposedValue": truncated,
+            "reason": reason ?? "AI suggested this change"
+        ]
+        let payloadJSON: String?
+        if let data = try? JSONEncoder().encode(payload),
+           let json = String(data: data, encoding: .utf8) {
+            payloadJSON = json
+        } else {
+            payloadJSON = nil
+        }
+
+        let suggestion = AgentSuggestion(
+            projectID: projectID,
+            type: "field_change",
+            title: "Change \(field) on \"\(itemTitle)\"",
+            body: "Proposed: set \(field) to \"\(truncated)\". Reason: \(reason ?? "AI analysis")",
+            status: "visible",
+            confidence: confidence,
+            sourceItemID: sourceItemID,
+            payloadJSON: payloadJSON
+        )
+        context.insert(suggestion)
+        try? context.save()
+    }
+
+    func proposeTaskUpdate(
+        taskTitle: String,
+        field: String,
+        proposedValue: String,
+        projectID: UUID?,
+        sourceItemID: UUID? = nil,
+        reason: String? = nil
+    ) {
+        proposeChange(
+            field: "task.\(field)",
+            proposedValue: proposedValue,
+            on: taskTitle,
+            projectID: projectID,
+            sourceItemID: sourceItemID,
+            reason: reason
+        )
     }
 }

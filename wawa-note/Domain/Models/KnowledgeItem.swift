@@ -80,6 +80,8 @@ final class KnowledgeItem {
     var scheduledDate: Date?
     var isImported: Bool = false
     var importSourceURL: String?
+    // Field authority
+    var fieldProvenanceJSON: String?
 
     var type: KnowledgeItemType {
         get {
@@ -124,5 +126,19 @@ final class KnowledgeItem {
         self.durationSeconds = durationSeconds
         self.languageCode = languageCode
         self.inboxDate = inboxDate
+        self.fieldProvenanceJSON = nil
+    }
+}
+
+// MARK: - KnowledgeItem + FieldProvidence
+
+extension KnowledgeItem: FieldProvidence {
+    var provenance: FieldProvenance {
+        get { FieldProvenance.decode(from: fieldProvenanceJSON) }
+        set { fieldProvenanceJSON = newValue.encode() }
+    }
+
+    func writeProvenance() {
+        fieldProvenanceJSON = provenance.encode()
     }
 }

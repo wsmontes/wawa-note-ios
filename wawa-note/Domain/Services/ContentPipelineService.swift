@@ -37,6 +37,12 @@ enum PipelineTemplate {
     - **For images**: if the item is an image, use `describe_image` first to get a visual description, \
       then pass that description to `analyze_content` as the text parameter.
 
+    ### Phase 2.5: DETECT SIGNALS (after analysis, before ingest)
+    - Review the analysis for significant signals — risks, alerts, opportunities, contradictions, patterns.
+    - Use `raise_signal` for any notable finding. Types: risk, alert, opportunity, change, contradiction, pattern, doubt, new_project, emerging_problem.
+    - Only raise signals that are clearly supported by the content. Be specific.
+    - Max 3 signals per item. If nothing significant, skip this phase.
+
     ### Phase 3: INGEST (if item has a project)
     - If the item belongs to a project, create any tasks, edges, or annotations based on the analysis.
     - Use `create_task` for action items extracted from the analysis.
@@ -85,6 +91,7 @@ enum PipelineTemplate {
 final class ContentPipelineService: ObservableObject {
     private let ingestionPipeline: ProjectIngestionPipeline
     private let ingestionState: ProjectIngestionState
+    private let modelContainer: ModelContainer
 
     @Published var pipelineStatus: PipelineProgress?
 
@@ -92,9 +99,10 @@ final class ContentPipelineService: ObservableObject {
     private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
     private var backgroundTaskCount = 0
 
-    init(ingestionPipeline: ProjectIngestionPipeline, ingestionState: ProjectIngestionState) {
+    init(ingestionPipeline: ProjectIngestionPipeline, ingestionState: ProjectIngestionState, modelContainer: ModelContainer) {
         self.ingestionPipeline = ingestionPipeline
         self.ingestionState = ingestionState
+        self.modelContainer = modelContainer
     }
 
     /// Process an item through the pipeline using an autonomous agent.
@@ -149,7 +157,8 @@ final class ContentPipelineService: ObservableObject {
                 GetItemTool(), GetProjectTool(), GetConnectionsTool(),
                 CreateTaskTool(), CreateEdgeTool(), SetAnnotationTool(),
                 GetAnalysisTool(),
-                SearchMemoryTool(), WriteMemoryTool()
+                SearchMemoryTool(), WriteMemoryTool(),
+                RaiseSignalTool(), ListLensesTool()
             ]
 
             let registry = AgentToolRegistry(tools: tools)
@@ -290,6 +299,87 @@ final class ContentPipelineService: ObservableObject {
         }
     }
 
+    /// Process a queue entry — called by ProcessingQueueService when the job reaches the front.
+    func processEntry(itemID: UUID, projectID: UUID? = nil, using modelContext: ModelContext? = nil) async {
+        let ctx = modelContext ?? ModelContext(modelContainer)
+        // Wrap the existing process() but without the duplicate guard (queue handles that)
+        // Use a fresh context for background processing
+        await withTaskCancellationHandler {
+            await processInternal(itemID: itemID, context: ctx)
+        } onCancel: {
+            AppLog.provider.info("ContentPipeline: job for item \(itemID) was cancelled")
+        }
+    }
+
+    /// Internal process that skips the duplicate guard (queue handles dedup).
+    private func processInternal(itemID: UUID, context: ModelContext) async {
+        // Same logic as process() but skips activeJobs guard
+        guard let itemSvc = try? KnowledgeItemService(context: context),
+              let item = try? itemSvc.fetchItem(id: itemID) else {
+            AppLog.provider.error("ContentPipeline: item \(itemID) not found")
+            return
+        }
+
+        try? Task.checkCancellation()
+
+        // Skip if already analyzed
+        if item.analysisProviderId != nil {
+            if let pid = item.projectID {
+                await ingestionPipeline.ingest(itemID: itemID, projectID: pid, using: context)
+            }
+            return
+        }
+
+        guard let provider = try? ProviderRouter.resolveActive(context: context) else {
+            AppLog.provider.error("ContentPipeline: no provider for item \(itemID)")
+            return
+        }
+
+        try? Task.checkCancellation()
+
+        let tools: [any AgentTool] = [
+            ExtractContentTool(), AnalyzeContentTool(), DescribeImageTool(),
+            GetItemTool(), GetProjectTool(), GetConnectionsTool(),
+            CreateTaskTool(), CreateEdgeTool(), SetAnnotationTool(),
+            GetAnalysisTool(), SearchMemoryTool(), WriteMemoryTool(),
+            RaiseSignalTool()
+        ]
+        let registry = AgentToolRegistry(tools: tools)
+        let loop = AgentLoop(registry: registry, toolContext: ToolContext(
+            modelContext: context, fileStore: FileArtifactStore(),
+            activeProjectID: item.projectID,
+            activeProjectName: nil,
+            activeItemID: item.id
+        ))
+
+        let taskDesc = "Process item \"\(item.title)\" (type: \(item.type.rawValue), status: \(item.status.rawValue))"
+        let stream = loop.runAutonomous(
+            task: taskDesc,
+            systemPrompt: PipelineTemplate.standard,
+            tools: tools,
+            provider: provider
+        )
+
+        do {
+            for try await event in stream {
+                try Task.checkCancellation()
+                switch event {
+                case .finished:
+                    if let pid = item.projectID {
+                        ProjectHealthEngine.updateProject(pid, context: context)
+                    }
+                case .error(let err):
+                    AppLog.provider.error("Pipeline error for \(itemID): \(err.localizedDescription)")
+                default: break
+                }
+            }
+        } catch is CancellationError {
+            AppLog.provider.info("Pipeline cancelled for item \(itemID)")
+        } catch {
+            AppLog.provider.error("Pipeline error for \(itemID): \(error.localizedDescription)")
+        }
+    }
+
     var isProcessing: Bool { !activeJobs.isEmpty }
     func isProcessingItem(_ itemID: UUID) -> Bool { activeJobs[itemID] != nil }
 
@@ -307,6 +397,55 @@ final class ContentPipelineService: ObservableObject {
         backgroundTaskCount = 0
         UIApplication.shared.endBackgroundTask(backgroundTaskID)
         backgroundTaskID = .invalid
+    }
+}
+
+// MARK: - LensCatalogService
+
+@MainActor
+final class LensCatalogService {
+    static let shared = LensCatalogService()
+    private init() {}
+
+    var allLenses: [Lens] { frameworkLenses + analyticalLenses }
+
+    func lenses(in category: LensCategory) -> [Lens] { allLenses.filter { $0.category == category } }
+    func resolve(id: String) -> Lens? { allLenses.first { $0.id == id } }
+
+    private var frameworkLenses: [Lens] {
+        [
+            Lens(id: "builtin/meeting", name: "Meeting Analysis", description: "Decisions, actions, risks, dates, entities", icon: "mic.fill", category: .domain, framework: FrameworkService.meetingFramework),
+            Lens(id: "builtin/research", name: "Research", description: "Hypotheses, findings, themes, sources", icon: "magnifyingglass", category: .domain, framework: FrameworkService.researchFramework),
+            Lens(id: "builtin/brainstorm", name: "Brainstorm", description: "Ideas, clusters, themes, questions", icon: "lightbulb.fill", category: .personal, framework: FrameworkService.brainstormFramework),
+            Lens(id: "builtin/journal", name: "Journal", description: "Themes, people, places, moods", icon: "book.fill", category: .personal, framework: FrameworkService.journalFramework),
+            Lens(id: "builtin/coaching", name: "Coaching", description: "Competencies, commitments, breakthroughs", icon: "person.fill.checkmark", category: .domain, framework: FrameworkService.coachingFramework),
+            Lens(id: "builtin/legal", name: "Legal Brief", description: "Cases, depositions, statutes, privilege", icon: "building.columns.fill", category: .domain, framework: FrameworkService.legalFramework),
+            Lens(id: "builtin/product", name: "Product Spec", description: "Stories, requirements, constraints, decisions", icon: "hammer.fill", category: .domain, framework: FrameworkService.productFramework),
+            Lens(id: "builtin/blank", name: "Blank Slate", description: "Minimal — AI adapts to your content", icon: "doc.fill", category: .custom, framework: FrameworkService.blankFramework)
+        ]
+    }
+
+    private var analyticalLenses: [Lens] {
+        let lenses = AIConfigService.shared.config.lenses ?? [:]
+        return lenses.compactMap { key, lensJSON in
+            guard let name = lensJSON.name else { return nil }
+            return Lens(id: "lens/\(key)", name: name, description: lensJSON.description ?? "",
+                icon: lensJSON.icon ?? "sparkles", category: .analytical, framework: nil,
+                systemPromptOverride: lensJSON.systemPrompt, userPromptTemplate: lensJSON.userPrompt)
+        }
+    }
+
+    func applyLens(_ lens: Lens, to project: Project) {
+        if let fw = lens.framework {
+            project.frameworkJSON = (try? JSONEncoder().encode(fw)).flatMap { String(data: $0, encoding: .utf8) }
+            project.frameworkId = lens.id
+        }
+        if let override = lens.systemPromptOverride {
+            var instructions = project.customInstructions ?? ""
+            if !instructions.isEmpty { instructions += "\n\n" }
+            instructions += "[Lens: \(lens.name)]\n\(override)"
+            project.customInstructions = instructions
+        }
     }
 }
 
@@ -347,6 +486,17 @@ final class FrameworkService {
            let json = String(data: data, encoding: .utf8) {
             project.frameworkJSON = json
         }
+    }
+
+    /// Validate all views in a framework. Returns invalid view IDs.
+    func validateViews(_ framework: ProjectFramework) -> [String] {
+        framework.views.filter { !$0.isValid }.map(\.id)
+    }
+
+    /// Reset a project's framework to the meeting default.
+    func restoreDefaults(to project: Project) {
+        project.frameworkJSON = nil
+        project.frameworkId = "builtin/meeting"
     }
 
     // MARK: Built-in frameworks
@@ -681,6 +831,11 @@ enum ProjectHealthEngine {
         guard let _ = try? ProjectService(context: context).fetch(id: projectID) else { return nil }
         let items = (try? ProjectService(context: context).items(in: projectID)) ?? []
         let tasks = (try? TaskService(context: context).tasks(for: projectID)) ?? []
+        // Signal counts
+        let allSignals = (try? context.fetch(FetchDescriptor<AgentSuggestion>())) ?? []
+        let projectSignals = allSignals.filter { $0.projectID == projectID }
+        let pendingSignals = projectSignals.filter { $0.isActive }
+        let unresolvedRisks = pendingSignals.filter { $0.type == "risk" || $0.type == "alert" }
         let edgeSvc = GraphEdgeService(context: context)
         let itemIDs = Set(items.map(\.id))
         let allEdges = (try? edgeSvc.recentEdges(limit: 500))?.filter { itemIDs.contains($0.fromID) || itemIDs.contains($0.toID) } ?? []
@@ -717,6 +872,8 @@ enum ProjectHealthEngine {
         if decisionVelocity < 0.5 && items.count >= 3 { anomalies.append("Decision drought") }
         if actionDebtRatio > 0.7 && totalTasks > 0 { anomalies.append("Action debt: \(Int(actionDebtRatio*100))%") }
         if riskExposure > 0.5 { anomalies.append("High risk exposure") }
+        if unresolvedRisks.count > 0 { anomalies.append("Unresolved risks: \(unresolvedRisks.count)") }
+        if pendingSignals.count >= 5 { anomalies.append("Signal backlog: \(pendingSignals.count) pending") }
         return HealthResult(score: score, status: status, decisionVelocity: decisionVelocity, actionDebtRatio: actionDebtRatio, evidenceFreshnessDays: medianAge, graphDensity: graphDensity, riskExposure: riskExposure, anomalies: anomalies)
     }
     @MainActor
@@ -1067,7 +1224,8 @@ enum ToolPermission {
             return .readOnly
         case "create_note", "create_task", "update_task", "create_edge",
              "set_annotation", "analyze_content", "edit_prompt",
-             "write_memory", "create_project_framework", "update_project_framework":
+             "write_memory", "create_project_framework", "update_project_framework",
+             "raise_signal", "list_lenses", "apply_lens":
             return .write
         case "trash_item":
             return .destructive
@@ -1818,4 +1976,627 @@ enum JSSandbox {
         }
     };
     """
+}
+
+// MARK: - FieldAuthorityService
+
+/// Centralized authority check for all field writes.
+/// Implements the rule: user-owned > stabilized ontology > new LLM output
+@MainActor
+final class FieldAuthorityService {
+    static let shared = FieldAuthorityService()
+    private init() {}
+
+    /// Returns true if the caller can modify the given field on the given model.
+    func canModify(field: String, of model: any FieldProvidence, by origin: FieldOrigin) -> Bool {
+        if origin == .user { return true }
+        if origin == .system { return true }
+        return !model.provenance.isUserOwned(field: field)
+    }
+
+    func markUserEdited(field: String, on model: some FieldProvidence) {
+        var m = model
+        m.provenance.mark(field: field, origin: .user)
+        m.writeProvenance()
+    }
+
+    func markLLMEdited(field: String, on model: some FieldProvidence) {
+        var m = model
+        m.provenance.mark(field: field, origin: .llm)
+        m.writeProvenance()
+    }
+
+    func markImportEdited(field: String, on model: some FieldProvidence) {
+        var m = model
+        m.provenance.mark(field: field, origin: .`import`)
+        m.writeProvenance()
+    }
+
+    func firstBlockedField(attemptedFields: [String], model: any FieldProvidence, by origin: FieldOrigin) -> String? {
+        attemptedFields.first { !canModify(field: $0, of: model, by: origin) }
+    }
+
+    func isUserCreated(_ task: TaskItem) -> Bool {
+        task.createdBy == .user
+    }
+
+    func isLLMCreated(_ task: TaskItem) -> Bool {
+        task.createdBy == .llm
+    }
+}
+
+// MARK: - SignalPriorityService
+
+/// Computes contextual priority for signals. Score is 0-100, dynamic, not a fixed enum.
+/// Factors: impact, urgency, relevance, signal age, project state, ontology inertia.
+@MainActor
+final class SignalPriorityService {
+    static let shared = SignalPriorityService()
+    private init() {}
+
+    func computePriority(
+        signal: AgentSuggestion,
+        project: Project?,
+        activeItemCount: Int = 0,
+        userContext: UserActivityContext = .idle
+    ) -> Double {
+        let impact = signal.impactScore ?? 0.5
+        let urgency = signal.urgencyScore ?? 0.5
+        let relevance = signal.relevanceScore ?? 0.5
+
+        // Boost urgency for risk/alert types
+        let typeBoost: Double = {
+            switch signal.type {
+            case "risk", "alert": return 1.2
+            case "contradiction", "emerging_problem": return 1.1
+            case "opportunity", "new_project": return 0.9
+            default: return 1.0
+            }
+        }()
+
+        // Project health modifier: struggling projects amplify signal priority
+        let healthModifier: Double = {
+            guard let health = project?.healthStatus else { return 1.0 }
+            switch health {
+            case "atRisk": return 1.25
+            case "stale": return 1.1
+            case "dormant": return 0.9
+            default: return 1.0
+            }
+        }()
+
+        // Age decay: signals older than 3 days start losing priority
+        let ageDays = Date().timeIntervalSince(signal.createdAt) / 86400
+        let ageDecay: Double = {
+            if ageDays < 1 { return 1.0 }
+            if ageDays < 3 { return 0.95 }
+            if ageDays < 7 { return 0.85 }
+            if ageDays < 14 { return 0.7 }
+            return 0.5
+        }()
+
+        // User context modifier: what user is looking at matters
+        let contextModifier: Double = {
+            switch userContext {
+            case .viewingProject: return 1.15
+            case .viewingItem: return 1.05
+            case .capturing: return 0.8
+            default: return 1.0
+            }
+        }()
+
+        // Ontology inertia: more items = more weight behind existing structure
+        let inertiaModifier: Double = {
+            if activeItemCount < 3 { return 1.0 }
+            if activeItemCount < 10 { return 0.95 }
+            return 0.85  // large projects resist change signals more
+        }()
+
+        let base = impact * 0.35 + urgency * 0.30 + relevance * 0.20 + 0.15
+        let raw = base * typeBoost * healthModifier * ageDecay * contextModifier * inertiaModifier * 100
+        return min(max(raw, 1.0), 100.0)
+    }
+}
+
+/// What the user is currently doing — affects signal relevance.
+enum UserActivityContext: String, Sendable {
+    case idle
+    case viewingProject
+    case viewingItem
+    case capturing
+    case chatting
+}
+
+// MARK: - SignalResolutionService
+
+/// Manages signal lifecycle transitions with audit trail.
+@MainActor
+final class SignalResolutionService {
+    private let context: ModelContext
+
+    init(context: ModelContext) {
+        self.context = context
+    }
+
+    func markSeen(_ signal: AgentSuggestion) {
+        guard signal.status == "visible" else { return }
+        signal.status = "seen"
+        try? context.save()
+    }
+
+    func markAcknowledged(_ signal: AgentSuggestion) {
+        guard ["visible", "seen"].contains(signal.status) else { return }
+        signal.status = "acknowledged"
+        try? context.save()
+    }
+
+    func approve(_ signal: AgentSuggestion) {
+        signal.status = "approved"
+        signal.resolvedAt = Date()
+        signal.resolvedByRaw = "user"
+        try? context.save()
+    }
+
+    func reject(_ signal: AgentSuggestion, reason: String? = nil) {
+        signal.status = "rejected"
+        signal.resolvedAt = Date()
+        signal.resolvedByRaw = "user"
+        signal.resolutionReason = reason
+        try? context.save()
+        AgentMemoryStore.shared.write(pattern: "rejected_\(signal.type)",
+            strategy: "User rejected: \(signal.title.prefix(60))",
+            itemType: signal.type, contentType: nil, language: nil)
+    }
+
+    func archive(_ signal: AgentSuggestion, reason: String) {
+        signal.status = "archived"
+        signal.resolvedAt = Date()
+        signal.resolvedByRaw = "user"
+        signal.resolutionReason = reason
+        try? context.save()
+    }
+
+    func autoArchive(_ signal: AgentSuggestion, reason: String) {
+        signal.status = "auto_archived"
+        signal.resolvedAt = Date()
+        signal.resolvedByRaw = "system"
+        signal.resolutionReason = reason
+        try? context.save()
+    }
+
+    func transformToTask(_ signal: AgentSuggestion, projectID: UUID? = nil) -> TaskItem? {
+        let taskSvc = TaskService(context: context)
+        guard let task = try? taskSvc.create(
+            title: signal.title,
+            projectID: projectID ?? signal.projectID,
+            priority: .medium,
+            sourceItemID: signal.sourceItemID,
+            createdBy: .user
+        ) else { return nil }
+        signal.status = "transformed"
+        signal.resolvedAt = Date()
+        signal.resolvedByRaw = "user"
+        signal.resolutionReason = "Transformed into task: \(task.id.uuidString)"
+        try? context.save()
+        return task
+    }
+
+    func transformToProject(_ signal: AgentSuggestion) -> Project? {
+        let svc = ProjectService(context: context)
+        guard let project = try? svc.create(name: signal.title) else { return nil }
+        project.nameIsAutoGenerated = false
+        var prov = project.provenance
+        prov.mark(field: "name", origin: .user)
+        project.fieldProvenanceJSON = prov.encode()
+        signal.status = "transformed"
+        signal.resolvedAt = Date()
+        signal.resolvedByRaw = "user"
+        signal.resolutionReason = "Transformed into project: \(project.id.uuidString)"
+        try? context.save()
+        return project
+    }
+
+    func ignore(_ signal: AgentSuggestion, reason: String) {
+        signal.status = "ignored"
+        signal.resolvedAt = Date()
+        signal.resolvedByRaw = "user"
+        signal.resolutionReason = reason
+        try? context.save()
+    }
+
+    /// Auto-archive contradictions when new information resolves them.
+    func resolveContradictions(relatedTo itemID: UUID, in projectID: UUID) {
+        let all = (try? context.fetch(FetchDescriptor<AgentSuggestion>())) ?? []
+        let contradictions = all.filter {
+            $0.projectID == projectID
+            && $0.type == "contradiction"
+            && $0.isActive
+        }
+        for sig in contradictions {
+            // If the new item is referenced in the signal's payload, auto-resolve
+            if let json = sig.payloadJSON,
+               let data = json.data(using: .utf8),
+               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let relatedIds = dict["related_item_ids"] as? [String],
+               relatedIds.contains(itemID.uuidString) {
+                autoArchive(sig, reason: "Resolved by new item: \(itemID.uuidString)")
+            }
+        }
+    }
+}
+
+// MARK: - VersioningService
+
+@MainActor
+final class VersioningService {
+    static let shared = VersioningService()
+    private var changeCounts: [UUID: Int] = [:]
+    private let autoMilestoneThreshold = 50
+    private init() {}
+
+    func recordChange(entityType: String, entityID: UUID, projectID: UUID? = nil,
+                      field: String, previousValue: String?, newValue: String?,
+                      origin: FieldOrigin, context: ModelContext) {
+        let record = ChangeRecord(entityType: entityType, entityID: entityID, projectID: projectID,
+            field: field, previousValue: previousValue, newValue: newValue, origin: origin)
+        context.insert(record)
+        if let pid = projectID {
+            let count = (changeCounts[pid] ?? 0) + 1
+            changeCounts[pid] = count
+            if count % autoMilestoneThreshold == 0 {
+                createSnapshot(projectID: pid, trigger: .auto_milestone, context: context)
+            }
+        }
+        try? context.save()
+    }
+
+    func createSnapshot(projectID: UUID, label: String? = nil,
+                        trigger: SnapshotTrigger = .manual, context: ModelContext) {
+        let allRecords = changes(for: projectID, context: context)
+        let unassigned = allRecords.filter { $0.snapshotID == nil }
+        let snapshot = ProjectSnapshot(projectID: projectID, label: label, trigger: trigger,
+            changeCount: unassigned.count)
+        context.insert(snapshot)
+        for record in unassigned { record.snapshotID = snapshot.id }
+        changeCounts[projectID] = 0
+        try? context.save()
+    }
+
+    func changes(for projectID: UUID, since: Date? = nil, limit: Int = 100,
+                 context: ModelContext) -> [ChangeRecord] {
+        let all = (try? context.fetch(FetchDescriptor<ChangeRecord>())) ?? []
+        return all.filter { r in
+            r.projectID == projectID && (since == nil || r.timestamp >= since!)
+        }.sorted(by: { $0.timestamp > $1.timestamp }).prefix(limit).map { $0 }
+    }
+
+    func snapshots(for projectID: UUID, context: ModelContext) -> [ProjectSnapshot] {
+        let all = (try? context.fetch(FetchDescriptor<ProjectSnapshot>())) ?? []
+        return all.filter { $0.projectID == projectID }.sorted(by: { $0.createdAt > $1.createdAt })
+    }
+
+    func diff(between older: ProjectSnapshot, and newer: ProjectSnapshot, context: ModelContext) -> [ChangeRecord] {
+        let all = (try? context.fetch(FetchDescriptor<ChangeRecord>())) ?? []
+        return all.filter { ($0.snapshotID == newer.id || $0.snapshotID == nil) && $0.timestamp > older.createdAt }
+    }
+
+    func restore(to snapshot: ProjectSnapshot, context: ModelContext) {
+        let records = changes(for: snapshot.projectID, context: context)
+        let snapshotRecords = records.filter { $0.timestamp <= snapshot.createdAt }
+        var lastValues: [String: String?] = [:]
+        for r in snapshotRecords.sorted(by: { $0.timestamp < $1.timestamp }) {
+            lastValues["\(r.entityType):\(r.entityID.uuidString):\(r.field)"] = r.newValue ?? r.previousValue
+        }
+        for (key, value) in lastValues {
+            let parts = key.split(separator: ":")
+            guard parts.count == 3, let eid = UUID(uuidString: String(parts[1])), let val = value else { continue }
+            applyRestore(entityType: String(parts[0]), entityID: eid, field: String(parts[2]),
+                value: val, projectID: snapshot.projectID, context: context)
+        }
+    }
+
+    private func applyRestore(entityType: String, entityID: UUID, field: String,
+                               value: String, projectID: UUID, context: ModelContext) {
+        switch entityType {
+        case "TaskItem":
+            guard let task = try? context.fetch(FetchDescriptor<TaskItem>(predicate: #Predicate { $0.id == entityID })).first else { return }
+            switch field {
+            case "title": task.title = value
+            case "status": if let s = TaskStatus(rawValue: value) { task.status = s }
+            case "priority": if let p = TaskPriority(rawValue: value) { task.priority = p }
+            case "ownerName": task.ownerName = value.isEmpty ? nil : value
+            default: break
+            }
+        case "Project":
+            guard let project = try? context.fetch(FetchDescriptor<Project>(predicate: #Predicate { $0.id == entityID })).first else { return }
+            switch field {
+            case "name": project.name = value
+            case "summary": project.summary = value.isEmpty ? nil : value
+            case "customInstructions": project.customInstructions = value.isEmpty ? nil : value
+            default: break
+            }
+        case "KnowledgeItem":
+            guard let item = try? context.fetch(FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.id == entityID })).first else { return }
+            switch field {
+            case "title": item.title = value
+            case "bodyText": item.bodyText = value.isEmpty ? nil : value
+            default: break
+            }
+        default: break
+        }
+        try? context.save()
+        recordChange(entityType: entityType, entityID: entityID, projectID: projectID,
+            field: field, previousValue: nil, newValue: value, origin: .system, context: context)
+    }
+}
+
+// MARK: - QueuePriorityService
+
+/// Computes processing queue priority (0-100). User actions always beat background processing.
+@MainActor
+final class QueuePriorityService {
+    static let shared = QueuePriorityService()
+    private init() {}
+
+    /// Compute priority for a queue entry based on context.
+    func computePriority(
+        itemID: UUID,
+        projectID: UUID?,
+        trigger: QueueTrigger,
+        hasActiveProject: Bool = false,
+        itemAge: TimeInterval? = nil
+    ) -> Int {
+        var score = 0
+
+        // Trigger base (40 pts) — user action > system
+        switch trigger {
+        case .directUserAction: score += 40   // "Transcribe", "Re-analyze"
+        case .newCapture: score += 30          // Recording just finished
+        case .projectAssignment: score += 25   // Swipe to project
+        case .batchReprocess: score += 10      // "Re-process All"
+        case .backgroundBackfill: score += 5   // Embedding backfill
+        }
+
+        // Recency (25 pts) — newer items first
+        if let age = itemAge {
+            if age < 300 { score += 25 }           // < 5 min
+            else if age < 3600 { score += 20 }     // < 1 hour
+            else if age < 86400 { score += 12 }    // < 1 day
+            else { score += 5 }
+        } else {
+            score += 15  // Unknown age = middle
+        }
+
+        // Project context (20 pts) — active/open project has priority
+        if hasActiveProject {
+            score += 20
+        } else if projectID != nil {
+            score += 10
+        }
+
+        // Retry boost (5 pts) — retries aren't penalized but don't jump the queue
+        // Applied by caller when retryCount > 0
+
+        return min(score + 10, 100) // +10 floor so nothing is zero-priority
+    }
+}
+
+/// What triggered this queue entry.
+enum QueueTrigger: String, Sendable {
+    case directUserAction    // User tapped a specific button
+    case newCapture          // Recording/scan/photo just completed
+    case projectAssignment   // Item assigned to project via swipe
+    case batchReprocess      // Batch "Re-process All"
+    case backgroundBackfill  // Embedding or other background work
+}
+
+// MARK: - ProcessingQueueService
+
+/// Manages the visible processing queue with throttling, priority, and cancellation.
+@MainActor
+final class ProcessingQueueService: ObservableObject {
+    @Published var entries: [QueueEntry] = []
+    @Published var isPaused: Bool = false
+    @Published var activeJobCount: Int = 0
+
+    let maxConcurrentJobs = 2
+
+    private var activeTasks: [UUID: Task<Void, Error>] = [:]
+    private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+    private var backgroundTaskCount = 0
+    private var pipeline: ContentPipelineService?
+
+    func setPipeline(_ pipeline: ContentPipelineService) {
+        self.pipeline = pipeline
+    }
+
+    // MARK: - Enqueue
+
+    func enqueue(
+        itemID: UUID,
+        projectID: UUID? = nil,
+        trigger: QueueTrigger = .newCapture,
+        priority: Int? = nil
+    ) -> QueueEntry {
+        // Deduplicate: if item already queued/processing, skip
+        if let existing = entries.first(where: { $0.itemID == itemID && ($0.status == .queued || $0.status == .processing) }) {
+            return existing
+        }
+
+        let computedPriority = priority ?? QueuePriorityService.shared.computePriority(
+            itemID: itemID, projectID: projectID, trigger: trigger)
+        let entry = QueueEntry(
+            itemID: itemID, projectID: projectID, status: .queued,
+            priority: computedPriority)
+        entries.append(entry)
+        sortEntries()
+        processNext()
+        return entry
+    }
+
+    // MARK: - Queue management
+
+    func cancel(_ entryID: UUID) {
+        guard let entry = entries.first(where: { $0.id == entryID }) else { return }
+        if entry.status == .processing {
+            activeTasks[entryID]?.cancel()
+            activeTasks[entryID] = nil
+            activeJobCount = max(0, activeJobCount - 1)
+            endBackgroundTask()
+        }
+        entry.status = .cancelled
+        entry.completedAt = Date()
+        entries.removeAll { $0.id == entryID }
+        processNext()
+    }
+
+    func pauseQueue() {
+        isPaused = true
+    }
+
+    func resumeQueue() {
+        isPaused = false
+        processNext()
+    }
+
+    func remove(_ entryID: UUID) {
+        cancel(entryID)
+    }
+
+    // MARK: - Processing
+
+    private func processNext() {
+        guard !isPaused, activeJobCount < maxConcurrentJobs else { return }
+
+        let pending = entries
+            .filter { $0.status == .queued }
+            .sorted { $0.priority > $1.priority || ($0.priority == $1.priority && $0.queuedAt < $1.queuedAt) }
+
+        guard let next = pending.first else { return }
+
+        next.status = .processing
+        next.startedAt = Date()
+        activeJobCount += 1
+        beginBackgroundTask()
+
+        let entryID = next.id
+        let itemID = next.itemID
+        let task = Task { [weak self] in
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.finishJob(entryID)
+                }
+            }
+            try Task.checkCancellation()
+            await self?.pipeline?.processEntry(
+                itemID: itemID,
+                projectID: next.projectID
+            )
+        }
+        activeTasks[entryID] = task
+    }
+
+    private func finishJob(_ entryID: UUID) {
+        guard let entry = entries.first(where: { $0.id == entryID }) else { return }
+        if entry.status != .cancelled {
+            entry.status = .done
+            entry.completedAt = Date()
+        }
+        activeTasks[entryID] = nil
+        activeJobCount = max(0, activeJobCount - 1)
+        entries.removeAll { $0.id == entryID }
+        endBackgroundTask()
+        sortEntries()
+        processNext()
+    }
+
+    private func sortEntries() {
+        entries.sort { $0.priority > $1.priority || ($0.priority == $1.priority && $0.queuedAt < $1.queuedAt) }
+        for (idx, entry) in entries.enumerated() {
+            entry.position = idx
+        }
+    }
+
+    // MARK: - Background task
+
+    private func beginBackgroundTask() {
+        backgroundTaskCount += 1
+        guard backgroundTaskID == .invalid else { return }
+        backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "WawaQueue") { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.endBackgroundTask()
+            }
+        }
+    }
+
+    private func endBackgroundTask() {
+        backgroundTaskCount -= 1
+        guard backgroundTaskCount <= 0, backgroundTaskID != .invalid else { return }
+        backgroundTaskCount = 0
+        UIApplication.shared.endBackgroundTask(backgroundTaskID)
+        backgroundTaskID = .invalid
+    }
+}
+
+// MARK: - OntologyInertiaService
+
+@MainActor
+final class OntologyInertiaService {
+    static let shared = OntologyInertiaService()
+    private init() {}
+
+    func computeInertia(projectID: UUID, context: ModelContext) -> Double {
+        let items = (try? ProjectService(context: context).items(in: projectID)) ?? []
+        let edgeSvc = GraphEdgeService(context: context)
+        let edges = (try? edgeSvc.recentEdges(limit: 1000)) ?? []
+        let itemIDs = Set(items.map(\.id))
+        let projectEdges = edges.filter { itemIDs.contains($0.fromID) || itemIDs.contains($0.toID) }
+        let contradictionCount = projectEdges.filter { $0.edgeType == .contradicts }.count
+        let oldestAge = items.map { Date().timeIntervalSince($0.createdAt) }.max() ?? 0
+        let edgeDensity = items.count > 1 ? Double(projectEdges.count) / Double(items.count * (items.count - 1)) : 0
+        let itemFactor = min(Double(items.count) / 20.0, 1.0)
+        let ageFactor = min(oldestAge / (90 * 86400), 1.0)
+        let densityFactor = min(edgeDensity / 0.15, 1.0)
+        let contradictionPenalty = min(Double(contradictionCount) * 0.1, 0.3)
+        return min((itemFactor * 0.35 + ageFactor * 0.25 + densityFactor * 0.4) - contradictionPenalty, 1.0)
+    }
+
+    var inertiaLabel: (Double) -> String {
+        { score in score >= 0.7 ? "Established" : score >= 0.4 ? "Stabilizing" : "Forming" }
+    }
+}
+
+// MARK: - PresetExportService
+
+@MainActor
+final class PresetExportService {
+    static let shared = PresetExportService()
+    private init() {}
+
+    func exportPreset(from project: Project) -> Preset {
+        var rules: [String] = []
+        if project.customInstructions?.isEmpty == false { rules.append("custom_instructions_present") }
+        return Preset(id: "preset/\(project.slug)", name: project.name,
+            description: "Preset exported from project \"\(project.name)\"",
+            lensID: project.frameworkId, frameworkJSON: project.frameworkJSON,
+            customInstructions: project.customInstructions, analysisRules: rules,
+            version: 1)
+    }
+
+    func applyPreset(_ preset: Preset, to project: Project) {
+        project.frameworkId = preset.lensID
+        project.frameworkJSON = preset.frameworkJSON
+        if let instructions = preset.customInstructions {
+            project.customInstructions = instructions
+        }
+    }
+
+    func builtInPresets() -> [Preset] {
+        LensCatalogService.shared.allLenses.map { lens in
+            var fwJSON: String?
+            if let fw = lens.framework { fwJSON = (try? JSONEncoder().encode(fw)).flatMap { String(data: $0, encoding: .utf8) } }
+            return Preset(id: "preset/\(lens.id)", name: lens.name, description: lens.description,
+                lensID: lens.id, frameworkJSON: fwJSON, version: 1)
+        }
+    }
 }

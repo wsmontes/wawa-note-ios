@@ -134,6 +134,15 @@ struct TaskEditorView: View {
             )
             if let task {
                 task.notes = finalNotes.isEmpty ? nil : finalNotes
+                // Mark as user-created and set field provenance
+                task.createdBy = .user
+                var prov = task.provenance
+                prov.mark(field: "title", origin: .user)
+                prov.mark(field: "status", origin: .user)
+                prov.mark(field: "priority", origin: .user)
+                if task.ownerName != nil { prov.mark(field: "ownerName", origin: .user) }
+                if task.dueAt != nil { prov.mark(field: "dueAt", origin: .user) }
+                task.fieldProvenanceJSON = prov.encode()
                 try? modelContext.save()
             }
 
@@ -147,6 +156,13 @@ struct TaskEditorView: View {
             )
             task.notes = finalNotes.isEmpty ? nil : finalNotes
             task.sourceItemID = sourceID
+            // Mark fields as user-edited
+            var prov = task.provenance
+            prov.mark(field: "title", origin: .user)
+            prov.mark(field: "priority", origin: .user)
+            if ownerName != nil { prov.mark(field: "ownerName", origin: .user) }
+            if hasDueDate { prov.mark(field: "dueAt", origin: .user) }
+            task.fieldProvenanceJSON = prov.encode()
             try? modelContext.save()
         }
 

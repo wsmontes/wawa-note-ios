@@ -102,6 +102,13 @@ struct CreateNoteTool: AgentTool {
             return ToolFormatting.error(tool: name, reason: "Failed to create note.", fix: "Check that the knowledge base is accessible and try again.")
         }
 
+        // Mark provenance as LLM-created
+        var prov = item.provenance
+        prov.mark(field: "title", origin: .llm)
+        if body != nil { prov.mark(field: "bodyText", origin: .llm) }
+        item.fieldProvenanceJSON = prov.encode()
+        try? context.modelContext.save()
+
         return ToolResult(content: "Note created successfully.\nTitle: \(item.title)\nUUID: \(item.id.uuidString)\nType: note\nUse get_item with this UUID to read it.", citations: [ChatCitation(itemId: item.id, title: item.title, snippet: title, itemType: .note)], isError: false, displaySummary: "Created note: \(title)")
     }
 }
@@ -125,7 +132,7 @@ struct CreateTaskTool: AgentTool {
         let owner = arguments["owner_name"] as? String
         let ts = TaskService(context: context.modelContext)
 
-        guard let task = try? ts.create(title: title, projectID: pid, priority: priority, ownerName: owner) else {
+        guard let task = try? ts.create(title: title, projectID: pid, priority: priority, ownerName: owner, createdBy: .llm) else {
             return ToolFormatting.error(tool: name, reason: "Failed to create task.", fix: "Verify the project exists and try again.")
         }
 
@@ -222,9 +229,30 @@ struct UpdateTaskTool: AgentTool {
         guard let task = tasks.first(where: { $0.title.localizedCaseInsensitiveCompare(title) == .orderedSame }) else {
             return ToolResult(content: "Task not found: \(title)", citations: [], isError: true, displaySummary: "Not found")
         }
-        if let s = args["new_status"] as? String, let st = TaskStatus(rawValue: s) { try? taskSvc.updateStatus(task, to: st) }
-        if let p = args["new_priority"] as? String, let pr = TaskPriority(rawValue: p) { task.priority = pr }
-        if let d = args["new_due_date"] as? String, let date = ISO8601DateFormatter().date(from: d) { task.dueAt = date }
+        let auth = FieldAuthorityService.shared
+        let sugSvc = SuggestionGatingService(context: context.modelContext)
+
+        if let s = args["new_status"] as? String, let st = TaskStatus(rawValue: s) {
+            if auth.canModify(field: "status", of: task, by: .llm) {
+                try? taskSvc.updateStatus(task, to: st)
+            } else {
+                sugSvc.proposeTaskUpdate(taskTitle: task.title, field: "status", proposedValue: s, projectID: context.activeProjectID, sourceItemID: task.sourceItemID)
+            }
+        }
+        if let p = args["new_priority"] as? String, let pr = TaskPriority(rawValue: p) {
+            if auth.canModify(field: "priority", of: task, by: .llm) {
+                task.priority = pr
+            } else {
+                sugSvc.proposeTaskUpdate(taskTitle: task.title, field: "priority", proposedValue: p, projectID: context.activeProjectID, sourceItemID: task.sourceItemID)
+            }
+        }
+        if let d = args["new_due_date"] as? String, let date = ISO8601DateFormatter().date(from: d) {
+            if auth.canModify(field: "dueAt", of: task, by: .llm) {
+                task.dueAt = date
+            } else {
+                sugSvc.proposeTaskUpdate(taskTitle: task.title, field: "dueAt", proposedValue: d, projectID: context.activeProjectID, sourceItemID: task.sourceItemID)
+            }
+        }
         try? context.modelContext.save()
         return ToolResult(content: "Task updated: \(task.title)", citations: [], isError: false, displaySummary: "Updated: \(title)")
     }
@@ -580,16 +608,57 @@ struct AnalyzeContentTool: AgentTool {
         let segments = extraction.chunkText(text, itemID: item.id)
         let transcript = Transcript(meetingId: item.id, languageCode: nil, segments: segments, sourceEngineId: "agent-tool")
 
-        do {
-            let result = try await AnalysisService().analyze(
-                transcript: transcript, using: provider, model: model,
-                meetingId: item.id, sourceContext: sourceCtx
-            )
+        // Resolve framework: use dynamic analysis for non-meeting frameworks
+        let framework: ProjectFramework? = {
+            if let pid = item.projectID,
+               let project = try? ProjectService(context: context.modelContext).fetch(id: pid) {
+                return FrameworkService.shared.resolve(for: project)
+            }
+            return nil
+        }()
 
-            // Persist analysis to disk so exports and UI can read it
+        var resultSummary: String = ""
+        var resultDetail: String = ""
+        var decisionCount = 0
+        var actionCount = 0
+        var riskCount = 0
+        var questionCount = 0
+        var entityCount = 0
+
+        do {
             let store = FileArtifactStore()
             try? store.createMeetingDirectory(for: item.id)
-            try? store.writeArtifact(result, fileName: "analysis.json", meetingId: item.id)
+
+            // Route to dynamic analysis if project has a non-meeting framework
+            if let fw = framework, fw.id != "builtin/meeting" {
+                let dynamicSuccess = await extraction.analyzeDynamic(text: text, item: item, framework: fw)
+                if dynamicSuccess {
+                    // Read dynamic analysis for summary
+                    if let dyn = try? store.readArtifact(DynamicAnalysis.self, fileName: "analysis.dynamic.json", meetingId: item.id) {
+                        resultSummary = dyn.results.stringField("short_summary") ?? "Analysis complete"
+                        resultDetail = ""
+                    } else {
+                        resultSummary = "Analysis complete (dynamic: \(fw.name))"
+                    }
+                } else {
+                    // Fallback to structured
+                    let result = try await AnalysisService().analyze(transcript: transcript, using: provider, model: model, meetingId: item.id, sourceContext: sourceCtx)
+                    try? store.writeArtifact(result, fileName: "analysis.json", meetingId: item.id)
+                    resultSummary = result.shortSummary; resultDetail = result.detailedSummary
+                    decisionCount = result.decisions.count; actionCount = result.actionItems.count
+                    riskCount = result.risks.count; questionCount = result.openQuestions.count
+                    entityCount = result.entities.count
+                }
+            } else {
+                let result = try await AnalysisService().analyze(transcript: transcript, using: provider, model: model, meetingId: item.id, sourceContext: sourceCtx)
+                try? store.writeArtifact(result, fileName: "analysis.json", meetingId: item.id)
+                resultSummary = result.shortSummary; resultDetail = result.detailedSummary
+                decisionCount = result.decisions.count; actionCount = result.actionItems.count
+                riskCount = result.risks.count; questionCount = result.openQuestions.count
+                entityCount = result.entities.count
+            }
+
+            // Write agent trace
 
             // Write agent trace — proves the agent orchestrated this
             let trace: [String: Any] = [
@@ -604,27 +673,30 @@ struct AnalyzeContentTool: AgentTool {
                 try? traceJSON.write(to: store.itemDirectoryURL(for: item.id).appendingPathComponent("agent_trace.json"), atomically: true, encoding: .utf8)
             }
 
-            // Update item status
-            item.status = .analyzed
+            // Update item status (with authority gate)
+            let auth = FieldAuthorityService.shared
+            if auth.canModify(field: "status", of: item, by: .llm) {
+                item.status = .analyzed
+            }
             item.analysisProviderId = model
             try? context.modelContext.save()
 
             let parts: [String] = [
                 "**Analysis complete** (model: \(model))",
                 "",
-                "Short Summary: \(result.shortSummary)",
-                result.detailedSummary.isEmpty ? "" : "Detailed: \(result.detailedSummary.prefix(500))",
-                "Decisions: \(result.decisions.count)",
-                "Action Items: \(result.actionItems.count)",
-                "Risks: \(result.risks.count)",
-                "Open Questions: \(result.openQuestions.count)",
-                "Entities: \(result.entities.count)"
+                "Short Summary: \(resultSummary)",
+                resultDetail.isEmpty ? "" : "Detailed: \(resultDetail.prefix(500))",
+                "Decisions: \(decisionCount)",
+                "Action Items: \(actionCount)",
+                "Risks: \(riskCount)",
+                "Open Questions: \(questionCount)",
+                "Entities: \(entityCount)"
             ]
             return ToolResult(
                 content: parts.filter { !$0.isEmpty }.joined(separator: "\n"),
-                citations: [ChatCitation(itemId: item.id, title: item.title, snippet: result.shortSummary, itemType: item.type)],
+                citations: [ChatCitation(itemId: item.id, title: item.title, snippet: resultSummary, itemType: item.type)],
                 isError: false,
-                displaySummary: "analyze: \"\(result.shortSummary.prefix(80))\""
+                displaySummary: "analyze: \"\(resultSummary.prefix(80))\""
             )
         } catch {
             return ToolResult(content: "Analysis failed: \(error.localizedDescription)", citations: [], isError: true, displaySummary: "analyze: failed")
@@ -982,6 +1054,14 @@ struct RenderActionsTool: AgentTool {
             let due: Date? = dueStr.flatMap { ISO8601DateFormatter().date(from: $0) }
             let priority = priorityStr.flatMap { TaskPriority(rawValue: $0) } ?? .medium
             let task = TaskItem(title: taskTitle, priority: priority, ownerName: owner, dueAt: due)
+            task.createdBy = .llm
+            var prov = FieldProvenance.empty
+            prov.mark(field: "title", origin: .llm)
+            prov.mark(field: "status", origin: .llm)
+            prov.mark(field: "priority", origin: .llm)
+            if owner != nil { prov.mark(field: "ownerName", origin: .llm) }
+            if due != nil { prov.mark(field: "dueAt", origin: .llm) }
+            task.fieldProvenanceJSON = prov.encode()
             context.modelContext.insert(task)
             created += 1
         }
@@ -1049,6 +1129,204 @@ struct RenderChartTool: AgentTool {
             return ToolResult(content: "render_chart: labels required.", citations: [], isError: true, displaySummary: "chart: bad labels")
         }
         return ToolResult(content: "render_chart: \(type) chart with \(labels.count) data points rendered.", citations: [], isError: false, displaySummary: "chart: \(type) (\(labels.count) pts)")
+    }
+}
+
+// MARK: - Lens Tools
+
+struct ListLensesTool: AgentTool {
+    let name = "list_lenses"
+    let description = "List available analysis lenses (frameworks + analytical lenses). Use to see what perspectives are available for a project."
+    let parameters = AIToolParameters(properties: ["category": AIToolProperty(type: "string", description: "Filter: domain, analytical, personal, custom")], required: [])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        let cat = args["category"] as? String
+        let lenses: [Lens] = {
+            if let c = cat, let category = LensCategory(rawValue: c) {
+                return LensCatalogService.shared.lenses(in: category)
+            }
+            return LensCatalogService.shared.allLenses
+        }()
+        let content = lenses.map { "- **\($0.name)** (`\($0.id)`) [\($0.category.rawValue)]: \($0.description)" }.joined(separator: "\n")
+        return ToolResult(content: "Available lenses:\n\n\(content)", citations: [], isError: false, displaySummary: "\(lenses.count) lenses")
+    }
+}
+
+struct ApplyLensTool: AgentTool {
+    let name = "apply_lens"
+    let description = "Apply a lens (analysis perspective) to a project. Changes how content is analyzed."
+    let parameters = AIToolParameters(properties: ["lens_id": AIToolProperty(type: "string", description: "Lens ID (e.g., builtin/meeting, lens/risk_analysis)"), "project_id": AIToolProperty(type: "string", description: "Project UUID")], required: ["lens_id", "project_id"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let lensID = args["lens_id"] as? String, let lens = LensCatalogService.shared.resolve(id: lensID) else {
+            return ToolResult(content: "apply_lens: lens not found", citations: [], isError: true, displaySummary: "Lens not found")
+        }
+        guard let pidStr = args["project_id"] as? String, let pid = UUID(uuidString: pidStr) else {
+            return ToolResult(content: "apply_lens: invalid project_id", citations: [], isError: true, displaySummary: "Bad project ID")
+        }
+        guard let project = try? ProjectService(context: context.modelContext).fetch(id: pid) else {
+            return ToolResult(content: "apply_lens: project not found", citations: [], isError: true, displaySummary: "Project not found")
+        }
+        LensCatalogService.shared.applyLens(lens, to: project)
+        try? context.modelContext.save()
+        return ToolResult(content: "Lens '\(lens.name)' applied to project '\(project.name)'.", citations: [], isError: false, displaySummary: "Lens applied: \(lens.name)")
+    }
+}
+
+// MARK: - Raise Signal Tool
+
+/// Raises a signal (risk, alert, opportunity, etc.) for a project.
+/// Signals are the "atoms of attention" — they appear in the project signal feed for user review.
+struct RaiseSignalTool: AgentTool {
+    let name = "raise_signal"
+    let description = """
+    Raise a signal for the active project. Signals are attention items — risks, alerts, \
+    opportunities, contradictions, patterns, doubts, possible new projects, or emerging problems. \
+    Use this when you detect something the user should know about. \
+    Types: risk, alert, opportunity, change, contradiction, pattern, doubt, new_project, emerging_problem.
+    """
+
+    let parameters = AIToolParameters(properties: [
+        "type": AIToolProperty(type: "string", description: "Signal type: risk|alert|opportunity|change|contradiction|pattern|doubt|new_project|emerging_problem"),
+        "title": AIToolProperty(type: "string", description: "Short signal title (max 120 chars)"),
+        "body": AIToolProperty(type: "string", description: "Detailed explanation of the signal"),
+        "impact": AIToolProperty(type: "number", description: "Impact magnitude 0.0-1.0"),
+        "urgency": AIToolProperty(type: "number", description: "Urgency 0.0-1.0 (time-sensitive = higher)")
+    ], required: ["type", "title"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let type = args["type"] as? String else {
+            return ToolResult(content: "raise_signal: 'type' is required.", citations: [], isError: true, displaySummary: "signal: missing type")
+        }
+        let validTypes = ["risk", "alert", "opportunity", "change", "contradiction",
+                          "pattern", "doubt", "new_project", "emerging_problem"]
+        guard validTypes.contains(type) else {
+            return ToolResult(content: "raise_signal: invalid type '\(type)'. Must be one of: \(validTypes.joined(separator: ", "))", citations: [], isError: true, displaySummary: "signal: bad type")
+        }
+
+        let title = (args["title"] as? String) ?? "Untitled signal"
+        let body = args["body"] as? String
+        let impact = (args["impact"] as? Double).map { min(max($0, 0), 1) }
+        let urgency = (args["urgency"] as? Double).map { min(max($0, 0), 1) }
+
+        let signal = AgentSuggestion(
+            projectID: context.activeProjectID,
+            type: type,
+            title: String(title.prefix(120)),
+            body: body,
+            status: "visible",
+            sourceItemID: context.activeItemID,
+            impactScore: impact,
+            urgencyScore: urgency
+        )
+        context.modelContext.insert(signal)
+        try? context.modelContext.save()
+
+        return ToolResult(content: "Signal raised: [\(type)] \(title)", citations: [], isError: false, displaySummary: "signal: \(type)")
+    }
+}
+
+// MARK: - Get History Tool
+
+struct GetHistoryTool: AgentTool {
+    let name = "get_history"
+    let description = "Get change history for a project or item. See what changed, when, by whom (user/LLM/import/system). Use to trace how a project evolved."
+    let parameters = AIToolParameters(properties: [
+        "project_id": AIToolProperty(type: "string", description: "Project UUID to get history for"),
+        "entity_type": AIToolProperty(type: "string", description: "Filter: Project, TaskItem, KnowledgeItem"),
+        "limit": AIToolProperty(type: "integer", description: "Max records (default 30)")
+    ], required: ["project_id"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let pidStr = args["project_id"] as? String, let pid = UUID(uuidString: pidStr) else {
+            return ToolResult(content: "get_history: invalid project_id", citations: [], isError: true, displaySummary: "Bad ID")
+        }
+        let limit = min(args["limit"] as? Int ?? 30, 100)
+        let records = VersioningService.shared.changes(for: pid, limit: limit, context: context.modelContext)
+        let snapshots = VersioningService.shared.snapshots(for: pid, context: context.modelContext)
+        var content = "**Project History**\n\n"
+        if !snapshots.isEmpty {
+            content += "Snapshots:\n"
+            for s in snapshots.prefix(5) {
+                content += "- \(s.createdAt.formatted()): \(s.label ?? "Unlabeled") [\(s.trigger.rawValue), \(s.changeCount) changes]\n"
+            }
+            content += "\n"
+        }
+        if !records.isEmpty {
+            content += "Recent changes:\n"
+            for r in records.prefix(limit) {
+                let icon = r.origin == .user ? "👤" : r.origin == .llm ? "🤖" : r.origin == .system ? "⚙️" : "📥"
+                content += "- \(icon) \(r.timestamp.formatted(date: .omitted, time: .shortened)): \(r.entityType)/\(r.field) \(r.previousValue ?? "nil") → \(r.newValue ?? "nil")\n"
+            }
+        } else {
+            content += "No changes recorded yet."
+        }
+        return ToolResult(content: content, citations: [], isError: false, displaySummary: "history: \(records.count) changes, \(snapshots.count) snapshots")
+    }
+}
+
+// MARK: - Answer Doubt Tool
+
+struct AnswerDoubtTool: AgentTool {
+    let name = "answer_doubt"
+    let description = "Answer a doubt (open question) raised by the system. Provide the doubt's title and your answer."
+    let parameters = AIToolParameters(properties: [
+        "doubt_title": AIToolProperty(type: "string", description: "Exact title of the doubt to answer"),
+        "answer": AIToolProperty(type: "string", description: "Your answer to the doubt")
+    ], required: ["doubt_title", "answer"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let title = args["doubt_title"] as? String, let answer = args["answer"] as? String else {
+            return ToolResult(content: "answer_doubt: missing doubt_title or answer", citations: [], isError: true, displaySummary: "Missing args")
+        }
+        let all = (try? context.modelContext.fetch(FetchDescriptor<AgentSuggestion>())) ?? []
+        guard let doubt = all.first(where: { $0.type == "doubt" && $0.title.localizedCaseInsensitiveCompare(title) == .orderedSame && $0.isActive }) else {
+            return ToolResult(content: "answer_doubt: no active doubt found with title \"\(title)\"", citations: [], isError: true, displaySummary: "Not found")
+        }
+        doubt.body = (doubt.body ?? "") + "\n\nAnswer: \(answer)"
+        doubt.status = "acknowledged"
+        try? context.modelContext.save()
+        return ToolResult(content: "Doubt answered: \(title)", citations: [], isError: false, displaySummary: "Doubt answered")
+    }
+}
+
+// MARK: - Preset Tools
+
+struct ExportPresetTool: AgentTool {
+    let name = "export_preset"
+    let description = "Export a project's behavior preset (lenses, frameworks, instructions, rules) as JSON without the data."
+    let parameters = AIToolParameters(properties: ["project_id": AIToolProperty(type: "string", description: "Project UUID")], required: ["project_id"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let pidStr = args["project_id"] as? String, let pid = UUID(uuidString: pidStr),
+              let project = try? ProjectService(context: context.modelContext).fetch(id: pid) else {
+            return ToolResult(content: "export_preset: project not found", citations: [], isError: true, displaySummary: "Not found")
+        }
+        let preset = PresetExportService.shared.exportPreset(from: project)
+        guard let json = (try? JSONEncoder().encode(preset)).flatMap({ String(data: $0, encoding: .utf8) }) else {
+            return ToolResult(content: "export_preset: failed to encode", citations: [], isError: true, displaySummary: "Encode failed")
+        }
+        return ToolResult(content: "Preset exported:\n```json\n\(json.prefix(3000))\n```", citations: [], isError: false, displaySummary: "Preset exported")
+    }
+}
+
+struct ImportPresetTool: AgentTool {
+    let name = "import_preset"
+    let description = "Apply a built-in preset to a project. Use list_lenses to see available presets."
+    let parameters = AIToolParameters(properties: ["preset_id": AIToolProperty(type: "string", description: "Preset ID (e.g., preset/builtin/legal)"), "project_id": AIToolProperty(type: "string", description: "Project UUID")], required: ["preset_id", "project_id"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let presetID = args["preset_id"] as? String, let pidStr = args["project_id"] as? String,
+              let pid = UUID(uuidString: pidStr), let project = try? ProjectService(context: context.modelContext).fetch(id: pid) else {
+            return ToolResult(content: "import_preset: invalid arguments", citations: [], isError: true, displaySummary: "Bad args")
+        }
+        let presets = PresetExportService.shared.builtInPresets()
+        guard let preset = presets.first(where: { $0.id == presetID }) else {
+            return ToolResult(content: "import_preset: preset '\(presetID)' not found. Use list_lenses to see available presets.", citations: [], isError: true, displaySummary: "Not found")
+        }
+        PresetExportService.shared.applyPreset(preset, to: project)
+        try? context.modelContext.save()
+        return ToolResult(content: "Preset '\(preset.name)' applied to project '\(project.name)'.", citations: [], isError: false, displaySummary: "Preset applied: \(preset.name)")
     }
 }
 

@@ -9,8 +9,10 @@ final class ChatOverlayState: ObservableObject {
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var processingQueue: ProcessingQueueService
     @State private var showSettings = false
     @State private var showChat = false
+    @State private var showQueue = false
     @State private var selectedTab = 0
     @State private var keyboardHeight: CGFloat = 0
     @StateObject private var chatState = ChatOverlayState()
@@ -35,6 +37,22 @@ struct ContentView: View {
                 NavigationStack {
                     HomeView()
                         .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button { showQueue = true } label: {
+                                    ZStack(alignment: .topTrailing) {
+                                        Image(systemName: "list.bullet.rectangle").accessibilityLabel("Queue")
+                                        let count = processingQueue.entries.filter { $0.status == .queued || $0.status == .processing }.count
+                                        if count > 0 {
+                                            Text("\(count)")
+                                                .font(.system(size: 10, weight: .bold))
+                                                .foregroundStyle(.white)
+                                                .padding(3)
+                                                .background(Circle().fill(.red))
+                                                .offset(x: 6, y: -6)
+                                        }
+                                    }
+                                }
+                            }
                             ToolbarItem(placement: .topBarTrailing) {
                                 Button { showSettings = true } label: {
                                     Image(systemName: "gearshape").accessibilityLabel("Settings")
@@ -89,6 +107,7 @@ struct ContentView: View {
         .environmentObject(chatState)
         .environmentObject(chatViewModel)
         .sheet(isPresented: $showSettings) { SettingsView() }
+        .sheet(isPresented: $showQueue) { ProcessingQueueSheet() }
         .onReceive(keyboardPublisher) { keyboardHeight = $0 }
         .onAppear {
             chatViewModel.setup(modelContext: modelContext)
@@ -144,5 +163,106 @@ struct ExploreView: View {
             }
         }
         .onAppear { chatState.context = .exploreProjects; chatViewModel.pregenerateGreeting(for: .exploreProjects) }
+    }
+}
+
+// MARK: - Processing Queue Sheet
+
+struct ProcessingQueueSheet: View {
+    @EnvironmentObject private var processingQueue: ProcessingQueueService
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                let active = processingQueue.entries.filter { $0.status == .queued || $0.status == .processing }
+                if active.isEmpty {
+                    Section {
+                        VStack(spacing: 12) {
+                            Image(systemName: "tray").font(.largeTitle).foregroundStyle(.secondary)
+                            Text("No items in queue").font(.headline)
+                            Text("Items will appear here when they are queued for processing.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity).padding(.vertical, 24)
+                    }
+                } else {
+                    Section {
+                        ForEach(processingQueue.entries.prefix(20)) { entry in
+                            QueueEntryRow(entry: entry)
+                        }
+                        .onDelete { idx in
+                            for i in idx {
+                                if i < processingQueue.entries.count {
+                                    processingQueue.remove(processingQueue.entries[i].id)
+                                }
+                            }
+                        }
+                    } header: {
+                        HStack {
+                            if processingQueue.isPaused {
+                                Label("Paused", systemImage: "pause.fill").foregroundStyle(.orange)
+                            } else if !active.isEmpty {
+                                Label("Active", systemImage: "gearshape.2.fill").foregroundStyle(.blue)
+                            }
+                            Spacer()
+                            Text("\(active.count) queued, \(processingQueue.activeJobCount) running").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Processing Queue")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(processingQueue.isPaused ? "Resume" : "Pause") {
+                        if processingQueue.isPaused { processingQueue.resumeQueue() }
+                        else { processingQueue.pauseQueue() }
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+private struct QueueEntryRow: View {
+    let entry: QueueEntry
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: entry.status == .processing ? "gearshape.2.fill" : entry.status == .done ? "checkmark.circle.fill" : entry.status == .failed ? "xmark.circle.fill" : "circle")
+                .foregroundStyle(entry.status == .processing ? .blue : entry.status == .done ? .green : entry.status == .failed ? .red : entry.status == .cancelled ? .gray : .orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Item \(entry.itemID.uuidString.prefix(8))...").font(.caption).lineLimit(1)
+                Text(statusText).font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer()
+            PriorityBadge(score: entry.priority)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var statusText: String {
+        switch entry.status {
+        case .queued: return "Waiting (priority: \(entry.priority))"
+        case .processing: return "Processing..."
+        case .paused: return "Paused"
+        case .done: return "Completed"
+        case .failed: return entry.lastError.map { "Failed: \($0.prefix(40))" } ?? "Failed"
+        case .cancelled: return "Cancelled"
+        case .waitingForUser: return "Waiting for you"
+        }
+    }
+}
+
+private struct PriorityBadge: View {
+    let score: Int
+    var body: some View {
+        let color: Color = score >= 70 ? .red : score >= 50 ? .orange : .blue
+        Text("P\(score)").font(.caption2).fontWeight(.medium)
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .background(color.opacity(0.15)).clipShape(Capsule())
+            .foregroundStyle(color)
     }
 }

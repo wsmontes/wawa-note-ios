@@ -14,6 +14,7 @@ struct WawaNoteApp: App {
     private let ingestionState: ProjectIngestionState
     private let contentPipeline: ContentPipelineService
     private let ingestionPipeline: ProjectIngestionPipeline
+    private let processingQueue: ProcessingQueueService
 
     @StateObject private var biometricGate = BiometricGateService()
 
@@ -29,7 +30,11 @@ struct WawaNoteApp: App {
                 Person.self,
                 GraphEdge.self,
                 Entity.self,
-                AgentSuggestion.self
+                AgentSuggestion.self,
+                QueueEntry.self,
+                ProjectFrame.self,
+                ChangeRecord.self,
+                ProjectSnapshot.self
             )
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
@@ -37,7 +42,9 @@ struct WawaNoteApp: App {
 
         ingestionState = ProjectIngestionState()
         ingestionPipeline = ProjectIngestionPipeline(ingestionState: ingestionState)
-        contentPipeline = ContentPipelineService(ingestionPipeline: ingestionPipeline, ingestionState: ingestionState)
+        contentPipeline = ContentPipelineService(ingestionPipeline: ingestionPipeline, ingestionState: ingestionState, modelContainer: modelContainer)
+        processingQueue = ProcessingQueueService()
+        processingQueue.setPipeline(contentPipeline)
 
         let coordinator = RecordingCoordinator(modelContainer: modelContainer)
         coordinator.contentPipeline = contentPipeline
@@ -52,6 +59,7 @@ struct WawaNoteApp: App {
         // Run one-time data migrations
         KnowledgeItemService.migrateMeetingToAudio(context: ModelContext(modelContainer))
         ProjectService.migrateProjectColors(context: ModelContext(modelContainer))
+        ProjectService.migrateFieldProvenance(context: ModelContext(modelContainer))
     }
 
     var body: some Scene {
@@ -65,6 +73,7 @@ struct WawaNoteApp: App {
         .environmentObject(ingestionState)
         .environmentObject(contentPipeline)
         .environmentObject(ingestionPipeline)
+        .environmentObject(processingQueue)
     }
 }
 

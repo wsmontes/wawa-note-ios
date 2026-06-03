@@ -52,7 +52,7 @@ struct ProjectOverviewCards: View {
 
             synthesisSection
 
-            suggestionsSection
+            signalFeedSection
 
             activityFeed
         }
@@ -142,31 +142,74 @@ struct ProjectOverviewCards: View {
         .projectCard()
     }
 
-    // MARK: Suggestions
+    // MARK: Signal Feed
 
-    private var pendingSuggestions: [AgentSuggestion] { cachedSuggestions }
+    private var activeSignals: [AgentSuggestion] {
+        cachedSuggestions.filter { $0.isActive }
+    }
 
     private func fetchPendingSuggestions(_ ctx: ModelContext) -> [AgentSuggestion] {
         let all = (try? ctx.fetch(FetchDescriptor<AgentSuggestion>())) ?? []
-        return all.filter { $0.projectID == project.id && $0.status == "pending" }
+        return all.filter { $0.projectID == project.id }
     }
 
-    private var suggestionsSection: some View {
-        let pending = pendingSuggestions
-        guard !pending.isEmpty else { return AnyView(EmptyView()) }
+    // MARK: - Signal type styling
+
+    private func signalColor(_ type: String) -> Color {
+        switch type {
+        case "risk": .red
+        case "alert": .orange
+        case "opportunity": .green
+        case "contradiction": .purple
+        case "pattern": .blue
+        case "doubt": .yellow
+        case "new_project": .mint
+        case "emerging_problem": .pink
+        case "change": .cyan
+        case "task": .indigo
+        case "edge": .teal
+        case "field_change": .gray
+        default: .secondary
+        }
+    }
+
+    private func signalIcon(_ type: String) -> String {
+        switch type {
+        case "risk": "exclamationmark.triangle.fill"
+        case "alert": "bell.fill"
+        case "opportunity": "lightbulb.fill"
+        case "contradiction": "arrow.triangle.swap"
+        case "pattern": "rectangle.3.group.fill"
+        case "doubt": "questionmark.circle.fill"
+        case "new_project": "sparkles"
+        case "emerging_problem": "ant.fill"
+        case "change": "arrow.triangle.2.circlepath"
+        case "task": "checklist"
+        case "edge": "arrow.triangle.branch"
+        case "field_change": "pencil"
+        default: "dot.radiowaves.left.and.right"
+        }
+    }
+
+    private var signalFeedSection: some View {
+        let active = activeSignals
+        guard !active.isEmpty else { return AnyView(EmptyView()) }
         return AnyView(
             VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 HStack {
-                    Image(systemName: "sparkles").font(.caption).foregroundStyle(.purple)
-                    Text("Suggestions to review").font(.caption).fontWeight(.semibold)
+                    Image(systemName: "waveform.path.ecg").font(.caption).foregroundStyle(.purple)
+                    Text("Signals").font(.caption).fontWeight(.semibold)
                     Spacer()
-                    Text("\(pending.count) pending").font(.caption2).foregroundStyle(.secondary)
+                    if active.contains(where: { $0.type == "risk" || $0.type == "alert" }) {
+                        Image(systemName: "exclamationmark.triangle.fill").font(.caption2).foregroundStyle(.red)
+                    }
+                    Text("\(active.count) active").font(.caption2).foregroundStyle(.secondary)
                 }
-                ForEach(pending.prefix(3)) { sug in
-                    suggestionCard(sug)
+                ForEach(active.prefix(5)) { sug in
+                    signalCard(sug)
                 }
-                if pending.count > 3 {
-                    Text("+\(pending.count - 3) more suggestions").font(.caption2).foregroundStyle(.blue).padding(.top, 2)
+                if active.count > 5 {
+                    Text("+\(active.count - 5) more signals").font(.caption2).foregroundStyle(.blue).padding(.top, 2).padding(.leading, AppSpacing.xs)
                 }
             }
             .padding(AppSpacing.md)
@@ -174,15 +217,19 @@ struct ProjectOverviewCards: View {
         )
     }
 
-    private func suggestionCard(_ sug: AgentSuggestion) -> some View {
+    private func signalCard(_ sug: AgentSuggestion) -> some View {
+        let color = signalColor(sug.type)
         VStack(alignment: .leading, spacing: AppSpacing.xs) {
             HStack(spacing: AppSpacing.xs) {
-                Image(systemName: sug.type == "task" ? "checklist" : sug.type == "edge" ? "arrow.triangle.branch" : "doc.text")
-                    .font(.caption2).foregroundStyle(sug.type == "task" ? .teal : .blue)
-                Text(sug.title).font(.caption).lineLimit(2)
+                Image(systemName: signalIcon(sug.type))
+                    .font(.caption2).foregroundStyle(color)
+                Text(sug.type.replacingOccurrences(of: "_", with: " ")).font(.caption2).fontWeight(.medium).foregroundStyle(color)
                 Spacer()
-                if let conf = sug.confidence { ConfidenceBadge(value: conf) }
+                // Priority bar
+                let priority = SignalPriorityService.shared.computePriority(signal: sug, project: project, activeItemCount: items.count)
+                PriorityBar(score: priority)
             }
+            Text(sug.title).font(.caption).lineLimit(2)
             if let body = sug.body, !body.isEmpty {
                 Text(body).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
             }
@@ -190,21 +237,64 @@ struct ProjectOverviewCards: View {
                 EvidenceCardView(itemTitle: "Source", itemID: sourceID, snippet: sug.title, segmentID: nil, confidence: sug.confidence, edgeType: nil)
             }
             HStack(spacing: AppSpacing.sm) {
-                Button { approveSuggestion(sug) } label: {
-                    Label("Approve", systemImage: "checkmark").font(.caption2)
-                        .padding(.horizontal, 10).padding(.vertical, AppSpacing.xs)
-                        .background(Color.green.opacity(0.1)).clipShape(Capsule())
-                }.buttonStyle(.plain)
-                Button { rejectSuggestion(sug) } label: {
-                    Label("Reject", systemImage: "xmark").font(.caption2)
-                        .padding(.horizontal, 10).padding(.vertical, AppSpacing.xs)
-                        .background(Color.red.opacity(0.1)).clipShape(Capsule())
-                }.buttonStyle(.plain)
+                if sug.type == "field_change" {
+                    Button { approveSuggestion(sug) } label: {
+                        Label("Apply", systemImage: "checkmark").font(.caption2)
+                            .padding(.horizontal, 10).padding(.vertical, AppSpacing.xs)
+                            .background(Color.green.opacity(0.1)).clipShape(Capsule())
+                    }.buttonStyle(.plain)
+                    Button { rejectSuggestion(sug) } label: {
+                        Label("Reject", systemImage: "xmark").font(.caption2)
+                            .padding(.horizontal, 10).padding(.vertical, AppSpacing.xs)
+                            .background(Color.red.opacity(0.1)).clipShape(Capsule())
+                    }.buttonStyle(.plain)
+                } else {
+                    Button { acknowledgeSignal(sug) } label: {
+                        Label("Acknowledge", systemImage: "eye").font(.caption2)
+                            .padding(.horizontal, 10).padding(.vertical, AppSpacing.xs)
+                            .background(color.opacity(0.1)).clipShape(Capsule())
+                    }.buttonStyle(.plain)
+                    Button { archiveSignal(sug) } label: {
+                        Label("Archive", systemImage: "archivebox").font(.caption2)
+                            .padding(.horizontal, 10).padding(.vertical, AppSpacing.xs)
+                            .background(Color.gray.opacity(0.1)).clipShape(Capsule())
+                    }.buttonStyle(.plain)
+                    if ["risk", "alert", "opportunity", "doubt"].contains(sug.type) {
+                        Button { transformSignalToTask(sug) } label: {
+                            Label("Task", systemImage: "checklist").font(.caption2)
+                                .padding(.horizontal, 10).padding(.vertical, AppSpacing.xs)
+                                .background(Color.blue.opacity(0.1)).clipShape(Capsule())
+                        }.buttonStyle(.plain)
+                    }
+                }
                 Spacer()
-                AIGeneratedBadge(confidence: sug.confidence, source: "AI suggestion")
+                AIGeneratedBadge(confidence: sug.confidence, source: "AI signal")
             }
         }
-        .padding(AppSpacing.sm).background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: AppRadius.md))
+        .padding(AppSpacing.sm)
+        .background(color.opacity(0.06))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.md).stroke(color.opacity(0.2), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.md))
+    }
+
+    // MARK: - Signal actions
+
+    private func acknowledgeSignal(_ sug: AgentSuggestion) {
+        guard let ctx = viewModel.modelContext else { return }
+        SignalResolutionService(context: ctx).markAcknowledged(sug)
+        refreshSuggestions(ctx)
+    }
+
+    private func archiveSignal(_ sug: AgentSuggestion) {
+        guard let ctx = viewModel.modelContext else { return }
+        SignalResolutionService(context: ctx).archive(sug, reason: "Archived by user")
+        refreshSuggestions(ctx)
+    }
+
+    private func transformSignalToTask(_ sug: AgentSuggestion) {
+        guard let ctx = viewModel.modelContext else { return }
+        _ = SignalResolutionService(context: ctx).transformToTask(sug, projectID: project.id)
+        refreshSuggestions(ctx)
     }
 
     private func approveSuggestion(_ sug: AgentSuggestion) {
@@ -231,10 +321,42 @@ struct ProjectOverviewCards: View {
                 }
                 ctx.insert(edge)
             }
+        case "field_change":
+            if let json = sug.payloadJSON, let data = json.data(using: .utf8),
+               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let field = dict["field"] as? String,
+               let proposedValue = dict["proposedValue"] as? String {
+                if field.hasPrefix("task.") {
+                    let taskField = String(field.dropFirst(5))
+                    if let task = (try? ctx.fetch(FetchDescriptor<TaskItem>()))?.first(where: {
+                        $0.projectID == project.id && sug.title.contains($0.title)
+                    }) {
+                        applyFieldChange(field: taskField, value: proposedValue, to: task)
+                    }
+                } else if field == "summary" {
+                    let datePrefix = Date().formatted(date: .abbreviated, time: .omitted)
+                    project.summary = (project.summary ?? "") + "\n\n[\(datePrefix) — approved]\n\(proposedValue)"
+                }
+                try? ctx.save()
+            }
         default: break
         }
         sug.status = "approved"; sug.resolvedAt = Date()
         try? ctx.save()
+    }
+
+    private func applyFieldChange(field: String, value: String, to task: TaskItem) {
+        switch field {
+        case "status":
+            if let st = TaskStatus(rawValue: value) { task.status = st }
+        case "priority":
+            if let pr = TaskPriority(rawValue: value) { task.priority = pr }
+        case "dueAt":
+            task.dueAt = ISO8601DateFormatter().date(from: value)
+        case "ownerName":
+            task.ownerName = value.isEmpty ? nil : value
+        default: break
+        }
     }
 
     private func rejectSuggestion(_ sug: AgentSuggestion) {
@@ -321,5 +443,30 @@ struct MetricTile: View {
             Text(label).font(.system(size: 9)).foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Priority Bar
+
+private struct PriorityBar: View {
+    let score: Double  // 0-100
+
+    var body: some View {
+        let clamped = min(max(score, 0), 100)
+        let color: Color = {
+            if clamped >= 70 { return .red }
+            if clamped >= 40 { return .orange }
+            return .yellow
+        }()
+        HStack(spacing: 1) {
+            RoundedRectangle(cornerRadius: 1)
+                .fill(color.opacity(0.3))
+                .frame(width: 24, height: 4)
+                .overlay(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(color)
+                        .frame(width: max(24 * clamped / 100, 2), height: 4)
+                }
+        }
     }
 }

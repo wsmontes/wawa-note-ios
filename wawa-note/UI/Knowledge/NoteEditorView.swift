@@ -5,6 +5,7 @@ struct NoteEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var contentPipeline: ContentPipelineService
+    @EnvironmentObject private var processingQueue: ProcessingQueueService
 
     enum Mode {
         case create(type: KnowledgeItemType, folderID: UUID?, initialTag: String?)
@@ -119,6 +120,12 @@ struct NoteEditorView: View {
                 tags: tags
             ) else { return }
 
+            // Mark as user-created
+            var prov = item.provenance
+            prov.mark(field: "title", origin: .user)
+            if item.bodyText != nil { prov.mark(field: "bodyText", origin: .user) }
+            item.fieldProvenanceJSON = prov.encode()
+
             // If journal, add mood tag if present
             if type == .journalEntry, let moodTag = initialTag {
                 item.tags = [moodTag]
@@ -127,7 +134,7 @@ struct NoteEditorView: View {
 
             // Trigger pipeline for analysis if there's content
             if let body = item.bodyText, !body.isEmpty {
-                contentPipeline.process( item.id, using: modelContext)
+                processingQueue.enqueue(itemID: item.id, trigger: .newCapture)
             }
 
         case .edit(let item):
@@ -138,6 +145,12 @@ struct NoteEditorView: View {
                 bodyText: bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bodyText,
                 tags: nil
             )
+            // Mark fields as user-edited
+            var prov = item.provenance
+            prov.mark(field: "title", origin: .user)
+            if bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false { prov.mark(field: "bodyText", origin: .user) }
+            item.fieldProvenanceJSON = prov.encode()
+            try? modelContext.save()
         }
 
         dismiss()

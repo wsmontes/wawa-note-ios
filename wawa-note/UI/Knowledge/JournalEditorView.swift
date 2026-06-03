@@ -5,6 +5,7 @@ struct JournalEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var contentPipeline: ContentPipelineService
+    @EnvironmentObject private var processingQueue: ProcessingQueueService
 
     enum Mode {
         case create(folderID: UUID?)
@@ -188,8 +189,17 @@ struct JournalEditorView: View {
                 bodyText: bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bodyText,
                 folderID: folderID,
                 tags: tags
-            ), let body = item.bodyText, !body.isEmpty {
-                contentPipeline.process( item.id, using: modelContext)
+            ) {
+                // Mark as user-created
+                var prov = item.provenance
+                prov.mark(field: "title", origin: .user)
+                if item.bodyText != nil { prov.mark(field: "bodyText", origin: .user) }
+                if !tags.isEmpty { prov.mark(field: "tags", origin: .user) }
+                item.fieldProvenanceJSON = prov.encode()
+                try? modelContext.save()
+                if item.bodyText != nil {
+                    processingQueue.enqueue(itemID: item.id, trigger: .newCapture)
+                }
             }
 
         case .edit(let item):
@@ -202,6 +212,13 @@ struct JournalEditorView: View {
                 bodyText: bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bodyText,
                 tags: tags
             )
+            // Mark fields as user-edited
+            var prov = item.provenance
+            prov.mark(field: "title", origin: .user)
+            if bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false { prov.mark(field: "bodyText", origin: .user) }
+            prov.mark(field: "tags", origin: .user)
+            item.fieldProvenanceJSON = prov.encode()
+            try? modelContext.save()
         }
 
         dismiss()
