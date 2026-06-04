@@ -120,13 +120,20 @@ struct ContentView: View {
     /// Scan for unprocessed items and enqueue them for background processing.
     private func autoProcessPendingItems() {
         // Only auto-process if a provider is configured
-        guard (try? ProviderRouter.resolveActive(context: modelContext)) != nil else { return }
-        guard AutomationSettings.shared.autoAnalyze else { return }
+        guard (try? ProviderRouter.resolveActive(context: modelContext)) != nil else {
+            AppLog.debug("lifecycle", "autoProcessPendingItems: no provider configured — skipping")
+            return
+        }
+        guard AutomationSettings.shared.autoAnalyze else {
+            AppLog.debug("lifecycle", "autoProcessPendingItems: autoAnalyze disabled — skipping")
+            return
+        }
 
         let allItems = (try? modelContext.fetch(FetchDescriptor<KnowledgeItem>())) ?? []
         let pending = allItems.filter { $0.inboxDate != nil && $0.analysisProviderId == nil }
         guard !pending.isEmpty else { return }
 
+        AppLog.event("pipeline", "Auto-processing \(pending.count) pending item(s)")
         for item in pending.prefix(5) {
             processingQueue.enqueue(itemID: item.id, projectID: item.projectID, trigger: .backgroundBackfill)
         }
