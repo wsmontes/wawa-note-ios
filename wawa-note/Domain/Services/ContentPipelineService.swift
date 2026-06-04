@@ -2360,8 +2360,10 @@ final class ProcessingQueueService: ObservableObject {
         trigger: QueueTrigger = .newCapture,
         priority: Int? = nil
     ) -> QueueEntry {
+        AppLog.event("pipeline", "Enqueue item — itemID=\(itemID.uuidString.prefix(8)) trigger=\(trigger) projectID=\(projectID?.uuidString.prefix(8) ?? "nil")")
         // Deduplicate: if item already queued/processing, skip
         if let existing = entries.first(where: { $0.itemID == itemID && ($0.status == .queued || $0.status == .processing) }) {
+            AppLog.debug("pipeline", "Item already queued — skipping duplicate")
             return existing
         }
 
@@ -2416,6 +2418,8 @@ final class ProcessingQueueService: ObservableObject {
 
         guard let next = pending.first else { return }
 
+        AppLog.event("pipeline", "Processing item — itemID=\(next.itemID.uuidString.prefix(8)) priority=\(next.priority) projectID=\(next.projectID?.uuidString.prefix(8) ?? "nil")")
+
         next.status = .processing
         next.startedAt = Date()
         activeJobCount += 1
@@ -2443,6 +2447,9 @@ final class ProcessingQueueService: ObservableObject {
         if entry.status != .cancelled {
             entry.status = .done
             entry.completedAt = Date()
+            AppLog.event("pipeline", "Processing complete — itemID=\(entry.itemID.uuidString.prefix(8)) status=\(entry.status)")
+        } else {
+            AppLog.warn("pipeline", "Processing cancelled — itemID=\(entry.itemID.uuidString.prefix(8))")
         }
         activeTasks[entryID] = nil
         activeJobCount = max(0, activeJobCount - 1)

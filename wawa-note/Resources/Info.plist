@@ -71,5 +71,7 @@
 	<string>Wawa Note detects your motion activity to add context to your recordings (e.g., walking, driving). Motion data stays on your device.</string>
 	<key>NSFocusStatusUsageDescription</key>
 	<string>Wawa Note checks your Focus mode to avoid interruptions while recording meetings.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 </dict>
 </plist>
