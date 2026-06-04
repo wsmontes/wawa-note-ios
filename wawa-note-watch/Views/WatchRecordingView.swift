@@ -38,7 +38,7 @@ struct WatchRecordingView: View {
             case "recording":
                 Image(systemName: "record.circle.fill")
                     .foregroundStyle(.red)
-            case "paused":
+            case "paused", "interrupted":
                 Image(systemName: "pause.circle.fill")
                     .foregroundStyle(.orange)
             case "stopped":
@@ -58,7 +58,7 @@ struct WatchRecordingView: View {
         Text(formatTime(status.elapsedTime))
             .font(.system(size: 36, weight: .semibold, design: .rounded))
             .monospacedDigit()
-            .foregroundStyle(status.state == "recording" ? .red : .primary)
+            .foregroundStyle(status.state == "recording" ? .red : status.state == "interrupted" ? .orange : .primary)
     }
 
     // MARK: - Audio level meter
@@ -122,7 +122,7 @@ struct WatchRecordingView: View {
                 .tint(.red)
             }
 
-        case "paused":
+        case "paused", "interrupted":
             HStack(spacing: 12) {
                 Button {
                     sessionManager.sendCommand(.resumeRecording)

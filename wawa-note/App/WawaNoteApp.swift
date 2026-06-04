@@ -60,6 +60,43 @@ struct WawaNoteApp: App {
         KnowledgeItemService.migrateMeetingToAudio(context: ModelContext(modelContainer))
         ProjectService.migrateProjectColors(context: ModelContext(modelContainer))
         ProjectService.migrateFieldProvenance(context: ModelContext(modelContainer))
+
+        // Initialize persistent file logging (survives crashes)
+        let fileLog = FileLogService.shared
+
+        // Clean up any recordings abandoned by a previous crash or force-quit
+        coordinator.cleanupOrphanedRecordings()
+
+        if fileLog.previousSessionCrashed {
+            AppLog.general.warning("⚠️ Previous session ended abnormally — crash log available in Settings > Debug Logs")
+        }
+
+        // Attempt recovery from audio interruptions when app returns to foreground
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            coordinator.onAppForeground()
+        }
+
+        // Mark clean exit on normal termination
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            fileLog.markCleanExit()
+        }
+
+        // Periodic heartbeat — clears crash sentinel every 30s while app is running
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            fileLog.heartbeat()
+        }
     }
 
     var body: some Scene {

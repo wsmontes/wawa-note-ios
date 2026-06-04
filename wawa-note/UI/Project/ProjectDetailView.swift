@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 // MARK: - Shared Signal Helpers
 
@@ -34,6 +35,9 @@ struct ProjectDetailView: View {
 
     var body: some View {
         ProjectHomeView(project: project)
+            .onAppear {
+                AppLog.debug("project", "ProjectDetailView appeared — project=\(project.name) id=\(project.id.uuidString.prefix(8)) status=\(project.status.rawValue) health=\(project.healthStatus ?? "nil")")
+            }
     }
 }
 
@@ -44,10 +48,14 @@ struct ProjectHomeView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var processingQueue: ProcessingQueueService
     @EnvironmentObject private var contentPipeline: ContentPipelineService
+    @EnvironmentObject private var coordinator: RecordingCoordinator
     @State private var tasks: [TaskItem] = []
     @State private var items: [KnowledgeItem] = []
     @State private var signals: [AgentSuggestion] = []
     @State private var showActionSheet = false
+    @State private var showNoteEditor = false
+    @State private var showFileImporter = false
+    @State private var createdNoteItem: KnowledgeItem? = nil
 
     var body: some View {
         ScrollView {
@@ -81,13 +89,27 @@ struct ProjectHomeView: View {
             }
         }
         .confirmationDialog("Add to Project", isPresented: $showActionSheet) {
-            Button("Record Audio") { /* recordingCoordinator */ }
-            Button("Scan Document") { /* scanner */ }
-            Button("Add Note") { /* NoteEditorView sheet */ }
-            Button("Import File") { /* import */ }
+            Button("Record Audio") { coordinator.startRecording(projectID: project.id) }
+            Button("Add Note") { showNoteEditor = true }
+            Button("Import File") { showFileImporter = true }
             Button("Cancel", role: .cancel) { }
         }
+        .sheet(isPresented: $showNoteEditor) {
+            NoteEditorView(mode: .create(type: .note, folderID: nil, initialTag: nil))
+        }
+        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.json, .plainText, .pdf, .html, .rtf, .audio, .image]) { result in
+            if case .success(let url) = result {
+                Task { await handleImportedFile(url) }
+            }
+        }
         .onAppear { loadData() }
+        .onChange(of: createdNoteItem?.id) { _, _ in
+            if let item = createdNoteItem {
+                try? ProjectService(context: modelContext).addItem(item.id, to: project.id)
+                processingQueue.enqueue(itemID: item.id, projectID: project.id, trigger: .newCapture)
+                createdNoteItem = nil
+            }
+        }
         .refreshable { loadData() }
     }
 
@@ -436,13 +458,39 @@ struct ProjectHomeView: View {
         }
     }
 
+    // MARK: Actions
+
+
+    private func handleImportedFile(_ url: URL) async {
+        let didStart = url.startAccessingSecurityScopedResource()
+        defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+        let router = ImportRouter(importers: [
+            JSONImporter(), MarkdownImporter(), PlainTextImporter(),
+            SRTImporter(), ICSImporter(), PDFImporter(), HTMLImporter(), RTFImporter()
+        ])
+        guard let importer = router.importer(for: url) else { return }
+        do {
+            let result = try await importer.importFromURL(url)
+            let item = result.knowledgeItem
+            modelContext.insert(item)
+            try? modelContext.save()
+            try? ProjectService(context: modelContext).addItem(item.id, to: project.id)
+            processingQueue.enqueue(itemID: item.id, projectID: project.id, trigger: .newCapture)
+            loadData()
+        } catch {
+            AppLog.general.error("Import failed: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: Data loading
 
     private func loadData() {
+        AppLog.debug("project", "loadData start — projectID=\(project.id.uuidString.prefix(8))")
         tasks = (try? TaskService(context: modelContext).tasks(for: project.id)) ?? []
         items = (try? ProjectService(context: modelContext).items(in: project.id)) ?? []
         let all = (try? modelContext.fetch(FetchDescriptor<AgentSuggestion>())) ?? []
         signals = all.filter { $0.projectID == project.id }
+        AppLog.debug("project", "loadData done — tasks=\(tasks.count) items=\(items.count) signals=\(signals.count)")
     }
 
     private func exportJSON() {
@@ -932,8 +980,13 @@ struct SignalsView: View {
     }
 
     private func loadSignals() {
+        AppLog.debug("project", "SignalsView.loadSignals — projectID=\(projectID.uuidString.prefix(8))")
         let all = (try? modelContext.fetch(FetchDescriptor<AgentSuggestion>())) ?? []
         signals = all.filter { $0.projectID == projectID }
+        AppLog.debug("project", "SignalsView.loadSignals done — total=\(all.count) filtered=\(signals.count)")
     }
 }
+
+
+// MARK: - Document Scanner (VisionKit wrapper)
 

@@ -5,6 +5,7 @@ enum AudioCaptureState {
     case idle
     case recording
     case paused
+    case interrupted
     case stopped
 }
 
@@ -12,6 +13,7 @@ enum AudioCaptureError: Error {
     case engineStartFailed
     case inputNodeUnavailable
     case permissionDenied
+    case diskFull
 }
 
 final class AudioCaptureService: ObservableObject, @unchecked Sendable {
@@ -23,6 +25,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     @Published private(set) var audioLevel: Float = 0.0
     @Published private(set) var elapsedTime: TimeInterval = 0.0
     @Published private(set) var audioInterruptionReason: String?
+    @Published private(set) var currentInputPortName: String = ""
 
     private var timerTask: Task<Void, Never>?
     private var levelMonitorTask: Task<Void, Never>?
@@ -32,7 +35,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private let audioLevelLock = NSLock()
     private nonisolated(unsafe) var rawAudioLevel: Float = 0.0
 
-    private static let captureBufferSize: AVAudioFrameCount = 4096
+    private let audioProcessingQueue = DispatchQueue(label: "com.wawa-note.audio.processing", qos: .userInitiated)
+
+    private static let captureBufferSize: AVAudioFrameCount = 8192
     private static let levelDecayFactor: Float = 0.85
     private static let levelUpdateIntervalNS: UInt64 = 50_000_000
     private static let timerUpdateInterval: TimeInterval = 0.1
@@ -51,6 +56,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         self.sessionManager = sessionManager
     }
 
+    deinit {
+        removeAudioNotificationObservers()
+    }
+
     // MARK: - Recording lifecycle
 
     func startRecording(meetingId: UUID) async throws {
@@ -60,6 +69,11 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         }
         let granted = await sessionManager.requestPermission()
         guard granted else { throw AudioCaptureError.permissionDenied }
+
+        guard sessionManager.hasMinimumDiskSpace() else {
+            AppLog.audio.error("Insufficient disk space to start recording")
+            throw AudioCaptureError.diskFull
+        }
 
         try sessionManager.configureForRecording()
 
@@ -75,6 +89,11 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             guard let self else { return }
             self.updateAudioLevel(from: buffer)
             if self.state == .recording {
+                // Write synchronously on the real-time audio thread.
+                // AVAudioFile.write is optimized for real-time AAC encoding —
+                // at 8192 frames it completes in <1ms on modern devices.
+                // Async dispatch is NOT safe here because the buffer's
+                // PCM data is reused by the audio system after callback return.
                 self.fileWriter.write(buffer: buffer)
             }
         }
@@ -92,10 +111,11 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         }
 
         state = .recording
+        currentInputPortName = sessionManager.currentInputPortName
         startTimer()
         startLevelSmoothing()
         observeAudioNotifications()
-        AppLog.audio.info("Recording started")
+        AppLog.audio.info("Recording started with input: \(self.currentInputPortName)")
     }
 
     func pauseRecording() {
@@ -109,14 +129,18 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     }
 
     func resumeRecording() {
-        guard state == .paused else { return }
+        guard state == .paused || state == .interrupted else { return }
+        if state == .interrupted {
+            attemptResume()
+            return
+        }
         state = .recording
         startTimer()
         AppLog.audio.info("Recording resumed")
     }
 
     func stopRecording() {
-        guard state == .recording || state == .paused else { return }
+        guard state == .recording || state == .paused || state == .interrupted else { return }
 
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
@@ -131,6 +155,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         audioLevel = 0.0
         elapsedTime = 0.0
         recordingStartTime = nil
+        currentInputPortName = ""
+        stateBeforeInterruption = nil
         AppLog.audio.info("Recording stopped")
     }
 
@@ -139,49 +165,166 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         state = .idle
     }
 
-    // MARK: - Timer
+    // MARK: - Engine rebuild
+
+    private func rebuildEngine() {
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        engine.reset()
+
+        let inputNode = engine.inputNode
+        inputNode.installTap(onBus: 0, bufferSize: Self.captureBufferSize, format: nil) { [weak self] buffer, _ in
+            guard let self else { return }
+            self.updateAudioLevel(from: buffer)
+            guard self.state == .recording else { return }
+            self.audioProcessingQueue.async { [weak self] in
+                self?.fileWriter.write(buffer: buffer)
+            }
+        }
+
+        engine.prepare()
+        do {
+            try engine.start()
+            AppLog.audio.info("Engine rebuilt successfully")
+        } catch {
+            AppLog.audio.error("Engine rebuild failed: \(error.localizedDescription)")
+            state = .interrupted
+            audioInterruptionReason = "Audio system reset. Recording may be affected."
+        }
+    }
+
+    // MARK: - Interruption recovery
+
+    func attemptResume() {
+        guard state == .interrupted else { return }
+
+        try? sessionManager.deactivate()
+        do {
+            try sessionManager.configureForRecording()
+        } catch {
+            AppLog.audio.error("Failed to reconfigure session during resume attempt: \(error.localizedDescription)")
+            audioInterruptionReason = "Could not resume after interruption"
+            return
+        }
+
+        rebuildEngine()
+
+        guard state != .interrupted else {
+            // rebuildEngine set state to .interrupted — rebuild failed
+            audioInterruptionReason = "Could not resume after interruption"
+            return
+        }
+
+        currentInputPortName = sessionManager.currentInputPortName
+        if stateBeforeInterruption == .recording {
+            state = .recording
+            startTimer()
+            audioInterruptionReason = nil
+            AppLog.audio.info("Recording resumed after interruption on \(self.currentInputPortName)")
+        } else {
+            state = .paused
+            audioInterruptionReason = nil
+            AppLog.audio.info("Engine rebuilt, recording remains paused on \(self.currentInputPortName)")
+        }
+    }
+
+    // MARK: - Notifications
+
+    // Block-based observers on .main queue guarantee that all @Published
+    // mutations and AVAudioEngine operations happen on the main thread.
+    // Selector-based observers run on the posting thread (which may be
+    // a background thread for route-change notifications), causing
+    // thread-safety violations and crashes.
+
+    private var interruptionObserver: NSObjectProtocol?
+    private var routeChangeObserver: NSObjectProtocol?
+    private var mediaServicesResetObserver: NSObjectProtocol?
 
     private func observeAudioNotifications() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleInterruption),
-            name: AVAudioSession.interruptionNotification,
-            object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleRouteChange),
-            name: AVAudioSession.routeChangeNotification,
-            object: nil
-        )
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleInterruption(notification)
+        }
+        routeChangeObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleRouteChange(notification)
+        }
+        mediaServicesResetObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.mediaServicesWereResetNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleMediaServicesReset(notification)
+        }
     }
 
     private func removeAudioNotificationObservers() {
-        NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
-        NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
+        if let obs = interruptionObserver { NotificationCenter.default.removeObserver(obs) }
+        if let obs = routeChangeObserver { NotificationCenter.default.removeObserver(obs) }
+        if let obs = mediaServicesResetObserver { NotificationCenter.default.removeObserver(obs) }
+        interruptionObserver = nil
+        routeChangeObserver = nil
+        mediaServicesResetObserver = nil
     }
 
-    @objc private func handleInterruption(_ notification: Notification) {
+    private func handleInterruption(_ notification: Notification) {
         guard let userInfo = notification.userInfo,
               let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
 
         switch type {
         case .began:
-            AppLog.audio.info("Audio interrupted — pausing")
+            AppLog.audio.info("Audio interrupted — setting interrupted state")
             stateBeforeInterruption = state
             if state == .recording {
-                state = .paused
+                state = .interrupted
+                audioInterruptionReason = "Recording paused due to interruption (phone call, alarm, etc.)."
                 timerTask?.cancel()
             }
         case .ended:
-            guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
-            let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
-            if options.contains(.shouldResume), stateBeforeInterruption == .recording {
-                AppLog.audio.info("Audio interruption ended — resuming")
-                try? sessionManager.configureForRecording()
-                state = .recording
-                startTimer()
+            // The InterruptionOptionKey may be absent (Apple DTS: no guarantee
+            // that every .began has a corresponding .ended with options).
+            let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt
+            let options = optionsValue.map { AVAudioSession.InterruptionOptions(rawValue: $0) }
+            if options?.contains(.shouldResume) == true,
+               stateBeforeInterruption == .recording || stateBeforeInterruption == .paused {
+                AppLog.audio.info("Audio interruption ended — attempting resume with engine rebuild")
+                audioInterruptionReason = "Attempting to resume after interruption..."
+
+                // Deactivate first to clear any stale session state
+                try? sessionManager.deactivate()
+                do {
+                    try sessionManager.configureForRecording()
+                } catch {
+                    AppLog.audio.error("Failed to reconfigure session after interruption: \(error.localizedDescription)")
+                    state = .interrupted
+                    audioInterruptionReason = "Could not resume after interruption"
+                    stateBeforeInterruption = nil
+                    return
+                }
+
+                // Always rebuild engine after interruption to fix iOS bugs
+                // where tap stops firing after phone calls (e.g. iPhone 16e)
+                rebuildEngine()
+
+                if state != .interrupted {
+                    state = .recording
+                    audioInterruptionReason = nil
+                    startTimer()
+                    AppLog.audio.info("Successfully resumed recording after interruption")
+                } else {
+                    audioInterruptionReason = "Could not resume after interruption"
+                }
+            } else if state == .interrupted {
+                AppLog.audio.info("Audio interruption ended without shouldResume — transitioning to paused")
+                audioInterruptionReason = "Interruption ended. Recording paused."
+                state = .paused
             }
             stateBeforeInterruption = nil
         @unknown default:
@@ -189,26 +332,79 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         }
     }
 
-    @objc private func handleRouteChange(_ notification: Notification) {
+    private func handleRouteChange(_ notification: Notification) {
         guard let userInfo = notification.userInfo,
               let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
 
         switch reason {
         case .oldDeviceUnavailable:
-            AppLog.audio.info("Audio route: old device unavailable — pausing")
-            if state == .recording {
-                audioInterruptionReason = "Headphones disconnected. Recording paused."
-                state = .paused
+            let wasRecording = state == .recording
+            AppLog.audio.info("Audio route: old device unavailable — interrupting")
+            if state == .recording || state == .paused {
+                state = .interrupted
+                audioInterruptionReason = "Headphones disconnected. Recording interrupted."
                 timerTask?.cancel()
             }
+            rebuildEngine()
+            currentInputPortName = sessionManager.currentInputPortName
+            if wasRecording, state != .interrupted {
+                state = .recording
+                audioInterruptionReason = nil
+                startTimer()
+                AppLog.audio.info("Resumed recording after route change to \(self.currentInputPortName)")
+            } else if wasRecording {
+                audioInterruptionReason = "Could not resume after audio route change."
+            }
         case .newDeviceAvailable:
-            AppLog.audio.info("Audio route: new device available")
+            let newPort = sessionManager.currentInputPortName
+            AppLog.audio.info("Audio route: new device available — \(newPort)")
+
+            // Validate the new device actually has input
+            guard sessionManager.isInputAvailable else {
+                AppLog.audio.warning("New device \(newPort) has no input channels — staying on current route")
+                return
+            }
+
+            // If we were recording, rebuild engine to switch to the new device
+            if state == .recording || state == .paused {
+                let wasRecording = state == .recording
+                audioInterruptionReason = "Switching to \(newPort)..."
+                state = .interrupted
+                timerTask?.cancel()
+                rebuildEngine()
+                if state != .interrupted {
+                    currentInputPortName = newPort
+                    if wasRecording {
+                        state = .recording
+                        startTimer()
+                    } else {
+                        state = .paused
+                    }
+                    audioInterruptionReason = nil
+                    AppLog.audio.info("Successfully switched to \(newPort)")
+                } else {
+                    audioInterruptionReason = "Could not switch to \(newPort)"
+                }
+            } else {
+                // Not recording — just update the port name for UI
+                currentInputPortName = newPort
+            }
         case .override, .categoryChange:
             break
         default:
             AppLog.audio.info("Audio route changed: \(reason.rawValue)")
         }
+    }
+
+    private func handleMediaServicesReset(_ notification: Notification) {
+        AppLog.audio.error("Catastrophic media services reset detected")
+        if state == .recording || state == .paused {
+            state = .interrupted
+            audioInterruptionReason = "Audio system reset. Recording may be affected."
+            timerTask?.cancel()
+        }
+        rebuildEngine()
     }
 
     private func startTimer() {

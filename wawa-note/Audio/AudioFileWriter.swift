@@ -3,6 +3,8 @@ import OSLog
 
 enum AudioFileWriterError: Error {
     case fileCreationFailed
+    case writeFailed
+    case diskFull
 }
 
 final class AudioFileWriter: @unchecked Sendable {
@@ -11,6 +13,8 @@ final class AudioFileWriter: @unchecked Sendable {
     private var audioFile: AVAudioFile?
     private(set) var currentFileURL: URL?
     private var currentMeetingId: UUID?
+    private(set) var writeErrorCount: Int = 0
+    private(set) var lastWriteError: Error?
 
     init(fileManager: FileManager = .default, fileStore: FileArtifactStore = FileArtifactStore()) {
         self.fileManager = fileManager
@@ -18,6 +22,13 @@ final class AudioFileWriter: @unchecked Sendable {
     }
 
     var isWriting: Bool { audioFile != nil }
+
+    var hasWriteErrors: Bool { writeErrorCount > 0 }
+
+    var fileSize: Int64 {
+        guard let url = currentFileURL else { return 0 }
+        return (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
+    }
 
     func startRecording(format: AVAudioFormat, meetingId: UUID) throws {
         try fileStore.createMeetingDirectory(for: meetingId)
@@ -53,13 +64,34 @@ final class AudioFileWriter: @unchecked Sendable {
         do {
             try file.write(from: buffer)
         } catch {
-            AppLog.audio.error("Failed to write audio buffer: \(error.localizedDescription)")
+            writeErrorCount += 1
+            lastWriteError = error
+            AppLog.audio.error("Failed to write audio buffer (#\(self.writeErrorCount)): \(error.localizedDescription)")
+            // On Cocoa error -11800 (disk full) or similar, log with high severity
+            let nsError = error as NSError
+            if nsError.domain == NSOSStatusErrorDomain {
+                AppLog.audio.error("Audio unit error code: \(nsError.code)")
+            }
         }
     }
 
     func finishRecording() {
+        // Force the file to be properly finalized by setting to nil,
+        // which triggers AVAudioFile's deinit and closes the fd.
+        let hadErrors = hasWriteErrors
+        let errorCount = writeErrorCount
         audioFile = nil
         currentMeetingId = nil
-        AppLog.audio.info("Audio file writer finished")
+        if hadErrors {
+            AppLog.audio.warning("Audio file writer finished with \(errorCount) write error(s) — file may be incomplete")
+        } else {
+            AppLog.audio.info("Audio file writer finished cleanly")
+        }
+    }
+
+    func cleanupAbandonedRecording(for meetingId: UUID) {
+        guard currentMeetingId == nil else { return }
+        // Remove any partially-written file for this meeting
+        try? fileStore.deleteMeetingDirectory(for: meetingId)
     }
 }

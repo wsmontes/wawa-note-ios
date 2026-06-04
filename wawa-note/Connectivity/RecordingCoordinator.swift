@@ -9,6 +9,8 @@ final class RecordingCoordinator: ObservableObject {
     @Published private(set) var audioLevel: Float = 0
     @Published private(set) var errorMessage: String?
     @Published private(set) var savedItemId: UUID?
+    @Published private(set) var currentInputPortName: String = ""
+    @Published private(set) var currentInputIcon: String = "mic.fill"
 
     private let captureService: AudioCaptureService
     private let nowPlayingController: NowPlayingController
@@ -60,6 +62,13 @@ final class RecordingCoordinator: ObservableObject {
     ) {
         guard self.state == .idle else {
             AppLog.audio.warning("RecordingCoordinator: startRecording called but state is \(String(describing: self.state))")
+            return
+        }
+
+        let sessionManager = AudioSessionManager()
+        guard sessionManager.hasMinimumDiskSpace() else {
+            errorMessage = "Not enough storage space to record. Please free up some space."
+            notifyStatusChange()
             return
         }
 
@@ -152,7 +161,7 @@ final class RecordingCoordinator: ObservableObject {
     }
 
     func resumeRecording() {
-        guard state == .paused else { return }
+        guard state == .paused || state == .interrupted else { return }
         captureService.resumeRecording()
         state = .recording
         if let pauseStart = pauseStartDate {
@@ -165,7 +174,7 @@ final class RecordingCoordinator: ObservableObject {
     }
 
     func stopRecording() {
-        guard state == .recording || state == .paused else { return }
+        guard state == .recording || state == .paused || state == .interrupted else { return }
         captureService.stopRecording()
         state = .stopped
         nowPlayingController.deactivate()
@@ -196,6 +205,39 @@ final class RecordingCoordinator: ObservableObject {
         captureService.resetToIdle()
     }
 
+    /// Attempt to recover from audio interruptions when the app returns to the foreground.
+    func onAppForeground() {
+        guard state == .interrupted else { return }
+        AppLog.audio.info("App returned to foreground while interrupted — attempting recovery")
+        captureService.resumeRecording()
+        if captureService.state == .recording {
+            state = .recording
+            startObservation()
+            notifyStatusChange()
+        } else if captureService.state == .paused {
+            state = .paused
+            notifyStatusChange()
+        }
+    }
+
+    /// Remove any recording directories for items that are still in .recording status
+    /// (abandoned from previous app termination). Call once at app startup.
+    func cleanupOrphanedRecordings() {
+        let context = modelContext
+        let descriptor = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.statusRaw == "recording" })
+        guard let orphans = try? context.fetch(descriptor) else { return }
+        for item in orphans {
+            AppLog.audio.info("Cleaning up orphaned recording: \(item.id)")
+            let store = FileArtifactStore()
+            try? store.deleteMeetingDirectory(for: item.id)
+            context.delete(item)
+        }
+        if !orphans.isEmpty {
+            try? context.save()
+            AppLog.audio.info("Cleaned up \(orphans.count) orphaned recording(s)")
+        }
+    }
+
     // MARK: - Status
 
     func currentStatus() -> RecordingStatus {
@@ -205,7 +247,7 @@ final class RecordingCoordinator: ObservableObject {
             audioLevel: audioLevel,
             errorMessage: errorMessage,
             recordingTitle: recordingTitle,
-            isActive: state == .recording || state == .paused
+            isActive: state == .recording || state == .paused || state == .interrupted
         )
     }
 
@@ -214,6 +256,7 @@ final class RecordingCoordinator: ObservableObject {
         case .idle: return "idle"
         case .recording: return "recording"
         case .paused: return "paused"
+        case .interrupted: return "interrupted"
         case .stopped: return "stopped"
         }
     }
@@ -262,35 +305,42 @@ final class RecordingCoordinator: ObservableObject {
         observationTimer?.invalidate()
         observationTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             guard let self else { return }
-            DispatchQueue.main.async {
-                if let start = self.recordingStartDate {
-                    self.elapsedTime = Date().timeIntervalSince(start)
-                }
-                self.audioLevel = self.captureService.audioLevel
-                if self.captureService.state == .stopped {
-                    self.state = .stopped
-                    self.nowPlayingController.deactivate()
-                    self.observationTimer?.invalidate()
-                    self.observationTimer = nil
-                    self.nowPlayingTimer?.invalidate()
-                    self.nowPlayingTimer = nil
-                }
+            // Timer.scheduledTimer fires on main run loop — already on main thread.
+            if let start = self.recordingStartDate {
+                self.elapsedTime = Date().timeIntervalSince(start)
+            }
+            self.audioLevel = self.captureService.audioLevel
+            // Sync input port info (may change on route switch)
+            let portName = self.captureService.currentInputPortName
+            if self.currentInputPortName != portName {
+                self.currentInputPortName = portName
+                self.currentInputIcon = AudioSessionManager().currentInputIcon
+            }
+            if self.captureService.state == .stopped {
+                self.state = .stopped
+                self.nowPlayingController.deactivate()
+                self.observationTimer?.invalidate()
+                self.observationTimer = nil
+                self.nowPlayingTimer?.invalidate()
+                self.nowPlayingTimer = nil
+            } else if self.captureService.state == .interrupted && self.state != .interrupted {
+                self.state = .interrupted
+                self.notifyStatusChange()
             }
         }
 
         nowPlayingTimer?.invalidate()
         nowPlayingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self else { return }
-            DispatchQueue.main.async {
-                guard self.state == .recording || self.state == .paused else { return }
-                let effective = self.elapsedTime - self.pausedDuration
-                self.nowPlayingController.update(
-                    title: self.recordingTitle,
-                    elapsedTime: effective,
-                    isPlaying: self.state == .recording
-                )
-                self.updateLiveActivity(effective: effective)
-            }
+            // Timer.scheduledTimer fires on main run loop — already on main thread.
+            guard self.state == .recording || self.state == .paused else { return }
+            let effective = self.elapsedTime - self.pausedDuration
+            self.nowPlayingController.update(
+                title: self.recordingTitle,
+                elapsedTime: effective,
+                isPlaying: self.state == .recording
+            )
+            self.updateLiveActivity(effective: effective)
         }
     }
 

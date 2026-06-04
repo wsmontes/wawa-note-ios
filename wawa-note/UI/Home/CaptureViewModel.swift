@@ -10,6 +10,8 @@ final class CaptureViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var savedItemId: UUID?
     @Published var pipelineStage: PipelineStage?
+    @Published var currentInputPortName: String = ""
+    @Published var currentInputIcon: String = "mic.fill"
 
     enum PipelineStage: String {
         case transcribing = "Transcribing..."
@@ -54,10 +56,22 @@ final class CaptureViewModel: ObservableObject {
             .sink { [weak self] in self?.savedItemId = $0 }
             .store(in: &cancellables)
 
+        coordinator.$currentInputPortName
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.currentInputPortName = $0 }
+            .store(in: &cancellables)
+
+        coordinator.$currentInputIcon
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.currentInputIcon = $0 }
+            .store(in: &cancellables)
+
         recordingState = coordinator.state
         elapsedTimeFormatted = coordinator.elapsedTimeFormatted
         audioLevel = coordinator.audioLevel
         savedItemId = coordinator.savedItemId
+        currentInputPortName = coordinator.currentInputPortName
+        currentInputIcon = coordinator.currentInputIcon
     }
 
     func startRecording(title: String? = nil, projectID: UUID? = nil) {
