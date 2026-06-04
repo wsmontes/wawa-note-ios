@@ -64,14 +64,14 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     func startRecording(meetingId: UUID) async throws {
         guard state == .idle else {
-            AppLog.audio.warning("startRecording called while state is \(String(describing: self.state)) — ignoring")
+            AppLog.warn("audio", "startRecording called while state is \(String(describing: self.state)) — ignoring")
             return
         }
         let granted = await sessionManager.requestPermission()
         guard granted else { throw AudioCaptureError.permissionDenied }
 
         guard sessionManager.hasMinimumDiskSpace() else {
-            AppLog.audio.error("Insufficient disk space to start recording")
+            AppLog.error("audio", "Insufficient disk space to start recording (needs 50MB free)")
             throw AudioCaptureError.diskFull
         }
 
@@ -103,7 +103,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         do {
             try engine.start()
         } catch {
-            AppLog.audio.error("Failed to start audio engine: \(error.localizedDescription)")
+            AppLog.error("audio", "Failed to start audio engine: \(error.localizedDescription)")
             engine.inputNode.removeTap(onBus: 0)
             fileWriter.finishRecording()
             try? sessionManager.deactivate()
@@ -115,7 +115,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         startTimer()
         startLevelSmoothing()
         observeAudioNotifications()
-        AppLog.audio.info("Recording started with input: \(self.currentInputPortName)")
+        AppLog.event("audio", "Audio engine started — input=\(self.currentInputPortName)")
     }
 
     func pauseRecording() {
@@ -280,7 +280,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         switch type {
         case .began:
-            AppLog.audio.info("Audio interrupted — setting interrupted state")
+            AppLog.event("audio", "Audio session interrupted — type=began prevState=\(state)")
             stateBeforeInterruption = state
             if state == .recording {
                 state = .interrupted
@@ -302,7 +302,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 do {
                     try sessionManager.configureForRecording()
                 } catch {
-                    AppLog.audio.error("Failed to reconfigure session after interruption: \(error.localizedDescription)")
+                    AppLog.error("audio", "Failed to reconfigure session after interruption: \(error.localizedDescription)")
                     state = .interrupted
                     audioInterruptionReason = "Could not resume after interruption"
                     stateBeforeInterruption = nil
@@ -317,7 +317,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                     state = .recording
                     audioInterruptionReason = nil
                     startTimer()
-                    AppLog.audio.info("Successfully resumed recording after interruption")
+                    AppLog.event("audio", "Successfully resumed recording after interruption")
                 } else {
                     audioInterruptionReason = "Could not resume after interruption"
                 }
@@ -398,7 +398,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     }
 
     private func handleMediaServicesReset(_ notification: Notification) {
-        AppLog.audio.error("Catastrophic media services reset detected")
+        AppLog.error("audio", "Catastrophic media services reset detected — engine must be rebuilt")
         if state == .recording || state == .paused {
             state = .interrupted
             audioInterruptionReason = "Audio system reset. Recording may be affected."

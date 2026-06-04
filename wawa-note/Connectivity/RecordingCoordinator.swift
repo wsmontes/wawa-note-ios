@@ -61,12 +61,15 @@ final class RecordingCoordinator: ObservableObject {
         projectID: UUID? = nil
     ) {
         guard self.state == .idle else {
-            AppLog.audio.warning("RecordingCoordinator: startRecording called but state is \(String(describing: self.state))")
+            AppLog.warn("audio", "RecordingCoordinator: startRecording called but state is \(String(describing: self.state))")
             return
         }
 
+        AppLog.event("audio", "Recording requested — title=\(title ?? "nil") projectID=\(projectID?.uuidString.prefix(8) ?? "nil")")
+
         let sessionManager = AudioSessionManager()
         guard sessionManager.hasMinimumDiskSpace() else {
+            AppLog.warn("audio", "Recording blocked: insufficient disk space")
             errorMessage = "Not enough storage space to record. Please free up some space."
             notifyStatusChange()
             return
@@ -88,7 +91,7 @@ final class RecordingCoordinator: ObservableObject {
         do {
             try context.save()
         } catch {
-            AppLog.audio.error("Failed to save knowledge item: \(error)")
+            AppLog.error("audio", "Failed to save knowledge item for recording: \(error.localizedDescription)")
             errorMessage = "Could not save recording. Try again."
             notifyStatusChange()
             return
@@ -106,13 +109,19 @@ final class RecordingCoordinator: ObservableObject {
                 activateLockScreenControls()
                 notifyStatusChange()
                 captureContextSafely(for: itemId)
+                AppLog.event("audio", "Recording started — itemID=\(itemId.uuidString.prefix(8)) input=\(captureService.currentInputPortName)")
             } catch AudioCaptureError.permissionDenied {
+                AppLog.warn("audio", "Recording blocked: microphone permission denied")
                 errorMessage = "Microphone access is off. Turn it on in Settings to record audio."
                 rollbackItem(item, context: context)
+            } catch AudioCaptureError.diskFull {
+                AppLog.error("audio", "Recording failed: disk full")
+                errorMessage = "Not enough storage. Free up space and try again."
+                rollbackItem(item, context: context)
             } catch {
+                AppLog.error("audio", "Recording start failed: \(error.localizedDescription)")
                 errorMessage = "Could not start recording."
                 rollbackItem(item, context: context)
-                AppLog.audio.error("Recording start failed: \(error.localizedDescription)")
             }
         }
     }
@@ -175,6 +184,7 @@ final class RecordingCoordinator: ObservableObject {
 
     func stopRecording() {
         guard state == .recording || state == .paused || state == .interrupted else { return }
+        AppLog.event("audio", "Stopping recording — elapsed=\(elapsedTimeFormatted) pausedDur=\(Int(pausedDuration))s itemID=\(savedItemId?.uuidString.prefix(8) ?? "nil")")
         captureService.stopRecording()
         state = .stopped
         nowPlayingController.deactivate()
@@ -208,7 +218,7 @@ final class RecordingCoordinator: ObservableObject {
     /// Attempt to recover from audio interruptions when the app returns to the foreground.
     func onAppForeground() {
         guard state == .interrupted else { return }
-        AppLog.audio.info("App returned to foreground while interrupted — attempting recovery")
+        AppLog.event("audio", "App returned to foreground while interrupted — attempting recovery")
         captureService.resumeRecording()
         if captureService.state == .recording {
             state = .recording
@@ -222,19 +232,26 @@ final class RecordingCoordinator: ObservableObject {
 
     /// Remove any recording directories for items that are still in .recording status
     /// (abandoned from previous app termination). Call once at app startup.
+    /// Uses a dedicated background context to avoid touching the main context during init.
     func cleanupOrphanedRecordings() {
-        let context = modelContext
-        let descriptor = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.statusRaw == "recording" })
-        guard let orphans = try? context.fetch(descriptor) else { return }
-        for item in orphans {
-            AppLog.audio.info("Cleaning up orphaned recording: \(item.id)")
+        // Use a fresh context isolated from the main context used by SwiftUI views.
+        // This is a read-delete-save driven by app init, not user interaction.
+        do {
+            let bgContext = ModelContext(modelContext.container)
+            let descriptor = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.statusRaw == "recording" })
+            guard let orphans = try? bgContext.fetch(descriptor), !orphans.isEmpty else { return }
+
+            AppLog.audio.info("Found \(orphans.count) orphaned recording(s) — cleaning up")
             let store = FileArtifactStore()
-            try? store.deleteMeetingDirectory(for: item.id)
-            context.delete(item)
-        }
-        if !orphans.isEmpty {
-            try? context.save()
+            for item in orphans {
+                AppLog.audio.info("Cleaning up orphaned recording: \(item.id)")
+                try? store.deleteMeetingDirectory(for: item.id)
+                bgContext.delete(item)
+            }
+            try bgContext.save()
             AppLog.audio.info("Cleaned up \(orphans.count) orphaned recording(s)")
+        } catch {
+            AppLog.audio.error("Orphan cleanup failed: \(error.localizedDescription)")
         }
     }
 
@@ -357,7 +374,7 @@ final class RecordingCoordinator: ObservableObject {
                     try annotSvc.upsert(captured, itemID: itemId, source: "recording_context")
                     AppLog.general.info("Context: \(captured.count) annotations for item \(itemId)")
                 } catch {
-                    AppLog.general.error("Context capture save failed: \(error)")
+                    AppLog.error("general", "Context capture save failed: \(error.localizedDescription)")
                 }
             }
         }
@@ -368,7 +385,7 @@ final class RecordingCoordinator: ObservableObject {
         do {
             try context.save()
         } catch {
-            AppLog.audio.error("Failed to rollback item: \(error)")
+            AppLog.error("audio", "Failed to rollback item after recording error: \(error.localizedDescription)")
         }
     }
 
@@ -389,7 +406,7 @@ final class RecordingCoordinator: ObservableObject {
                 pushType: nil
             )
         } catch {
-            AppLog.general.warning("LiveActivity start failed: \(error)")
+            AppLog.warn("general", "LiveActivity start failed: \(error.localizedDescription)")
         }
     }
 
@@ -435,7 +452,7 @@ final class RecordingCoordinator: ObservableObject {
             try context.save()
             AppLog.audio.info("Item updated: \(item.id)")
         } catch {
-            AppLog.audio.error("Failed to save item update: \(error)")
+            AppLog.error("audio", "Failed to save item update: \(error.localizedDescription)")
         }
     }
 }

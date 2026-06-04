@@ -41,6 +41,40 @@ struct ProjectDetailView: View {
     }
 }
 
+// MARK: - Stable Project Detail Link (Navigation-safe)
+
+/// Resolves a project by UUID and holds it in `@State` so that SwiftData context saves
+/// (which cause `@Query` to emit new managed-object instances) do NOT recreate the view.
+/// Always prefer this over passing a `Project` managed object through navigation state.
+struct ProjectDetailLink: View {
+    let projectID: UUID
+    @Environment(\.modelContext) private var modelContext
+    @State private var project: Project?
+    @State private var resolutionAttempted = false
+
+    var body: some View {
+        Group {
+            if let project {
+                ProjectDetailView(project: project)
+            } else {
+                Color.clear
+                    .onAppear { resolveIfNeeded() }
+            }
+        }
+    }
+
+    private func resolveIfNeeded() {
+        guard !resolutionAttempted else { return }
+        resolutionAttempted = true
+        let predicate = #Predicate<Project> { $0.id == projectID }
+        let descriptor = FetchDescriptor<Project>(predicate: predicate)
+        project = try? modelContext.fetch(descriptor).first
+        if project == nil {
+            AppLog.general.warning("ProjectDetailLink: project not found for id \(projectID.uuidString.prefix(8))")
+        }
+    }
+}
+
 // MARK: - Project Home (Glance Layer)
 
 struct ProjectHomeView: View {
@@ -56,6 +90,7 @@ struct ProjectHomeView: View {
     @State private var showNoteEditor = false
     @State private var showFileImporter = false
     @State private var createdNoteItem: KnowledgeItem? = nil
+    @State private var lastLoadTime: Date = .distantPast
 
     var body: some View {
         ScrollView {
@@ -110,7 +145,7 @@ struct ProjectHomeView: View {
                 createdNoteItem = nil
             }
         }
-        .refreshable { loadData() }
+        .refreshable { loadData(force: true) }
     }
 
     // MARK: Header
@@ -484,7 +519,12 @@ struct ProjectHomeView: View {
 
     // MARK: Data loading
 
-    private func loadData() {
+    private func loadData(force: Bool = false) {
+        let now = Date()
+        if !force && now.timeIntervalSince(lastLoadTime) < 1.0 {
+            return  // Skip redundant reloads within 1 second
+        }
+        lastLoadTime = now
         AppLog.debug("project", "loadData start — projectID=\(project.id.uuidString.prefix(8))")
         tasks = (try? TaskService(context: modelContext).tasks(for: project.id)) ?? []
         items = (try? ProjectService(context: modelContext).items(in: project.id)) ?? []

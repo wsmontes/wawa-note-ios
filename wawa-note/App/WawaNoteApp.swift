@@ -68,7 +68,7 @@ struct WawaNoteApp: App {
         coordinator.cleanupOrphanedRecordings()
 
         if fileLog.previousSessionCrashed {
-            AppLog.general.warning("⚠️ Previous session ended abnormally — crash log available in Settings > Debug Logs")
+            AppLog.warn("general", "⚠️ Previous session ended abnormally — crash log available in Settings > Debug Logs")
         }
 
         // Attempt recovery from audio interruptions when app returns to foreground
@@ -77,6 +77,7 @@ struct WawaNoteApp: App {
             object: nil,
             queue: .main
         ) { _ in
+            AppLog.event("general", "App will enter foreground")
             coordinator.onAppForeground()
         }
 
@@ -86,6 +87,7 @@ struct WawaNoteApp: App {
             object: nil,
             queue: .main
         ) { _ in
+            AppLog.event("general", "App will terminate — marking clean exit")
             fileLog.markCleanExit()
         }
 
@@ -96,6 +98,14 @@ struct WawaNoteApp: App {
             queue: .main
         ) { _ in
             fileLog.heartbeat()
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            AppLog.event("general", "App did enter background")
         }
     }
 

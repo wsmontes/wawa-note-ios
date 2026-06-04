@@ -93,9 +93,7 @@ struct ProjectListView: View {
     private var listView: some View {
         List {
             ForEach(sortedProjects) { project in
-                NavigationLink {
-                    ProjectDetailView(project: project)
-                } label: {
+                NavigationLink(value: project.id) {
                     projectRow(project)
                 }
                 .swipeActions(edge: .leading) {
@@ -123,6 +121,9 @@ struct ProjectListView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
+        .navigationDestination(for: UUID.self) { projectID in
+            ProjectDetailLink(projectID: projectID)
+        }
     }
 
     private func projectRow(_ project: Project) -> some View {

@@ -193,6 +193,34 @@ extension AppLog {
         }
     }
 
+    /// Logs a warning to both OSLog and the persistent file log.
+    /// Use for recoverable error states that may precede a crash.
+    static func warn(_ category: String, _ message: String) {
+        FileLogService.shared.log(category: category, level: "WARN", message: message)
+        switch category {
+        case "audio": audio.warning("\(message)")
+        case "transcription": transcription.warning("\(message)")
+        case "provider": provider.warning("\(message)")
+        case "storage": storage.warning("\(message)")
+        case "general": general.warning("\(message)")
+        default: general.warning("[\(category)] \(message)")
+        }
+    }
+
+    /// Logs an error to both OSLog and the persistent file log.
+    /// Use for every error that could be crash-adjacent.
+    static func error(_ category: String, _ message: String) {
+        FileLogService.shared.log(category: category, level: "ERROR", message: message)
+        switch category {
+        case "audio": audio.error("\(message)")
+        case "transcription": transcription.error("\(message)")
+        case "provider": provider.error("\(message)")
+        case "storage": storage.error("\(message)")
+        case "general": general.error("\(message)")
+        default: general.error("[\(category)] \(message)")
+        }
+    }
+
     /// Logs a detailed trace with file+line to the persistent log.
     static func debug(_ category: String, _ message: String, file: String = #file, line: Int = #line) {
         let src = "\(file.split(separator: "/").last ?? ""):\(line)"

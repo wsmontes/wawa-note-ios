@@ -33,7 +33,7 @@ final class AudioSessionManager {
             try session.setAllowHapticsAndSystemSoundsDuringRecording(true)
             try session.setActive(true)
         } catch {
-            AppLog.audio.error("Failed to configure audio session: \(error.localizedDescription)")
+            AppLog.error("audio", "Failed to configure audio session: \(error.localizedDescription)")
             throw AudioSessionError.configurationFailed
         }
     }
@@ -47,7 +47,7 @@ final class AudioSessionManager {
         do {
             try session.setActive(false, options: .notifyOthersOnDeactivation)
         } catch {
-            AppLog.audio.error("Failed to deactivate audio session: \(error.localizedDescription)")
+            AppLog.error("audio", "Failed to deactivate audio session: \(error.localizedDescription)")
             throw AudioSessionError.configurationFailed
         }
     }

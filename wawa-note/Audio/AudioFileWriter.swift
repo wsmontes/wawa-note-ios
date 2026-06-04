@@ -54,7 +54,7 @@ final class AudioFileWriter: @unchecked Sendable {
             currentMeetingId = meetingId
             AppLog.audio.info("Audio file created: \(fileURL.lastPathComponent) at \(format.sampleRate)Hz for meeting \(meetingId.uuidString.prefix(8))")
         } catch {
-            AppLog.audio.error("Failed to create audio file: \(error.localizedDescription)")
+            AppLog.error("audio", "Failed to create audio file: \(error.localizedDescription)")
             throw AudioFileWriterError.fileCreationFailed
         }
     }
@@ -66,12 +66,10 @@ final class AudioFileWriter: @unchecked Sendable {
         } catch {
             writeErrorCount += 1
             lastWriteError = error
-            AppLog.audio.error("Failed to write audio buffer (#\(self.writeErrorCount)): \(error.localizedDescription)")
-            // On Cocoa error -11800 (disk full) or similar, log with high severity
+            writeErrorCount += 1
+            lastWriteError = error
             let nsError = error as NSError
-            if nsError.domain == NSOSStatusErrorDomain {
-                AppLog.audio.error("Audio unit error code: \(nsError.code)")
-            }
+            AppLog.error("audio", "Failed to write audio buffer (#\(writeErrorCount)): \(error.localizedDescription) domain=\(nsError.domain) code=\(nsError.code)")
         }
     }
 
@@ -83,9 +81,9 @@ final class AudioFileWriter: @unchecked Sendable {
         audioFile = nil
         currentMeetingId = nil
         if hadErrors {
-            AppLog.audio.warning("Audio file writer finished with \(errorCount) write error(s) — file may be incomplete")
+            AppLog.warn("audio", "Audio file writer finished with \(errorCount) write error(s) — file may be incomplete")
         } else {
-            AppLog.audio.info("Audio file writer finished cleanly")
+            AppLog.event("audio", "Audio file writer finished cleanly — size=\(fileSize) bytes")
         }
     }
 
