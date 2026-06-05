@@ -13,65 +13,49 @@ import PDFKit
 enum PipelineTemplate {
 
     /// The standard content processing pipeline: Extract → Analyze → Ingest.
+    /// Uses the virtual filesystem shell (run_command) for all operations.
     static let standard: String = """
     You are a content processing agent in Wawa Note. Your job is to process a knowledge item \
-    through a structured pipeline autonomously. You have access to content extraction, AI analysis, \
-    project management tools, and an agent memory system.
+    through a structured pipeline autonomously using the virtual filesystem.
 
     ## YOUR TASK
 
-    Process the item described in the first message. Follow these phases:
+    Process the item described in the first message. You have one command: run_command.
 
     ### Phase 0: LEARN FROM PAST (before processing)
-    - Use `search_memory` to check if similar content has been processed before.
-    - Search with matching item_type, language, and content_type.
-    - If relevant memories are found, apply their proven strategies.
-    - Example: if memory says "audio >60min in Portuguese → chunk with nano, reduce with gpt-5.5", follow that.
+    - Use `ls /agent/memories/` to see past strategies.
+    - Use `grep "pattern" /agent/memories/` to find relevant memories.
+    - If found, apply their proven strategies.
 
     ### Phase 1: EXTRACT
-    - Use `extract_content` to get the item's raw text (transcript for audio, OCR for images, body text for notes).
-    - If the content is empty or extraction fails, report the error and stop.
+    - Use `extract <item-id>` to get the item's raw text.
+    - If empty or fails, report the error and stop.
 
     ### Phase 2: ANALYZE
-    - Use `analyze_content` with the extracted text to get structured analysis (summary, decisions, actions, risks, entities).
-    - **For images**: if the item is an image, use `describe_image` first to get a visual description, \
-      then pass that description to `analyze_content` as the text parameter.
+    - Review the extracted content and produce structured analysis.
+    - For images: describe them first, then analyze.
+    - Use `echo '{"summary":"..."}' > /projects/{slug}/analysis/{item-id}.json` to save findings.
 
-    ### Phase 2.5: DETECT SIGNALS (after analysis, before ingest)
-    - Review the analysis for significant signals — risks, alerts, opportunities, contradictions, patterns.
-    - Use `raise_signal` for any notable finding. Types: risk, alert, opportunity, change, contradiction, pattern, doubt, new_project, emerging_problem.
-    - Only raise signals that are clearly supported by the content. Be specific.
-    - Max 3 signals per item. If nothing significant, skip this phase.
+    ### Phase 3: DETECT SIGNALS
+    - Review for risks, alerts, opportunities, contradictions, patterns.
+    - Use `echo '{"type":"risk","title":"...","body":"..."}' > /projects/{slug}/signals/` for each finding.
+    - Max 3 signals per item. Skip if nothing significant.
 
-    ### Phase 3: INGEST (if item has a project)
-    - If the item belongs to a project, create any tasks, edges, or annotations based on the analysis.
-    - Use `create_task` for action items extracted from the analysis.
-    - Use `create_edge` to connect this item to related items mentioned in the content.
+    ### Phase 4: INGEST (if item has a project)
+    - Use `touch /projects/{slug}/tasks/ --title "..." --priority high --owner "..."` for action items.
+    - Use `ls /projects/{slug}/items/` to find related items, then reference them.
 
-    ### Phase 4: REMEMBER (after processing)
-    - Use `write_memory` to record what you learned:
-      - `pattern`: describe the content characteristics (e.g. "80min business meeting in mixed EN/PT")
-      - `strategy`: describe what worked (e.g. "single-pass analysis with gpt-5.5, no chunking needed")
-      - Include `item_type`, `language`, and other metadata for future matching.
-    - Only write memories when you discovered something non-obvious — don't write for trivial cases.
-
-    ## MODEL STRATEGY
-
-    - Use `analyze_content` with parameter `model: "nano"` for simple content (<3000 chars).
-    - Use `analyze_content` with parameter `model: "gpt-5.5"` for complex content.
-    - **Never send raw transcripts longer than 10,000 characters in a single prompt.** \
-      The analyze_content tool handles chunking for you.
+    ### Phase 5: REMEMBER (after processing)
+    - Use `echo '{"pattern":"...","strategy":"..."}' > /agent/memories/` to record what you learned.
+    - Only write memories for non-obvious discoveries.
 
     ## ERROR HANDLING
-
-    - If `extract_content` returns empty: report "No extractable content" and stop.
-    - If `analyze_content` fails: try once more with `model: "gpt-5.5"`. If it still fails, stop.
-    - Never loop more than 3 times trying the same tool with the same parameters.
+    - If extract returns empty: report and stop.
+    - If analyze fails: try once more with a different approach. If it still fails, stop.
+    - Never loop more than 3 times with the same approach.
 
     ## OUTPUT
-
-    When all phases complete, output a summary: item title, type, content length, model used, key findings.
-    Be concise.
+    When done, summarize: item title, type, key findings. Be concise.
     """
 
     /// Lightweight pipeline: extract and analyze only. No project ingestion.
@@ -142,23 +126,18 @@ final class ContentPipelineService: ObservableObject {
                 return
             }
 
-            // Assemble pipeline tools
+            // Assemble pipeline tools — single shell tool
             let fileStore = FileArtifactStore()
+            let project = item.projectID.flatMap { pid in try? ProjectService(context: modelContext).fetch(id: pid) }
             let toolContext = ToolContext(
                 modelContext: modelContext, fileStore: fileStore,
                 activeProjectID: item.projectID,
-                activeProjectName: item.projectID.flatMap { pid in
-                    try? ProjectService(context: modelContext).fetch(id: pid)?.name
-                }
+                activeProjectName: project?.name,
+                activeProjectSlug: project?.slug
             )
 
             let tools: [any AgentTool] = [
-                ExtractContentTool(), AnalyzeContentTool(), DescribeImageTool(),
-                GetItemTool(), GetProjectTool(), GetConnectionsTool(),
-                CreateTaskTool(), CreateEdgeTool(), SetAnnotationTool(),
-                GetAnalysisTool(),
-                SearchMemoryTool(), WriteMemoryTool(),
-                RaiseSignalTool(), ListLensesTool()
+                ShellTool()
             ]
 
             let registry = AgentToolRegistry(tools: tools)
@@ -270,6 +249,13 @@ final class ContentPipelineService: ObservableObject {
                     itemType: item.type.rawValue, phase: "error",
                     currentTool: nil, toolSummary: error, toolLog: toolLog)
             }
+            // Mark item as processed so it's not re-enqueued forever
+            // (was the root cause of infinite pipeline loops for notes)
+            if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+                fresh.analysisProviderId = "pipeline" // marker to prevent re-enqueue
+                fresh.status = lastError == nil ? .analyzed : .failed
+                try? modelContext.save()
+            }
             // Update project health after agent completes
             if let pid = item.projectID { ProjectHealthEngine.updateProject(pid, context: modelContext) }
             // Keep status visible so user can see agent trace
@@ -305,10 +291,13 @@ final class ContentPipelineService: ObservableObject {
         // Use the original process() which has retry logic, background tasks, notifications, and verification
         // Wait for completion via notification
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            var resumed = false
             var token: NSObjectProtocol?
             token = NotificationCenter.default.addObserver(forName: .pipelineCompleted, object: nil, queue: .main) { note in
                 guard let completedID = note.object as? String, completedID == itemID.uuidString else { return }
                 if let t = token { NotificationCenter.default.removeObserver(t) }
+                guard !resumed else { return }
+                resumed = true
                 continuation.resume()
             }
             // Fire the original process() — it handles everything internally
@@ -316,6 +305,8 @@ final class ContentPipelineService: ObservableObject {
             // Safety timeout: if notification never fires, resume after 120s
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(120))
+                guard !resumed else { return }
+                resumed = true
                 if let t = token { NotificationCenter.default.removeObserver(t) }
                 continuation.resume()
             }

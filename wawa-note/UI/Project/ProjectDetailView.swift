@@ -32,10 +32,12 @@ private func activitySignalColor(_ type: String) -> Color { signalColor(type) }
 /// Delegates immediately to the new ProjectHomeView.
 struct ProjectDetailView: View {
     let project: Project
+    @EnvironmentObject private var chatState: ChatOverlayState
 
     var body: some View {
         ProjectHomeView(project: project)
             .onAppear {
+                chatState.context = .project(project.id)
                 AppLog.debug("project", "ProjectDetailView appeared — project=\(project.name) id=\(project.id.uuidString.prefix(8)) status=\(project.status.rawValue) health=\(project.healthStatus ?? "nil")")
             }
     }

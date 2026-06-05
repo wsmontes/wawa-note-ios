@@ -122,6 +122,26 @@ struct ChatMessage: Identifiable, Codable {
     var citations: [ChatCitation]?
     var isThinking: Bool?
     var projectColorHex: String?
+    var blocksJSON: String?
+    /// When true, this message is invisible in the chat UI but still sent to the agent.
+    /// Used for UI-triggered decisions (ChoicePrompt, swipe actions) that shouldn't
+    /// appear as user-typed bubbles.
+    var isInternal: Bool
+
+    /// Parsed blocks from blocksJSON. Nil if no structured content (falls back to text parsing).
+    var blocks: [ChatBlock]? {
+        get {
+            guard let json = blocksJSON, let data = json.data(using: .utf8) else { return nil }
+            return try? JSONDecoder().decode([ChatBlock].self, from: data)
+        }
+        set {
+            if let blocks = newValue, let data = try? JSONEncoder().encode(blocks) {
+                blocksJSON = String(data: data, encoding: .utf8)
+            } else {
+                blocksJSON = nil
+            }
+        }
+    }
 
     init(
         id: UUID = UUID(),
@@ -133,7 +153,9 @@ struct ChatMessage: Identifiable, Codable {
         toolCallId: String? = nil,
         citations: [ChatCitation]? = nil,
         isThinking: Bool? = nil,
-        projectColorHex: String? = nil
+        projectColorHex: String? = nil,
+        blocks: [ChatBlock]? = nil,
+        isInternal: Bool = false
     ) {
         self.id = id
         self.conversationId = conversationId
@@ -145,6 +167,8 @@ struct ChatMessage: Identifiable, Codable {
         self.citations = citations
         self.isThinking = isThinking
         self.projectColorHex = projectColorHex
+        self.isInternal = isInternal
+        self.blocks = blocks
     }
 }
 
@@ -187,4 +211,116 @@ struct ChatCitation: Codable {
     let itemType: KnowledgeItemType
     var projectID: UUID?
     var projectColorHex: String?
+}
+
+// MARK: - Interactive Chat Blocks
+
+/// Structured content blocks that render as native SwiftUI views in the chat.
+/// Emitted by ShellInterpreter tool handlers and persisted in ChatMessage.blocksJSON.
+enum ChatBlock: Codable, Sendable {
+    case text(String)
+    case table(TableData)
+    case code(CodeData)
+    case bulletList([String])
+    case orderedList([String])
+
+    // Interactive cards
+    case projectContext(ProjectContextData)
+    case taskCard(TaskCardData)
+    case itemCard(ItemCardData)
+    case searchResults(SearchResultsData)
+    case analysisAccordion(AnalysisData)
+
+    // Action prompts
+    case choicePrompt(ChoicePromptData)
+    case confirmation(ConfirmationData)
+}
+
+// MARK: - Block Data Types
+
+struct TableData: Codable, Sendable {
+    let title: String?
+    let headers: [String]
+    let rows: [[String]]
+}
+
+struct CodeData: Codable, Sendable {
+    let code: String
+    let language: String?
+    let caption: String?
+}
+
+struct ProjectContextData: Codable, Sendable {
+    let projectName: String
+    let slug: String
+    let status: String
+    let taskCount: Int
+    let itemCount: Int
+    let signalCount: Int
+    let healthStatus: String?
+    let summary: String?
+}
+
+struct TaskCardData: Codable, Sendable {
+    let taskID: String
+    let title: String
+    let status: String
+    let priority: String
+    let owner: String?
+    let projectSlug: String?
+    let needsConfirmation: Bool  // true = show Confirm/Cancel buttons
+}
+
+struct ItemCardData: Codable, Sendable {
+    let itemID: String
+    let title: String
+    let type: String
+    let status: String
+    let durationSeconds: Double?
+    let projectSlug: String?
+    let hasTranscript: Bool
+    let hasAnalysis: Bool
+}
+
+struct SearchResultsData: Codable, Sendable {
+    let query: String
+    let results: [SearchResultItem]
+}
+
+struct SearchResultItem: Codable, Sendable {
+    let itemID: String
+    let title: String
+    let snippet: String
+    let type: String
+    let projectSlug: String?
+}
+
+struct AnalysisData: Codable, Sendable {
+    let itemID: String
+    let sections: [AnalysisSection]
+}
+
+struct AnalysisSection: Codable, Sendable {
+    let title: String
+    let count: Int
+    let items: [String]
+}
+
+struct ChoicePromptData: Codable, Sendable {
+    let question: String
+    let options: [ChoiceOption]
+}
+
+struct ChoiceOption: Codable, Sendable {
+    let label: String
+    let value: String  // sent as user message when tapped
+}
+
+struct ConfirmationData: Codable, Sendable {
+    let title: String
+    let message: String
+    let confirmLabel: String
+    let cancelLabel: String
+    let confirmValue: String
+    let cancelValue: String
 }

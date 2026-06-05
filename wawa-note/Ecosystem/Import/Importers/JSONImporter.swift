@@ -62,9 +62,6 @@ final class JSONImporter: FormatImporter, @unchecked Sendable {
         let bodyText = imported.item?.body ?? imported.item?.summary
             ?? imported.meeting?.body ?? imported.meeting?.summary
 
-        let bodyText = imported.item?.body ?? imported.item?.summary
-            ?? imported.meeting?.body ?? imported.meeting?.summary
-
         let item = KnowledgeItem(
             type: itemType,
             title: imported.item?.title ?? imported.meeting?.title ?? url.deletingPathExtension().lastPathComponent,
