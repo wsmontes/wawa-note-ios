@@ -15,6 +15,8 @@ final class HomeViewModel: ObservableObject {
     @Published var showFilePicker = false
     @Published var pendingImport: ImportPending?
     @Published var targetProjectForImport: Project?
+    @Published var showProjectPickerForInboxItem = false
+    @Published var pendingInboxItemForProject: KnowledgeItem?
 
     private let importService = AudioImportService()
     private let artifactStore = FileArtifactStore()
@@ -199,6 +201,7 @@ struct HomeView: View {
     @EnvironmentObject private var chatState: ChatOverlayState
     @EnvironmentObject private var chatViewModel: ChatViewModel
     @Query(sort: \Project.updatedAt, order: .reverse) private var projects: [Project]
+    @Query(filter: #Predicate<KnowledgeItem> { $0.inboxDate != nil }, sort: \KnowledgeItem.updatedAt, order: .reverse) private var inboxItems: [KnowledgeItem]
     @Query(sort: \KnowledgeItem.updatedAt, order: .reverse) private var allItems: [KnowledgeItem]
     @Environment(\.modelContext) private var modelContext
 
@@ -330,18 +333,52 @@ struct HomeView: View {
             .padding(.top, 0).padding(.bottom, 20)
 
             if !projects.isEmpty {
+                let recentProjects = Array(projects.prefix(5))
                 Text("Projects").font(.caption).foregroundStyle(.secondary).textCase(.uppercase)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20).padding(.bottom, 6)
                 List {
-                    ForEach(projects) { project in projectRow(project) }
+                    ForEach(recentProjects) { project in projectRow(project) }
                         .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                         .listRowBackground(Color(.systemBackground))
                         .listRowSeparator(.hidden)
+                    if projects.count > 5 {
+                        NavigationLink(value: "explore:projects") {
+                            Text("See all \(projects.count) projects →").font(.caption).foregroundStyle(.blue)
+                        }
+                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                        .listRowBackground(Color(.systemBackground))
+                    }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
-            } else { Spacer() }
+                .frame(minHeight: min(CGFloat(recentProjects.count) * 52, 260))
+            }
+
+            if !inboxItems.isEmpty {
+                let recentInbox = Array(inboxItems.prefix(5))
+                Text("Inbox").font(.caption).foregroundStyle(.secondary).textCase(.uppercase)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20).padding(.bottom, 6).padding(.top, 16)
+                List {
+                    ForEach(recentInbox) { item in inboxRow(item) }
+                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                        .listRowBackground(Color(.systemBackground))
+                        .listRowSeparator(.hidden)
+                    if inboxItems.count > 5 {
+                        NavigationLink(value: "explore:inbox") {
+                            Text("See all \(inboxItems.count) inbox items →").font(.caption).foregroundStyle(.blue)
+                        }
+                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                        .listRowBackground(Color(.systemBackground))
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .frame(minHeight: min(CGFloat(recentInbox.count) * 52, 260))
+            }
+
+            if projects.isEmpty && inboxItems.isEmpty { Spacer() }
         }
         .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { expandedProjectIDs = [] } }
         .safeAreaInset(edge: .bottom) {
@@ -474,6 +511,48 @@ struct HomeView: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    // MARK: Inbox row (home screen)
+
+    private func inboxRow(_ item: KnowledgeItem) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: item.type.icon)
+                .font(.title3).foregroundStyle(item.type.color)
+                .frame(width: 32, height: 32)
+                .background(item.type.color.opacity(0.1)).clipShape(RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title.isEmpty ? "Untitled" : item.title).font(.subheadline).fontWeight(.medium).lineLimit(1)
+                Text("\(item.type.label) · \(item.updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+        .onTapGesture { navigateToItem = item }
+        .swipeActions(edge: .leading) {
+            Button {
+                try? KnowledgeItemService(context: modelContext).removeFromInbox(item)
+            } label: {
+                Label("Archive", systemImage: "archivebox.fill")
+            }.tint(.green)
+        }
+        .swipeActions(edge: .trailing) {
+            Button {
+                importVM.targetProjectForImport = nil
+                importVM.pendingInboxItemForProject = item
+                importVM.showProjectPickerForInboxItem = true
+            } label: {
+                Label("Move to Project", systemImage: "folder.badge.plus")
+            }.tint(.blue)
+        }
+        .sheet(isPresented: $importVM.showProjectPickerForInboxItem) {
+            if let item = importVM.pendingInboxItemForProject {
+                ProjectPickerForItemView(item: item)
+            }
+        }
     }
 
     private func startRecordingFor(_ project: Project) {
@@ -806,6 +885,62 @@ struct CameraCaptureView: UIViewControllerRepresentable {
         }
 
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { parent.dismiss() }
+    }
+}
+
+// MARK: - Project Picker for Inbox Item
+
+struct ProjectPickerForItemView: View {
+    let item: KnowledgeItem
+    @Query(sort: \Project.name) private var projects: [Project]
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var processingQueue: ProcessingQueueService
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(projects) { project in
+                    Button {
+                        assignToProject(item, project: project)
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Image(systemName: project.iconName ?? "folder.fill")
+                                .foregroundStyle(project.colorHex.flatMap { Color(hex: $0) } ?? .blue)
+                            Text(project.name).font(.subheadline)
+                            Spacer()
+                        }
+                    }
+                }
+                if projects.isEmpty {
+                    Text("No projects yet").foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Move to Project")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+            }
+        }
+    }
+
+    private func assignToProject(_ item: KnowledgeItem, project: Project) {
+        let svc = ProjectService(context: modelContext)
+        if item.projectID == nil {
+            // Item has no project — move/assign
+            try? svc.addItem(item.id, to: project.id)
+        } else if item.projectID != project.id {
+            // Item already belongs to another project — create a copy
+            let newItem = KnowledgeItem(
+                type: item.type,
+                title: item.title + " (copy)",
+                bodyText: item.bodyText
+            )
+            newItem.projectID = project.id
+            modelContext.insert(newItem)
+            try? modelContext.save()
+        }
+        processingQueue.enqueue(itemID: item.id, projectID: project.id, trigger: .projectAssignment)
     }
 }
 

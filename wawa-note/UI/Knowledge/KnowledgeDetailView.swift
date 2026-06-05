@@ -302,10 +302,24 @@ struct KnowledgeDetailView: View {
 
         if let transcript {
             let groups = transcript.groupedSegments()
+            let transcriptText = groups.map { g in
+                "[\(formatTime(g.startTime))] \(g.text)"
+            }.joined(separator: "\n\n")
 
             VStack(alignment: .leading, spacing: 0) {
-                sectionHeader("Transcript", icon: "text.alignleft")
-                    .padding(.horizontal, 16)
+                HStack {
+                    sectionHeader("Transcript", icon: "text.alignleft")
+                    Spacer()
+                    Button {
+                        UIPasteboard.general.string = transcriptText
+                    } label: {
+                        Image(systemName: "doc.on.doc").font(.caption).foregroundStyle(.secondary)
+                    }
+                    ShareLink(item: transcriptText) {
+                        Image(systemName: "square.and.arrow.up").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 16)
 
                 VStack(spacing: 0) {
                     ForEach(Array(groups.enumerated()), id: \.element.id) { idx, group in
@@ -320,7 +334,7 @@ struct KnowledgeDetailView: View {
                                 }
                             }
                             Text(group.text)
-                                .font(.body)
+                                .font(.body).textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         .padding(12)
@@ -536,14 +550,14 @@ struct KnowledgeDetailView: View {
         switch renderer.field {
         case "short_summary":
             if !analysis.shortSummary.isEmpty {
-                card(title: renderer.title, systemImage: renderer.icon ?? "doc.text") {
-                    Text(analysis.shortSummary).font(.body)
+                card(title: renderer.title, systemImage: renderer.icon ?? "doc.text", copyText: analysis.shortSummary) {
+                    Text(analysis.shortSummary).font(.body).textSelection(.enabled)
                 }
             }
         case "decisions":
             if !analysis.decisions.isEmpty {
                 card(title: renderer.title, systemImage: renderer.icon ?? "checkmark.seal") {
-                    ForEach(analysis.decisions) { d in Text(d.title).font(.body).padding(.vertical, 2) }
+                    ForEach(analysis.decisions) { d in Text(d.title).font(.body).textSelection(.enabled).padding(.vertical, 2) }
                 }
             }
         case "action_items":
@@ -553,7 +567,7 @@ struct KnowledgeDetailView: View {
                         HStack(alignment: .top, spacing: 8) {
                             Image(systemName: "circle").font(.caption).padding(.top, 3)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(a.task).font(.body)
+                                Text(a.task).font(.body).textSelection(.enabled)
                                 if let o = a.owner { Text(o).font(.caption).foregroundStyle(.secondary) }
                             }
                         }.padding(.vertical, 2)
@@ -565,7 +579,7 @@ struct KnowledgeDetailView: View {
                 card(title: renderer.title, systemImage: renderer.icon ?? "exclamationmark.triangle") {
                     ForEach(analysis.risks) { r in
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(r.risk).font(.body)
+                            Text(r.risk).font(.body).textSelection(.enabled)
                             if !r.details.isEmpty { Text(r.details).font(.caption).foregroundStyle(.secondary) }
                         }.padding(.vertical, 2)
                     }
@@ -574,7 +588,7 @@ struct KnowledgeDetailView: View {
         case "open_questions":
             if !analysis.openQuestions.isEmpty {
                 card(title: renderer.title, systemImage: renderer.icon ?? "questionmark.bubble") {
-                    ForEach(analysis.openQuestions) { q in Text(q.question).font(.body).padding(.vertical, 2) }
+                    ForEach(analysis.openQuestions) { q in Text(q.question).font(.body).textSelection(.enabled).padding(.vertical, 2) }
                 }
             }
         case "entities":
@@ -608,7 +622,7 @@ struct KnowledgeDetailView: View {
             VStack(alignment: .leading, spacing: 16) {
                 if !analysis.shortSummary.isEmpty {
                     card(title: "Summary", systemImage: "doc.text") {
-                        Text(analysis.shortSummary).font(.body)
+                        Text(analysis.shortSummary).font(.body).textSelection(.enabled)
                     }
                 }
                 if !analysis.actionItems.isEmpty {
@@ -650,7 +664,7 @@ struct KnowledgeDetailView: View {
                 if !analysis.openQuestions.isEmpty {
                     card(title: "Open Questions", systemImage: "questionmark.bubble") {
                         ForEach(analysis.openQuestions) { q in
-                            Text(q.question).font(.body).padding(.vertical, 2)
+                            Text(q.question).font(.body).textSelection(.enabled).padding(.vertical, 2)
                         }
                     }
                 }
@@ -1201,9 +1215,19 @@ struct KnowledgeDetailView: View {
         return "\(m)m"
     }
 
-    private func card<Content: View>(title: String, systemImage: String, @ViewBuilder content: () -> Content) -> some View {
+    private func card<Content: View>(title: String, systemImage: String, copyText: String? = nil, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: systemImage).font(.headline)
+            HStack {
+                Label(title, systemImage: systemImage).font(.headline)
+                Spacer()
+                if let copyText {
+                    Button {
+                        UIPasteboard.general.string = copyText
+                    } label: {
+                        Image(systemName: "doc.on.doc").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
             content()
         }
         .padding(16)

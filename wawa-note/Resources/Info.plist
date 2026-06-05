@@ -36,7 +36,6 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
-		<string>processing</string>
 	</array>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Wawa Note shows your calendar events so you can start recordings with the right meeting context.</string>

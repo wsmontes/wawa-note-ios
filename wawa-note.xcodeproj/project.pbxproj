@@ -954,12 +954,10 @@
 				F1B74605C0F11543E6C7409B /* Resources */,
 				BCB460E2F44F273C8C6222E2 /* Frameworks */,
 				DF4FCEFEA9FC77DFF5A85967 /* Embed Foundation Extensions */,
-				1FB53A0DB6016E9EA3C461BF /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				0FAFA9252FBB98E0D8D54CD9 /* PBXTargetDependency */,
 				63876487E871152D737741BC /* PBXTargetDependency */,
 			);
 			name = "wawa-note";
@@ -1016,8 +1014,6 @@
 			targets = (
 				FBF603A45B7E98AB42328908 /* wawa-note */,
 				9A7D0C7FA7A598BB22AC7ACE /* wawa-note-share */,
-				CB31CC7D8EBBBB19231E60E4 /* wawa-note-watch */,
-				0C1BCC8EB0D5A66978335ED7 /* wawa-note-watch-widget */,
 				B96C7082C5E86A010A279726 /* wawa-noteTests */,
 			);
 		};
