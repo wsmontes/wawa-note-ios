@@ -14,6 +14,7 @@ struct WawaNoteApp: App {
     private let ingestionState: ProjectIngestionState
     private let contentPipeline: ContentPipelineService
     private let ingestionPipeline: ProjectIngestionPipeline
+    private let processingQueue: ProcessingQueueService
 
     @StateObject private var biometricGate = BiometricGateService()
 
@@ -28,7 +29,12 @@ struct WawaNoteApp: App {
                 TaskItem.self,
                 Person.self,
                 GraphEdge.self,
-                Entity.self
+                Entity.self,
+                AgentSuggestion.self,
+                QueueEntry.self,
+                ProjectFrame.self,
+                ChangeRecord.self,
+                ProjectSnapshot.self
             )
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
@@ -36,7 +42,9 @@ struct WawaNoteApp: App {
 
         ingestionState = ProjectIngestionState()
         ingestionPipeline = ProjectIngestionPipeline(ingestionState: ingestionState)
-        contentPipeline = ContentPipelineService(ingestionPipeline: ingestionPipeline, ingestionState: ingestionState)
+        contentPipeline = ContentPipelineService(ingestionPipeline: ingestionPipeline, ingestionState: ingestionState, modelContainer: modelContainer)
+        processingQueue = ProcessingQueueService()
+        processingQueue.setPipeline(contentPipeline)
 
         let coordinator = RecordingCoordinator(modelContainer: modelContainer)
         coordinator.contentPipeline = contentPipeline
@@ -47,6 +55,58 @@ struct WawaNoteApp: App {
 
         sharedEventStore = EKEventStore()
         calendarSyncService = CalendarSyncService(eventStore: sharedEventStore)
+
+        // Run one-time data migrations
+        KnowledgeItemService.migrateMeetingToAudio(context: ModelContext(modelContainer))
+        ProjectService.migrateProjectColors(context: ModelContext(modelContainer))
+        ProjectService.migrateFieldProvenance(context: ModelContext(modelContainer))
+
+        // Initialize persistent file logging (survives crashes)
+        let fileLog = FileLogService.shared
+
+        // Clean up any recordings abandoned by a previous crash or force-quit
+        coordinator.cleanupOrphanedRecordings()
+
+        if fileLog.previousSessionCrashed {
+            AppLog.warn("general", "⚠️ Previous session ended abnormally — crash log available in Settings > Debug Logs")
+        }
+
+        // Attempt recovery from audio interruptions when app returns to foreground
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            AppLog.event("general", "App will enter foreground")
+            coordinator.onAppForeground()
+        }
+
+        // Mark clean exit on normal termination
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            AppLog.event("general", "App will terminate — marking clean exit")
+            fileLog.markCleanExit()
+        }
+
+        // Periodic heartbeat — clears crash sentinel every 30s while app is running
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            fileLog.heartbeat()
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            AppLog.event("general", "App did enter background")
+        }
     }
 
     var body: some Scene {
@@ -60,6 +120,7 @@ struct WawaNoteApp: App {
         .environmentObject(ingestionState)
         .environmentObject(contentPipeline)
         .environmentObject(ingestionPipeline)
+        .environmentObject(processingQueue)
     }
 }
 

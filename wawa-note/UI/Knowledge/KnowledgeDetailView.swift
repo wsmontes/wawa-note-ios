@@ -5,6 +5,8 @@ struct KnowledgeDetailView: View {
     let item: KnowledgeItem
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var contentPipeline: ContentPipelineService
+    @EnvironmentObject private var processingQueue: ProcessingQueueService
+    @EnvironmentObject private var chatState: ChatOverlayState
     @State private var transcript: Transcript?
     @State private var analysis: MeetingAnalysis?
     @State private var annotations: [Annotation] = []
@@ -22,7 +24,9 @@ struct KnowledgeDetailView: View {
     @State private var editedBody = ""
     @State private var backlinks: [(edge: GraphEdge, sourceItem: KnowledgeItem)] = []
     @State private var isPipelineProcessing = false
+    @State private var pipelineStage: String = ""
     @State private var isReprocessing = false
+    @State private var showReprocessWarning = false
 
     private let fileStore = FileArtifactStore()
 
@@ -35,7 +39,7 @@ struct KnowledgeDetailView: View {
                 if isTranscribing || isPipelineProcessing {
                     HStack(spacing: 10) {
                         ProgressView()
-                        Text(transcriptionProgress ?? (isPipelineProcessing ? "Processing..." : "Transcribing..."))
+                        Text(transcriptionProgress ?? (pipelineStage.isEmpty ? "Processing..." : pipelineStage))
                             .font(.subheadline).foregroundStyle(.secondary)
                     }
                     .padding(12)
@@ -47,9 +51,17 @@ struct KnowledgeDetailView: View {
                 }
 
                 if let error = transcriptionError {
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
-                        Text(error).font(.subheadline)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                            Text(error).font(.subheadline)
+                        }
+                        if error.contains("Settings") {
+                            Button("Open Settings") {
+                                guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                                UIApplication.shared.open(url)
+                            }.font(.subheadline)
+                        }
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -71,6 +83,12 @@ struct KnowledgeDetailView: View {
                 // Images: OCR text already shown inside imageSection
                 if (item.bodyText != nil && item.type != .image) || item.type == .note || item.type == .journalEntry { textContentSection }
                 if item.type == .webBookmark { bookmarkSection }
+
+                // Debug: show raw LLM response when analysis exists but summary is empty
+                if let a = analysis, a.shortSummary.trimmingCharacters(in: .whitespaces).isEmpty {
+                    rawResponseSection
+                        .padding(.top, 12)
+                }
 
                 if !annotations.isEmpty {
                     annotationsSection
@@ -133,8 +151,19 @@ struct KnowledgeDetailView: View {
                 showPromoteSheet = false
             }
         }
+        .alert("Re-process Item", isPresented: $showReprocessWarning) {
+            Button("Cancel", role: .cancel) { }
+            Button("Continue") { Task { await reprocessItem(confirmed: true) } }
+        } message: {
+            Text("You have manually edited this item's content. Re-processing will re-analyze it. Your edits will be protected and AI may suggest changes for your review instead of overwriting them.")
+        }
         .onAppear {
+            chatState.context = .item(item.id)
             isPipelineProcessing = contentPipeline.isProcessingItem(item.id)
+            // Load scanned pages ONCE to avoid blocking main thread on re-renders
+            if item.type == .image, scannedPages.isEmpty {
+                scannedPages = loadScannedPages(count: item.imagePageCount ?? 1)
+            }
             Task { @MainActor in
                 await Task.yield()
                 loadData()
@@ -143,18 +172,35 @@ struct KnowledgeDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: .pipelineCompleted)) { n in
             if n.object as? String == item.id.uuidString {
                 isPipelineProcessing = false
+                pipelineStage = ""
                 Task { @MainActor in loadData() }
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .transcriptReady)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .contentPipelineStageChanged)) { n in
+            guard n.object as? String == item.id.uuidString else { return }
+            if let stage = n.userInfo?["stage"] as? String {
+                pipelineStage = stage
+                isPipelineProcessing = true
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .transcriptReady)) { n in
+            guard n.object as? String == item.id.uuidString else { return }
             Task { @MainActor in
                 transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id)
                 isTranscribing = false; transcriptionProgress = nil
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .analysisReady)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .analysisReady)) { n in
+            guard n.object as? String == item.id.uuidString else { return }
             Task { @MainActor in
                 analysis = try? fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id)
+                if analysis == nil {
+                    if let dynamic = try? fileStore.readArtifact(DynamicAnalysis.self, fileName: "analysis.dynamic.json", meetingId: item.id) {
+                        analysis = MeetingAnalysis(meetingId: item.id, providerId: dynamic.providerId, model: dynamic.model,
+                            shortSummary: dynamic.results.stringField("short_summary") ?? "Analysis available",
+                            detailedSummary: dynamic.results.stringField("detailed_summary") ?? "")
+                    }
+                }
                 isAnalyzing = false
                 loadData()
             }
@@ -238,32 +284,20 @@ struct KnowledgeDetailView: View {
     @ViewBuilder
     private var artifactSections: some View {
         if let analysis {
-            sectionHeader("Summary", icon: "sparkles").padding(.horizontal, 16)
-
-            VStack(alignment: .leading, spacing: 16) {
-                if !analysis.shortSummary.isEmpty {
-                    card(title: "Summary", systemImage: "doc.text") {
-                        Text(analysis.shortSummary).font(.body)
+            // Use dynamic rendering when a non-meeting framework is active
+            if let fw = resolvedFramework, fw.id != "builtin/meeting" {
+                dynamicAnalysisSection(framework: fw)
+            } else {
+                // Meeting framework: render all analysis fields using the framework's renderAs
+                let meetingFW = FrameworkService.meetingFramework
+                sectionHeader("Summary", icon: "sparkles").padding(.horizontal, 16)
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(meetingFW.itemAnalysis.renderAs, id: \.field) { renderer in
+                        meetingAnalysisCard(for: renderer, analysis: analysis)
                     }
                 }
-                if !analysis.actionItems.isEmpty {
-                    card(title: "Action Items", systemImage: "checklist") {
-                        ForEach(analysis.actionItems) { action in
-                            HStack(alignment: .top, spacing: 8) {
-                                Image(systemName: "circle").font(.caption).padding(.top, 3)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(action.task).font(.body)
-                                    if let owner = action.owner {
-                                        Text(owner).font(.caption).foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                            .padding(.vertical, 2)
-                        }
-                    }
-                }
+                .padding(.horizontal, 16)
             }
-            .padding(.horizontal, 16)
         }
 
         if let transcript {
@@ -315,8 +349,8 @@ struct KnowledgeDetailView: View {
                         Text(error).font(.caption).foregroundStyle(.red)
                     }
                     ActiveModelPicker(selectedModel: $selectedModel, label: "Model")
-                    Button("Analyze Now") {
-                        Task { await runAnalysis() }
+                    Button("Analyze via Agent") {
+                        Task { await reprocessItem() }
                     }
                     .buttonStyle(.borderedProminent)
                 }
@@ -344,7 +378,7 @@ struct KnowledgeDetailView: View {
                     .foregroundStyle(.secondary)
                 Text("No transcript yet")
                     .font(.headline)
-                Text("This meeting has audio but hasn't been transcribed.")
+                Text("This recording has audio but hasn't been transcribed.")
                     .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
 
                 // Locale picker
@@ -386,6 +420,182 @@ struct KnowledgeDetailView: View {
                 .font(.headline)
         }
         .padding(.bottom, 8)
+    }
+
+    // MARK: - Framework resolution
+
+    private var resolvedFramework: ProjectFramework? {
+        guard let projectID = item.projectID else { return nil }
+        let projSvc = ProjectService(context: modelContext)
+        guard let project = try? projSvc.fetch(id: projectID) else { return nil }
+        return FrameworkService.shared.resolve(for: project)
+    }
+
+    // MARK: - Dynamic analysis section (framework-driven)
+
+    @ViewBuilder
+    private func dynamicAnalysisSection(framework: ProjectFramework) -> some View {
+        sectionHeader("Analysis", icon: "sparkles").padding(.horizontal, 16).padding(.top, 16)
+
+        VStack(alignment: .leading, spacing: 16) {
+            if let dynamicAnalysis = try? fileStore.readArtifact(DynamicAnalysis.self, fileName: "analysis.dynamic.json", meetingId: item.id) {
+                ForEach(framework.itemAnalysis.renderAs, id: \.field) { renderer in
+                    dynamicCard(for: renderer, data: dynamicAnalysis.results)
+                }
+            } else if let analysis {
+                // Fallback: MeetingAnalysis rendered through framework's renderAs
+                ForEach(framework.itemAnalysis.renderAs, id: \.field) { renderer in
+                    meetingAnalysisCard(for: renderer, analysis: analysis)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+    }
+
+    @ViewBuilder
+    private func dynamicCard(for renderer: FieldRenderer, data: AnalysisResults) -> some View {
+        switch renderer.type {
+        case .card:
+            if let text = data.stringField(renderer.field), !text.isEmpty {
+                card(title: renderer.title, systemImage: renderer.icon ?? "doc.text") {
+                    Text(text).font(.body)
+                }
+            }
+        case .list:
+            if let items = data.arrayField(renderer.field), !items.isEmpty {
+                card(title: renderer.title, systemImage: renderer.icon ?? "list.bullet") {
+                    ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                        renderItemValue(item.value)
+                    }
+                }
+            }
+        case .chips:
+            if let items = data.arrayField(renderer.field), !items.isEmpty {
+                card(title: renderer.title, systemImage: renderer.icon ?? "tag") {
+                    ChipFlowLayout(spacing: 8) {
+                        ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                            Text(formatItemLabel(item.value)).font(.caption)
+                                .padding(.horizontal, 8).padding(.vertical, 4)
+                                .background(.quaternary).clipShape(Capsule())
+                        }
+                    }
+                }
+            }
+        case .markdown:
+            if let text = data.stringField(renderer.field), !text.isEmpty {
+                Text(text).font(.body).padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.secondarySystemGroupedBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+        case .table, .timeline:
+            if let text = data.stringField(renderer.field), !text.isEmpty {
+                card(title: renderer.title, systemImage: renderer.icon ?? "tablecells") {
+                    Text(text).font(.body)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func renderItemValue(_ value: Any) -> some View {
+        if let str = value as? String {
+            Text(str).font(.body).padding(.vertical, 2)
+        } else if let dict = value as? [String: AnyCodable] {
+            VStack(alignment: .leading, spacing: 1) {
+                ForEach(Array(dict.keys.sorted()), id: \.self) { key in
+                    if let v = dict[key]?.value {
+                        HStack(spacing: 4) {
+                            Text("\(key):").font(.caption).foregroundStyle(.secondary)
+                            Text(formatItemLabel(v)).font(.body).lineLimit(2)
+                        }
+                    }
+                }
+            }.padding(.vertical, 2)
+        } else {
+            Text(formatItemLabel(value)).font(.body).padding(.vertical, 2)
+        }
+    }
+
+    private func formatItemLabel(_ value: Any) -> String {
+        if let str = value as? String { return str }
+        if let dict = value as? [String: AnyCodable] {
+            if let name = dict["name"]?.value as? String { return name }
+            if let title = dict["title"]?.value as? String { return title }
+            if let task = dict["task"]?.value as? String { return task }
+            if let first = dict.values.first { return String(describing: first.value) }
+            return ""
+        }
+        if let num = value as? Double { return String(format: "%.2f", num) }
+        if let num = value as? Int { return String(num) }
+        return String(describing: value)
+    }
+
+    @ViewBuilder
+    private func meetingAnalysisCard(for renderer: FieldRenderer, analysis: MeetingAnalysis) -> some View {
+        switch renderer.field {
+        case "short_summary":
+            if !analysis.shortSummary.isEmpty {
+                card(title: renderer.title, systemImage: renderer.icon ?? "doc.text") {
+                    Text(analysis.shortSummary).font(.body)
+                }
+            }
+        case "decisions":
+            if !analysis.decisions.isEmpty {
+                card(title: renderer.title, systemImage: renderer.icon ?? "checkmark.seal") {
+                    ForEach(analysis.decisions) { d in Text(d.title).font(.body).padding(.vertical, 2) }
+                }
+            }
+        case "action_items":
+            if !analysis.actionItems.isEmpty {
+                card(title: renderer.title, systemImage: renderer.icon ?? "checklist") {
+                    ForEach(analysis.actionItems) { a in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "circle").font(.caption).padding(.top, 3)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(a.task).font(.body)
+                                if let o = a.owner { Text(o).font(.caption).foregroundStyle(.secondary) }
+                            }
+                        }.padding(.vertical, 2)
+                    }
+                }
+            }
+        case "risks":
+            if !analysis.risks.isEmpty {
+                card(title: renderer.title, systemImage: renderer.icon ?? "exclamationmark.triangle") {
+                    ForEach(analysis.risks) { r in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(r.risk).font(.body)
+                            if !r.details.isEmpty { Text(r.details).font(.caption).foregroundStyle(.secondary) }
+                        }.padding(.vertical, 2)
+                    }
+                }
+            }
+        case "open_questions":
+            if !analysis.openQuestions.isEmpty {
+                card(title: renderer.title, systemImage: renderer.icon ?? "questionmark.bubble") {
+                    ForEach(analysis.openQuestions) { q in Text(q.question).font(.body).padding(.vertical, 2) }
+                }
+            }
+        case "entities":
+            if !analysis.entities.isEmpty {
+                card(title: renderer.title, systemImage: renderer.icon ?? "person.3") {
+                    ForEach(analysis.entities.prefix(10)) { e in
+                        HStack { Text(e.name).font(.body); Spacer(); Text(e.type.rawValue).font(.caption).foregroundStyle(.secondary) }
+                    }
+                }
+            }
+        case "important_dates":
+            if !analysis.importantDates.isEmpty {
+                card(title: renderer.title, systemImage: renderer.icon ?? "calendar") {
+                    ForEach(analysis.importantDates) { d in
+                        HStack { Text(d.date).font(.caption).foregroundStyle(.secondary); Text(d.meaning).font(.body) }
+                    }
+                }
+            }
+        default:
+            EmptyView()
+        }
     }
 
     // MARK: - Analysis cards (for notes, journals)
@@ -551,14 +761,12 @@ struct KnowledgeDetailView: View {
 
     // MARK: - Image
 
+    @State private var scannedPages: [UIImage] = []
     @State private var currentPage = 0
 
     @ViewBuilder
     private var imageSection: some View {
-        let pageCount = item.imagePageCount ?? 1
-        let pages = loadScannedPages(count: pageCount)
-
-        if pages.isEmpty {
+        if scannedPages.isEmpty {
             Text("No scanned image")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -566,12 +774,12 @@ struct KnowledgeDetailView: View {
         } else {
             VStack(alignment: .leading, spacing: 16) {
                 // Page indicator above gallery
-                if pageCount > 1 {
+                if scannedPages.count > 1 {
                     HStack {
                         Image(systemName: "doc.on.doc")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Text("Page \(currentPage + 1) of \(pageCount)")
+                        Text("Page \(currentPage + 1) of \(scannedPages.count)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -580,7 +788,7 @@ struct KnowledgeDetailView: View {
 
                 // Gallery
                 TabView(selection: $currentPage) {
-                    ForEach(Array(pages.enumerated()), id: \.offset) { idx, image in
+                    ForEach(Array(scannedPages.enumerated()), id: \.offset) { idx, image in
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFit()
@@ -590,7 +798,7 @@ struct KnowledgeDetailView: View {
                             .tag(idx)
                     }
                 }
-                .tabViewStyle(.page(indexDisplayMode: pageCount > 1 ? .always : .never))
+                .tabViewStyle(.page(indexDisplayMode: scannedPages.count > 1 ? .always : .never))
                 .frame(minHeight: 350)
 
                 // OCR text
@@ -620,6 +828,32 @@ struct KnowledgeDetailView: View {
             let url = dir.appendingPathComponent("scan_\(idx).jpg")
             guard let data = try? Data(contentsOf: url) else { return nil }
             return UIImage(data: data)
+        }
+    }
+
+    // MARK: - Raw Response (debug)
+
+    @ViewBuilder
+    private var rawResponseSection: some View {
+        let rawURL = fileStore.itemDirectoryURL(for: item.id).appendingPathComponent("provider.response.raw.txt")
+        let iterativeURL = fileStore.itemDirectoryURL(for: item.id).appendingPathComponent("analysis.iterative.txt")
+        let rawText = (try? String(contentsOf: rawURL, encoding: .utf8)) ?? ""
+        let iterText = (try? String(contentsOf: iterativeURL, encoding: .utf8)) ?? ""
+
+        if !rawText.isEmpty || !iterText.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Raw LLM Response").font(.footnote).fontWeight(.semibold).foregroundStyle(.orange)
+                if !rawText.isEmpty {
+                    Text(rawText.prefix(2000)).font(.caption).foregroundStyle(.secondary).padding(8)
+                        .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                if !iterText.isEmpty {
+                    Text("Iterative: \(iterText.prefix(2000))").font(.caption).foregroundStyle(.secondary).padding(8)
+                        .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+            }
+            .padding(12).background(Color.orange.opacity(0.06)).clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 16)
         }
     }
 
@@ -781,9 +1015,10 @@ struct KnowledgeDetailView: View {
                 await pipeline.ensureEmbedding(for: item, using: provider)
             }
 
-            // Auto-run analysis after transcription if provider is configured
-            if let provider = try? ProviderRouter.resolveActive(context: modelContext) {
-                await runAnalysisWithProvider(provider)
+            // Auto-run pipeline (agent-based) after transcription
+            if (try? ProviderRouter.resolveActive(context: modelContext)) != nil {
+                isPipelineProcessing = true
+                processingQueue.enqueue(itemID: item.id, trigger: .directUserAction)
             }
         } catch let error as TranscriptionError {
             switch error {
@@ -839,6 +1074,12 @@ struct KnowledgeDetailView: View {
             bodyText: editedBody.isEmpty ? nil : editedBody,
             tags: nil
         )
+        // Mark fields as user-edited
+        var prov = item.provenance
+        prov.mark(field: "title", origin: .user)
+        if !editedBody.isEmpty { prov.mark(field: "bodyText", origin: .user) }
+        item.fieldProvenanceJSON = prov.encode()
+        try? modelContext.save()
         isEditing = false
     }
 
@@ -848,7 +1089,16 @@ struct KnowledgeDetailView: View {
 
     // MARK: - Reprocess
 
-    private func reprocessItem() async {
+    private func reprocessItem(confirmed: Bool = false) async {
+        // Check for user-owned fields before re-processing
+        if !confirmed {
+            let userOwned = ["title", "bodyText"].filter { item.provenance.isUserOwned(field: $0) }
+            if !userOwned.isEmpty {
+                showReprocessWarning = true
+                return
+            }
+        }
+
         isReprocessing = true
         defer { isReprocessing = false }
 
@@ -859,6 +1109,7 @@ struct KnowledgeDetailView: View {
         // Delete stale artifacts
         let dir = fileStore.itemDirectoryURL(for: item.id)
         try? FileManager.default.removeItem(at: dir.appendingPathComponent("analysis.json"))
+        try? FileManager.default.removeItem(at: dir.appendingPathComponent("analysis.dynamic.json"))
         try? FileManager.default.removeItem(at: dir.appendingPathComponent("provider.response.raw.txt"))
 
         // Clear local state so UI refreshes
@@ -920,61 +1171,20 @@ struct KnowledgeDetailView: View {
 
     private func edgeColor(for type: EdgeType) -> Color {
         switch type {
-        case .relatesTo: .blue
         case .mentions: .purple
-        case .supports: .green
+        case .belongsTo: .blue
+        case .produced: .green
         case .assignedTo: .orange
+        case .supports: .teal
+        case .precedes: .indigo
         case .blockedBy: .red
-        case .belongsTo: .brown
-        case .produced: .indigo
-        case .precedes: .gray
-        case .references: .teal
+        case .relatesTo: .gray
+        case .references: .cyan
         case .contradicts: .pink
         }
     }
 
-    // MARK: - Analysis
-
-    private func runAnalysis() async {
-        guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
-            analysisError = "No AI provider configured. Go to Settings."
-            return
-        }
-        await runAnalysisWithProvider(provider)
-    }
-
-    private func runAnalysisWithProvider(_ provider: any AIProvider) async {
-        guard transcript != nil else {
-            analysisError = "No transcript available. Transcribe first."
-            return
-        }
-
-        isAnalyzing = true
-        analysisError = nil
-
-        do {
-            let svc = AnalysisService()
-            let model = selectedModel.isEmpty
-                ? ActiveModelPicker.effectiveModel(context: modelContext, feature: "analysis")
-                : selectedModel
-
-            guard let t = transcript else { return }
-            let result = try await svc.analyze(transcript: t, using: provider, model: model)
-
-            // Show immediately, then save
-            analysis = result
-            item.status = .analyzed
-
-            try? fileStore.createMeetingDirectory(for: item.id)
-            try? fileStore.writeArtifact(result, fileName: "analysis.json", meetingId: item.id)
-        } catch let error as ProviderError {
-            analysisError = "[Provider] \(error.userMessage)"
-        } catch {
-            analysisError = "[Error] \(error.localizedDescription)"
-        }
-
-        isAnalyzing = false
-    }
+    // MARK: - Analysis (all via agent pipeline)
 
     private var typeIcon: String { item.type.icon }
     private var typeColor: Color { item.type.color }
@@ -1001,4 +1211,52 @@ struct KnowledgeDetailView: View {
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
+}
+
+// MARK: - Chip Flow Layout
+
+struct ChipFlowLayout: Layout {
+    let spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(proposal: proposal, subviews: subviews)
+        let height = rows.last?.maxY ?? 0
+        return CGSize(width: proposal.width ?? 0, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let rows = arrange(proposal: ProposedViewSize(width: bounds.width, height: nil), subviews: subviews)
+        for row in rows {
+            for item in row.items {
+                subviews[item.index].place(at: CGPoint(x: bounds.minX + item.x, y: bounds.minY + row.y), proposal: .unspecified)
+            }
+        }
+    }
+
+    private func arrange(proposal: ProposedViewSize, subviews: Subviews) -> [LayoutRow] {
+        let maxWidth = proposal.width ?? .infinity
+        var rows: [LayoutRow] = []
+        var currentRow: [LayoutItem] = []
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+
+        for (idx, subview) in subviews.enumerated() {
+            let size = subview.sizeThatFits(.unspecified)
+            if !currentRow.isEmpty && x + size.width > maxWidth {
+                rows.append(LayoutRow(items: currentRow, y: y))
+                currentRow = []
+                x = 0
+                y += size.height + spacing
+            }
+            currentRow.append(LayoutItem(index: idx, x: x, width: size.width, height: size.height))
+            x += size.width + spacing
+        }
+        if !currentRow.isEmpty {
+            rows.append(LayoutRow(items: currentRow, y: y))
+        }
+        return rows
+    }
+
+    struct LayoutItem { let index: Int; let x: CGFloat; let width: CGFloat; let height: CGFloat }
+    struct LayoutRow { let items: [LayoutItem]; let y: CGFloat; var maxY: CGFloat { (items.map(\.height).max() ?? 0) + y } }
 }

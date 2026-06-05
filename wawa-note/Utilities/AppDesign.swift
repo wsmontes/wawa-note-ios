@@ -1,5 +1,40 @@
 import SwiftUI
 
+// MARK: - Color from Hex
+
+extension Color {
+    init(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+        let r = Double((int >> 16) & 0xFF) / 255
+        let g = Double((int >> 8) & 0xFF) / 255
+        let b = Double(int & 0xFF) / 255
+        self.init(red: r, green: g, blue: b)
+    }
+
+    static let defaultProjectColor = Color(hex: ProjectPalette.allHexes.first!)
+}
+
+// MARK: - Project Color Palette
+
+enum ProjectPalette {
+    static let allHexes = [
+        "#64748B",  // slateGray  — neutral, professional
+        "#0D9488",  // teal       — calm, structured
+        "#B45379",  // rose       — warm, creative
+        "#B45309",  // amber      — vibrant, earthy
+        "#7C3AED",  // lavender   — elegant
+        "#4D7C0F",  // sage       — natural, grounded
+        "#C2410C",  // terracotta — warm, active
+        "#2563EB",  // steelBlue  — trustworthy (default)
+        "#6B21A8",  // plum       — sophisticated, deep
+        "#5B8C2A",  // moss       — organic
+        "#DB2777",  // coral      — energetic, personal
+        "#9A3412",  // copper     — rich, archival
+    ]
+}
+
 enum AppColor {
     // Semantic
     static let recording = Color.red
@@ -36,13 +71,13 @@ enum AppRadius {
 
 enum AppCopy {
     // MARK: - Home Screen
-    static let homeValueProp = "Record meetings. Get instant transcripts."
+    static let homeValueProp = "Record audio. Get instant transcripts."
 
     // MARK: - Empty States
-    static let noMeetings = "No meetings yet.\nTap the button below to record your first one."
+    static let noMeetings = "No recordings yet.\nTap the button below to record your first one."
     static let noProvider = "Connect an AI service to generate summaries and action items."
     static let noTranscript = "Your transcript will appear here.\nTap Transcribe Meeting to get started."
-    static let noActionItems = "Action items from your meeting will appear here once you generate a summary."
+    static let noActionItems = "Action items from your recording will appear here once you generate a summary."
     static let noSummary = "Transcribe this meeting first, then tap Generate Summary."
 
     // MARK: - Permissions
@@ -83,4 +118,48 @@ enum AppCopy {
     static let errorNoAIService = "No AI service connected. Go to Settings to connect one, then try again."
     static let errorMicrophoneDenied = "Microphone access is off. Turn it on in Settings > Privacy > Microphone, then come back."
     static let errorPlaybackFailed = "Couldn't play the recording. The audio file may be missing or damaged."
+}
+
+// MARK: - UI extensions for Domain types (keeps SwiftUI out of Domain layer)
+
+extension KnowledgeItemType {
+    var color: Color {
+        switch self {
+        case .audio: .blue
+        case .note: .orange
+        case .journalEntry: .purple
+        case .webBookmark: .green
+        case .image: .pink
+        }
+    }
+}
+
+extension TimelineEntry {
+    var typeColor: Color { contentType?.color ?? .blue }
+}
+
+// MARK: - Card Modifier
+
+struct ProjectCard: ViewModifier {
+    let padding: CGFloat
+    let cornerRadius: CGFloat
+
+    init(padding: CGFloat = AppSpacing.md, cornerRadius: CGFloat = AppRadius.lg) {
+        self.padding = padding
+        self.cornerRadius = cornerRadius
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .padding(padding)
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+            .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+    }
+}
+
+extension View {
+    func projectCard(padding: CGFloat = AppSpacing.md, cornerRadius: CGFloat = AppRadius.lg) -> some View {
+        modifier(ProjectCard(padding: padding, cornerRadius: cornerRadius))
+    }
 }

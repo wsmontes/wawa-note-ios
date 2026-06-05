@@ -2,6 +2,8 @@ import Foundation
 import SwiftData
 import UIKit
 import Vision
+import CoreLocation
+import ImageIO
 
 // MARK: - Text extraction from any content type
 
@@ -120,9 +122,6 @@ final class ContentExtractionService {
             request.recognitionLevel = .accurate
             request.usesLanguageCorrection = true
             try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
-            if request.results == nil {
-                continuation.resume(returning: nil)
-            }
         }
     }
 
@@ -142,56 +141,108 @@ final class ContentExtractionService {
             let parts = [analysis.shortSummary, analysis.detailedSummary].filter { !$0.isEmpty }
             if !parts.isEmpty { return parts.joined(separator: "\n") }
         }
+        if let dynamic = try? fileStore.readArtifact(DynamicAnalysis.self, fileName: "analysis.dynamic.json", meetingId: item.id),
+           let summary = dynamic.results.stringField("short_summary") {
+            return summary
+        }
         return nil
     }
 
     // MARK: - Analyze text (source-aware)
 
-    /// Runs AI analysis on extracted text. The system prompt and user prompt structure
-    /// adapt to the item's source type so the LLM understands context: a recording gets
-    /// meeting-analysis framing, a scan gets document-structure framing, etc.
+    /// Runs AI analysis on extracted text. Uses the direct AnalysisService path
+    /// for reliable structured output. The iterative agent path is reserved for
+    /// framework-driven analysis (analyzeDynamic) where tools add value.
     func analyze(text: String, item: KnowledgeItem) async -> Bool {
         guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
             AppLog.provider.warning("ContentExtraction.analyze: no provider configured")
             return false
         }
 
+        // Use configured analysis model (respects user's ai_config.json), with fallback
         let settings = AutomationSettings.shared
-        let model = settings.resolveAutoAnalysisModel(context: modelContext) ?? settings.autoAnalysisModel
-
+        let configModel = AIConfigService.shared.featureConfig(for: "analysis")?.model
+        let model = configModel ?? settings.resolveAutoAnalysisModel(context: modelContext) ?? settings.autoAnalysisModel
         let sourceCtx = SourceContext.from(item)
-
-        // Build synthetic transcript from text chunks for AnalysisService
         let segments = chunkText(text, itemID: item.id)
-        let sourceId = segments.count > 1 ? "text-chunked" : "text-direct"
-        let transcript = Transcript(meetingId: item.id, languageCode: nil, segments: segments, sourceEngineId: sourceId)
+        let transcript = Transcript(meetingId: item.id, languageCode: nil, segments: segments, sourceEngineId: "text-direct")
 
-        AppLog.provider.info("ContentExtraction.analyze: source=\(sourceCtx.sourceType.rawValue), \(segments.count) segments, model \(model)")
+        AppLog.provider.info("ContentExtraction.analyze: source=\(sourceCtx.sourceType.rawValue), model=\(model)")
 
         do {
-            let result = try await AnalysisService().analyze(
-                transcript: transcript,
-                using: provider,
-                model: model,
-                meetingId: item.id,
-                sourceContext: sourceCtx
-            )
+            let result = try await AnalysisService().analyze(transcript: transcript, using: provider, model: model, meetingId: item.id, sourceContext: sourceCtx)
 
             try fileStore.createMeetingDirectory(for: item.id)
             try fileStore.writeArtifact(result, fileName: "analysis.json", meetingId: item.id)
-
             item.status = .analyzed
             item.analysisProviderId = model
             try modelContext.save()
 
             AppLog.provider.info("ContentExtraction.analyze: done — \(result.shortSummary.prefix(80))")
             NotificationCenter.default.post(name: .analysisReady, object: item.id.uuidString)
-
             await EmbeddingPipelineService().ensureEmbedding(for: item, using: provider)
-
             return true
         } catch {
-            AppLog.provider.error("ContentExtraction.analyze: failed for item \(item.id): \(error)")
+            AppLog.provider.error("ContentExtraction.analyze: FAILED for item \(item.id): \(error.localizedDescription)")
+            try? fileStore.createMeetingDirectory(for: item.id)
+            return false
+        }
+    }
+
+    /// Parses agent output into structured MeetingAnalysis artifact.
+    private func analyzeStructured(transcript: Transcript, item: KnowledgeItem, sourceCtx: SourceContext, provider: any AIProvider, model: String) async -> Bool {
+        do {
+            let result = try await AnalysisService().analyze(transcript: transcript, using: provider, model: model, meetingId: item.id, sourceContext: sourceCtx)
+            try fileStore.createMeetingDirectory(for: item.id)
+            try fileStore.writeArtifact(result, fileName: "analysis.json", meetingId: item.id)
+            item.status = .analyzed
+            item.analysisProviderId = model
+            try modelContext.save()
+            AppLog.provider.info("ContentExtraction.analyze: done — \(result.shortSummary.prefix(80))")
+            NotificationCenter.default.post(name: .analysisReady, object: item.id.uuidString)
+            await EmbeddingPipelineService().ensureEmbedding(for: item, using: provider)
+            return true
+        } catch { return false }
+    }
+
+    /// Framework-driven analysis: uses the project's framework to determine
+    /// the output schema and system prompt. Returns DynamicAnalysis.
+    func analyzeDynamic(text: String, item: KnowledgeItem, framework: ProjectFramework) async -> Bool {
+        guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
+            AppLog.provider.warning("ContentExtraction.analyzeDynamic: no provider configured")
+            return false
+        }
+
+        let model = ModelTierResolver.resolveForAnalysis(item: item)
+        let sourceCtx = SourceContext.from(item)
+        let segments = chunkText(text, itemID: item.id)
+        let transcript = Transcript(meetingId: item.id, languageCode: nil, segments: segments, sourceEngineId: "text-direct")
+
+        AppLog.provider.info("ContentExtraction.analyzeDynamic: framework=\(framework.id), source=\(sourceCtx.sourceType.rawValue), model=\(model)")
+
+        do {
+            let result = try await AnalysisService().analyzeDynamic(
+                transcript: transcript, using: provider, model: model,
+                meetingId: item.id, sourceContext: sourceCtx,
+                schema: framework.itemAnalysis.outputSchema,
+                systemPrompt: framework.itemAnalysis.systemPrompt
+            )
+
+            try fileStore.createMeetingDirectory(for: item.id)
+            let resultData = try JSONEncoder().encode(result)
+            try resultData.write(to: fileStore.itemDirectoryURL(for: item.id).appendingPathComponent("analysis.dynamic.json"))
+
+            item.status = .analyzed
+            item.analysisProviderId = model
+            try modelContext.save()
+
+            AppLog.provider.info("ContentExtraction.analyzeDynamic: done for item \(item.id)")
+            NotificationCenter.default.post(name: .analysisReady, object: item.id.uuidString)
+
+            await EmbeddingPipelineService().ensureEmbedding(for: item, using: provider)
+            return true
+        } catch {
+            AppLog.provider.error("ContentExtraction.analyzeDynamic: failed for item \(item.id): \(error)")
             return false
         }
     }
@@ -200,7 +251,7 @@ final class ContentExtractionService {
 
     private static let maxChunkChars = 8000
 
-    private func chunkText(_ text: String, itemID: UUID) -> [TranscriptSegment] {
+    func chunkText(_ text: String, itemID: UUID) -> [TranscriptSegment] {
         let paragraphs = text.components(separatedBy: "\n\n")
         var segments: [TranscriptSegment] = []
         var currentChunk = ""
@@ -274,7 +325,7 @@ final class ContentExtractionService {
 // MARK: - Source Context
 
 /// Describes where an item came from so the analysis prompt can adapt.
-/// A meeting transcript, an imported PDF, a scanned document, and a manual note
+/// A audio transcript, an imported PDF, a scanned document, and a manual note
 /// all need different AI framing to produce useful structured output.
 struct SourceContext: Sendable {
     enum SourceType: String, Sendable {
@@ -298,9 +349,11 @@ struct SourceContext: Sendable {
         } else if item.imageFileRelativePath != nil {
             sourceType = .scan
             if let pages = item.imagePageCount { metadata["pageCount"] = String(pages) }
-        } else if item.isImported, let source = item.importSourceURL {
+        } else if item.isImported {
             sourceType = .import_
-            metadata["filename"] = URL(string: source)?.lastPathComponent ?? source
+            if let source = item.importSourceURL {
+                metadata["filename"] = URL(string: source)?.lastPathComponent ?? source
+            }
         } else {
             sourceType = .note
         }
@@ -312,17 +365,17 @@ struct SourceContext: Sendable {
     }
 
     /// Builds the analysis system prompt for this source type.
-    /// Each source gets a different analytical lens — a meeting transcript needs
+    /// Each source gets a different analytical lens — a audio transcript needs
     /// decisions/actions/risks extraction, while a scanned document needs
     /// structure analysis and clause identification.
     func analysisSystemPrompt() -> String {
         switch sourceType {
         case .recording:
-            return "You are a meeting intelligence analyst. Extract decisions, action items with owners, risks, open questions, important dates, mentioned people/systems/organizations, and a topic timeline. Return only valid JSON."
+            return "You are a audio content analyst. Extract decisions, action items with owners, risks, open questions, important dates, mentioned people/systems/organizations, and a topic timeline. Return only valid JSON."
         case .import_:
             return "You are a document analyst. Analyze this imported file. Identify its structure, key points, decisions if any, action items, risks, mentioned entities, and dates. Consider the filename and metadata for context. Return only valid JSON."
         case .scan:
-            return "You are a document analyst. Analyze this scanned document (OCR text). Identify document structure, key clauses, dates, parties mentioned, obligations, risks, and action items if applicable. Note that OCR may have errors — flag uncertain readings. Return only valid JSON."
+            return "You are a visual content analyst. Analyze this image description (which may include OCR text and/or an AI-generated visual description). Identify what is depicted, key objects, text content, context, and any action items or insights. Note that this is NOT a meeting transcript — focus on visual content. Return only valid JSON."
         case .note:
             return "You are a knowledge analyst. Analyze this note. Extract key themes, questions being explored, references to other topics, action items if any, and people/systems mentioned. Return only valid JSON."
         }
@@ -334,14 +387,14 @@ struct SourceContext: Sendable {
         var lines: [String] = []
         switch sourceType {
         case .recording:
-            lines.append("The following is a meeting transcript.")
+            lines.append("The following is a audio transcript.")
             if let dur = metadata["duration"] { lines.append("Duration: \(dur)") }
             if let lang = metadata["language"] { lines.append("Language: \(lang)") }
         case .import_:
             lines.append("The following is the content of an imported file.")
             if let fn = metadata["filename"] { lines.append("Filename: \(fn)") }
         case .scan:
-            lines.append("The following is OCR-extracted text from a scanned document.")
+            lines.append("The following describes an image (may include OCR text and/or visual scene description).")
             if let pages = metadata["pageCount"] { lines.append("Pages: \(pages)") }
         case .note:
             lines.append("The following is a user note.")
@@ -357,3 +410,232 @@ struct SourceContext: Sendable {
         return "\(m)m \(s)s"
     }
 }
+
+// MARK: - Model Tier Resolver
+
+/// Decides which model tier to use for analysis and ingestion based on content complexity,
+/// project size, and framework type. Cheap models (nano/haiku) handle simple extraction
+/// and small projects; expensive models (opus/gpt-5.5) handle complex analysis and large projects.
+@MainActor
+enum ModelTierResolver {
+    /// Executor model — cheap, fast, good at extraction.
+    static var executorModel: String {
+        AIConfigService.shared.featureConfig(for: "agent")?.model
+            ?? "gpt-5-nano"
+    }
+
+    /// Advisor model — expensive, smart, good at reasoning.
+    /// Validated against active provider's available models, falls back to executor.
+    static var advisorModel: String {
+        let chatModel = AIConfigService.shared.featureConfig(for: "chat")?.model ?? "gpt-5.5"
+        let analysisModel = AIConfigService.shared.featureConfig(for: "analysis")?.model
+        return analysisModel ?? chatModel
+    }
+
+    /// Resolve which model to use for item analysis based on content complexity.
+    static func resolveForAnalysis(item: KnowledgeItem) -> String {
+        if item.durationSeconds.map({ $0 > 600 }) ?? false { return advisorModel }
+        if item.imagePageCount.map({ $0 > 2 }) ?? false { return advisorModel }
+        if let body = item.bodyText, body.count > 15000 { return advisorModel }
+        return executorModel
+    }
+
+    /// Resolve which model to use for project ingestion based on project complexity.
+    static func resolveForIngestion(projectID: UUID, context: ModelContext) -> String {
+        let itemCount = (try? ProjectService(context: context).items(in: projectID).count) ?? 0
+        if itemCount >= 3 { return advisorModel }
+        return executorModel
+    }
+}
+
+// MARK: - Image Analysis (OCR + LLM Vision)
+
+/// Combines Apple OCR with LLM vision analysis for comprehensive image understanding.
+/// OCR extracts exact text; the LLM describes visual content, layout, document type, and context.
+@MainActor
+final class ImageAnalysisService {
+
+    /// Analyze an image file: run OCR + LLM vision, return combined enriched text.
+    func analyzeImage(_ imageURL: URL, llmProvider: any AIProvider, model: String) async throws -> String {
+        guard let image = UIImage(contentsOfFile: imageURL.path),
+              let cgImage = image.cgImage else {
+            throw ImageAnalysisError.invalidImage
+        }
+
+        // Phase 1: Apple OCR for exact text extraction
+        let ocrText: String = await withCheckedContinuation { continuation in
+            let request = VNRecognizeTextRequest { request, _ in
+                let text = (request.results as? [VNRecognizedTextObservation] ?? [])
+                    .compactMap { $0.topCandidates(1).first?.string }
+                    .joined(separator: "\n")
+                continuation.resume(returning: text)
+            }
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = true
+            try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
+        }
+
+        // Phase 2: LLM vision analysis for visual understanding
+        let visualDescription: String
+        do {
+            let params = AIConfigService.shared.requestParams(for: "analysis", model: model)
+            let request = AIRequest(
+                model: model,
+                messages: [
+                    AIMessage(role: .system, content: [.text("You are a document image analyst. Describe what you see in the image — document type, layout, visual elements, handwriting, diagrams. Be concise but thorough. Return only the description, no JSON.")]),
+                    AIMessage(role: .user, content: [
+                        .text("Analyze this document image. Describe its type, content, layout, and any notable visual elements."),
+                        .imageFile(imageURL)
+                    ])
+                ],
+                temperature: params.temperature,
+                maxTokens: min(params.maxTokens ?? 4096, 2048)
+            )
+            let response = try await llmProvider.send(request)
+            visualDescription = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            visualDescription = ""
+        }
+
+        // Combine OCR + visual description
+        var parts: [String] = []
+        if !ocrText.isEmpty { parts.append("OCR TEXT:\n\(ocrText)") }
+        if !visualDescription.isEmpty { parts.append("VISUAL ANALYSIS:\n\(visualDescription)") }
+        return parts.isEmpty ? "" : parts.joined(separator: "\n\n---\n\n")
+    }
+}
+
+enum ImageAnalysisError: Error, LocalizedError {
+    case invalidImage
+    case noProviderConfigured
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidImage: return "The image file could not be read."
+        case .noProviderConfigured: return "No AI provider configured. Go to Settings to add one."
+        }
+    }
+}
+
+// MARK: - Location Intelligence
+
+/// Resolves coordinates to human-readable addresses and vice versa.
+/// Enriches items with location context for LLM analysis.
+/// Handles GPS from recordings, EXIF from images/videos, and text mentions.
+@MainActor
+final class LocationIntelligenceService {
+    private let geocoder = CLGeocoder()
+
+    /// Extract coordinates from an image file via EXIF metadata.
+    /// Works with JPEG, HEIC, TIFF, and RAW formats that embed GPS tags.
+    static func extractGPSFromImage(_ imageURL: URL) -> CLLocationCoordinate2D? {
+        guard let source = CGImageSourceCreateWithURL(imageURL as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let gps = props[kCGImagePropertyGPSDictionary] as? [CFString: Any],
+              let lat = gps[kCGImagePropertyGPSLatitude] as? Double,
+              let lon = gps[kCGImagePropertyGPSLongitude] as? Double,
+              let latRef = gps[kCGImagePropertyGPSLatitudeRef] as? String,
+              let lonRef = gps[kCGImagePropertyGPSLongitudeRef] as? String
+        else { return nil }
+
+        let latitude = latRef == "S" ? -lat : lat
+        let longitude = lonRef == "W" ? -lon : lon
+        return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+
+    /// Reverse-geocode coordinates into a human-readable address string.
+    func resolveToAddress(latitude: Double, longitude: Double) async -> String? {
+        let location = CLLocation(latitude: latitude, longitude: longitude)
+        return await withCheckedContinuation { continuation in
+            geocoder.reverseGeocodeLocation(location) { placemarks, _ in
+                guard let place = placemarks?.first else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                let parts = [
+                    place.name,
+                    place.thoroughfare,
+                    place.locality,
+                    place.administrativeArea,
+                    place.country
+                ].compactMap { $0 }.filter { !$0.isEmpty }
+                let address = parts.joined(separator: ", ")
+                continuation.resume(returning: address.isEmpty ? nil : address)
+            }
+        }
+    }
+
+    /// Forward-geocode a text query into coordinates.
+    func resolveToCoordinates(_ query: String) async -> CLLocationCoordinate2D? {
+        await withCheckedContinuation { continuation in
+            geocoder.geocodeAddressString(query) { placemarks, _ in
+                guard let loc = placemarks?.first?.location else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                continuation.resume(returning: loc.coordinate)
+            }
+        }
+    }
+
+    /// Enrich a KnowledgeItem with location context for LLM analysis.
+    /// Uses recorded GPS or EXIF metadata from attached images.
+    func enrichItem(_ item: KnowledgeItem) async -> String? {
+        var lat: Double?
+        var lon: Double?
+
+        // Priority 1: Already captured context coordinates
+        if let clat = item.contextLatitude, let clon = item.contextLongitude {
+            lat = clat
+            lon = clon
+        }
+
+        // Priority 2: EXIF from scanned images
+        if lat == nil, let relativePath = item.imageFileRelativePath {
+            let store = FileArtifactStore()
+            let url = store.itemDirectoryURL(for: item.id).appendingPathComponent(relativePath)
+            if let coord = Self.extractGPSFromImage(url) {
+                lat = coord.latitude
+                lon = coord.longitude
+                // Persist for future use
+                item.contextLatitude = lat
+                item.contextLongitude = lon
+            }
+        }
+
+        guard let lat, let lon else { return nil }
+
+        let address = await resolveToAddress(latitude: lat, longitude: lon)
+        if let address {
+            item.contextPlaceName = address
+        }
+        return address
+    }
+
+    /// Build a location-aware context string for LLM prompts.
+    func locationContextString(for item: KnowledgeItem) async -> String {
+        guard let address = await enrichItem(item) else {
+            // Fall back to existing place_name annotation
+            if let place = item.contextPlaceName, !place.isEmpty {
+                return "Location: \(place)"
+            }
+            return ""
+        }
+        var parts: [String] = ["Location: \(address)"]
+        if let city = item.contextPlaceName?.components(separatedBy: ", ").dropFirst().first {
+            parts.append("City: \(city)")
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    /// Find items near a given coordinate within a radius (meters).
+    static func nearbyItems(to coordinate: CLLocationCoordinate2D, radiusMeters: Double, in items: [KnowledgeItem]) -> [KnowledgeItem] {
+        let center = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        return items.filter { item in
+            guard let ilat = item.contextLatitude, let ilon = item.contextLongitude else { return false }
+            let loc = CLLocation(latitude: ilat, longitude: ilon)
+            return loc.distance(from: center) <= radiusMeters
+        }
+    }
+}
+

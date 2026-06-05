@@ -5,7 +5,7 @@ struct ListItemsTool: AgentTool {
     let description = "List knowledge items filtered by type, date range, or search. Returns item UUIDs for use with get_item. Good for browsing when you don't have a specific query."
 
     let parameters = AIToolParameters(properties: [
-        "item_type": AIToolProperty(type: "string", description: "Filter: meeting, note, journalEntry, webBookmark, image"),
+        "item_type": AIToolProperty(type: "string", description: "Filter: audio, note, journalEntry, webBookmark, image"),
         "limit": AIToolProperty(type: "integer", description: "Max results (default 15, max 30)"),
         "date_from": AIToolProperty(type: "string", description: "ISO 8601 date (YYYY-MM-DD)"),
         "date_to": AIToolProperty(type: "string", description: "ISO 8601 date (YYYY-MM-DD)")

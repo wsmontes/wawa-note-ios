@@ -1,5 +1,59 @@
 import Foundation
 
+// MARK: - Chat Context
+
+enum ChatContext: Equatable, Hashable, Codable {
+    case global
+    case inbox
+    case item(UUID)
+    case exploreProjects
+    case project(UUID)
+
+    var key: String {
+        switch self {
+        case .global:           return "global"
+        case .inbox:            return "inbox"
+        case .item(let id):     return "item:\(id.uuidString)"
+        case .exploreProjects:  return "explore:projects"
+        case .project(let id):  return "project:\(id.uuidString)"
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .global:           return "General"
+        case .inbox:            return "Inbox"
+        case .item:             return "Item"
+        case .exploreProjects:  return "Projects"
+        case .project:          return "Project"
+        }
+    }
+
+    var associatedID: UUID? {
+        switch self {
+        case .item(let id):     return id
+        case .project(let id):  return id
+        default:                return nil
+        }
+    }
+
+    static func from(key: String) -> ChatContext? {
+        switch key {
+        case "global": return .global
+        case "inbox": return .inbox
+        case "explore:projects": return .exploreProjects
+        default:
+            if key.hasPrefix("item:"), let uuid = UUID(uuidString: String(key.dropFirst(5))) {
+                return .item(uuid)
+            }
+            if key.hasPrefix("project:"), let uuid = UUID(uuidString: String(key.dropFirst(8))) {
+                return .project(uuid)
+            }
+            return nil
+        }
+    }
+}
+
 enum AIRole: String, Codable {
     case system
     case user
@@ -28,6 +82,7 @@ struct ChatConversation: Identifiable, Codable {
     var messageCount: Int
     var pinnedAt: Date?
     var lastMessagePreview: String?
+    var contextKey: String?
 
     init(
         id: UUID = UUID(),
@@ -38,7 +93,8 @@ struct ChatConversation: Identifiable, Codable {
         model: String? = nil,
         messageCount: Int = 0,
         pinnedAt: Date? = nil,
-        lastMessagePreview: String? = nil
+        lastMessagePreview: String? = nil,
+        contextKey: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -49,6 +105,7 @@ struct ChatConversation: Identifiable, Codable {
         self.messageCount = messageCount
         self.pinnedAt = pinnedAt
         self.lastMessagePreview = lastMessagePreview
+        self.contextKey = contextKey
     }
 }
 
@@ -64,6 +121,7 @@ struct ChatMessage: Identifiable, Codable {
     var toolCallId: String?
     var citations: [ChatCitation]?
     var isThinking: Bool?
+    var projectColorHex: String?
 
     init(
         id: UUID = UUID(),
@@ -74,7 +132,8 @@ struct ChatMessage: Identifiable, Codable {
         toolCalls: [PersistedToolCall]? = nil,
         toolCallId: String? = nil,
         citations: [ChatCitation]? = nil,
-        isThinking: Bool? = nil
+        isThinking: Bool? = nil,
+        projectColorHex: String? = nil
     ) {
         self.id = id
         self.conversationId = conversationId
@@ -85,6 +144,7 @@ struct ChatMessage: Identifiable, Codable {
         self.toolCallId = toolCallId
         self.citations = citations
         self.isThinking = isThinking
+        self.projectColorHex = projectColorHex
     }
 }
 
@@ -124,5 +184,7 @@ struct ChatCitation: Codable {
     let itemId: UUID
     let title: String
     let snippet: String
-    let itemType: String
+    let itemType: KnowledgeItemType
+    var projectID: UUID?
+    var projectColorHex: String?
 }

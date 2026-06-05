@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 import AVFoundation
 import Vision
 import VisionKit
+import PhotosUI
 
 // MARK: - HomeViewModel
 
@@ -26,11 +27,13 @@ final class HomeViewModel: ObservableObject {
     private var modelContext: ModelContext?
     private var contentPipeline: ContentPipelineService?
     private var coordinator: RecordingCoordinator?
+    private var processingQueue: ProcessingQueueService?
 
-    func configure(modelContext: ModelContext, contentPipeline: ContentPipelineService, coordinator: RecordingCoordinator) {
+    func configure(modelContext: ModelContext, contentPipeline: ContentPipelineService, coordinator: RecordingCoordinator, processingQueue: ProcessingQueueService? = nil) {
         self.modelContext = modelContext
         self.contentPipeline = contentPipeline
         self.coordinator = coordinator
+        self.processingQueue = processingQueue
     }
 
     // MARK: Import
@@ -83,10 +86,12 @@ final class HomeViewModel: ObservableObject {
         let fileSize = Int64(resourceValues?.fileSize ?? 0)
         let creationDate = resourceValues?.creationDate ?? resourceValues?.contentModificationDate
         var snippet = ""
-        if let handle = try? FileHandle(forReadingFrom: url),
-           let data = try? handle.read(upToCount: 4096),
-           let text = String(data: data, encoding: .utf8) {
-            snippet = String(text.prefix(500))
+        if let handle = try? FileHandle(forReadingFrom: url) {
+            defer { try? handle.close() }
+            if let data = try? handle.read(upToCount: 4096),
+               let text = String(data: data, encoding: .utf8) {
+                snippet = String(text.prefix(500))
+            }
         }
         return TextImportPreview(formatIdentifier: importer.formatIdentifier, displayName: importer.displayName,
                                   suggestedTitle: filename, fileSize: fileSize, creationDate: creationDate, textSnippet: snippet)
@@ -149,7 +154,7 @@ final class HomeViewModel: ObservableObject {
             try await importService.storeAudio(sourceURL: tempURL, itemID: itemId, using: artifactStore)
             try? FileManager.default.removeItem(at: tempURL)
             if deleteSource { try? FileManager.default.removeItem(at: url) }
-            pipeline.process(itemId, using: modelContext)
+            processingQueue?.enqueue(itemID: itemId, trigger: .newCapture)
         } catch {
             await MainActor.run { coord.deleteItem(itemId) }
         }
@@ -162,10 +167,10 @@ final class HomeViewModel: ObservableObject {
             await MainActor.run {
                 modelContext.insert(item)
                 try? modelContext.save()
-                if let target = targetProjectForImport {
-                    try? ProjectService(context: modelContext).addItem(item.id, to: target.id)
+                if let t = targetProjectForImport {
+                    try? ProjectService(context: modelContext).addItem(item.id, to: t.id)
                 }
-                pipeline.process(item.id, using: modelContext)
+                processingQueue?.enqueue(itemID: item.id, projectID: targetProjectForImport?.id, trigger: .newCapture)
             }
             if deleteSource { try? FileManager.default.removeItem(at: url) }
         } catch {
@@ -190,6 +195,9 @@ final class HomeViewModel: ObservableObject {
 struct HomeView: View {
     @EnvironmentObject private var coordinator: RecordingCoordinator
     @EnvironmentObject private var contentPipeline: ContentPipelineService
+    @EnvironmentObject private var processingQueue: ProcessingQueueService
+    @EnvironmentObject private var chatState: ChatOverlayState
+    @EnvironmentObject private var chatViewModel: ChatViewModel
     @Query(sort: \Project.updatedAt, order: .reverse) private var projects: [Project]
     @Query(sort: \KnowledgeItem.updatedAt, order: .reverse) private var allItems: [KnowledgeItem]
     @Environment(\.modelContext) private var modelContext
@@ -201,12 +209,16 @@ struct HomeView: View {
     @State private var navigateToProject: Project?
     @State private var showCreationSheet = false
     @State private var showScanner = false
+    @State private var showPhotoPicker = false
+    @State private var showCamera = false
+    @State private var showPhotoSourceMenu = false
+    @State private var capturedPhoto: UIImage?
     @State private var expandedProjectIDs: Set<UUID> = []
 
     var body: some View {
         ZStack {
             switch captureVM.recordingState {
-            case .recording, .paused:
+            case .recording, .paused, .interrupted:
                 recordingPanel
             case .stopped:
                 defaultSurface
@@ -243,36 +255,62 @@ struct HomeView: View {
         .fileImporter(isPresented: $importVM.showFilePicker, allowedContentTypes: importVM.importRouter.allUTTypes(), allowsMultipleSelection: true) { importVM.handleFilePick($0) }
         .sheet(item: $importVM.pendingImport) { imp in
             ImportFormView(sourceURL: imp.url, kind: imp.kind, textImporter: imp.textImporter, isFromShareExtension: imp.isFromShareExtension) { item in
-                if let target = importVM.targetProjectForImport {
-                    try? ProjectService(context: modelContext).addItem(item.id, to: target.id)
+                if let t = importVM.targetProjectForImport {
+                    try? ProjectService(context: modelContext).addItem(item.id, to: t.id)
                 }
-                contentPipeline.process(item.id, using: modelContext)
+                processingQueue.enqueue(itemID: item.id, projectID: importVM.targetProjectForImport?.id, trigger: .newCapture)
                 navigateToItem = item
                 importVM.pendingImport = nil
             }
+            .environmentObject(coordinator)
         }
         .onOpenURL { if $0.scheme == "wawanote" { Task { await importVM.scanSharedDirectoryAndImport() } } }
-        .alert("Import Error", isPresented: .constant(importVM.importError != nil)) { Button("OK") { importVM.importError = nil } } message: { Text(importVM.importError ?? "") }
+        .alert("Import Error", isPresented: Binding(get: { importVM.importError != nil }, set: { if !$0 { importVM.importError = nil } })) { Button("OK") { importVM.importError = nil } } message: { Text(importVM.importError ?? "") }
         .sheet(isPresented: $showCreationSheet) { CreationSheetView() }
         .fullScreenCover(isPresented: $showScanner) {
             ScannerView(scannedImages: $scannerVM.scannedImages)
+        }
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraCaptureView(capturedImage: $capturedPhoto)
+        }
+        .sheet(isPresented: $showPhotoPicker) {
+            PhotoPickerView(selectedImage: $capturedPhoto)
+        }
+        .confirmationDialog("Photo Source", isPresented: $showPhotoSourceMenu) {
+            Button("Take Photo") { showCamera = true }
+            Button("Choose from Gallery") { showPhotoPicker = true }
+            Button("Cancel", role: .cancel) {}
+        }
+        .onChange(of: capturedPhoto) { _, photo in
+            guard let photo else { return }
+            Task {
+                let items = await processPhotoItem(photo)
+                for item in items {
+                    processingQueue.enqueue(itemID: item.id, trigger: .newCapture)
+                }
+                capturedPhoto = nil
+                navigateToItem = items.first
+            }
         }
         .onChange(of: scannerVM.scannedImages) { _, images in
             guard !images.isEmpty else { return }
             Task {
                 let items = await scannerVM.createItems(from: images, context: modelContext)
                 for item in items {
-                    await contentPipeline.process(item.id, using: modelContext)
+                    processingQueue.enqueue(itemID: item.id, trigger: .newCapture)
                 }
                 scannerVM.scannedImages = []
                 navigateToItem = items.first
             }
         }
         .onAppear {
+            chatState.context = .global
+            chatViewModel.pregenerateGreeting(for: .global)
             captureVM.bind(coordinator: coordinator)
             captureVM.modelContext = modelContext
             captureVM.contentPipeline = contentPipeline
-            importVM.configure(modelContext: modelContext, contentPipeline: contentPipeline, coordinator: coordinator)
+            captureVM.processingQueue = processingQueue
+            importVM.configure(modelContext: modelContext, contentPipeline: contentPipeline, coordinator: coordinator, processingQueue: processingQueue)
         }
     }
 
@@ -286,7 +324,7 @@ struct HomeView: View {
                     .frame(width: 96, height: 96)
                     .shadow(color: .blue.opacity(0.15), radius: 16, y: 4)
                 Text("wawa-note").font(.title2).fontWeight(.semibold)
-                Text("Capture, organize, understand")
+                Text("A informação é sua. O processo é seu.")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
             .padding(.top, 0).padding(.bottom, 20)
@@ -307,50 +345,63 @@ struct HomeView: View {
         }
         .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { expandedProjectIDs = [] } }
         .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 0) {
-                Divider()
-                HStack(spacing: 16) {
-                    Button(action: { captureVM.startRecording() }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "record.circle.fill").font(.title3).symbolRenderingMode(.hierarchical)
-                            Text("Record").font(.headline)
+            if !chatState.isActive {
+                VStack(spacing: 0) {
+                    Divider()
+                    HStack(spacing: 10) {
+                        Button(action: { captureVM.startRecording() }) {
+                            VStack(spacing: 2) {
+                                Image(systemName: "record.circle.fill").font(.title3).symbolRenderingMode(.hierarchical)
+                                Text("Record").font(.caption2)
+                            }
+                            .foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 52)
+                            .background(LinearGradient(colors: [.red, .red.opacity(0.85)], startPoint: .leading, endPoint: .trailing))
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
                         }
-                        .foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 52)
-                        .background(LinearGradient(colors: [.red, .red.opacity(0.85)], startPoint: .leading, endPoint: .trailing))
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        Button(action: { showScanner = true }) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "doc.text.viewfinder").font(.subheadline)
+                                Text("Scan").font(.caption2)
+                            }.foregroundStyle(.primary).frame(width: 60, height: 52)
+                            .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
+                        }
+                        Button(action: { showPhotoSourceMenu = true }) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "photo").font(.subheadline)
+                                Text("Photo").font(.caption2)
+                            }.foregroundStyle(.primary).frame(width: 60, height: 52)
+                            .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
+                        }
+                        Button(action: { importVM.showFilePicker = true }) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "square.and.arrow.down").font(.subheadline)
+                                Text("Import").font(.caption2)
+                            }.foregroundStyle(.primary).frame(width: 60, height: 52)
+                            .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
+                        }
+                        Button(action: { showCreationSheet = true }) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "plus.circle").font(.subheadline)
+                                Text("New").font(.caption2)
+                            }.foregroundStyle(.primary).frame(width: 60, height: 52)
+                            .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
+                        }
                     }
-                    Button(action: { showScanner = true }) {
-                        VStack(spacing: 4) {
-                            Image(systemName: "doc.text.viewfinder").font(.subheadline)
-                            Text("Scan").font(.caption2)
-                        }.foregroundStyle(.primary).frame(width: 60, height: 52)
-                        .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
-                    }
-                    Button(action: { importVM.showFilePicker = true }) {
-                        VStack(spacing: 4) {
-                            Image(systemName: "square.and.arrow.down").font(.subheadline)
-                            Text("Import").font(.caption2)
-                        }.foregroundStyle(.primary).frame(width: 60, height: 52)
-                        .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
-                    }
-                    Button(action: { showCreationSheet = true }) {
-                        VStack(spacing: 4) {
-                            Image(systemName: "plus.circle").font(.subheadline)
-                            Text("New").font(.caption2)
-                        }.foregroundStyle(.primary).frame(width: 60, height: 52)
-                        .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
-                    }
+                    .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 6).background(.bar)
+                    .shadow(color: .black.opacity(0.08), radius: 4, y: -2)
                 }
-                .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 8).background(.bar)
-                .shadow(color: .black.opacity(0.08), radius: 4, y: -2)
             }
         }
     }
 
     // MARK: Project row
 
+    private var itemsByProject: [UUID: [KnowledgeItem]] {
+        Dictionary(grouping: allItems, by: { $0.projectID ?? UUID() })
+    }
+
     private func projectRow(_ project: Project) -> some View {
-        let projectItems = allItems.filter { $0.projectID == project.id }
+        let projectItems = itemsByProject[project.id] ?? []
         let isExpanded = expandedProjectIDs.contains(project.id)
 
         return VStack(spacing: 0) {
@@ -433,26 +484,48 @@ struct HomeView: View {
 
     private var recordingPanel: some View {
         let isPaused = captureVM.recordingState == .paused
+        let isInterrupted = captureVM.recordingState == .interrupted
+        let isActive = captureVM.recordingState == .recording
         return VStack(spacing: 0) {
             Spacer()
-            ScrollingWaveformView(level: captureVM.audioLevel, isRunning: !isPaused)
+            ScrollingWaveformView(level: captureVM.audioLevel, isRunning: isActive)
                 .frame(height: 64).padding(.horizontal, 16)
-            Spacer().frame(height: 24)
+            Spacer().frame(height: 16)
+            // Audio source indicator
+            HStack(spacing: 4) {
+                Image(systemName: captureVM.currentInputIcon)
+                    .font(.caption2)
+                Text(captureVM.currentInputPortName)
+                    .font(.caption2)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(.ultraThinMaterial, in: Capsule())
+            Spacer().frame(height: 16)
             Text(captureVM.elapsedTimeFormatted)
                 .font(.system(size: 48, weight: .thin, design: .monospaced))
-                .foregroundStyle(isPaused ? .orange : .primary)
-            Text(isPaused ? "Paused" : "Recording")
-                .font(.subheadline).foregroundStyle(isPaused ? .orange : .secondary)
+                .foregroundStyle(isInterrupted ? .red : (isPaused ? .orange : .primary))
+            if isInterrupted {
+                Text(captureVM.errorMessage ?? "Recording interrupted")
+                    .font(.subheadline).foregroundStyle(.red)
+            } else {
+                Text(isPaused ? "Paused" : "Recording")
+                    .font(.subheadline).foregroundStyle(isPaused ? .orange : .secondary)
+            }
+            if let error = captureVM.errorMessage {
+                Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 32).multilineTextAlignment(.center)
+            }
             Spacer()
             HStack(spacing: 40) {
-                if isPaused {
+                if isPaused || isInterrupted {
                     Button(action: { captureVM.resumeRecording() }) {
                         ZStack {
-                            Circle().fill(.red).frame(width: 64, height: 64)
-                            Image(systemName: "record.circle.fill").font(.system(size: 28)).foregroundStyle(.white)
+                            Circle().fill(isInterrupted ? .orange : .red).frame(width: 64, height: 64)
+                            Image(systemName: isInterrupted ? "arrow.clockwise.circle.fill" : "record.circle.fill")
+                                .font(.system(size: 28)).foregroundStyle(.white)
                         }
                     }
-                    Button(action: { captureVM.stopRecording() }) {
+                    Button(action: { UINotificationFeedbackGenerator().notificationOccurred(.success); captureVM.stopRecording() }) {
                         Text("Finish").font(.headline).foregroundStyle(.primary)
                             .frame(width: 80, height: 44)
                             .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 22))
@@ -468,6 +541,65 @@ struct HomeView: View {
             }.padding(.bottom, 48)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(.systemGroupedBackground))
+    }
+
+    private func processPhotoItem(_ image: UIImage) async -> [KnowledgeItem] {
+        let itemService = KnowledgeItemService(context: modelContext)
+        guard let item = try? itemService.createItem(type: .image, title: "Photo", bodyText: nil) else { return [] }
+        let store = FileArtifactStore()
+        let dir = store.itemDirectoryURL(for: item.id)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        if let data = image.jpegData(compressionQuality: 0.85) {
+            try? data.write(to: dir.appendingPathComponent("scan_0.jpg"))
+        }
+        item.imageFileRelativePath = "scan_0.jpg"
+        item.imagePageCount = 1
+
+        // ImageAnalysisService handles both OCR and LLM vision in one call.
+        if let provider = try? ProviderRouter.resolveActive(context: modelContext) {
+            let model = AIConfigService.shared.featureConfig(for: "analysis")?.model ?? "gpt-5.5"
+            let auth = FieldAuthorityService.shared
+            if auth.canModify(field: "bodyText", of: item, by: .system) {
+                item.bodyText = try? await ImageAnalysisService().analyzeImage(
+                    dir.appendingPathComponent("scan_0.jpg"),
+                    llmProvider: provider, model: model
+                )
+                if item.bodyText != nil {
+                    var prov = item.provenance
+                    prov.mark(field: "bodyText", origin: .system)
+                    item.fieldProvenanceJSON = prov.encode()
+                }
+            }
+        }
+        // Fallback: local OCR only if no provider configured
+        if item.bodyText == nil {
+            let auth = FieldAuthorityService.shared
+            if auth.canModify(field: "bodyText", of: item, by: .system) {
+                item.bodyText = await recognizeText(from: image)
+                if item.bodyText != nil {
+                    var prov = item.provenance
+                    prov.mark(field: "bodyText", origin: .system)
+                    item.fieldProvenanceJSON = prov.encode()
+                }
+            }
+        }
+        try? modelContext.save()
+        return [item]
+    }
+
+    private func recognizeText(from image: UIImage) async -> String? {
+        guard let cgImage = image.cgImage else { return nil }
+        return await withCheckedContinuation { continuation in
+            let request = VNRecognizeTextRequest { request, _ in
+                let text = (request.results as? [VNRecognizedTextObservation] ?? [])
+                    .compactMap { $0.topCandidates(1).first?.string }
+                    .joined(separator: "\n")
+                continuation.resume(returning: text.isEmpty ? nil : text)
+            }
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = true
+            try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
+        }
     }
 }
 
@@ -576,21 +708,49 @@ final class ScannerViewModel: ObservableObject {
         let dir = fileStore.itemDirectoryURL(for: item.id)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
-        // Save all pages and collect OCR text
-        var allText: [String] = []
+        // Save all pages
         for (idx, image) in images.enumerated() {
             let filename = "scan_\(idx).jpg"
             if let data = image.jpegData(compressionQuality: 0.85) {
                 try? data.write(to: dir.appendingPathComponent(filename))
             }
-            if let text = await recognizeText(from: image), !text.isEmpty {
-                allText.append(text)
+        }
+
+        var contentParts: [String] = []
+
+        // Page 1: ImageAnalysisService handles OCR + LLM vision together (no duplication)
+        if let provider = try? ProviderRouter.resolveActive(context: context) {
+            let model = AIConfigService.shared.featureConfig(for: "analysis")?.model ?? "gpt-5.5"
+            let firstPageURL = dir.appendingPathComponent("scan_0.jpg")
+            if let analysis = try? await ImageAnalysisService().analyzeImage(firstPageURL, llmProvider: provider, model: model),
+               !analysis.isEmpty {
+                contentParts.append(analysis)
+            }
+        } else {
+            // Fallback: local OCR only
+            if !images.isEmpty, let ocr = await recognizeText(from: images[0]), !ocr.isEmpty {
+                contentParts.append("OCR TEXT:\n\(ocr)")
+            }
+        }
+
+        // Pages 2+: local OCR only (LLM vision on every page would be too expensive)
+        if images.count > 1 {
+            for idx in 1..<images.count {
+                if let ocr = await recognizeText(from: images[idx]), !ocr.isEmpty {
+                    contentParts.append("PAGE \(idx + 1):\n\(ocr)")
+                }
             }
         }
 
         item.imageFileRelativePath = "scan_0.jpg"
         item.imagePageCount = images.count
-        item.bodyText = allText.joined(separator: "\n\n---\n\n")
+        let auth = FieldAuthorityService.shared
+        if auth.canModify(field: "bodyText", of: item, by: .system) {
+            item.bodyText = contentParts.joined(separator: "\n\n---\n\n")
+            var prov = item.provenance
+            prov.mark(field: "bodyText", origin: .system)
+            item.fieldProvenanceJSON = prov.encode()
+        }
 
         do {
             try context.save()
@@ -613,7 +773,74 @@ final class ScannerViewModel: ObservableObject {
             request.recognitionLevel = .accurate
             request.usesLanguageCorrection = true
             try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
-            if request.results == nil { continuation.resume(returning: nil) }
+        }
+    }
+}
+
+// MARK: - Camera Capture
+
+struct CameraCaptureView: UIViewControllerRepresentable {
+    @Binding var capturedImage: UIImage?
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate, @unchecked Sendable {
+        let parent: CameraCaptureView
+        init(_ parent: CameraCaptureView) { self.parent = parent }
+
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            if let image = info[.originalImage] as? UIImage {
+                Task { @MainActor [weak self] in self?.parent.capturedImage = image }
+            }
+            parent.dismiss()
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { parent.dismiss() }
+    }
+}
+
+// MARK: - Photo Gallery Picker
+
+struct PhotoPickerView: UIViewControllerRepresentable {
+    @Binding var selectedImage: UIImage?
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> PHPickerViewController {
+        var config = PHPickerConfiguration()
+        config.filter = .images
+        config.selectionLimit = 1
+        let picker = PHPickerViewController(configuration: config)
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, PHPickerViewControllerDelegate, @unchecked Sendable {
+        let parent: PhotoPickerView
+        init(_ parent: PhotoPickerView) { self.parent = parent }
+
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            guard let result = results.first else { parent.dismiss(); return }
+            result.itemProvider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
+                guard let data, let image = UIImage(data: data) else { return }
+                Task { @MainActor [weak self] in
+                    self?.parent.selectedImage = image
+                    self?.parent.dismiss()
+                }
+            }
         }
     }
 }

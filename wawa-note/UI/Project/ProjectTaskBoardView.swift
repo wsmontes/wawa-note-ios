@@ -21,7 +21,7 @@ struct ProjectTaskBoardView: View {
                         .font(.title).foregroundStyle(.secondary)
                     Text("No tasks yet")
                         .font(.headline)
-                    Text("Promote a meeting to a project or add a task manually.")
+                    Text("Add a task or promote an item from the library.")
                         .font(.subheadline).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center).padding(.horizontal, 40)
                     Button { newTaskStatus = .todo; showNewTask = true } label: {
@@ -101,8 +101,28 @@ struct ProjectTaskBoardView: View {
                     LazyVStack(spacing: 8) {
                         ForEach(columnTasks, id: \.id) { task in
                             taskCard(task, status: status)
-                                .padding(.horizontal, 12)
-                                .onTapGesture { editingTask = task }
+                                .padding(.horizontal, AppSpacing.md)
+                                .onTapGesture {
+                                    editingTask = task
+                                }
+                                .swipeActions(edge: .leading) {
+                                    if let prev = previousStatus(status) {
+                                        Button {
+                                            moveTask(task, to: prev)
+                                        } label: {
+                                            Label("Move to \(statusLabel(prev))", systemImage: "arrow.left")
+                                        }.tint(statusColor(prev))
+                                    }
+                                }
+                                .swipeActions(edge: .trailing) {
+                                    if let next = nextStatus(status) {
+                                        Button {
+                                            moveTask(task, to: next)
+                                        } label: {
+                                            Label("Move to \(statusLabel(next))", systemImage: "arrow.right")
+                                        }.tint(statusColor(next))
+                                    }
+                                }
                         }
                     }
                     .padding(.vertical, 8)
@@ -122,20 +142,35 @@ struct ProjectTaskBoardView: View {
                         .font(.subheadline)
                         .foregroundStyle(task.statusRaw == "cancelled" ? .secondary : .primary)
                         .strikethrough(task.statusRaw == "cancelled")
-                        .lineLimit(3)
+                        .lineLimit(2)
 
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         if let owner = task.ownerName {
-                            Label(owner, systemImage: "person")
-                                .font(.caption2).foregroundStyle(.secondary)
+                            Label(owner, systemImage: "person").font(.caption2).foregroundStyle(.secondary)
                         }
                         priorityBadge(task.priority)
                         if let due = task.dueAt {
+                            let urgency = due.timeIntervalSinceNow
                             Text(due.formatted(date: .abbreviated, time: .omitted))
-                                .font(.caption2).foregroundStyle(due < Date() ? .red : .secondary)
+                                .font(.caption2)
+                                .foregroundStyle(urgency < 0 ? .red : urgency < 259200 ? .orange : .secondary)
                         }
                     }
+
+                    // Provenance footer
+                    if let sourceID = task.sourceItemID, let sourceItem = findSourceItem(sourceID) {
+                        HStack(spacing: 3) {
+                            Image(systemName: "arrow.turn.down.right").font(.system(size: 7))
+                            Text(sourceItem.title).font(.system(size: 9)).foregroundStyle(.tertiary).lineLimit(1)
+                        }
+                    }
+
+                    // Stale indicator
+                    if task.status == .todo, task.createdAt.timeIntervalSinceNow < -14 * 86400 {
+                        Text("Stale — \(Int(-task.createdAt.timeIntervalSinceNow / 86400))d").font(.system(size: 8)).foregroundStyle(.orange)
+                    }
                 }
+                .opacity(task.status == .todo && task.createdAt.timeIntervalSinceNow < -14 * 86400 ? 0.6 : 1.0)
                 Spacer()
                 Menu {
                     ForEach(columns, id: \.rawValue) { col in
@@ -155,9 +190,9 @@ struct ProjectTaskBoardView: View {
                 }
             }
         }
-        .padding(10)
+        .padding(AppSpacing.md)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg))
         .shadow(color: .black.opacity(0.04), radius: 2, y: 1)
     }
 
@@ -179,6 +214,19 @@ struct ProjectTaskBoardView: View {
 
     // MARK: - Priority
 
+    @State private var sourceItemCache: [UUID: KnowledgeItem] = [:]
+
+    private func findSourceItem(_ id: UUID) -> KnowledgeItem? {
+        if let cached = sourceItemCache[id] { return cached }
+        if sourceItemCache.isEmpty {
+            let desc = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.projectID == projectID })
+            if let items = try? modelContext.fetch(desc) {
+                for item in items { sourceItemCache[item.id] = item }
+            }
+        }
+        return sourceItemCache[id]
+    }
+
     private func priorityBadge(_ priority: TaskPriority) -> some View {
         Text(priority.rawValue.capitalized)
             .font(.caption2)
@@ -193,6 +241,11 @@ struct ProjectTaskBoardView: View {
     private func moveTask(_ task: TaskItem, to status: TaskStatus) {
         let svc = TaskService(context: modelContext)
         try? svc.updateStatus(task, to: status)
+        // Mark status as user-edited
+        var prov = task.provenance
+        prov.mark(field: "status", origin: .user)
+        task.fieldProvenanceJSON = prov.encode()
+        try? modelContext.save()
     }
 
     private func deleteTask(_ task: TaskItem) {
@@ -201,6 +254,33 @@ struct ProjectTaskBoardView: View {
     }
 
     // MARK: - Labels
+
+    private func previousStatus(_ status: TaskStatus) -> TaskStatus? {
+        switch status {
+        case .todo: nil
+        case .inProgress: .todo
+        case .done: .inProgress
+        case .cancelled: .done
+        }
+    }
+
+    private func nextStatus(_ status: TaskStatus) -> TaskStatus? {
+        switch status {
+        case .todo: .inProgress
+        case .inProgress: .done
+        case .done: .cancelled
+        case .cancelled: nil
+        }
+    }
+
+    private func statusColor(_ status: TaskStatus) -> Color {
+        switch status {
+        case .todo: .blue
+        case .inProgress: .orange
+        case .done: .green
+        case .cancelled: .gray
+        }
+    }
 
     private func statusLabel(_ status: TaskStatus) -> String {
         switch status {

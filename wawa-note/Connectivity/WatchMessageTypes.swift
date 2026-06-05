@@ -15,7 +15,7 @@ enum WatchMessageKey {
     static let elapsedTime = "elapsedTime"
     static let audioLevel = "audioLevel"
     static let isActive = "isActive"
-    static let meetingTitle = "meetingTitle"
+    static let recordingTitle = "recordingTitle"
     static let errorMessage = "errorMessage"
 }
 
@@ -24,13 +24,13 @@ struct RecordingStatus: Codable, Equatable {
     let elapsedTime: Double
     let audioLevel: Float
     let errorMessage: String?
-    let meetingTitle: String?
+    let recordingTitle: String?
     let isActive: Bool
 
     static func idle() -> RecordingStatus {
         RecordingStatus(
             state: "idle", elapsedTime: 0, audioLevel: 0,
-            errorMessage: nil, meetingTitle: nil, isActive: false
+            errorMessage: nil, recordingTitle: nil, isActive: false
         )
     }
 }

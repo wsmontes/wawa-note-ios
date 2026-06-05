@@ -80,6 +80,8 @@ struct MarkdownExporter: Sendable {
                 let time = formatTime(group.startTime)
                 md += "**[\(time)]** \(group.text)\n\n"
             }
+        } else if let body = item.bodyText, !body.isEmpty {
+            md += "## Content\n\n\(body)\n\n"
         }
 
         md += "\n---\n*Exported by Wawa Note*\n"

@@ -4,6 +4,9 @@ import SwiftData
 struct InboxView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var contentPipeline: ContentPipelineService
+    @EnvironmentObject private var processingQueue: ProcessingQueueService
+    @EnvironmentObject private var chatState: ChatOverlayState
+    @EnvironmentObject private var chatViewModel: ChatViewModel
     @Query(sort: \KnowledgeItem.updatedAt, order: .reverse) private var allItems: [KnowledgeItem]
     @Query(sort: \Folder.name) private var folders: [Folder]
     @Query(sort: \Project.name) private var projects: [Project]
@@ -37,27 +40,25 @@ struct InboxView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                filterBar
-                Divider()
-                if filteredItems.isEmpty {
-                    emptyState
-                } else {
-                    itemList
-                }
+        VStack(spacing: 0) {
+            filterBar
+            Divider()
+            if filteredItems.isEmpty {
+                emptyState
+            } else {
+                itemList
             }
-            .navigationTitle("Inbox")
-            .navigationDestination(item: $navigateToProject) { ProjectDetailView(project: $0) }
-            .searchable(text: $searchText, prompt: "Search all sources...")
-            .onChange(of: searchText) { _, newValue in
-                if newValue.isEmpty { matchingIDs = []; searchResults = [] }
-                else { performSearch() }
-            }
-            .onAppear { loadTrashFolder() }
-            .sheet(item: $showFolderPicker) { item in
-                folderPickerSheet(for: item)
-            }
+        }
+        .navigationTitle("Inbox")
+        .navigationDestination(item: $navigateToProject) { ProjectDetailView(project: $0) }
+        .searchable(text: $searchText, prompt: "Search all sources...")
+        .onChange(of: searchText) { _, newValue in
+            if newValue.isEmpty { matchingIDs = []; searchResults = [] }
+            else { performSearch() }
+        }
+        .onAppear { chatState.context = .inbox; chatViewModel.pregenerateGreeting(for: .inbox); loadTrashFolder() }
+        .sheet(item: $showFolderPicker) { item in
+            folderPickerSheet(for: item)
         }
     }
 
@@ -368,7 +369,10 @@ struct InboxView: View {
                         }
                     }
                     if projects.isEmpty {
-                        Text("No projects yet").font(.caption).foregroundStyle(.secondary)
+                        VStack(spacing: 8) {
+                            Text("No projects yet").font(.headline)
+                            Text("Promote a knowledge item from the Explore tab to create your first project.").font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        }.padding(.vertical, 24)
                     }
                 }
                 Section("Actions") {
@@ -394,7 +398,7 @@ struct InboxView: View {
         let projectID = project.id
 
         try? ProjectService(context: modelContext).addItem(itemID, to: projectID)
-        contentPipeline.process(itemID, using: modelContext)
+        processingQueue.enqueue(itemID: itemID, projectID: projectID, trigger: .projectAssignment)
 
         showFolderPicker = nil
         navigateToProject = project
@@ -408,23 +412,5 @@ struct InboxView: View {
         let m = Int(seconds) / 60
         if m >= 60 { return "\(m / 60)h \(m % 60)m" }
         return "\(m)m"
-    }
-}
-
-// MARK: - Color hex helper
-
-private extension Color {
-    init?(hex: String) {
-        guard let color = Color(hexString: hex) else { return nil }
-        self = color
-    }
-
-    init?(hexString: String) {
-        let hex = hexString.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        guard let int = UInt64(hex, radix: 16) else { return nil }
-        let r = Double((int >> 16) & 0xFF) / 255.0
-        let g = Double((int >> 8) & 0xFF) / 255.0
-        let b = Double(int & 0xFF) / 255.0
-        self.init(red: r, green: g, blue: b)
     }
 }

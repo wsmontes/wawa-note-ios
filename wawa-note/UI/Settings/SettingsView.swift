@@ -101,10 +101,98 @@ struct SettingsView: View {
                 } header: {
                     Text("Privacy & Data")
                 }
+
+                // Data Export
+                Section {
+                    if let jsonData = try? InstanceExportService().exportComplete(context: modelContext, includeHistory: false),
+                       let jsonStr = String(data: jsonData, encoding: .utf8) {
+                        let stats = InstanceExportService().exportStatistics(context: modelContext)
+                        ShareLink(item: jsonStr, preview: SharePreview("Wawa Note Export", image: Image(systemName: "doc.text"))) {
+                            HStack {
+                                Label("Export Complete JSON", systemImage: "arrow.up.doc")
+                                Spacer()
+                                VStack(alignment: .trailing) {
+                                    Text("\(stats.itemCount) items").font(.caption).foregroundStyle(.secondary)
+                                    let size = ByteCountFormatter.string(fromByteCount: Int64(jsonData.count), countStyle: .file)
+                                    Text(size).font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Data")
+                } footer: {
+                    Text("Exports all projects, items, analyses, signals, frames, prompts, and configuration as a complete JSON file. File may be large.")
+                }
+
+                // Debug Logs
+                Section {
+                    NavigationLink {
+                        DebugLogView()
+                    } label: {
+                        Label("Debug Logs", systemImage: "terminal")
+                    }
+                } header: {
+                    Text("Developer")
+                } footer: {
+                    let crashed = FileLogService.shared.previousSessionCrashed
+                    Text(crashed
+                         ? "⚠️ Previous session crashed. Logs may contain crash information."
+                         : "Persistent logs survive crashes. Use for debugging.")
+                }
             }
             .navigationTitle("Settings")
         }
     }
+
+// MARK: - Debug Log Viewer
+
+struct DebugLogView: View {
+    @State private var logs: String = ""
+    @State private var isLoading = true
+
+    var body: some View {
+        Group {
+            if isLoading {
+                ProgressView("Loading logs...")
+            } else if logs.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "terminal").font(.largeTitle).foregroundStyle(.secondary)
+                    Text("No logs yet").font(.headline)
+                    Text("Logs will appear here as the app runs.").font(.subheadline).foregroundStyle(.secondary)
+                }
+            } else {
+                ScrollView {
+                    Text(logs)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                }
+            }
+        }
+        .navigationTitle("Debug Logs")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                HStack(spacing: 16) {
+                    Button {
+                        FileLogService.shared.clearLogs()
+                        logs = ""
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    if let url = FileLogService.shared.exportLogs() {
+                        ShareLink(item: url) {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                    }
+                }
+            }
+        }
+        .onAppear { logs = FileLogService.shared.retrieveLogs(); isLoading = false }
+        .refreshable { logs = FileLogService.shared.retrieveLogs() }
+    }
+}
 
     private var hasWhisperProvider: Bool {
         guard let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext),

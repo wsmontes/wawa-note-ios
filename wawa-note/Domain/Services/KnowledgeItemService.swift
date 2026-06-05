@@ -53,11 +53,31 @@ final class KnowledgeItemService {
 
     func items(ofType type: KnowledgeItemType) throws -> [KnowledgeItem] {
         let typeRaw = type.rawValue
-        var descriptor = FetchDescriptor<KnowledgeItem>(
-            predicate: #Predicate { $0.typeRaw == typeRaw }
-        )
+        // Include legacy "meeting" items when querying for audio type
+        let predicate: Predicate<KnowledgeItem>
+        if typeRaw == "audio" {
+            predicate = #Predicate { $0.typeRaw == "audio" || $0.typeRaw == "meeting" }
+        } else {
+            predicate = #Predicate { $0.typeRaw == typeRaw }
+        }
+        var descriptor = FetchDescriptor<KnowledgeItem>(predicate: predicate)
         descriptor.sortBy = [SortDescriptor(\.updatedAt, order: .reverse)]
         return try context.fetch(descriptor)
+    }
+
+    /// One-time migration: rewrite legacy "meeting" typeRaw to "audio"
+    static func migrateMeetingToAudio(context: ModelContext) {
+        let key = "migration_meeting_to_audio_done"
+        if UserDefaults.standard.bool(forKey: key) { return }
+        var descriptor = FetchDescriptor<KnowledgeItem>(
+            predicate: #Predicate { $0.typeRaw == "meeting" }
+        )
+        descriptor.fetchLimit = 1000
+        if let items = try? context.fetch(descriptor), !items.isEmpty {
+            for item in items { item.typeRaw = "audio" }
+            try? context.save()
+        }
+        UserDefaults.standard.set(true, forKey: key)
     }
 
     func recentItems(limit: Int = 20) throws -> [KnowledgeItem] {
@@ -73,6 +93,11 @@ final class KnowledgeItemService {
         if let anns = try? context.fetch(annPred) {
             for ann in anns { context.delete(ann) }
         }
+        let tid = item.id
+        let outgoing = try context.fetch(FetchDescriptor<GraphEdge>(predicate: #Predicate { $0.fromID == tid }))
+        for edge in outgoing { context.delete(edge) }
+        let incoming = try context.fetch(FetchDescriptor<GraphEdge>(predicate: #Predicate { $0.toID == tid }))
+        for edge in incoming { context.delete(edge) }
         try fileStore.deleteMeetingDirectory(for: item.id)
         context.delete(item)
         try context.save()

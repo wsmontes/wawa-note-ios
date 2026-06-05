@@ -207,7 +207,7 @@ final class ProjectConversionService {
 
     private var conversionSystemPrompt: String {
         """
-        You are a project management AI that converts meeting transcripts into structured project plans.
+        You are a project management AI that converts content into structured project plans.
         Extract: project name, tasks with owners and priorities, people mentioned, entities (organizations, systems, tools), and relationships between them.
         Output valid JSON matching this schema:
         {
@@ -224,7 +224,7 @@ final class ProjectConversionService {
 
     private func buildConversionPrompt(context: String) -> String {
         """
-        Analyze this meeting and create a project plan:
+        Analyze this content and create a project plan:
 
         \(context)
 

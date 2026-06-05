@@ -6,6 +6,7 @@ enum RecordingUIState {
     case idle
     case recording
     case paused
+    case interrupted
     case stopped
 }
 

@@ -12,14 +12,38 @@ final class ChatService {
 
     // MARK: - Conversations
 
-    func createConversation(title: String = "", providerId: UUID? = nil, model: String? = nil) throws -> ChatConversation {
+    func createConversation(title: String = "", providerId: UUID? = nil, model: String? = nil, contextKey: String? = nil) throws -> ChatConversation {
         let conversation = ChatConversation(
             title: title,
             providerId: providerId,
-            model: model
+            model: model,
+            contextKey: contextKey
         )
         try saveConversation(conversation)
         return conversation
+    }
+
+    func findConversation(for contextKey: String) throws -> ChatConversation? {
+        let all = try fetchConversations()
+        return all
+            .filter { $0.contextKey == contextKey }
+            .max(by: { $0.updatedAt < $1.updatedAt })
+    }
+
+    func findOrCreateConversation(for context: ChatContext) throws -> ChatConversation {
+        if let existing = try findConversation(for: context.key) {
+            return existing
+        }
+        let defaultTitle: String = {
+            switch context {
+            case .global:          return "General Chat"
+            case .inbox:           return "Inbox Chat"
+            case .item:            return "Item Chat"
+            case .exploreProjects: return "Projects Chat"
+            case .project:         return "Project Chat"
+            }
+        }()
+        return try createConversation(title: defaultTitle, contextKey: context.key)
     }
 
     func fetchConversations() throws -> [ChatConversation] {

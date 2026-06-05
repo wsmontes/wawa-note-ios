@@ -2,7 +2,7 @@ import Foundation
 
 struct GetItemTool: AgentTool {
     let name = "get_item"
-    let description = "Fetch a specific knowledge item by its full UUID. Returns title, type, body text, tags, creation date, transcript excerpts (for meetings), and analysis summaries."
+    let description = "Fetch a specific knowledge item by its full UUID. Returns title, type, body text, tags, creation date, transcript excerpts (for audio recordings), and analysis summaries."
 
     let parameters = AIToolParameters(
         properties: ["item_id": AIToolProperty(type: "string", description: "Full UUID of the item (from search_knowledge or list_items results)")],
@@ -67,7 +67,8 @@ struct GetItemTool: AgentTool {
         return ToolFormatting.success(
             summary: "get_item: \(item.title)",
             content: content,
-            citations: [ChatCitation(itemId: item.id, title: item.title, snippet: String(content.prefix(100)), itemType: item.typeRaw)],
+            citations: [ChatCitation(itemId: item.id, title: item.title, snippet: String(content.prefix(100)), itemType: item.type,
+                projectID: item.projectID, projectColorHex: item.projectID.flatMap { context.projectColorHex(for: $0) })],
             totalFound: 1, shown: 1
         )
     }

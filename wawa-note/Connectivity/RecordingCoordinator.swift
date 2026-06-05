@@ -9,6 +9,8 @@ final class RecordingCoordinator: ObservableObject {
     @Published private(set) var audioLevel: Float = 0
     @Published private(set) var errorMessage: String?
     @Published private(set) var savedItemId: UUID?
+    @Published private(set) var currentInputPortName: String = ""
+    @Published private(set) var currentInputIcon: String = "mic.fill"
 
     private let captureService: AudioCaptureService
     private let nowPlayingController: NowPlayingController
@@ -22,7 +24,7 @@ final class RecordingCoordinator: ObservableObject {
     private var recordingStartDate: Date?
     private var pausedDuration: TimeInterval = 0
     private var pauseStartDate: Date?
-    private var meetingTitle: String = ""
+    private var recordingTitle: String = ""
     private var observationTimer: Timer?
     private var nowPlayingTimer: Timer?
 
@@ -59,7 +61,17 @@ final class RecordingCoordinator: ObservableObject {
         projectID: UUID? = nil
     ) {
         guard self.state == .idle else {
-            AppLog.audio.warning("RecordingCoordinator: startRecording called but state is \(String(describing: self.state))")
+            AppLog.warn("audio", "RecordingCoordinator: startRecording called but state is \(String(describing: self.state))")
+            return
+        }
+
+        AppLog.event("audio", "Recording requested — title=\(title ?? "nil") projectID=\(projectID?.uuidString.prefix(8) ?? "nil")")
+
+        let sessionManager = AudioSessionManager()
+        guard sessionManager.hasMinimumDiskSpace() else {
+            AppLog.warn("audio", "Recording blocked: insufficient disk space")
+            errorMessage = "Not enough storage space to record. Please free up some space."
+            notifyStatusChange()
             return
         }
 
@@ -67,10 +79,10 @@ final class RecordingCoordinator: ObservableObject {
         errorMessage = nil
         savedItemId = nil
 
-        let meetingTitle = title ?? "Meeting \(Date().formatted(date: .abbreviated, time: .shortened))"
-        self.meetingTitle = meetingTitle
+        let recordingTitle = title ?? "Recording \(Date().formatted(date: .abbreviated, time: .shortened))"
+        self.recordingTitle = recordingTitle
 
-        let item = KnowledgeItem(type: .meeting, title: meetingTitle, status: .recording)
+        let item = KnowledgeItem(type: .audio, title: recordingTitle, status: .recording)
         item.scheduledDate = scheduledDate
         item.calendarEventIdentifier = calendarEventIdentifier
         if let projectID { item.projectID = projectID; item.inboxDate = nil }
@@ -79,8 +91,8 @@ final class RecordingCoordinator: ObservableObject {
         do {
             try context.save()
         } catch {
-            AppLog.audio.error("Failed to save knowledge item: \(error)")
-            errorMessage = "Could not save meeting. Try again."
+            AppLog.error("audio", "Failed to save knowledge item for recording: \(error.localizedDescription)")
+            errorMessage = "Could not save recording. Try again."
             notifyStatusChange()
             return
         }
@@ -97,13 +109,19 @@ final class RecordingCoordinator: ObservableObject {
                 activateLockScreenControls()
                 notifyStatusChange()
                 captureContextSafely(for: itemId)
+                AppLog.event("audio", "Recording started — itemID=\(itemId.uuidString.prefix(8)) input=\(captureService.currentInputPortName)")
             } catch AudioCaptureError.permissionDenied {
-                errorMessage = "Microphone access is off. Turn it on in Settings to record meetings."
+                AppLog.warn("audio", "Recording blocked: microphone permission denied")
+                errorMessage = "Microphone access is off. Turn it on in Settings to record audio."
+                rollbackItem(item, context: context)
+            } catch AudioCaptureError.diskFull {
+                AppLog.error("audio", "Recording failed: disk full")
+                errorMessage = "Not enough storage. Free up space and try again."
                 rollbackItem(item, context: context)
             } catch {
+                AppLog.error("audio", "Recording start failed: \(error.localizedDescription)")
                 errorMessage = "Could not start recording."
                 rollbackItem(item, context: context)
-                AppLog.audio.error("Recording start failed: \(error.localizedDescription)")
             }
         }
     }
@@ -127,16 +145,15 @@ final class RecordingCoordinator: ObservableObject {
     func createItemFromImport(
         title: String,
         date: Date,
-        duration: TimeInterval
+        duration: TimeInterval,
+        projectID: UUID? = nil
     ) -> KnowledgeItem? {
         let context = modelContext
-
-        let item = KnowledgeItem(type: .meeting, title: title, createdAt: date, updatedAt: date,
-                                  status: .recorded, durationSeconds: duration)
+        let item = KnowledgeItem(type: .audio, title: title, createdAt: date, updatedAt: date, status: .recorded, durationSeconds: duration)
         item.audioFileRelativePath = AppFileConstants.audioFileName
         item.isImported = true
+        if let pid = projectID { item.projectID = pid; item.inboxDate = nil }
         context.insert(item)
-
         try? context.save()
         return item
     }
@@ -148,25 +165,26 @@ final class RecordingCoordinator: ObservableObject {
         pauseStartDate = Date()
         observationTimer?.invalidate()
         nowPlayingTimer?.invalidate()
-        nowPlayingController.update(title: meetingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: false)
+        nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: false)
         notifyStatusChange()
     }
 
     func resumeRecording() {
-        guard state == .paused else { return }
+        guard state == .paused || state == .interrupted else { return }
         captureService.resumeRecording()
         state = .recording
         if let pauseStart = pauseStartDate {
             pausedDuration += Date().timeIntervalSince(pauseStart)
         }
         pauseStartDate = nil
-        nowPlayingController.update(title: meetingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: true)
+        nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: true)
         startObservation()
         notifyStatusChange()
     }
 
     func stopRecording() {
-        guard state == .recording || state == .paused else { return }
+        guard state == .recording || state == .paused || state == .interrupted else { return }
+        AppLog.event("audio", "Stopping recording — elapsed=\(elapsedTimeFormatted) pausedDur=\(Int(pausedDuration))s itemID=\(savedItemId?.uuidString.prefix(8) ?? "nil")")
         captureService.stopRecording()
         state = .stopped
         nowPlayingController.deactivate()
@@ -183,13 +201,8 @@ final class RecordingCoordinator: ObservableObject {
         updateItemOnStop()
         notifyStatusChange()
 
-        // Launch content pipeline directly so lock-screen / now-playing stops
-        // also trigger transcription → analysis → project ingestion.
-        // The guard in ContentPipelineService prevents double execution if
-        // CaptureViewModel also calls process().
-        if let itemId = savedItemId {
-            contentPipeline?.process(itemId, using: modelContext)
-        }
+        // Pipeline is launched by CaptureViewModel.stopRecording() which owns
+        // the recording lifecycle. RecordingCoordinator just manages audio state.
     }
 
     func returnToIdle() {
@@ -199,6 +212,47 @@ final class RecordingCoordinator: ObservableObject {
         audioLevel = 0
         savedItemId = nil
         errorMessage = nil
+        captureService.resetToIdle()
+    }
+
+    /// Attempt to recover from audio interruptions when the app returns to the foreground.
+    func onAppForeground() {
+        guard state == .interrupted else { return }
+        AppLog.event("audio", "App returned to foreground while interrupted — attempting recovery")
+        captureService.resumeRecording()
+        if captureService.state == .recording {
+            state = .recording
+            startObservation()
+            notifyStatusChange()
+        } else if captureService.state == .paused {
+            state = .paused
+            notifyStatusChange()
+        }
+    }
+
+    /// Remove any recording directories for items that are still in .recording status
+    /// (abandoned from previous app termination). Call once at app startup.
+    /// Uses a dedicated background context to avoid touching the main context during init.
+    func cleanupOrphanedRecordings() {
+        // Use a fresh context isolated from the main context used by SwiftUI views.
+        // This is a read-delete-save driven by app init, not user interaction.
+        do {
+            let bgContext = ModelContext(modelContext.container)
+            let descriptor = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.statusRaw == "recording" })
+            guard let orphans = try? bgContext.fetch(descriptor), !orphans.isEmpty else { return }
+
+            AppLog.audio.info("Found \(orphans.count) orphaned recording(s) — cleaning up")
+            let store = FileArtifactStore()
+            for item in orphans {
+                AppLog.audio.info("Cleaning up orphaned recording: \(item.id)")
+                try? store.deleteMeetingDirectory(for: item.id)
+                bgContext.delete(item)
+            }
+            try bgContext.save()
+            AppLog.audio.info("Cleaned up \(orphans.count) orphaned recording(s)")
+        } catch {
+            AppLog.audio.error("Orphan cleanup failed: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Status
@@ -209,8 +263,8 @@ final class RecordingCoordinator: ObservableObject {
             elapsedTime: elapsedTime - pausedDuration,
             audioLevel: audioLevel,
             errorMessage: errorMessage,
-            meetingTitle: meetingTitle,
-            isActive: state == .recording || state == .paused
+            recordingTitle: recordingTitle,
+            isActive: state == .recording || state == .paused || state == .interrupted
         )
     }
 
@@ -219,6 +273,7 @@ final class RecordingCoordinator: ObservableObject {
         case .idle: return "idle"
         case .recording: return "recording"
         case .paused: return "paused"
+        case .interrupted: return "interrupted"
         case .stopped: return "stopped"
         }
     }
@@ -230,7 +285,7 @@ final class RecordingCoordinator: ObservableObject {
             shared.set(status.state, forKey: "recordingState")
             shared.set(status.elapsedTime, forKey: "elapsedTime")
             shared.set(status.isActive, forKey: "isActive")
-            shared.set(status.meetingTitle, forKey: "meetingTitle")
+            shared.set(status.recordingTitle, forKey: "recordingTitle")
         }
     }
 
@@ -257,7 +312,7 @@ final class RecordingCoordinator: ObservableObject {
             }
         }
         nowPlayingController.activate()
-        nowPlayingController.update(title: meetingTitle, elapsedTime: 0, isPlaying: true)
+        nowPlayingController.update(title: recordingTitle, elapsedTime: 0, isPlaying: true)
         startLiveActivity()
     }
 
@@ -267,35 +322,42 @@ final class RecordingCoordinator: ObservableObject {
         observationTimer?.invalidate()
         observationTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             guard let self else { return }
-            DispatchQueue.main.async {
-                if let start = self.recordingStartDate {
-                    self.elapsedTime = Date().timeIntervalSince(start)
-                }
-                self.audioLevel = self.captureService.audioLevel
-                if self.captureService.state == .stopped {
-                    self.state = .stopped
-                    self.nowPlayingController.deactivate()
-                    self.observationTimer?.invalidate()
-                    self.observationTimer = nil
-                    self.nowPlayingTimer?.invalidate()
-                    self.nowPlayingTimer = nil
-                }
+            // Timer.scheduledTimer fires on main run loop — already on main thread.
+            if let start = self.recordingStartDate {
+                self.elapsedTime = Date().timeIntervalSince(start)
+            }
+            self.audioLevel = self.captureService.audioLevel
+            // Sync input port info (may change on route switch)
+            let portName = self.captureService.currentInputPortName
+            if self.currentInputPortName != portName {
+                self.currentInputPortName = portName
+                self.currentInputIcon = AudioSessionManager().currentInputIcon
+            }
+            if self.captureService.state == .stopped {
+                self.state = .stopped
+                self.nowPlayingController.deactivate()
+                self.observationTimer?.invalidate()
+                self.observationTimer = nil
+                self.nowPlayingTimer?.invalidate()
+                self.nowPlayingTimer = nil
+            } else if self.captureService.state == .interrupted && self.state != .interrupted {
+                self.state = .interrupted
+                self.notifyStatusChange()
             }
         }
 
         nowPlayingTimer?.invalidate()
         nowPlayingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self else { return }
-            DispatchQueue.main.async {
-                guard self.state == .recording || self.state == .paused else { return }
-                let effective = self.elapsedTime - self.pausedDuration
-                self.nowPlayingController.update(
-                    title: self.meetingTitle,
-                    elapsedTime: effective,
-                    isPlaying: self.state == .recording
-                )
-                self.updateLiveActivity(effective: effective)
-            }
+            // Timer.scheduledTimer fires on main run loop — already on main thread.
+            guard self.state == .recording || self.state == .paused else { return }
+            let effective = self.elapsedTime - self.pausedDuration
+            self.nowPlayingController.update(
+                title: self.recordingTitle,
+                elapsedTime: effective,
+                isPlaying: self.state == .recording
+            )
+            self.updateLiveActivity(effective: effective)
         }
     }
 
@@ -312,7 +374,7 @@ final class RecordingCoordinator: ObservableObject {
                     try annotSvc.upsert(captured, itemID: itemId, source: "recording_context")
                     AppLog.general.info("Context: \(captured.count) annotations for item \(itemId)")
                 } catch {
-                    AppLog.general.error("Context capture save failed: \(error)")
+                    AppLog.error("general", "Context capture save failed: \(error.localizedDescription)")
                 }
             }
         }
@@ -323,7 +385,7 @@ final class RecordingCoordinator: ObservableObject {
         do {
             try context.save()
         } catch {
-            AppLog.audio.error("Failed to rollback item: \(error)")
+            AppLog.error("audio", "Failed to rollback item after recording error: \(error.localizedDescription)")
         }
     }
 
@@ -335,7 +397,7 @@ final class RecordingCoordinator: ObservableObject {
         let state = RecordingActivityAttributes.ContentState(
             elapsedTimeFormatted: "00:00",
             isPaused: false,
-            title: meetingTitle
+            title: recordingTitle
         )
         do {
             liveActivity = try Activity<RecordingActivityAttributes>.request(
@@ -344,7 +406,7 @@ final class RecordingCoordinator: ObservableObject {
                 pushType: nil
             )
         } catch {
-            AppLog.general.warning("LiveActivity start failed: \(error)")
+            AppLog.warn("general", "LiveActivity start failed: \(error.localizedDescription)")
         }
     }
 
@@ -356,7 +418,7 @@ final class RecordingCoordinator: ObservableObject {
         let state = RecordingActivityAttributes.ContentState(
             elapsedTimeFormatted: formatted,
             isPaused: state == .paused,
-            title: meetingTitle
+            title: recordingTitle
         )
         Task { @MainActor [activity] in await activity.update(using: state) }
     }
@@ -390,7 +452,7 @@ final class RecordingCoordinator: ObservableObject {
             try context.save()
             AppLog.audio.info("Item updated: \(item.id)")
         } catch {
-            AppLog.audio.error("Failed to save item update: \(error)")
+            AppLog.error("audio", "Failed to save item update: \(error.localizedDescription)")
         }
     }
 }

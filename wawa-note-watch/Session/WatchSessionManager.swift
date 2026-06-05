@@ -48,7 +48,7 @@ final class WatchSessionManager: NSObject, WCSessionDelegate, ObservableObject, 
                     elapsedTime: updated.elapsedTime + 1.0,
                     audioLevel: updated.audioLevel,
                     errorMessage: updated.errorMessage,
-                    meetingTitle: updated.meetingTitle,
+                    recordingTitle: updated.recordingTitle,
                     isActive: true
                 )
                 self.recordingStatus = updated
@@ -82,7 +82,7 @@ final class WatchSessionManager: NSObject, WCSessionDelegate, ObservableObject, 
         let audioLevel = message["audioLevel"] as? Float ?? 0
         let isActive = message["isActive"] as? Bool ?? false
         let errorMessage = message["errorMessage"] as? String
-        let meetingTitle = message["meetingTitle"] as? String
+        let recordingTitle = message["recordingTitle"] as? String
 
         DispatchQueue.main.async { [weak self] in
             self?.applyStatusUpdate(
@@ -92,7 +92,7 @@ final class WatchSessionManager: NSObject, WCSessionDelegate, ObservableObject, 
                 audioLevel: audioLevel,
                 isActive: isActive,
                 errorMessage: errorMessage,
-                meetingTitle: meetingTitle
+                recordingTitle: recordingTitle
             )
         }
     }
@@ -106,7 +106,7 @@ final class WatchSessionManager: NSObject, WCSessionDelegate, ObservableObject, 
         audioLevel: Float,
         isActive: Bool,
         errorMessage: String?,
-        meetingTitle: String?
+        recordingTitle: String?
     ) {
         guard type == "status" else { return }
 
@@ -117,7 +117,7 @@ final class WatchSessionManager: NSObject, WCSessionDelegate, ObservableObject, 
             elapsedTime: elapsedTime,
             audioLevel: audioLevel,
             errorMessage: errorMessage,
-            meetingTitle: meetingTitle,
+            recordingTitle: recordingTitle,
             isActive: isActive
         )
 
@@ -134,7 +134,7 @@ final class WatchSessionManager: NSObject, WCSessionDelegate, ObservableObject, 
             shared.set(recordingStatus.state, forKey: "recordingState")
             shared.set(recordingStatus.elapsedTime, forKey: "elapsedTime")
             shared.set(recordingStatus.isActive, forKey: "isActive")
-            shared.set(recordingStatus.meetingTitle, forKey: "meetingTitle")
+            shared.set(recordingStatus.recordingTitle, forKey: "recordingTitle")
         }
     }
 }

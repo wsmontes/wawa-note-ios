@@ -8,11 +8,17 @@ struct PromoteToProjectSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var contentPipeline: ContentPipelineService
+    @EnvironmentObject private var processingQueue: ProcessingQueueService
 
     @State private var isGenerating = false
     @State private var preview: ConversionPreview?
     @State private var errorMessage: String?
     @State private var selectedModel: String = ""
+    @State private var selectedTaskIDs: Set<String> = []
+    @State private var selectedPersonIDs: Set<String> = []
+    @State private var selectedEntityIDs: Set<String> = []
+    @State private var selectedEdgeIDs: Set<String> = []
+    @State private var generationStep: String = ""
 
     init(item: KnowledgeItem, onComplete: @escaping (Project) -> Void) {
         self.item = item
@@ -38,6 +44,11 @@ struct PromoteToProjectSheet: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
                 }
+                if preview != nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Select All") { selectAll() }
+                    }
+                }
             }
         }
         .task {
@@ -53,7 +64,7 @@ struct PromoteToProjectSheet: View {
             Image(systemName: "sparkles.rectangle.stack")
                 .font(.system(size: 48))
                 .foregroundStyle(.blue)
-            Text("Create Project from Meeting")
+            Text("Create Project from Item")
                 .font(.title2)
                 .fontWeight(.semibold)
             Text("AI will extract tasks, people, entities, and relationships from the analysis.")
@@ -81,7 +92,7 @@ struct PromoteToProjectSheet: View {
             Spacer()
             ProgressView()
                 .scaleEffect(1.2)
-            Text("Analyzing meeting...")
+            Text(generationStep.isEmpty ? "Analyzing item..." : generationStep)
                 .font(.headline)
             Text("Extracting tasks, people, and structure")
                 .font(.caption)
@@ -120,83 +131,87 @@ struct PromoteToProjectSheet: View {
     private func previewContent(_ preview: ConversionPreview) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                // Project name
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Project")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .textCase(.uppercase)
+                    Text("Project").font(.caption).foregroundStyle(.secondary).textCase(.uppercase)
                     HStack {
-                        Image(systemName: "folder.fill")
-                            .foregroundStyle(.blue)
-                        Text(preview.projectName)
-                            .font(.title3)
-                            .fontWeight(.semibold)
+                        Image(systemName: "folder.fill").foregroundStyle(.blue)
+                        Text(preview.projectName).font(.title3).fontWeight(.semibold)
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, AppSpacing.lg)
 
-                // Tasks
                 if !preview.tasks.isEmpty {
-                    sectionHeader("Tasks (\(preview.tasks.count))", icon: "checklist")
-
+                    sectionHeader("Tasks (\(selectedTaskIDs.count)/\(preview.tasks.count))", icon: "checklist")
                     VStack(spacing: 0) {
                         ForEach(Array(preview.tasks.enumerated()), id: \.element.id) { idx, task in
-                            taskRow(task)
-                            if idx < preview.tasks.count - 1 { Divider().padding(.leading, 12) }
+                            selectableRow(
+                                isSelected: selectedTaskIDs.contains(task.id),
+                                onToggle: { selectedTaskIDs.toggle(task.id) }
+                            ) {
+                                taskRowContent(task)
+                            }
+                            if idx < preview.tasks.count - 1 { Divider().padding(.leading, 40) }
                         }
                     }
                     .background(Color(.systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .padding(.horizontal, 16)
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg))
+                    .padding(.horizontal, AppSpacing.lg)
                 }
 
-                // People
                 if !preview.people.isEmpty {
-                    sectionHeader("People (\(preview.people.count))", icon: "person.2")
-
+                    sectionHeader("People (\(selectedPersonIDs.count)/\(preview.people.count))", icon: "person.2")
                     VStack(spacing: 0) {
                         ForEach(Array(preview.people.enumerated()), id: \.element.id) { idx, person in
-                            personRow(person)
-                            if idx < preview.people.count - 1 { Divider().padding(.leading, 12) }
+                            selectableRow(
+                                isSelected: selectedPersonIDs.contains(person.id),
+                                onToggle: { selectedPersonIDs.toggle(person.id) }
+                            ) {
+                                personRowContent(person)
+                            }
+                            if idx < preview.people.count - 1 { Divider().padding(.leading, 40) }
                         }
                     }
                     .background(Color(.systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .padding(.horizontal, 16)
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg))
+                    .padding(.horizontal, AppSpacing.lg)
                 }
 
-                // Entities
                 if !preview.entities.isEmpty {
-                    sectionHeader("Entities", icon: "cube")
-
+                    sectionHeader("Entities (\(selectedEntityIDs.count)/\(preview.entities.count))", icon: "cube")
                     VStack(spacing: 0) {
                         ForEach(Array(preview.entities.enumerated()), id: \.element.id) { idx, entity in
-                            entityRow(entity)
-                            if idx < preview.entities.count - 1 { Divider().padding(.leading, 12) }
+                            selectableRow(
+                                isSelected: selectedEntityIDs.contains(entity.id),
+                                onToggle: { selectedEntityIDs.toggle(entity.id) }
+                            ) {
+                                entityRowContent(entity)
+                            }
+                            if idx < preview.entities.count - 1 { Divider().padding(.leading, 40) }
                         }
                     }
                     .background(Color(.systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .padding(.horizontal, 16)
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg))
+                    .padding(.horizontal, AppSpacing.lg)
                 }
 
-                // Edges
                 if !preview.edges.isEmpty {
-                    sectionHeader("Relationships (\(preview.edges.count))", icon: "link")
-
+                    sectionHeader("Relationships (\(selectedEdgeIDs.count)/\(preview.edges.count))", icon: "link")
                     VStack(spacing: 0) {
                         ForEach(Array(preview.edges.enumerated()), id: \.element.id) { idx, edge in
-                            edgeRow(edge)
-                            if idx < preview.edges.count - 1 { Divider().padding(.leading, 12) }
+                            selectableRow(
+                                isSelected: selectedEdgeIDs.contains(edge.id),
+                                onToggle: { selectedEdgeIDs.toggle(edge.id) }
+                            ) {
+                                edgeRowContent(edge)
+                            }
+                            if idx < preview.edges.count - 1 { Divider().padding(.leading, 40) }
                         }
                     }
                     .background(Color(.systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .padding(.horizontal, 16)
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg))
+                    .padding(.horizontal, AppSpacing.lg)
                 }
 
-                // Confirm button
                 Button {
                     executeConversion(preview)
                 } label: {
@@ -208,11 +223,11 @@ struct PromoteToProjectSheet: View {
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .frame(height: 50)
-                    .background(Color.blue)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .background(Color.accentColor)
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl))
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
+                .padding(.horizontal, AppSpacing.lg)
+                .padding(.top, AppSpacing.sm)
 
                 Spacer().frame(height: 24)
             }
@@ -221,101 +236,99 @@ struct PromoteToProjectSheet: View {
         .background(Color(.systemGroupedBackground))
     }
 
-    // MARK: - Rows
+    // MARK: - Selectable Row
 
-    private func taskRow(_ task: ConversionPreview.ConversionTask) -> some View {
+    private func selectableRow(isSelected: Bool, onToggle: @escaping () -> Void, @ViewBuilder content: () -> some View) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: "circle")
-                .font(.caption)
-                .foregroundStyle(.blue)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(task.title)
-                    .font(.subheadline)
-                if let owner = task.ownerName {
-                    Text("Owner: \(owner)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+            Button(action: onToggle) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(isSelected ? .blue : .secondary)
             }
-            Spacer()
+            .buttonStyle(.plain)
+            content()
+        }
+        .padding(12)
+    }
+
+    // MARK: - Row content helpers
+
+    private func taskRowContent(_ task: ConversionPreview.ConversionTask) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(task.title).font(.subheadline)
+            if let owner = task.ownerName {
+                Text("Owner: \(owner)").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .trailing) {
             if let priority = task.priority {
-                Text(priority)
-                    .font(.caption2)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
+                Text(priority).font(.caption2)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(priorityColor(priority).opacity(0.15))
                     .clipShape(Capsule())
             }
         }
-        .padding(12)
     }
 
-    private func personRow(_ person: ConversionPreview.ConversionPerson) -> some View {
+    private func personRowContent(_ person: ConversionPreview.ConversionPerson) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: "person.fill")
-                .font(.caption)
-                .foregroundStyle(.purple)
-            Text(person.displayName)
-                .font(.subheadline)
+            Image(systemName: "person.fill").font(.caption).foregroundStyle(.purple)
+            Text(person.displayName).font(.subheadline)
             if let role = person.role {
-                Text("· \(role)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text("· \(role)").font(.caption).foregroundStyle(.secondary)
             }
         }
-        .padding(12)
     }
 
-    private func entityRow(_ entity: ConversionPreview.ConversionEntity) -> some View {
+    private func entityRowContent(_ entity: ConversionPreview.ConversionEntity) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: entityKindIcon(entity.kind))
-                .font(.caption)
-                .foregroundStyle(.orange)
+            Image(systemName: entityKindIcon(entity.kind)).font(.caption).foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 1) {
-                Text(entity.displayName)
-                    .font(.subheadline)
-                Text(entity.kind.capitalized)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                Text(entity.displayName).font(.subheadline)
+                Text(entity.kind.capitalized).font(.caption2).foregroundStyle(.secondary)
             }
         }
-        .padding(12)
     }
 
-    private func edgeRow(_ edge: ConversionPreview.ConversionEdge) -> some View {
+    private func edgeRowContent(_ edge: ConversionPreview.ConversionEdge) -> some View {
         HStack(spacing: 8) {
-            Text(edge.fromRef)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Image(systemName: "arrow.right")
-                .font(.caption2)
-                .foregroundStyle(.quaternary)
-            Text(edge.toRef)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text(edge.fromRef).font(.caption).foregroundStyle(.secondary)
+            Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.secondary)
+            Text(edge.toRef).font(.caption).foregroundStyle(.secondary)
             Spacer()
-            Text(edge.edgeType)
-                .font(.caption2)
-                .foregroundStyle(.blue)
+            Text(edge.edgeType).font(.caption2).foregroundStyle(.blue)
         }
-        .padding(12)
     }
 
     // MARK: - Helpers
 
     private func sectionHeader(_ title: String, icon: String) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(title)
-                .font(.footnote)
-                .fontWeight(.semibold)
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
+            Image(systemName: icon).font(.caption).foregroundStyle(.secondary)
+            Text(title).font(.footnote).fontWeight(.semibold).foregroundStyle(.secondary).textCase(.uppercase)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
+        .padding(.horizontal, AppSpacing.lg)
+        .padding(.top, AppSpacing.sm)
+    }
+
+    private func selectAll() {
+        guard let preview else { return }
+        let allSelected = selectedTaskIDs.count == preview.tasks.count
+            && selectedPersonIDs.count == preview.people.count
+            && selectedEntityIDs.count == preview.entities.count
+            && selectedEdgeIDs.count == preview.edges.count
+        if allSelected {
+            selectedTaskIDs = []
+            selectedPersonIDs = []
+            selectedEntityIDs = []
+            selectedEdgeIDs = []
+        } else {
+            selectedTaskIDs = Set(preview.tasks.map(\.id))
+            selectedPersonIDs = Set(preview.people.map(\.id))
+            selectedEntityIDs = Set(preview.entities.map(\.id))
+            selectedEdgeIDs = Set(preview.edges.map(\.id))
+        }
     }
 
     private func priorityColor(_ p: String) -> Color {
@@ -346,6 +359,7 @@ struct PromoteToProjectSheet: View {
 
     private func generatePreview() async {
         isGenerating = true
+        generationStep = "Analyzing content..."
         guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
             errorMessage = "No AI provider configured. Go to Settings to add one."
             isGenerating = false
@@ -356,8 +370,13 @@ struct PromoteToProjectSheet: View {
             let model = selectedModel.isEmpty
                 ? ActiveModelPicker.effectiveModel(context: modelContext, feature: "analysis")
                 : selectedModel
+            generationStep = "Extracting structure..."
             let preview = try await makeService().generatePreview(from: item, using: provider, model: model)
             self.preview = preview
+            selectedTaskIDs = Set(preview.tasks.map(\.id))
+            selectedPersonIDs = Set(preview.people.map(\.id))
+            selectedEntityIDs = Set(preview.entities.map(\.id))
+            selectedEdgeIDs = Set(preview.edges.map(\.id))
         } catch let error as ProviderError {
             errorMessage = error.userMessage
         } catch {
@@ -367,15 +386,26 @@ struct PromoteToProjectSheet: View {
     }
 
     private func executeConversion(_ preview: ConversionPreview) {
+        let filteredPreview = ConversionPreview(
+            projectName: preview.projectName,
+            tasks: preview.tasks.filter { selectedTaskIDs.contains($0.id) },
+            people: preview.people.filter { selectedPersonIDs.contains($0.id) },
+            entities: preview.entities.filter { selectedEntityIDs.contains($0.id) },
+            edges: preview.edges.filter { selectedEdgeIDs.contains($0.id) }
+        )
         do {
-            let project = try makeService().executeConversion(from: item, preview: preview)
-            // Pipeline handles analysis + ingestion (Step 3 picks up projectID from re-fetch)
-            // ProjectDetailView will show progress via ingestionState environment object
-            contentPipeline.process( item.id, using: modelContext)
+            let project = try makeService().executeConversion(from: item, preview: filteredPreview)
+            processingQueue.enqueue(itemID: item.id, trigger: .newCapture)
             dismiss()
             onComplete(project)
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+}
+
+extension Set where Element == String {
+    mutating func toggle(_ element: String) {
+        if contains(element) { remove(element) } else { insert(element) }
     }
 }

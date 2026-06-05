@@ -215,7 +215,7 @@ final class GraphIntelligenceService {
         2. PATTERNS: recurring themes, people, risks, or types of decisions
         3. GAPS: questions raised but never answered, decisions promised but not made, topics mentioned in one item but never followed up
         4. EMERGING THEMES: topics that appear across multiple disconnected items — something the project is "about" that isn't explicitly stated
-        5. INFLUENCE: who or what drives decisions? Are there key people, meetings, or documents that shape outcomes?
+        5. INFLUENCE: who or what drives decisions? Are there key people, recordings, or documents that shape outcomes?
 
         Return a JSON array. Each hypothesis has: type (contradiction|pattern|gap|theme|influence), text (one clear sentence), confidence (0.0-1.0).
 

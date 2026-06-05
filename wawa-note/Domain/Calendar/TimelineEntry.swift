@@ -1,5 +1,4 @@
 import Foundation
-import SwiftUI
 import EventKit
 
 enum TimelineEntrySource {
@@ -65,10 +64,6 @@ struct TimelineEntry: Identifiable {
 
     var typeIcon: String {
         contentType?.icon ?? "calendar"
-    }
-
-    var typeColor: Color {
-        contentType?.color ?? .blue
     }
 
     var timeString: String {

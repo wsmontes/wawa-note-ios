@@ -250,7 +250,7 @@
       "provider": "openai",
       "model": "gpt-5.5",
       "temperature": null,
-      "maxCompletionTokens": 4000,
+      "maxCompletionTokens": 16000,
       "systemPrompt": "You are a meeting analysis assistant. Return only valid JSON without markdown formatting or code blocks. Do not wrap the JSON in ``` fences.",
       "userPrompt": "You are analyzing a meeting transcript.\n\nReturn structured JSON with these fields (use null for empty arrays):\n- short_summary: string\n- detailed_summary: string\n- decisions: array of {title, details, source_segment_ids, confidence}\n- action_items: array of {task, owner, due_date, source_segment_ids, confidence}\n- open_questions: array of {question, source_segment_ids, confidence}\n- risks: array of {risk, details, source_segment_ids, confidence}\n- important_dates: array of {date, meaning, source_segment_ids}\n- mentioned_people: array of strings\n- mentioned_systems: array of strings\n- mentioned_organizations: array of strings\n- mentioned_repositories: array of strings\n- mentioned_locations: array of strings\n- follow_up_email_draft: string\n\nDo not invent information. If something is unclear, mark it as uncertain.\nEvery extracted item should include evidence from transcript segment IDs when available.\nUse the exact segment IDs shown in brackets.\n\nMeeting transcript:\n{transcript}\n"
     },

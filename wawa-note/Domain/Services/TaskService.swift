@@ -19,7 +19,8 @@ final class TaskService {
         dueAt: Date? = nil,
         sourceItemID: UUID? = nil,
         sourceSegmentIDs: [String] = [],
-        confidence: Double? = nil
+        confidence: Double? = nil,
+        createdBy: FieldOrigin = .user
     ) throws -> TaskItem {
         let task = TaskItem(
             title: title,
@@ -31,6 +32,16 @@ final class TaskService {
             confidence: confidence
         )
         task.projectID = projectID
+        task.createdBy = createdBy
+        // Mark initial field provenance
+        var prov = FieldProvenance.empty
+        let origin = createdBy
+        prov.mark(field: "title", origin: origin)
+        prov.mark(field: "status", origin: origin)
+        prov.mark(field: "priority", origin: origin)
+        if ownerName != nil { prov.mark(field: "ownerName", origin: origin) }
+        if dueAt != nil { prov.mark(field: "dueAt", origin: origin) }
+        task.fieldProvenanceJSON = prov.encode()
         context.insert(task)
         try context.save()
 
@@ -71,9 +82,12 @@ final class TaskService {
     }
 
     func updateStatus(_ task: TaskItem, to status: TaskStatus) throws {
+        let prev = task.status.rawValue
         task.status = status
         task.updatedAt = Date()
         try context.save()
+        VersioningService.shared.recordChange(entityType: "TaskItem", entityID: task.id, projectID: task.projectID,
+            field: "status", previousValue: prev, newValue: status.rawValue, origin: .user, context: context)
     }
 
     func updateTask(
@@ -83,10 +97,11 @@ final class TaskService {
         priority: TaskPriority? = nil,
         dueAt: Date? = nil
     ) throws {
-        if let title { task.title = title }
-        if let ownerName { task.ownerName = ownerName }
-        if let priority { task.priority = priority }
-        if let dueAt { task.dueAt = dueAt }
+        let vs = VersioningService.shared; let ctx = context; let pid = task.projectID; let tid = task.id
+        if let title { let prev = task.title; task.title = title; vs.recordChange(entityType: "TaskItem", entityID: tid, projectID: pid, field: "title", previousValue: prev, newValue: title, origin: .user, context: ctx) }
+        if let ownerName { let prev = task.ownerName; task.ownerName = ownerName; vs.recordChange(entityType: "TaskItem", entityID: tid, projectID: pid, field: "ownerName", previousValue: prev, newValue: ownerName, origin: .user, context: ctx) }
+        if let priority { let prev = task.priority.rawValue; task.priority = priority; vs.recordChange(entityType: "TaskItem", entityID: tid, projectID: pid, field: "priority", previousValue: prev, newValue: priority.rawValue, origin: .user, context: ctx) }
+        if let dueAt { let prev = task.dueAt?.ISO8601Format(); task.dueAt = dueAt; vs.recordChange(entityType: "TaskItem", entityID: tid, projectID: pid, field: "dueAt", previousValue: prev, newValue: dueAt.ISO8601Format(), origin: .user, context: ctx) }
         task.updatedAt = Date()
         try context.save()
     }

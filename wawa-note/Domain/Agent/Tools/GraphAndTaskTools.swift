@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 // MARK: - Get Connections
 
@@ -101,7 +102,14 @@ struct CreateNoteTool: AgentTool {
             return ToolFormatting.error(tool: name, reason: "Failed to create note.", fix: "Check that the knowledge base is accessible and try again.")
         }
 
-        return ToolResult(content: "Note created successfully.\nTitle: \(item.title)\nUUID: \(item.id.uuidString)\nType: note\nUse get_item with this UUID to read it.", citations: [ChatCitation(itemId: item.id, title: item.title, snippet: title, itemType: "note")], isError: false, displaySummary: "Created note: \(title)")
+        // Mark provenance as LLM-created
+        var prov = item.provenance
+        prov.mark(field: "title", origin: .llm)
+        if body != nil { prov.mark(field: "bodyText", origin: .llm) }
+        item.fieldProvenanceJSON = prov.encode()
+        try? context.modelContext.save()
+
+        return ToolResult(content: "Note created successfully.\nTitle: \(item.title)\nUUID: \(item.id.uuidString)\nType: note\nUse get_item with this UUID to read it.", citations: [ChatCitation(itemId: item.id, title: item.title, snippet: title, itemType: .note)], isError: false, displaySummary: "Created note: \(title)")
     }
 }
 
@@ -124,7 +132,7 @@ struct CreateTaskTool: AgentTool {
         let owner = arguments["owner_name"] as? String
         let ts = TaskService(context: context.modelContext)
 
-        guard let task = try? ts.create(title: title, projectID: pid, priority: priority, ownerName: owner) else {
+        guard let task = try? ts.create(title: title, projectID: pid, priority: priority, ownerName: owner, createdBy: .llm) else {
             return ToolFormatting.error(tool: name, reason: "Failed to create task.", fix: "Verify the project exists and try again.")
         }
 
@@ -139,7 +147,7 @@ struct CreateTaskTool: AgentTool {
 
 struct SummarizeDayTool: AgentTool {
     let name = "summarize_day"
-    let description = "Summarize all activity on a specific date — items created, meetings recorded, notes written."
+    let description = "Summarize all activity on a specific date — items created, audio recorded, notes written."
     let parameters = AIToolParameters(properties: ["date": AIToolProperty(type: "string", description: "ISO 8601 date (YYYY-MM-DD)")], required: ["date"])
 
     func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
@@ -196,5 +204,1248 @@ struct GetProjectTool: AgentTool {
         for (idx, t) in tasks.enumerated() { content += ToolFormatting.formatTaskLine(t, index: idx + 1) + "\n" }
 
         return ToolFormatting.success(summary: "Project: \(project.name) (\(allTasks.count) tasks)", content: content, citations: [], totalFound: allTasks.count, shown: tasks.count)
+    }
+}
+
+// MARK: - Update Task Tool
+
+struct UpdateTaskTool: AgentTool {
+    let name = "update_task"
+    let description = "Update a task's status, priority, owner, or due date. Provide the task title and only the fields you want to change."
+    let parameters = AIToolParameters(properties: [
+        "task_title": AIToolProperty(type: "string", description: "Exact title of the task to update", enum: nil),
+        "new_status": AIToolProperty(type: "string", description: "todo|inProgress|done|cancelled", enum: nil),
+        "new_priority": AIToolProperty(type: "string", description: "low|medium|high|critical", enum: nil),
+        "new_due_date": AIToolProperty(type: "string", description: "ISO 8601 date", enum: nil)
+    ], required: ["task_title"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let title = args["task_title"] as? String else { return ToolResult(content: "Missing task_title", citations: [], isError: true, displaySummary: "Error") }
+        let taskSvc = TaskService(context: context.modelContext)
+        let tasks: [TaskItem] = {
+            if let pid = context.activeProjectID { return (try? taskSvc.tasks(for: pid)) ?? [] }
+            return (try? context.modelContext.fetch(FetchDescriptor<TaskItem>())) ?? []
+        }()
+        guard let task = tasks.first(where: { $0.title.localizedCaseInsensitiveCompare(title) == .orderedSame }) else {
+            return ToolResult(content: "Task not found: \(title)", citations: [], isError: true, displaySummary: "Not found")
+        }
+        let auth = FieldAuthorityService.shared
+        let sugSvc = SuggestionGatingService(context: context.modelContext)
+
+        if let s = args["new_status"] as? String, let st = TaskStatus(rawValue: s) {
+            if auth.canModify(field: "status", of: task, by: .llm) {
+                try? taskSvc.updateStatus(task, to: st)
+            } else {
+                sugSvc.proposeTaskUpdate(taskTitle: task.title, field: "status", proposedValue: s, projectID: context.activeProjectID, sourceItemID: task.sourceItemID)
+            }
+        }
+        if let p = args["new_priority"] as? String, let pr = TaskPriority(rawValue: p) {
+            if auth.canModify(field: "priority", of: task, by: .llm) {
+                task.priority = pr
+            } else {
+                sugSvc.proposeTaskUpdate(taskTitle: task.title, field: "priority", proposedValue: p, projectID: context.activeProjectID, sourceItemID: task.sourceItemID)
+            }
+        }
+        if let d = args["new_due_date"] as? String, let date = ISO8601DateFormatter().date(from: d) {
+            if auth.canModify(field: "dueAt", of: task, by: .llm) {
+                task.dueAt = date
+            } else {
+                sugSvc.proposeTaskUpdate(taskTitle: task.title, field: "dueAt", proposedValue: d, projectID: context.activeProjectID, sourceItemID: task.sourceItemID)
+            }
+        }
+        try? context.modelContext.save()
+        return ToolResult(content: "Task updated: \(task.title)", citations: [], isError: false, displaySummary: "Updated: \(title)")
+    }
+}
+
+// MARK: - Create Edge Tool
+
+struct CreateEdgeTool: AgentTool {
+    let name = "create_edge"
+    let description = "Create a typed connection between two items. Include source_segment_ids to link the edge to specific transcript segments or note paragraphs."
+    let parameters = AIToolParameters(properties: [
+        "from_title": AIToolProperty(type: "string", description: "Title of the source item", enum: nil),
+        "to_title": AIToolProperty(type: "string", description: "Title of the target item", enum: nil),
+        "type": AIToolProperty(type: "string", description: "supports|contradicts|references|relates_to|mentions|precedes|produces", enum: nil),
+        "source_segment_ids": AIToolProperty(type: "array", description: "Optional segment IDs that prove this connection"),
+        "confidence": AIToolProperty(type: "number", description: "Confidence 0.0-1.0 for this edge. AI-inferred edges should include this.")
+    ], required: ["from_title", "to_title", "type"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let fromTitle = args["from_title"] as? String,
+              let toTitle = args["to_title"] as? String,
+              let typeStr = args["type"] as? String else {
+            return ToolResult(content: "Missing required arguments", citations: [], isError: true, displaySummary: "Error")
+        }
+        let svc = KnowledgeItemService(context: context.modelContext)
+        let items = (try? svc.allItems()) ?? []
+        guard let from = items.first(where: { $0.title.localizedCaseInsensitiveCompare(fromTitle) == .orderedSame }),
+              let to = items.first(where: { $0.title.localizedCaseInsensitiveCompare(toTitle) == .orderedSame }) else {
+            return ToolResult(content: "Could not find both items", citations: [], isError: true, displaySummary: "Not found")
+        }
+        let edgeSvc = GraphEdgeService(context: context.modelContext)
+        let et = EdgeType(rawValue: typeStr) ?? .relatesTo
+        let segmentIDs = (args["source_segment_ids"] as? [String]) ?? []
+        let conf = (args["confidence"] as? Double) ?? 0.5
+        try edgeSvc.create(fromID: from.id, toID: to.id, edgeType: et, weight: conf,
+            provenanceItemID: from.id, provenanceSegmentIDs: segmentIDs)
+        let prov = segmentIDs.isEmpty ? "item-level" : "\(segmentIDs.count) segment(s)"
+        return ToolResult(content: "Edge created: \(from.title) → [\(et.rawValue)] → \(to.title) (provenance: \(prov))", citations: [], isError: false, displaySummary: "Connected: \(from.title) → \(to.title)")
+    }
+}
+
+// MARK: - Set Annotation Tool
+
+struct SetAnnotationTool: AgentTool {
+    let name = "set_annotation"
+    let description = "Add or update a key-value annotation on an item."
+    let parameters = AIToolParameters(properties: [
+        "item_title": AIToolProperty(type: "string", description: "Title of the item", enum: nil),
+        "key": AIToolProperty(type: "string", description: "Annotation key", enum: nil),
+        "value": AIToolProperty(type: "string", description: "Annotation value", enum: nil)
+    ], required: ["item_title", "key", "value"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let title = args["item_title"] as? String,
+              let key = args["key"] as? String,
+              let value = args["value"] as? String else {
+            return ToolResult(content: "Missing arguments", citations: [], isError: true, displaySummary: "Error")
+        }
+        let items = (try? KnowledgeItemService(context: context.modelContext).allItems()) ?? []
+        guard let item = items.first(where: { $0.title.localizedCaseInsensitiveCompare(title) == .orderedSame }) else {
+            return ToolResult(content: "Item not found: \(title)", citations: [], isError: true, displaySummary: "Not found")
+        }
+        let annotation = Annotation(source: "agent", key: key, value: value, itemID: item.id)
+        context.modelContext.insert(annotation)
+        try context.modelContext.save()
+        return ToolResult(content: "Annotation set: \(key) = \(value)", citations: [], isError: false, displaySummary: "Annotated: \(key)")
+    }
+}
+
+// MARK: - Trash Item Tool
+
+struct TrashItemTool: AgentTool {
+    let name = "trash_item"
+    let description = "Move an item to the trash. Does not destroy the original audio or image."
+    let parameters = AIToolParameters(properties: [
+        "item_title": AIToolProperty(type: "string", description: "Title of the item to trash", enum: nil)
+    ], required: ["item_title"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let title = args["item_title"] as? String else { return ToolResult(content: "Missing item_title", citations: [], isError: true, displaySummary: "Error") }
+        let items = (try? KnowledgeItemService(context: context.modelContext).allItems()) ?? []
+        guard let item = items.first(where: { $0.title.localizedCaseInsensitiveCompare(title) == .orderedSame }) else {
+            return ToolResult(content: "Item not found: \(title)", citations: [], isError: true, displaySummary: "Not found")
+        }
+        try TrashService(context: context.modelContext).moveToTrash(item)
+        return ToolResult(content: "Trashed: \(item.title)", citations: [], isError: false, displaySummary: "Trashed: \(title)")
+    }
+}
+
+// MARK: - Get Analysis Tool
+
+struct GetAnalysisTool: AgentTool {
+    let name = "get_analysis"
+    let description = "Get the full analysis (summary, decisions, actions, risks, entities) for an item."
+    let parameters = AIToolParameters(properties: [
+        "item_id": AIToolProperty(type: "string", description: "UUID of the item", enum: nil)
+    ], required: ["item_id"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let idStr = args["item_id"] as? String, let id = UUID(uuidString: idStr) else { return ToolResult(content: "Invalid UUID", citations: [], isError: true, displaySummary: "Error") }
+        let svc = KnowledgeItemService(context: context.modelContext)
+        guard let item = try? svc.fetchItem(id: id) else { return ToolResult(content: "Item not found", citations: [], isError: true, displaySummary: "Not found") }
+
+        // Try MeetingAnalysis first, then DynamicAnalysis
+        if let analysis = try? context.fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: id) {
+            var content = "## Analysis: \(item.title)\nSummary: \(analysis.shortSummary)\n"
+            if !analysis.decisions.isEmpty { content += "\nDecisions:\n" + analysis.decisions.map { "- \($0.title)" }.joined(separator: "\n") }
+            if !analysis.actionItems.isEmpty { content += "\nActions:\n" + analysis.actionItems.map { "- \($0.task)" }.joined(separator: "\n") }
+            if !analysis.risks.isEmpty { content += "\nRisks:\n" + analysis.risks.map { "- \($0.risk)" }.joined(separator: "\n") }
+            return ToolFormatting.success(summary: "Analysis: \(item.title)", content: content, citations: [ChatCitation(itemId: item.id, title: item.title, snippet: analysis.shortSummary, itemType: item.type)], totalFound: 1, shown: 1)
+        }
+        // Fallback: check for DynamicAnalysis (framework-driven analysis)
+        if let dynamic = try? context.fileStore.readArtifact(DynamicAnalysis.self, fileName: "analysis.json", meetingId: id) {
+            var content = "## Analysis: \(item.title)\nSchema: \(dynamic.schemaId)\n"
+            for key in dynamic.results.allKeys.prefix(20) {
+                if let val = dynamic.results.stringField(key) {
+                    content += "\n\(key): \(val.prefix(500))"
+                }
+            }
+            return ToolFormatting.success(summary: "Dynamic Analysis: \(item.title)", content: String(content.prefix(3000)), citations: [ChatCitation(itemId: item.id, title: item.title, snippet: "Framework: \(dynamic.schemaId)", itemType: item.type)], totalFound: 1, shown: 1)
+        }
+        return ToolResult(content: "No analysis found for item \(item.title)", citations: [], isError: true, displaySummary: "No analysis")
+    }
+}
+
+// MARK: - Think Tool (Advisor Escalation)
+
+struct ThinkTool: AgentTool {
+    let name = "think"
+    let description = "Ask a more capable reasoning model for help with complex analysis. Use for comparing items, finding patterns, or multi-step reasoning. Provide structured context, not raw data."
+    let parameters = AIToolParameters(properties: [
+        "question": AIToolProperty(type: "string", description: "Focused question requiring complex reasoning", enum: nil),
+        "context": AIToolProperty(type: "string", description: "Structured data to reason about (not raw transcripts)", enum: nil)
+    ], required: ["question", "context"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        // The AgentLoop routes think calls to the advisor model automatically.
+        // This tool's execute is a no-op — the real work happens in the LLM's response.
+        // We just return the context so the advisor can work with it.
+        let question = args["question"] as? String ?? ""
+        let ctx = args["context"] as? String ?? ""
+        return ToolResult(content: "Think requested:\n\(question)\n\nContext:\n\(ctx.prefix(2000))", citations: [], isError: false, displaySummary: "Asking advisor...")
+    }
+}
+
+// MARK: - Framework Management Tools
+
+struct CreateProjectFrameworkTool: AgentTool {
+    let name = "create_project_framework"
+    let description = "Generate a custom analysis framework for a project. Define what fields to extract from items, how to synthesize the project, and what views to show. Use this when creating a project for a specific domain (research, brainstorm, legal, etc.) that doesn't fit the default meeting/audio template."
+    let parameters = AIToolParameters(properties: [
+        "project_id": AIToolProperty(type: "string", description: "UUID of the project to configure", enum: nil),
+        "domain_description": AIToolProperty(type: "string", description: "What kind of project is this? e.g. 'bird migration research', 'product launch', 'legal contract review'", enum: nil),
+        "special_instructions": AIToolProperty(type: "string", description: "Any specific analysis preferences or focus areas", enum: nil)
+    ], required: ["project_id", "domain_description"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let idStr = args["project_id"] as? String, let pid = UUID(uuidString: idStr) else {
+            return ToolResult(content: "Missing or invalid project_id", citations: [], isError: true, displaySummary: "Error")
+        }
+        guard let domain = args["domain_description"] as? String else {
+            return ToolResult(content: "Missing domain_description", citations: [], isError: true, displaySummary: "Error")
+        }
+        let instructions = args["special_instructions"] as? String ?? ""
+
+        let projSvc = ProjectService(context: context.modelContext)
+        guard let project = try? projSvc.fetch(id: pid) else {
+            return ToolResult(content: "Project not found: \(idStr)", citations: [], isError: true, displaySummary: "Not found")
+        }
+
+        // Try to match a built-in framework based on domain keywords
+        let lower = domain.lowercased()
+        let fw: ProjectFramework
+        if lower.contains("research") || lower.contains("study") || lower.contains("paper") || lower.contains("investigation") {
+            fw = FrameworkService.researchFramework
+        } else if lower.contains("brainstorm") || lower.contains("idea") || lower.contains("ideation") || lower.contains("creative") {
+            fw = FrameworkService.brainstormFramework
+        } else if lower.contains("journal") || lower.contains("diary") || lower.contains("personal") || lower.contains("reflection") {
+            fw = FrameworkService.journalFramework
+        } else {
+            fw = FrameworkService.blankFramework
+        }
+
+        let svc = FrameworkService.shared
+        svc.apply(to: project, framework: fw)
+        try? context.modelContext.save()
+
+        let views = fw.views.map(\.title).joined(separator: ", ")
+        return ToolResult(content: "Framework applied to project '\(project.name)': \(fw.name)\nViews: \(views)\nIf this doesn't fit, use update_project_framework to customize.", citations: [], isError: false, displaySummary: "Framework: \(fw.name)")
+    }
+}
+
+struct UpdateProjectFrameworkTool: AgentTool {
+    let name = "update_project_framework"
+    let description = "Update the analysis framework for a project. Switch to a different built-in framework or provide a custom JSON framework definition."
+    let parameters = AIToolParameters(properties: [
+        "project_id": AIToolProperty(type: "string", description: "UUID of the project", enum: nil),
+        "framework_id": AIToolProperty(type: "string", description: "Built-in framework ID: builtin/meeting, builtin/research, builtin/brainstorm, builtin/journal, builtin/blank", enum: nil),
+        "framework_json": AIToolProperty(type: "string", description: "Custom framework JSON definition (advanced)", enum: nil)
+    ], required: ["project_id"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let idStr = args["project_id"] as? String, let pid = UUID(uuidString: idStr) else {
+            return ToolResult(content: "Missing or invalid project_id", citations: [], isError: true, displaySummary: "Error")
+        }
+        let projSvc = ProjectService(context: context.modelContext)
+        guard let project = try? projSvc.fetch(id: pid) else {
+            return ToolResult(content: "Project not found: \(idStr)", citations: [], isError: true, displaySummary: "Not found")
+        }
+
+        // Try custom JSON first, then built-in ID, then error
+        if let json = args["framework_json"] as? String {
+            let svc = FrameworkService.shared
+            switch svc.validate(json) {
+            case .success(let fw):
+                svc.apply(to: project, framework: fw)
+                try? context.modelContext.save()
+                return ToolResult(content: "Custom framework applied to '\(project.name)'.", citations: [], isError: false, displaySummary: "Framework updated")
+            case .failure(let e):
+                return ToolResult(content: "Invalid framework JSON: \(e.localizedDescription)", citations: [], isError: true, displaySummary: "Invalid JSON")
+            }
+        }
+
+        if let fwId = args["framework_id"] as? String {
+            let fw: ProjectFramework
+            switch fwId {
+            case "builtin/meeting": fw = FrameworkService.meetingFramework
+            case "builtin/research": fw = FrameworkService.researchFramework
+            case "builtin/brainstorm": fw = FrameworkService.brainstormFramework
+            case "builtin/journal": fw = FrameworkService.journalFramework
+            case "builtin/blank": fw = FrameworkService.blankFramework
+            default: return ToolResult(content: "Unknown framework ID: \(fwId). Use: builtin/meeting, builtin/research, builtin/brainstorm, builtin/journal, builtin/blank", citations: [], isError: true, displaySummary: "Unknown framework")
+            }
+            FrameworkService.shared.apply(to: project, framework: fw)
+            try? context.modelContext.save()
+            return ToolResult(content: "Project '\(project.name)' now uses the \(fw.name) framework.", citations: [], isError: false, displaySummary: "Framework: \(fw.name)")
+        }
+
+        return ToolResult(content: "Specify either framework_id (built-in) or framework_json (custom).", citations: [], isError: true, displaySummary: "Missing args")
+    }
+}
+
+// MARK: - Content Processing Tools (Pipeline)
+
+struct ExtractContentTool: AgentTool {
+    let name = "extract_content"
+    let description = """
+    Extract text content from a knowledge item. For audio items, returns the transcript. \
+    For images, returns OCR text. For notes/journal entries, returns the body text. \
+    Use this before analyze_content to get the raw text to analyze.
+    """
+
+    let parameters = AIToolParameters(
+        properties: [
+            "item_id": AIToolProperty(type: "string", description: "UUID of the knowledge item to extract content from")
+        ],
+        required: ["item_id"]
+    )
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let itemIdStr = arguments["item_id"] as? String,
+              let itemId = UUID(uuidString: itemIdStr) else {
+            return ToolFormatting.error(tool: name, reason: "Missing or invalid item_id.", fix: "Provide a valid UUID string.")
+        }
+
+        let itemService = KnowledgeItemService(context: context.modelContext)
+        guard let item = try? itemService.fetchItem(id: itemId) else {
+            return ToolFormatting.error(tool: name, reason: "Item not found: \(itemIdStr)", fix: "Check the item_id and try again.")
+        }
+
+        let extraction = ContentExtractionService(modelContext: context.modelContext)
+        let text: String?
+
+        if item.audioFileRelativePath != nil {
+            text = await extraction.extractTextFromAudio(item)
+        } else {
+            text = await extraction.extractTextFromDocument(item)
+        }
+
+        let effectiveText = text ?? extraction.bestAvailableText(for: item)
+        guard let content = effectiveText, !content.isEmpty else {
+            return ToolResult(
+                content: "No extractable content found for item \(itemIdStr) (type: \(item.type.rawValue)). The item may need transcription first.",
+                citations: [], isError: false,
+                displaySummary: "extract: no content for \(item.title)"
+            )
+        }
+
+        let truncated = String(content.prefix(ToolFormatting.maxContentChars))
+        return ToolResult(
+            content: truncated + (content.count > ToolFormatting.maxContentChars ? "\n\n[Content truncated at \(ToolFormatting.maxContentChars) chars. \(content.count - ToolFormatting.maxContentChars) more available.]" : ""),
+            citations: [ChatCitation(itemId: item.id, title: item.title, snippet: String(content.prefix(200)), itemType: item.type)],
+            isError: false,
+            displaySummary: "extract: \(content.count) chars from \"\(item.title)\""
+        )
+    }
+}
+
+struct AnalyzeContentTool: AgentTool {
+    let name = "analyze_content"
+    let description = """
+    Run structured AI analysis on text content. Extracts summary, decisions, action items, \
+    risks, open questions, dates, and entities. For long content, uses map-reduce internally. \
+    Returns the analysis as structured JSON.
+    """
+
+    let parameters = AIToolParameters(
+        properties: [
+            "item_id": AIToolProperty(type: "string", description: "UUID of the knowledge item to analyze"),
+            "text": AIToolProperty(type: "string", description: "Text content to analyze. If omitted, extracts from the item first."),
+            "model": AIToolProperty(type: "string", description: "Model: 'nano' for simple, 'gpt-5.5' for complex. Default: auto-select.")
+        ],
+        required: ["item_id"]
+    )
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let itemIdStr = arguments["item_id"] as? String,
+              let itemId = UUID(uuidString: itemIdStr) else {
+            return ToolFormatting.error(tool: name, reason: "Missing or invalid item_id.", fix: "Provide a valid UUID string.")
+        }
+
+        let itemService = KnowledgeItemService(context: context.modelContext)
+        guard let item = try? itemService.fetchItem(id: itemId) else {
+            return ToolFormatting.error(tool: name, reason: "Item not found: \(itemIdStr)", fix: "Check the item_id.")
+        }
+
+        let text: String
+        if let provided = arguments["text"] as? String, !provided.isEmpty {
+            text = provided
+        } else {
+            let extraction = ContentExtractionService(modelContext: context.modelContext)
+            let extracted = await extraction.extractTextFromDocument(item)
+                ?? extraction.bestAvailableText(for: item)
+            guard let ext = extracted, !ext.isEmpty else {
+                return ToolFormatting.error(tool: name, reason: "No text content for item.", fix: "Use extract_content first.")
+            }
+            text = ext
+        }
+
+        guard let provider = try? ProviderRouter.resolveActive(context: context.modelContext) else {
+            return ToolFormatting.error(tool: name, reason: "No AI provider configured.", fix: "Configure a provider in Settings.")
+        }
+
+        let model: String
+        if let requested = arguments["model"] as? String, !requested.isEmpty {
+            model = requested
+        } else {
+            model = ModelTierResolver.resolveForAnalysis(item: item)
+        }
+
+        let extraction = ContentExtractionService(modelContext: context.modelContext)
+        let sourceCtx = SourceContext.from(item)
+        let segments = extraction.chunkText(text, itemID: item.id)
+        let transcript = Transcript(meetingId: item.id, languageCode: nil, segments: segments, sourceEngineId: "agent-tool")
+
+        // Resolve framework: use dynamic analysis for non-meeting frameworks
+        let framework: ProjectFramework? = {
+            if let pid = item.projectID,
+               let project = try? ProjectService(context: context.modelContext).fetch(id: pid) {
+                return FrameworkService.shared.resolve(for: project)
+            }
+            return nil
+        }()
+
+        var resultSummary: String = ""
+        var resultDetail: String = ""
+        var decisionCount = 0
+        var actionCount = 0
+        var riskCount = 0
+        var questionCount = 0
+        var entityCount = 0
+
+        do {
+            let store = FileArtifactStore()
+            try? store.createMeetingDirectory(for: item.id)
+
+            // Route to dynamic analysis if project has a non-meeting framework
+            if let fw = framework, fw.id != "builtin/meeting" {
+                let dynamicSuccess = await extraction.analyzeDynamic(text: text, item: item, framework: fw)
+                if dynamicSuccess {
+                    // Read dynamic analysis for summary
+                    if let dyn = try? store.readArtifact(DynamicAnalysis.self, fileName: "analysis.dynamic.json", meetingId: item.id) {
+                        resultSummary = dyn.results.stringField("short_summary") ?? "Analysis complete"
+                        resultDetail = ""
+                    } else {
+                        resultSummary = "Analysis complete (dynamic: \(fw.name))"
+                    }
+                } else {
+                    // Fallback to structured
+                    let result = try await AnalysisService().analyze(transcript: transcript, using: provider, model: model, meetingId: item.id, sourceContext: sourceCtx)
+                    try? store.writeArtifact(result, fileName: "analysis.json", meetingId: item.id)
+                    resultSummary = result.shortSummary; resultDetail = result.detailedSummary
+                    decisionCount = result.decisions.count; actionCount = result.actionItems.count
+                    riskCount = result.risks.count; questionCount = result.openQuestions.count
+                    entityCount = result.entities.count
+                }
+            } else {
+                let result = try await AnalysisService().analyze(transcript: transcript, using: provider, model: model, meetingId: item.id, sourceContext: sourceCtx)
+                try? store.writeArtifact(result, fileName: "analysis.json", meetingId: item.id)
+                resultSummary = result.shortSummary; resultDetail = result.detailedSummary
+                decisionCount = result.decisions.count; actionCount = result.actionItems.count
+                riskCount = result.risks.count; questionCount = result.openQuestions.count
+                entityCount = result.entities.count
+            }
+
+            // Write agent trace
+
+            // Write agent trace — proves the agent orchestrated this
+            let trace: [String: Any] = [
+                "agent_version": "2.0",
+                "pipeline": "autonomous_agent",
+                "model": model,
+                "tool": "analyze_content",
+                "timestamp": ISO8601DateFormatter().string(from: Date())
+            ]
+            if let traceData = try? JSONSerialization.data(withJSONObject: trace),
+               let traceJSON = String(data: traceData, encoding: .utf8) {
+                try? traceJSON.write(to: store.itemDirectoryURL(for: item.id).appendingPathComponent("agent_trace.json"), atomically: true, encoding: .utf8)
+            }
+
+            // Update item status (with authority gate)
+            let auth = FieldAuthorityService.shared
+            if auth.canModify(field: "status", of: item, by: .llm) {
+                item.status = .analyzed
+            }
+            item.analysisProviderId = model
+            try? context.modelContext.save()
+
+            let parts: [String] = [
+                "**Analysis complete** (model: \(model))",
+                "",
+                "Short Summary: \(resultSummary)",
+                resultDetail.isEmpty ? "" : "Detailed: \(resultDetail.prefix(500))",
+                "Decisions: \(decisionCount)",
+                "Action Items: \(actionCount)",
+                "Risks: \(riskCount)",
+                "Open Questions: \(questionCount)",
+                "Entities: \(entityCount)"
+            ]
+            return ToolResult(
+                content: parts.filter { !$0.isEmpty }.joined(separator: "\n"),
+                citations: [ChatCitation(itemId: item.id, title: item.title, snippet: resultSummary, itemType: item.type)],
+                isError: false,
+                displaySummary: "analyze: \"\(resultSummary.prefix(80))\""
+            )
+        } catch {
+            return ToolResult(content: "Analysis failed: \(error.localizedDescription)", citations: [], isError: true, displaySummary: "analyze: failed")
+        }
+    }
+}
+
+struct DescribeImageTool: AgentTool {
+    let name = "describe_image"
+    let description = """
+    Analyze an image file visually using AI vision. Returns OCR text (if any) and a visual \
+    description of what's in the image. Use before analyze_content for image items.
+    """
+
+    let parameters = AIToolParameters(
+        properties: [
+            "item_id": AIToolProperty(type: "string", description: "UUID of the image item to describe"),
+            "model": AIToolProperty(type: "string", description: "Model for vision. Default: gpt-5.5.")
+        ],
+        required: ["item_id"]
+    )
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let itemIdStr = arguments["item_id"] as? String,
+              let itemId = UUID(uuidString: itemIdStr) else {
+            return ToolFormatting.error(tool: name, reason: "Missing or invalid item_id.", fix: "Provide a valid UUID string.")
+        }
+
+        let itemService = KnowledgeItemService(context: context.modelContext)
+        guard let item = try? itemService.fetchItem(id: itemId),
+              let relativePath = item.imageFileRelativePath else {
+            return ToolFormatting.error(tool: name, reason: "Item not found or not an image.", fix: "Provide the UUID of an image item.")
+        }
+
+        let imageURL = context.fileStore.itemDirectoryURL(for: itemId).appendingPathComponent(relativePath)
+        guard FileManager.default.fileExists(atPath: imageURL.path) else {
+            return ToolFormatting.error(tool: name, reason: "Image file not found on disk.", fix: "The image may have been deleted.")
+        }
+
+        guard let provider = try? ProviderRouter.resolveActive(context: context.modelContext) else {
+            return ToolFormatting.error(tool: name, reason: "No AI provider configured.", fix: "Configure a provider in Settings.")
+        }
+
+        let model = (arguments["model"] as? String) ?? AIConfigService.shared.featureConfig(for: "analysis")?.model ?? "gpt-5.5"
+
+        do {
+            let description = try await ImageAnalysisService().analyzeImage(imageURL, llmProvider: provider, model: model)
+            guard !description.isEmpty else {
+                return ToolResult(content: "Image analysis returned empty result.", citations: [], isError: false, displaySummary: "describe: empty")
+            }
+            let truncated = String(description.prefix(ToolFormatting.maxContentChars))
+            return ToolResult(
+                content: truncated,
+                citations: [ChatCitation(itemId: item.id, title: item.title, snippet: String(description.prefix(200)), itemType: item.type)],
+                isError: false,
+                displaySummary: "describe: \(description.count) chars for \"\(item.title)\""
+            )
+        } catch {
+            return ToolResult(content: "Image analysis failed: \(error.localizedDescription)", citations: [], isError: true, displaySummary: "describe: failed")
+        }
+    }
+}
+
+// MARK: - Prompt Management Tools (Phase 2)
+
+struct ListPromptsTool: AgentTool {
+    let name = "list_prompts"
+    let description = "List all available prompt templates. Use 'category' to filter by type: analysis, chat, pipeline, system, custom."
+
+    let parameters = AIToolParameters(
+        properties: [
+            "category": AIToolProperty(type: "string", description: "Filter by category: analysis, chat, pipeline, system, custom")
+        ],
+        required: []
+    )
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        let category = arguments["category"] as? String
+        let all = PromptStore.shared.prompts(in: category)
+        let lines = all.map { p in
+            "- `\(p.name)` [\(p.category)]\(p.isUserEdited ? " (edited)" : ""): \(p.description ?? "")"
+        }
+        return ToolResult(
+            content: lines.joined(separator: "\n"),
+            citations: [], isError: false,
+            displaySummary: "prompts: \(all.count) templates"
+        )
+    }
+}
+
+struct ReadPromptTool: AgentTool {
+    let name = "read_prompt"
+    let description = "Read the full content of a prompt template by name. Use list_prompts first to discover available templates."
+
+    let parameters = AIToolParameters(
+        properties: [
+            "name": AIToolProperty(type: "string", description: "Prompt name, e.g. 'analysis_system', 'pipeline_standard'")
+        ],
+        required: ["name"]
+    )
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let name = arguments["name"] as? String else {
+            return ToolFormatting.error(tool: self.name, reason: "Missing 'name' parameter.", fix: "Provide a prompt name from list_prompts.")
+        }
+        guard let prompt = PromptStore.shared.prompt(named: name) else {
+            return ToolFormatting.error(tool: self.name, reason: "Prompt '\(name)' not found.", fix: "Use list_prompts to see available templates.")
+        }
+        let status = prompt.isUserEdited ? " (user edited, \(prompt.updatedAt.formatted(date: .abbreviated, time: .shortened)))" : " (base)"
+        let header = "**\(prompt.name)**\(status)\nCategory: \(prompt.category)\nVariables: \(prompt.variables.joined(separator: ", "))\n\n"
+        return ToolResult(
+            content: header + prompt.content,
+            citations: [], isError: false,
+            displaySummary: "read: \(prompt.name) (\(prompt.content.count) chars)"
+        )
+    }
+}
+
+struct EditPromptTool: AgentTool {
+    let name = "edit_prompt"
+    let description = "Update the content of a prompt template. Changes are persisted and take effect immediately. Use read_prompt first to see current content. Always confirm with the user before editing."
+
+    let parameters = AIToolParameters(
+        properties: [
+            "name": AIToolProperty(type: "string", description: "Prompt name to edit"),
+            "content": AIToolProperty(type: "string", description: "New prompt content (full replacement, not a diff)")
+        ],
+        required: ["name", "content"]
+    )
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let name = arguments["name"] as? String else {
+            return ToolFormatting.error(tool: self.name, reason: "Missing 'name'.", fix: "Provide the prompt name to edit.")
+        }
+        guard let content = arguments["content"] as? String, !content.isEmpty else {
+            return ToolFormatting.error(tool: self.name, reason: "Missing 'content'.", fix: "Provide the new prompt content.")
+        }
+        guard PromptStore.shared.prompt(named: name) != nil else {
+            return ToolFormatting.error(tool: self.name, reason: "Prompt '\(name)' not found.", fix: "Use list_prompts first.")
+        }
+        PromptStore.shared.updatePrompt(named: name, content: content)
+        return ToolResult(
+            content: "Prompt '\(name)' updated successfully (\(content.count) chars).",
+            citations: [], isError: false,
+            displaySummary: "edit_prompt: '\(name)' updated"
+        )
+    }
+}
+
+// MARK: - Agent Memory Tools (Phase 3)
+
+struct WriteMemoryTool: AgentTool {
+    let name = "write_memory"
+    let description = """
+    Record a learned pattern or strategy so future pipeline runs can benefit. \
+    After successfully processing an item, write what worked. \
+    Provide: pattern (what you observed), strategy (what worked), and optional \
+    item_type, language, min_duration, content_type for future matching.
+    """
+
+    let parameters = AIToolParameters(
+        properties: [
+            "pattern": AIToolProperty(type: "string", description: "What was observed, e.g. 'audio > 60min in Portuguese'"),
+            "strategy": AIToolProperty(type: "string", description: "What worked, e.g. 'chunk 5k chars with nano, reduce with gpt-5.5'"),
+            "item_type": AIToolProperty(type: "string", description: "audio, image, note"),
+            "language": AIToolProperty(type: "string", description: "Language code: pt, en, etc."),
+            "min_duration": AIToolProperty(type: "number", description: "Duration threshold in seconds"),
+            "content_type": AIToolProperty(type: "string", description: "meeting, interview, document, photo")
+        ],
+        required: ["pattern", "strategy"]
+    )
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let pattern = arguments["pattern"] as? String,
+              let strategy = arguments["strategy"] as? String else {
+            return ToolFormatting.error(tool: name, reason: "Missing pattern or strategy.", fix: "Provide both the observed pattern and the strategy that worked.")
+        }
+        let mem = AgentMemoryStore.shared.write(
+            pattern: pattern, strategy: strategy,
+            itemType: arguments["item_type"] as? String,
+            language: arguments["language"] as? String,
+            minDuration: arguments["min_duration"] as? Double
+        )
+        return ToolResult(
+            content: "Memory recorded: \(mem.id.uuidString.prefix(8)) — \"\(pattern.prefix(80))\"",
+            citations: [], isError: false,
+            displaySummary: "memory: \"\(pattern.prefix(60))\""
+        )
+    }
+}
+
+struct SearchMemoryTool: AgentTool {
+    let name = "search_memory"
+    let description = "Search agent memories for patterns that match the current content. Use before processing to find proven strategies."
+
+    let parameters = AIToolParameters(
+        properties: [
+            "item_type": AIToolProperty(type: "string", description: "Filter by item type: audio, image, note"),
+            "language": AIToolProperty(type: "string", description: "Filter by language: pt, en"),
+            "content_type": AIToolProperty(type: "string", description: "Filter by content type: meeting, interview, document, photo")
+        ],
+        required: []
+    )
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        let results = AgentMemoryStore.shared.search(
+            itemType: arguments["item_type"] as? String,
+            language: arguments["language"] as? String,
+            contentType: arguments["content_type"] as? String
+        )
+        guard !results.isEmpty else {
+            return ToolResult(content: "No relevant memories found for these criteria.", citations: [], isError: false, displaySummary: "memory search: 0 results")
+        }
+        let lines = results.map { m in
+            "- [\(m.relevance > 0.8 ? "HIGH" : "MED")] \(m.pattern) → \(m.strategy) (success: \(m.successCount), fail: \(m.failCount))"
+        }
+        return ToolResult(
+            content: "Found \(results.count) relevant memories:\n\n" + lines.joined(separator: "\n"),
+            citations: [], isError: false,
+            displaySummary: "memory search: \(results.count) results"
+        )
+    }
+}
+
+struct ListMemoriesTool: AgentTool {
+    let name = "list_memories"
+    let description = "List all agent memories (learned patterns and strategies)."
+
+    let parameters = AIToolParameters(properties: [:], required: [])
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        let all = AgentMemoryStore.shared.listAll()
+        guard !all.isEmpty else {
+            return ToolResult(content: "No memories recorded yet.", citations: [], isError: false, displaySummary: "memories: 0")
+        }
+        let lines = all.map { m in
+            "- \(m.isStale ? "[STALE] " : "")\(m.pattern) → \(m.strategy.prefix(80)) (\(m.successCount)S/\(m.failCount)F)"
+        }
+        return ToolResult(
+            content: "\(all.count) agent memories:\n\n" + lines.joined(separator: "\n"),
+            citations: [], isError: false,
+            displaySummary: "memories: \(all.count)"
+        )
+    }
+}
+
+// MARK: - Plan Mode Tools (Phase 5)
+
+struct PlanCreateTool: AgentTool {
+    let name = "plan_create"
+    let description = "Create a structured plan before executing a complex task. Use for multi-step operations like processing large items or research."
+
+    let parameters = AIToolParameters(
+        properties: [
+            "steps": AIToolProperty(type: "array", description: "Array of step descriptions, e.g. [\"Extract content\", \"Analyze with nano\", \"Review and synthesize\"]"),
+            "goal": AIToolProperty(type: "string", description: "What this plan aims to accomplish")
+        ],
+        required: ["steps", "goal"]
+    )
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        let goal = arguments["goal"] as? String ?? "Unnamed plan"
+        let steps = arguments["steps"] as? [String] ?? []
+        var content = "**Plan: \(goal)**\n\n"
+        for (i, step) in steps.enumerated() {
+            content += "\(i + 1). [ ] \(step)\n"
+        }
+        return ToolResult(content: content, citations: [], isError: false, displaySummary: "plan: \(steps.count) steps")
+    }
+}
+
+struct PlanUpdateTool: AgentTool {
+    let name = "plan_update"
+    let description = "Mark a plan step as completed. Use after finishing each step."
+
+    let parameters = AIToolParameters(
+        properties: [
+            "step_index": AIToolProperty(type: "integer", description: "1-based index of the completed step"),
+            "note": AIToolProperty(type: "string", description: "Optional note about the step outcome")
+        ],
+        required: ["step_index"]
+    )
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        let idx = arguments["step_index"] as? Int ?? 0
+        let note = arguments["note"] as? String ?? ""
+        return ToolResult(
+            content: "Step \(idx) completed.\(note.isEmpty ? "" : " Note: \(note)")",
+            citations: [], isError: false,
+            displaySummary: "plan: step \(idx) done"
+        )
+    }
+}
+
+// MARK: - Output Block Tools
+
+/// Validates and returns a table block for native rendering.
+struct RenderTableTool: AgentTool {
+    let name = "render_table"
+    let description = "Render tabular data as a native sortable table. Each row must have exactly the same number of cells as headers. Use for comparisons, inventories, decision matrices, etc."
+
+    let parameters = AIToolParameters(properties: [
+        "headers": AIToolProperty(type: "array", description: "Column headers"),
+        "rows": AIToolProperty(type: "array", description: "Array of row arrays. Each row must match header count."),
+        "title": AIToolProperty(type: "string", description: "Optional table title")
+    ], required: ["headers", "rows"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let headers = args["headers"] as? [String], !headers.isEmpty else {
+            return ToolResult(content: "render_table: headers required.", citations: [], isError: true, displaySummary: "render_table: bad headers")
+        }
+        guard let rows = args["rows"] as? [[String]] else {
+            return ToolResult(content: "render_table: rows required as array of string arrays.", citations: [], isError: true, displaySummary: "render_table: bad rows")
+        }
+        // Validate row lengths
+        for (i, row) in rows.enumerated() {
+            if row.count != headers.count {
+                return ToolResult(content: "render_table: row \(i+1) has \(row.count) columns, expected \(headers.count). Fix: each row must match: | \(headers.joined(separator: " | ")) |", citations: [], isError: true, displaySummary: "render_table: column mismatch")
+            }
+        }
+        let title = args["title"] as? String
+        // Persist as annotation so the table is recoverable
+        if let itemId = context.activeProjectID {
+            let annotationSvc = AnnotationService(context: context.modelContext)
+            try? annotationSvc.upsert([
+                CapturedAnnotation(source: "render_table", key: "headers", value: headers.joined(separator: "|"), confidence: nil),
+                CapturedAnnotation(source: "render_table", key: "rowCount", value: String(rows.count), confidence: nil)
+            ], itemID: itemId, source: "render_table")
+        }
+        return ToolResult(content: "render_table: \(headers.count) cols × \(rows.count) rows rendered.\(title.map { " Title: \"\($0)\"." } ?? "")", citations: [], isError: false, displaySummary: "table: \(headers.count)×\(rows.count)")
+    }
+}
+
+/// Validates and renders action items with checkboxes. Items are persisted as TaskItems.
+struct RenderActionsTool: AgentTool {
+    let name = "render_actions"
+    let description = "Render action items as native checkboxes. Each item can have owner, due date, and priority. Items are persisted as tasks. Use for todos, commitments, and follow-ups."
+
+    let parameters = AIToolParameters(properties: [
+        "items": AIToolProperty(type: "array", description: "Array of {task, owner?, due?, priority?} objects"),
+        "title": AIToolProperty(type: "string", description: "Optional section title")
+    ], required: ["items"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let items = args["items"] as? [[String: Any]] else {
+            return ToolResult(content: "render_actions: items required as array of {task, owner?, due?, priority?}.", citations: [], isError: true, displaySummary: "render_actions: bad items")
+        }
+        var created = 0
+        let taskSvc = TaskService(context: context.modelContext)
+        for item in items {
+            guard let taskTitle = item["task"] as? String else { continue }
+            let owner = item["owner"] as? String
+            let dueStr = item["due"] as? String
+            let priorityStr = item["priority"] as? String
+            let due: Date? = dueStr.flatMap { ISO8601DateFormatter().date(from: $0) }
+            let priority = priorityStr.flatMap { TaskPriority(rawValue: $0) } ?? .medium
+            let task = TaskItem(title: taskTitle, priority: priority, ownerName: owner, dueAt: due)
+            task.createdBy = .llm
+            var prov = FieldProvenance.empty
+            prov.mark(field: "title", origin: .llm)
+            prov.mark(field: "status", origin: .llm)
+            prov.mark(field: "priority", origin: .llm)
+            if owner != nil { prov.mark(field: "ownerName", origin: .llm) }
+            if due != nil { prov.mark(field: "dueAt", origin: .llm) }
+            task.fieldProvenanceJSON = prov.encode()
+            context.modelContext.insert(task)
+            created += 1
+        }
+        try? context.modelContext.save()
+        return ToolResult(content: "render_actions: \(created) tasks created\(created > 0 ? " and rendered" : "").", citations: [], isError: false, displaySummary: "actions: \(created) tasks")
+    }
+}
+
+/// Renders a card with title, body, entity chips, and optional badge.
+struct RenderCardTool: AgentTool {
+    let name = "render_card"
+    let description = "Render a summary card with title, body text, entity tags, and an optional badge. Use for key findings, executive summaries, or item overviews."
+
+    let parameters = AIToolParameters(properties: [
+        "title": AIToolProperty(type: "string", description: "Card title"),
+        "body": AIToolProperty(type: "string", description: "Card body text (markdown)"),
+        "entities": AIToolProperty(type: "array", description: "Entity names to show as chips"),
+        "badge": AIToolProperty(type: "string", description: "Optional badge text (e.g. 'HIGH', 'DONE')")
+    ], required: ["title", "body"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        let title = args["title"] as? String ?? ""
+        let body = args["body"] as? String ?? ""
+        let entities = args["entities"] as? [String] ?? []
+        let badge = args["badge"] as? String
+        return ToolResult(content: "render_card: \"\(title)\" rendered with \(entities.count) entities.\(badge.map { " Badge: \($0)." } ?? "")", citations: [], isError: false, displaySummary: "card: \(title)")
+    }
+}
+
+/// Renders a code block with syntax highlighting and copy button.
+struct RenderCodeTool: AgentTool {
+    let name = "render_code"
+    let description = "Render a code block with syntax highlighting and a copy button. Use for scripts, queries, config examples, or structured data."
+
+    let parameters = AIToolParameters(properties: [
+        "code": AIToolProperty(type: "string", description: "Code content"),
+        "language": AIToolProperty(type: "string", description: "Programming language for syntax highlighting"),
+        "caption": AIToolProperty(type: "string", description: "Optional caption below the code block")
+    ], required: ["code"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        let code = args["code"] as? String ?? ""
+        let lang = args["language"] as? String
+        let caption = args["caption"] as? String
+        return ToolResult(content: "render_code: \(code.count) chars\(lang.map { " (\($0))" } ?? "").", citations: [], isError: false, displaySummary: "code: \(code.count) chars")
+    }
+}
+
+/// Renders a chart using native Swift Charts. Supports bar, line, pie, and scatter.
+struct RenderChartTool: AgentTool {
+    let name = "render_chart"
+    let description = "Render a native chart. Supported types: bar, line, pie, scatter. Labels array for X axis. Data as array of {label, value} or {label, values:[]} for multi-series."
+
+    let parameters = AIToolParameters(properties: [
+        "type": AIToolProperty(type: "string", description: "Chart type: bar, line, pie, scatter"),
+        "labels": AIToolProperty(type: "array", description: "X-axis labels"),
+        "data": AIToolProperty(type: "array", description: "Array of {label, value} or {label, values:[]} for multi-series")
+    ], required: ["type", "labels", "data"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        let type = args["type"] as? String ?? "bar"
+        let labels = args["labels"] as? [String] ?? []
+        let _ = args["data"] as? [[String: Any]] ?? []
+        guard !labels.isEmpty else {
+            return ToolResult(content: "render_chart: labels required.", citations: [], isError: true, displaySummary: "chart: bad labels")
+        }
+        return ToolResult(content: "render_chart: \(type) chart with \(labels.count) data points rendered.", citations: [], isError: false, displaySummary: "chart: \(type) (\(labels.count) pts)")
+    }
+}
+
+// MARK: - Lens Tools
+
+struct ListLensesTool: AgentTool {
+    let name = "list_lenses"
+    let description = "List available analysis lenses (frameworks + analytical lenses). Use to see what perspectives are available for a project."
+    let parameters = AIToolParameters(properties: ["category": AIToolProperty(type: "string", description: "Filter: domain, analytical, personal, custom")], required: [])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        let cat = args["category"] as? String
+        let lenses: [Lens] = {
+            if let c = cat, let category = LensCategory(rawValue: c) {
+                return LensCatalogService.shared.lenses(in: category)
+            }
+            return LensCatalogService.shared.allLenses
+        }()
+        let content = lenses.map { "- **\($0.name)** (`\($0.id)`) [\($0.category.rawValue)]: \($0.description)" }.joined(separator: "\n")
+        return ToolResult(content: "Available lenses:\n\n\(content)", citations: [], isError: false, displaySummary: "\(lenses.count) lenses")
+    }
+}
+
+struct ApplyLensTool: AgentTool {
+    let name = "apply_lens"
+    let description = "Apply a lens (analysis perspective) to a project. Changes how content is analyzed."
+    let parameters = AIToolParameters(properties: ["lens_id": AIToolProperty(type: "string", description: "Lens ID (e.g., builtin/meeting, lens/risk_analysis)"), "project_id": AIToolProperty(type: "string", description: "Project UUID")], required: ["lens_id", "project_id"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let lensID = args["lens_id"] as? String, let lens = LensCatalogService.shared.resolve(id: lensID) else {
+            return ToolResult(content: "apply_lens: lens not found", citations: [], isError: true, displaySummary: "Lens not found")
+        }
+        guard let pidStr = args["project_id"] as? String, let pid = UUID(uuidString: pidStr) else {
+            return ToolResult(content: "apply_lens: invalid project_id", citations: [], isError: true, displaySummary: "Bad project ID")
+        }
+        guard let project = try? ProjectService(context: context.modelContext).fetch(id: pid) else {
+            return ToolResult(content: "apply_lens: project not found", citations: [], isError: true, displaySummary: "Project not found")
+        }
+        LensCatalogService.shared.applyLens(lens, to: project)
+        try? context.modelContext.save()
+        return ToolResult(content: "Lens '\(lens.name)' applied to project '\(project.name)'.", citations: [], isError: false, displaySummary: "Lens applied: \(lens.name)")
+    }
+}
+
+// MARK: - Raise Signal Tool
+
+/// Raises a signal (risk, alert, opportunity, etc.) for a project.
+/// Signals are the "atoms of attention" — they appear in the project signal feed for user review.
+struct RaiseSignalTool: AgentTool {
+    let name = "raise_signal"
+    let description = """
+    Raise a signal for the active project. Signals are attention items — risks, alerts, \
+    opportunities, contradictions, patterns, doubts, possible new projects, or emerging problems. \
+    Use this when you detect something the user should know about. \
+    Types: risk, alert, opportunity, change, contradiction, pattern, doubt, new_project, emerging_problem.
+    """
+
+    let parameters = AIToolParameters(properties: [
+        "type": AIToolProperty(type: "string", description: "Signal type: risk|alert|opportunity|change|contradiction|pattern|doubt|new_project|emerging_problem"),
+        "title": AIToolProperty(type: "string", description: "Short signal title (max 120 chars)"),
+        "body": AIToolProperty(type: "string", description: "Detailed explanation of the signal"),
+        "impact": AIToolProperty(type: "number", description: "Impact magnitude 0.0-1.0"),
+        "urgency": AIToolProperty(type: "number", description: "Urgency 0.0-1.0 (time-sensitive = higher)")
+    ], required: ["type", "title"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let type = args["type"] as? String else {
+            return ToolResult(content: "raise_signal: 'type' is required.", citations: [], isError: true, displaySummary: "signal: missing type")
+        }
+        let validTypes = ["risk", "alert", "opportunity", "change", "contradiction",
+                          "pattern", "doubt", "new_project", "emerging_problem"]
+        guard validTypes.contains(type) else {
+            return ToolResult(content: "raise_signal: invalid type '\(type)'. Must be one of: \(validTypes.joined(separator: ", "))", citations: [], isError: true, displaySummary: "signal: bad type")
+        }
+
+        let title = (args["title"] as? String) ?? "Untitled signal"
+        let body = args["body"] as? String
+        let impact = (args["impact"] as? Double).map { min(max($0, 0), 1) }
+        let urgency = (args["urgency"] as? Double).map { min(max($0, 0), 1) }
+
+        let signal = AgentSuggestion(
+            projectID: context.activeProjectID,
+            type: type,
+            title: String(title.prefix(120)),
+            body: body,
+            status: "visible",
+            sourceItemID: context.activeItemID,
+            impactScore: impact,
+            urgencyScore: urgency
+        )
+        context.modelContext.insert(signal)
+        try? context.modelContext.save()
+
+        return ToolResult(content: "Signal raised: [\(type)] \(title)", citations: [], isError: false, displaySummary: "signal: \(type)")
+    }
+}
+
+// MARK: - Get History Tool
+
+struct GetHistoryTool: AgentTool {
+    let name = "get_history"
+    let description = "Get change history for a project or item. See what changed, when, by whom (user/LLM/import/system). Use to trace how a project evolved."
+    let parameters = AIToolParameters(properties: [
+        "project_id": AIToolProperty(type: "string", description: "Project UUID to get history for"),
+        "entity_type": AIToolProperty(type: "string", description: "Filter: Project, TaskItem, KnowledgeItem"),
+        "limit": AIToolProperty(type: "integer", description: "Max records (default 30)")
+    ], required: ["project_id"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let pidStr = args["project_id"] as? String, let pid = UUID(uuidString: pidStr) else {
+            return ToolResult(content: "get_history: invalid project_id", citations: [], isError: true, displaySummary: "Bad ID")
+        }
+        let limit = min(args["limit"] as? Int ?? 30, 100)
+        let records = VersioningService.shared.changes(for: pid, limit: limit, context: context.modelContext)
+        let snapshots = VersioningService.shared.snapshots(for: pid, context: context.modelContext)
+        var content = "**Project History**\n\n"
+        if !snapshots.isEmpty {
+            content += "Snapshots:\n"
+            for s in snapshots.prefix(5) {
+                content += "- \(s.createdAt.formatted()): \(s.label ?? "Unlabeled") [\(s.trigger.rawValue), \(s.changeCount) changes]\n"
+            }
+            content += "\n"
+        }
+        if !records.isEmpty {
+            content += "Recent changes:\n"
+            for r in records.prefix(limit) {
+                let icon = r.origin == .user ? "👤" : r.origin == .llm ? "🤖" : r.origin == .system ? "⚙️" : "📥"
+                content += "- \(icon) \(r.timestamp.formatted(date: .omitted, time: .shortened)): \(r.entityType)/\(r.field) \(r.previousValue ?? "nil") → \(r.newValue ?? "nil")\n"
+            }
+        } else {
+            content += "No changes recorded yet."
+        }
+        return ToolResult(content: content, citations: [], isError: false, displaySummary: "history: \(records.count) changes, \(snapshots.count) snapshots")
+    }
+}
+
+// MARK: - Answer Doubt Tool
+
+struct AnswerDoubtTool: AgentTool {
+    let name = "answer_doubt"
+    let description = "Answer a doubt (open question) raised by the system. Provide the doubt's title and your answer."
+    let parameters = AIToolParameters(properties: [
+        "doubt_title": AIToolProperty(type: "string", description: "Exact title of the doubt to answer"),
+        "answer": AIToolProperty(type: "string", description: "Your answer to the doubt")
+    ], required: ["doubt_title", "answer"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let title = args["doubt_title"] as? String, let answer = args["answer"] as? String else {
+            return ToolResult(content: "answer_doubt: missing doubt_title or answer", citations: [], isError: true, displaySummary: "Missing args")
+        }
+        let all = (try? context.modelContext.fetch(FetchDescriptor<AgentSuggestion>())) ?? []
+        guard let doubt = all.first(where: { $0.type == "doubt" && $0.title.localizedCaseInsensitiveCompare(title) == .orderedSame && $0.isActive }) else {
+            return ToolResult(content: "answer_doubt: no active doubt found with title \"\(title)\"", citations: [], isError: true, displaySummary: "Not found")
+        }
+        doubt.body = (doubt.body ?? "") + "\n\nAnswer: \(answer)"
+        doubt.status = "acknowledged"
+        try? context.modelContext.save()
+        return ToolResult(content: "Doubt answered: \(title)", citations: [], isError: false, displaySummary: "Doubt answered")
+    }
+}
+
+// MARK: - Preset Tools
+
+struct ExportPresetTool: AgentTool {
+    let name = "export_preset"
+    let description = "Export a project's behavior preset (lenses, frameworks, instructions, rules) as JSON without the data."
+    let parameters = AIToolParameters(properties: ["project_id": AIToolProperty(type: "string", description: "Project UUID")], required: ["project_id"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let pidStr = args["project_id"] as? String, let pid = UUID(uuidString: pidStr),
+              let project = try? ProjectService(context: context.modelContext).fetch(id: pid) else {
+            return ToolResult(content: "export_preset: project not found", citations: [], isError: true, displaySummary: "Not found")
+        }
+        let preset = PresetExportService.shared.exportPreset(from: project)
+        guard let json = (try? JSONEncoder().encode(preset)).flatMap({ String(data: $0, encoding: .utf8) }) else {
+            return ToolResult(content: "export_preset: failed to encode", citations: [], isError: true, displaySummary: "Encode failed")
+        }
+        return ToolResult(content: "Preset exported:\n```json\n\(json.prefix(3000))\n```", citations: [], isError: false, displaySummary: "Preset exported")
+    }
+}
+
+struct ImportPresetTool: AgentTool {
+    let name = "import_preset"
+    let description = "Apply a built-in preset to a project. Use list_lenses to see available presets."
+    let parameters = AIToolParameters(properties: ["preset_id": AIToolProperty(type: "string", description: "Preset ID (e.g., preset/builtin/legal)"), "project_id": AIToolProperty(type: "string", description: "Project UUID")], required: ["preset_id", "project_id"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let presetID = args["preset_id"] as? String, let pidStr = args["project_id"] as? String,
+              let pid = UUID(uuidString: pidStr), let project = try? ProjectService(context: context.modelContext).fetch(id: pid) else {
+            return ToolResult(content: "import_preset: invalid arguments", citations: [], isError: true, displaySummary: "Bad args")
+        }
+        let presets = PresetExportService.shared.builtInPresets()
+        guard let preset = presets.first(where: { $0.id == presetID }) else {
+            return ToolResult(content: "import_preset: preset '\(presetID)' not found. Use list_lenses to see available presets.", citations: [], isError: true, displaySummary: "Not found")
+        }
+        PresetExportService.shared.applyPreset(preset, to: project)
+        try? context.modelContext.save()
+        return ToolResult(content: "Preset '\(preset.name)' applied to project '\(project.name)'.", citations: [], isError: false, displaySummary: "Preset applied: \(preset.name)")
+    }
+}
+
+// MARK: - JavaScript Execution Tool
+
+/// Executes JavaScript code in a sandboxed JSContext with access to native APIs.
+/// The code runs with a 5-second timeout. Use `native.getAllItems()` etc.
+struct ExecuteJavaScriptTool: AgentTool {
+    let name = "execute_javascript"
+    let description = """
+    Execute JavaScript code in a secure sandbox with access to native APIs via `native.*`. \
+    Available APIs: native.getAllItems(), native.searchItems(query), native.getItem(id), \
+    native.getItemAnalysis(id), native.getProject(id), native.getProjectTasks(projectId), \
+    native.createTask(title, owner, due, projectId), native.jsLog(msg), native.jsNow(). \
+    Use console.log() for debugging. 5-second timeout. No network, no fs, no require.
+    """
+
+    let parameters = AIToolParameters(properties: [
+        "code": AIToolProperty(type: "string", description: "JavaScript code to execute"),
+        "description": AIToolProperty(type: "string", description: "Brief description of what this script does")
+    ], required: ["code"])
+
+    func execute(_ args: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let code = args["code"] as? String, !code.isEmpty else {
+            return ToolFormatting.error(tool: name, reason: "Missing 'code'.", fix: "Provide JavaScript code to execute.")
+        }
+        let desc = args["description"] as? String ?? ""
+
+        let bridge = WawaJSBridge(modelContext: context.modelContext, fileStore: context.fileStore)
+        let result = JSSandbox.execute(code, bridge: bridge)
+
+        if let error = result.error {
+            let msg = """
+            JavaScript execution failed:
+
+            **Description:** \(desc)
+            **Error:** \(error)
+
+            Fix the code and retry. Check for:
+            - Syntax errors (missing brackets, semicolons)
+            - API misuse (check `native.*` function signatures)
+            - Infinite loops (5s timeout)
+            """
+            return ToolResult(content: msg, citations: [], isError: true, displaySummary: "JS: error — \(error.prefix(60))")
+        }
+
+        let logSection = result.logs.isEmpty ? "" : "\n\n**Console output:**\n\(result.logs.map { "  > \($0)" }.joined(separator: "\n"))"
+        return ToolResult(
+            content: "**JS result** (\(desc)):\n\(result.output)\(logSection)",
+            citations: [], isError: false,
+            displaySummary: "JS: \(desc.isEmpty ? code.prefix(40) : desc.prefix(60))"
+        )
+    }
+}
+
+// MARK: - Semantic Search Tool (Phase I)
+
+struct SearchSemanticTool: AgentTool {
+    let name = "search_semantic"
+    let description = "Semantic search across knowledge items using embeddings. Finds conceptually similar content even when keywords don't match. Use for broad research questions, thematic exploration, and finding related items by meaning."
+
+    let parameters = AIToolParameters(properties: [
+        "query": AIToolProperty(type: "string", description: "Natural language question or concept to search for"),
+        "limit": AIToolProperty(type: "integer", description: "Max results (default 10)")
+    ], required: ["query"])
+
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let query = arguments["query"] as? String, !query.isEmpty else {
+            return ToolFormatting.error(tool: name, reason: "Missing query.", fix: "Provide a search query.")
+        }
+        let limit = min((arguments["limit"] as? Int) ?? 10, 20)
+        let itemSvc = KnowledgeItemService(context: context.modelContext)
+        let items = (try? itemSvc.allItems()) ?? []
+
+        // Try semantic search first (embeddings), fall back to FTS
+        let embeddingSvc = EmbeddingService()
+        let embStore = FileArtifactStore()
+        var scored: [(item: KnowledgeItem, score: Double, snippet: String)] = []
+
+        // Generate embedding for query
+        guard let provider = try? ProviderRouter.resolveActive(context: context.modelContext) else {
+            return ToolFormatting.error(tool: name, reason: "No provider for embeddings.", fix: "Configure a provider in Settings.")
+        }
+        let queryEmbedding: [Float]
+        let tmpID = UUID()
+        do {
+            queryEmbedding = try await embeddingSvc.generateAndStore(for: tmpID, text: query, using: provider)
+        } catch {
+            // Fallback to FTS
+            let ftsResults = SearchService().searchNow(query: query, in: items).prefix(limit)
+            let lines = ftsResults.map { r in "- \(items.first(where: {$0.id == r.itemID})?.title ?? "??"): \(r.snippet)" }
+            return ToolResult(content: "FTS results (embeddings unavailable):\n" + lines.joined(separator: "\n"), citations: [], isError: false, displaySummary: "search: \(ftsResults.count) FTS")
+        }
+
+        // Score items by cosine similarity
+        for item in items {
+            guard let emb = embeddingSvc.load(for: item.id), !emb.isEmpty else { continue }
+            let sim = Double(SemanticSearchService().cosineSimilarity(queryEmbedding, emb))
+            if sim > 0.3 { // Minimum relevance threshold
+                let snippet: String = item.bodyText.map { String($0.prefix(200)) } ?? item.title
+                scored.append((item, sim, snippet))
+            }
+        }
+
+        // Clean up temporary embedding
+        try? FileManager.default.removeItem(at: embeddingSvc.embeddingURL(for: tmpID))
+
+        scored.sort { $0.score > $1.score }
+        let top = scored.prefix(limit)
+        guard !top.isEmpty else {
+            return ToolResult(content: "No semantically relevant items found for \"\(query)\". Try different wording or use search_knowledge for keyword search.", citations: [], isError: false, displaySummary: "semantic: 0 results")
+        }
+
+        var content = "Semantic search results for \"\(query)\":\n\n"
+        var citations: [ChatCitation] = []
+        for (i, r) in top.enumerated() {
+            content += "\(i+1). **\(r.item.title)** (score: \(String(format: "%.0f", r.score * 100))%)\n   \(r.snippet)\n\n"
+            citations.append(ChatCitation(itemId: r.item.id, title: r.item.title, snippet: r.snippet, itemType: r.item.type))
+        }
+        return ToolResult(content: content, citations: citations, isError: false, displaySummary: "semantic: \(top.count) results")
     }
 }

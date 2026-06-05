@@ -1,4 +1,3 @@
-import SwiftUI
 import Foundation
 import SwiftData
 
@@ -15,7 +14,7 @@ enum ItemStatus: String, Codable, CaseIterable {
 }
 
 enum KnowledgeItemType: String, Codable, CaseIterable, Hashable {
-    case meeting
+    case audio = "audio"
     case note
     case journalEntry
     case webBookmark
@@ -27,21 +26,11 @@ enum KnowledgeItemType: String, Codable, CaseIterable, Hashable {
 extension KnowledgeItemType {
     var icon: String {
         switch self {
-        case .meeting: "recordingtape"
+        case .audio: "recordingtape"
         case .note: "note.text"
         case .journalEntry: "book"
         case .webBookmark: "bookmark"
         case .image: "photo"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .meeting: .blue
-        case .note: .orange
-        case .journalEntry: .purple
-        case .webBookmark: .green
-        case .image: .pink
         }
     }
 
@@ -91,9 +80,15 @@ final class KnowledgeItem {
     var scheduledDate: Date?
     var isImported: Bool = false
     var importSourceURL: String?
+    // Field authority
+    var fieldProvenanceJSON: String?
 
     var type: KnowledgeItemType {
-        get { KnowledgeItemType(rawValue: typeRaw) ?? .meeting }
+        get {
+            // Migration: "meeting" was renamed to "audio"
+            if typeRaw == "meeting" { return .audio }
+            return KnowledgeItemType(rawValue: typeRaw) ?? .audio
+        }
         set { typeRaw = newValue.rawValue }
     }
 
@@ -104,7 +99,7 @@ final class KnowledgeItem {
 
     init(
         id: UUID = UUID(),
-        type: KnowledgeItemType = .meeting,
+        type: KnowledgeItemType = .audio,
         title: String = "",
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
@@ -131,5 +126,19 @@ final class KnowledgeItem {
         self.durationSeconds = durationSeconds
         self.languageCode = languageCode
         self.inboxDate = inboxDate
+        self.fieldProvenanceJSON = nil
+    }
+}
+
+// MARK: - KnowledgeItem + FieldProvidence
+
+extension KnowledgeItem: FieldProvidence {
+    var provenance: FieldProvenance {
+        get { FieldProvenance.decode(from: fieldProvenanceJSON) }
+        set { fieldProvenanceJSON = newValue.encode() }
+    }
+
+    func writeProvenance() {
+        fieldProvenanceJSON = provenance.encode()
     }
 }

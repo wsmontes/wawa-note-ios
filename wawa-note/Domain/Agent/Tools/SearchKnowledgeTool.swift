@@ -2,7 +2,7 @@ import Foundation
 
 struct SearchKnowledgeTool: AgentTool {
     let name = "search_knowledge"
-    let description = "Full-text search across all knowledge items (meetings, notes, journals, bookmarks, images). Searches titles, body text, transcripts, and analysis summaries. Returns item UUIDs for use with get_item."
+    let description = "Full-text search across all knowledge items (audio, notes, journals, bookmarks, images). Searches titles, body text, transcripts, and analysis summaries. Returns item UUIDs for use with get_item."
 
     let parameters = AIToolParameters(
         properties: [
@@ -46,7 +46,8 @@ struct SearchKnowledgeTool: AgentTool {
             content += ToolFormatting.formatItemLine(item, index: idx + 1)
             content += "   Matched in: \(r.matchedField.rawValue)\n"
             content += "   Snippet: \"\(r.snippet)\"\n\n"
-            citations.append(ChatCitation(itemId: r.itemID, title: item.title, snippet: r.snippet, itemType: item.typeRaw))
+            citations.append(ChatCitation(itemId: r.itemID, title: item.title, snippet: r.snippet, itemType: item.type,
+                projectID: item.projectID, projectColorHex: item.projectID.flatMap { context.projectColorHex(for: $0) }))
         }
 
         content += "To read a full item, use get_item with its UUID."

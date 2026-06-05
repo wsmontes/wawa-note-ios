@@ -69,6 +69,12 @@ final class AnalysisService: @unchecked Sendable {
 
     nonisolated(unsafe) var onProgress: (@Sendable (AnalysisProgress) -> Void)?
 
+    /// Reasoning models (o1, o3, gpt-5.5, etc.) don't support response_format: json_object.
+    /// The prompt already instructs JSON output, so we omit the parameter for them.
+    private func jsonResponseFormat(for model: String) -> AIRequest.AIResponseFormat? {
+        configService.isReasoningModel(model) ? nil : .jsonObject
+    }
+
     func analyze(
         transcript: Transcript,
         using provider: any AIProvider,
@@ -98,6 +104,51 @@ final class AnalysisService: @unchecked Sendable {
         return try await mapReduceAnalysis(chunks: chunks, provider: provider, model: model, systemPrompt: systemPrompt, meetingId: meetingId, sourceContext: sourceCtx)
     }
 
+    /// Framework-driven analysis: accepts a dynamic output schema and returns
+    /// a DynamicAnalysis whose results conform to that schema.
+    func analyzeDynamic(
+        transcript: Transcript,
+        using provider: any AIProvider,
+        model: String,
+        meetingId: UUID = UUID(),
+        sourceContext: SourceContext,
+        schema: AnalysisOutputSchema,
+        systemPrompt: String
+    ) async throws -> DynamicAnalysis {
+        let prefix = sourceContext.userPromptPrefix()
+        let segmentsText = transcript.segments.map { "[\($0.id.uuidString)|\(formatTime($0.startTime))] \($0.text)" }
+        let body = segmentsText.joined(separator: "\n")
+
+        // Serialize schema so the LLM knows what JSON structure to produce
+        let schemaJSON: String
+        if let schemaData = try? JSONEncoder().encode(schema),
+           let json = String(data: schemaData, encoding: .utf8) {
+            schemaJSON = json
+        } else {
+            schemaJSON = "{\"type\":\"object\",\"properties\":{\"short_summary\":{\"type\":\"string\"}},\"required\":[\"short_summary\"]}"
+        }
+
+        let userPrompt = "\(prefix)Analyze the following content. Return ONLY valid JSON matching this schema:\n\n\(schemaJSON)\n\nCONTENT:\n\(body)"
+
+        let params = configService.requestParams(for: "analysis", model: model)
+        let request = AIRequest(model: model, messages: [
+            AIMessage(role: .system, content: [.text(systemPrompt)]),
+            AIMessage(role: .user, content: [.text(userPrompt)])
+        ], temperature: params.temperature, maxTokens: params.maxTokens, responseFormat: jsonResponseFormat(for: model))
+
+        let response = try await provider.send(request)
+        let cleaned = ProviderAdapter.normalizeJSON(response.content)
+
+        guard let data = cleaned.data(using: .utf8) else {
+            throw ProviderError.decodingFailed
+        }
+
+        let results = try JSONDecoder().decode(AnalysisResults.self, from: data)
+        // schemaId tracks which framework generated this analysis
+        let schemaId = sourceContext.sourceType == .recording ? "dynamic/recording" : "dynamic/\(sourceContext.sourceType.rawValue)"
+        return DynamicAnalysis(itemId: meetingId, providerId: provider.id, model: model, schemaId: schemaId, results: results)
+    }
+
     // MARK: - Direct (single request)
 
     private func singleAnalysis(provider: any AIProvider, model: String, systemPrompt: String, userPrompt: String, meetingId: UUID) async throws -> MeetingAnalysis {
@@ -110,7 +161,7 @@ final class AnalysisService: @unchecked Sendable {
             ],
             temperature: params.temperature,
             maxTokens: params.maxTokens,
-            responseFormat: .jsonObject
+            responseFormat: jsonResponseFormat(for: model)
         )
         let response = try await provider.send(request)
         return await parseResponse(response.content, meetingId: meetingId, providerId: provider.id, model: model, provider: provider)
@@ -143,7 +194,7 @@ final class AnalysisService: @unchecked Sendable {
         }.joined(separator: "\n\n")
 
         let reducePrompt = """
-        Below are summaries from different parts of a long meeting. Synthesize them into a complete meeting analysis.
+        Below are summaries from different parts of a content. Synthesize them into a complete meeting analysis.
         Extract: short_summary, detailed_summary, decisions (title, details), action_items (task, owner, due_date), open_questions, risks (risk, details), important_dates (date, meaning), mentioned_people, mentioned_systems, mentioned_organizations, mentioned_repositories, mentioned_locations.
 
         \(combined)
@@ -160,7 +211,7 @@ final class AnalysisService: @unchecked Sendable {
             ],
             temperature: params.temperature,
             maxTokens: params.maxTokens,
-            responseFormat: .jsonObject
+            responseFormat: jsonResponseFormat(for: model)
         )
         let response = try await sendWithRetry(provider: provider, request: request, maxRetries: Self.maxRetries)
         return await parseResponse(response.content, meetingId: meetingId, providerId: provider.id, model: model, provider: provider)
@@ -204,7 +255,7 @@ final class AnalysisService: @unchecked Sendable {
     private func summarizeChunkWithRetry(_ chunk: TextChunk, index: Int, total: Int, provider: any AIProvider, model: String, sourceContext: SourceContext) async -> String? {
         let contentLabel: String = {
             switch sourceContext.sourceType {
-            case .recording: return "meeting excerpt"
+            case .recording: return "content excerpt"
             case .import_: return "document excerpt"
             case .scan: return "scanned document excerpt (OCR)"
             case .note: return "note excerpt"
@@ -289,13 +340,14 @@ final class AnalysisService: @unchecked Sendable {
         // Attempt 1: direct parse
         let cleaned = ProviderAdapter.normalizeJSON(content)
         if let data = cleaned.data(using: .utf8),
-           let parsed = tryDecode(AnalysisResponse.self, from: data) {
+           let parsed = tryDecode(AnalysisResponse.self, from: data),
+           parsed.shortSummary?.isEmpty == false {
             return buildAnalysis(from: parsed, meetingId: meetingId, providerId: providerId, model: model)
         }
 
         // Attempt 2: retry with a "fix your JSON" prompt (save the failed response first)
         saveRawResponse(content, meetingId: meetingId)
-        AppLog.provider.warning("Initial parse failed. Requesting JSON fix from provider...")
+        AppLog.provider.warning("Initial parse failed or empty shortSummary. Requesting JSON fix from provider...")
 
         if let parsed = await tryRetryWithFix(provider: provider, model: model, failedJSON: cleaned, meetingId: meetingId) {
             return buildAnalysis(from: parsed, meetingId: meetingId, providerId: providerId, model: model)
@@ -321,7 +373,7 @@ final class AnalysisService: @unchecked Sendable {
                 AIMessage(role: .system, content: [.text("You are a JSON repair assistant. Output ONLY valid JSON. No markdown, no code fences.")]),
                 AIMessage(role: .user, content: [.text(fixPrompt)])
             ],
-            responseFormat: .jsonObject
+            responseFormat: jsonResponseFormat(for: model)
         )
 
         do {
