@@ -3,7 +3,8 @@
 </p>
 
 <p align="center">
-  <strong>Local-first AI workspace for project memory. iOS. Provider-agnostic.</strong>
+  <strong>Your Knowledge, Your Process.</strong><br>
+  <sub>An open-source, provider-agnostic AI workspace for project memory. Free. No SaaS. Your data, your rules.</sub>
 </p>
 
 <p align="center">
@@ -18,9 +19,14 @@
 
 ## What is Wawa Note?
 
-Wawa Note captures meeting evidence — audio recordings, scanned documents, web links, notes — and transforms them into a **canonical project knowledge store** with typed graph relationships, tasks, decisions, and provenance trails. An agentic AI chat with tool calling lets you query, navigate, and act on your knowledge without switching contexts.
+Wawa Note is a **free, open-source AI workspace** that captures meeting evidence — audio, scans, links, notes — and transforms it into a **canonical project knowledge store** with typed graphs, tasks, decisions, and provenance trails. An agentic AI chat navigates your knowledge like a filesystem.
 
-**No backend. No vendor lock-in. Your data stays on your iPhone.**
+**You own your data. You choose your AI provider. You control the process.**
+
+- **No SaaS.** There are no Wawa Note servers. The app never sees your data.
+- **No vendor lock-in.** Export everything. Import everything. Your knowledge is portable.
+- **Pay for what you use.** Wawa Note is free. You bring your own API keys. You decide how much AI costs you.
+- **Go fully local if you want.** On-device transcription. Local LLMs via LM Studio, Ollama, or your internal network.
 
 ### Core Capabilities
 
@@ -28,8 +34,8 @@ Wawa Note captures meeting evidence — audio recordings, scanned documents, web
 - **Intelligent Pipeline**: Extract → Analyze → Detect signals → Ingest — fully automated per item
 - **Agentic Chat**: AI agent with shell-based tool calling navigates your knowledge like a filesystem
 - **Project Graph**: Typed relationships between items, tasks, people, and decisions — all with evidence provenance
-- **Provider Agnostic**: Works with OpenAI, Anthropic, Gemini, DeepSeek, OpenAI-compatible APIs, and local models
-- **Privacy First**: All data stored locally. Audio, transcripts, and analysis stay on device
+- **Provider Agnostic**: Works with OpenAI, Anthropic, Gemini, DeepSeek, OpenAI-compatible APIs, and local models (LM Studio, Ollama, vLLM)
+- **Data Ownership**: Import/export freely. Use your data anywhere — ChatGPT, Claude, Notion, Obsidian. It's yours.
 
 ---
 
