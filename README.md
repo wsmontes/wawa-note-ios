@@ -1,5 +1,3 @@
-# Wawa Note
-
 <p align="center">
   <img src="docs/assets/logo-horizontal.png" width="400" alt="Wawa Note">
 </p>
