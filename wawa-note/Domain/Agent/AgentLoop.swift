@@ -134,6 +134,7 @@ final class AgentLoop: @unchecked Sendable {
         let iterations = maxIterations ?? self.maxIterations
         var messages = history
         messages.append(ChatMessage(conversationId: UUID(), role: initialRole, content: initialMessage))
+        AppLog.event("agent", "User: \(initialMessage.prefix(200))")
         var allCitations: [ChatCitation] = []
 
         for iteration in 0..<iterations {
@@ -185,6 +186,7 @@ final class AgentLoop: @unchecked Sendable {
 
                 for tc in pendingToolCalls {
                     continuation.yield(.toolCallStarted(name: tc.name, id: tc.id, arguments: tc.arguments))
+                    AppLog.event("agent", "Tool call: \(tc.name)(\(tc.arguments.prefix(120)))")
 
                     guard let tool = effectiveRegistry.tool(named: tc.name) else {
                         messages.append(ChatMessage(conversationId: UUID(), role: .tool,
@@ -205,10 +207,14 @@ final class AgentLoop: @unchecked Sendable {
 
                     allCitations.append(contentsOf: result.citations)
                     continuation.yield(.toolCallCompleted(name: tc.name, id: tc.id, summary: result.displaySummary))
+                    let resultPreview = result.content.prefix(150).replacingOccurrences(of: "\n", with: " ")
+                    AppLog.event("agent", "Tool result: \(tc.name) → \(result.isError ? "ERROR: " : "")\(resultPreview)")
                     messages.append(ChatMessage(conversationId: UUID(), role: .tool,
-                        content: (result.isError ? "TOOL ERROR: " : "") + result.content, toolCallId: tc.id))
+                        content: (result.isError ? "TOOL ERROR: " : "") + result.content, toolCallId: tc.id,
+                        blocks: result.blocks))
                 }
             } else {
+                AppLog.event("agent", "Response: \(fullContent.prefix(300))")
                 messages.append(ChatMessage(conversationId: UUID(), role: .assistant, content: fullContent, citations: allCitations))
                 continuation.yield(.finished(citations: allCitations))
                 continuation.finish()
@@ -253,76 +259,60 @@ final class AgentLoop: @unchecked Sendable {
     /// Static: tool definitions, behavior rules (cacheable across requests).
     /// Dynamic: project context, current date (changes per request).
     func buildPromptFragments() -> (static: String, dynamic: String) {
-        let tools = registry.allDefinitions()
-        let toolList = tools.map { t in
-            let params = t.parameters.properties.keys.sorted().joined(separator: ", ")
-            return "- `\(t.name)`\(params.isEmpty ? "" : "(\(params))"): \(t.description)"
-        }.joined(separator: "\n")
-
         let staticPrompt = """
-        You are Wawa, an AI assistant with access to the user's personal knowledge workspace.
+        You are Wawa, an assistant in the user's personal knowledge workspace. You help capture, organize, and explore knowledge using a virtual filesystem accessed through run_command.
 
-        AVAILABLE TOOLS:
-        \(toolList)
+        [CORE RULES]
+        1. ONE COMMAND PER CALL. No &&, ||, ;, or pipes. cd, then ls/cat in the next call.
+        2. NEVER show UUIDs or technical IDs to the user. Reference items by title, not ID.
+        3. The [CURRENT STATE] section below is authoritative — do not re-verify with ls / or ls /projects.
+        4. For choices, use numbered lists (1. Option A, 2. Option B). They become buttons.
+        5. touch /inbox/ for ITEMS. touch tasks/ for TASKS. echo '{...}' > path to UPDATE.
+        6. rm is soft delete. mv moves between inbox and projects.
+        7. ERROR: read it, fix it, retry once. Never retry the same failing command twice.
 
-        HOW TO USE TOOLS:
-        - Call tools using the exact function name. Arguments must be valid JSON.
-        - Use search_knowledge to find information by keywords. Always search before answering.
-        - Use get_item to fetch the full content of a specific item by its UUID.
-        - Use list_items to browse by type, date range, or filter.
-        - Use get_project to see a project's tasks and connected items.
-        - Use get_connections to explore how items relate to each other.
-        - Use think to ask a more capable reasoning model for help with complex analysis. Provide structured context, not raw data. The advisor returns only guidance.
-        - Use create_note and create_task ONLY when the user explicitly asks. Confirm first.
-        - Use list_prompts, read_prompt, and edit_prompt to inspect and modify system behavior. Always confirm before editing prompts.
-
-        RULES:
-        1. NEVER guess or make up facts. Always search or fetch before answering.
-        2. Cite items by their title and ID when referencing them.
-        3. If search returns no results, tell the user honestly and suggest alternatives.
-        4. Be concise. Answer directly, then offer to explore further.
-        5. For date-based queries, use today's date: see dynamic context below.
-        6. Item IDs are UUIDs. Use exact IDs from search or list results.
-        7. If you need clarification, ask.
+        [QUICK REFERENCE — use 'help' for details]
+        ls <path>  List contents. Flags: --long --type --status --tag --since --limit
+        cd <path>  Change directory. cd .. to go up.
+        cat <path> Read a file. --json for raw data.
+        find <path> --tag X --since 7d --type audio. In tasks/ dir: finds tasks.
+        grep "text" <path>  Full-text search. Also works on analysis/ and transcript files.
+        touch <path> --title "Name" --priority high --owner "Name"
+        echo '{"field":"value"}' > <path>  Update item, task, project.
+        help <command>  Show detailed docs for any command.
+        help vfs  Show the virtual filesystem layout.
         """
 
         var dynamicPrompt = "Today's date: \(Date().formatted(date: .complete, time: .omitted))."
 
-        // Context-aware guidance
-        if let ck = toolContext.contextKey {
-            dynamicPrompt += "\n\nCURRENT CONTEXT: \(toolContext.contextDisplayName ?? ck)"
+        // Context-aware guidance — filesystem edition
+        if let slug = toolContext.activeProjectSlug, let pid = toolContext.activeProjectID {
+            dynamicPrompt += "\n\nCURRENT DIRECTORY: /projects/\(slug)/"
+            dynamicPrompt += "\nProject ID: \(pid.uuidString.prefix(8))"
+            if let name = toolContext.activeProjectName {
+                dynamicPrompt += "\nProject: \(name)"
+            }
+            dynamicPrompt += "\nUse ls to list contents, cat to read files, touch to create tasks."
+        } else if toolContext.contextKey == "inbox" {
+            dynamicPrompt += "\n\nCURRENT DIRECTORY: /inbox/"
+            dynamicPrompt += "\nUse ls to see unprocessed items. Use mv to assign items to projects."
+        } else if let ck = toolContext.contextKey {
             switch ck {
-            case "inbox":
-                dynamicPrompt += "\n- The user is browsing their inbox. Use list_items to show unprocessed items."
-                dynamicPrompt += "\n- Help triage: suggest archiving, assigning to projects, or flagging."
             case "explore:projects":
-                dynamicPrompt += "\n- The user is browsing projects. Use get_project to explore specific ones."
-                dynamicPrompt += "\n- Help compare projects, identify stalled ones, or suggest new project ideas."
+                dynamicPrompt += "\n\nCURRENT CONTEXT: Explore > Projects"
+                dynamicPrompt += "\nUse ls /projects to browse all projects."
             default:
                 if ck.hasPrefix("project:") {
-                    dynamicPrompt += "\n- The user is viewing this project. Use get_project to see tasks, items, and connections."
-                    dynamicPrompt += "\n- Answer about status, risks, and progress. Suggest next steps."
+                    dynamicPrompt += "\n\nCURRENT CONTEXT: Viewing a project. Use ls and cat to explore it."
                 } else if ck.hasPrefix("item:") {
-                    dynamicPrompt += "\n- The user is viewing this item. Use get_item to retrieve its full content."
-                    dynamicPrompt += "\n- Answer detailed questions about this item's content."
+                    dynamicPrompt += "\n\nCURRENT CONTEXT: Viewing an item. Use cat to read its content."
                 }
             }
         }
 
-        if let projectID = toolContext.activeProjectID {
-            dynamicPrompt += "\n\nCURRENT PROJECT:\n"
-            if let name = toolContext.activeProjectName { dynamicPrompt += "- Project: \(name)\n" }
-            dynamicPrompt += "- Project ID: \(projectID.uuidString)\n"
-            dynamicPrompt += "- Use get_project to see tasks, items, and connections.\n"
-            dynamicPrompt += "- Use create_task and create_edge to add to this project.\n"
-            dynamicPrompt += "- When referencing items from this project, cite them by title and ID.\n"
-            dynamicPrompt += "- Prioritize this project's context in all searches and answers."
-        }
-
         if let itemID = toolContext.activeItemID {
-            dynamicPrompt += "\n\nFOCUSED ITEM:\n- Item ID: \(itemID.uuidString)"
-            dynamicPrompt += "\n- Use get_item to read its full content."
-            dynamicPrompt += "\n- Prioritize information from this item when answering."
+            dynamicPrompt += "\n\nFOCUSED ITEM: \(itemID.uuidString.prefix(8))"
+            dynamicPrompt += "\nUse cat to read its full content."
         }
 
         return (static: staticPrompt, dynamic: dynamicPrompt)

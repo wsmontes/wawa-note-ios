@@ -36,9 +36,18 @@ struct AIToolProperty: Codable, Sendable {
 
 struct ToolResult: Sendable {
     let content: String
+    let blocks: [ChatBlock]?
     let citations: [ChatCitation]
     let isError: Bool
     let displaySummary: String
+
+    init(content: String, blocks: [ChatBlock]? = nil, citations: [ChatCitation] = [], isError: Bool = false, displaySummary: String? = nil) {
+        self.content = content
+        self.blocks = blocks
+        self.citations = citations
+        self.isError = isError
+        self.displaySummary = displaySummary ?? String(content.prefix(80))
+    }
 }
 
 struct ToolCallProgress: Sendable {

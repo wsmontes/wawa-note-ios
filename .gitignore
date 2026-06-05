@@ -15,6 +15,9 @@ build/
 *.moved-aside
 *.xccheckout
 *.xcscmblueprint
+*.hmap
+*.ipa
+*.xcuserstate
 
 # Swift Package Manager
 .build/
@@ -57,3 +60,14 @@ Icon
 # Playgrounds
 timeline.xctimeline
 playground.xcworkspace
+
+# Secrets
+*.xcconfig
+!*.sample.xcconfig
+.env
+.env.*
+
+# Logs
+*.log
+wawa-debug.log
+*.logarchive
