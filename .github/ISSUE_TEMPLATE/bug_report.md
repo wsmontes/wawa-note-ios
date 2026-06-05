@@ -18,13 +18,17 @@ Steps to reproduce:
 **Expected behavior**
 What you expected to happen.
 
-**Screenshots**
-If applicable, add screenshots.
+**Screenshots / Logs**
+If applicable, add screenshots. The app's debug log is in Settings > Debug Logs.
 
 **Device:**
- - Model: [e.g. iPhone 16 Pro]
- - iOS: [e.g. 18.0]
+ - Model: [e.g. iPhone 14 Plus]
+ - iOS: [e.g. 18.6]
  - App Version: [e.g. 1.0]
+
+**AI Provider (if chat-related):**
+ - Provider: [e.g. OpenAI, Anthropic, Gemini, Local]
+ - Model: [e.g. gpt-5.5, claude-sonnet-4-6]
 
 **Additional context**
 Any other context about the problem.

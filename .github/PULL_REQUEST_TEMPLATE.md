@@ -1,25 +1,28 @@
-## Summary
-
+## Description
 <!-- Briefly describe what this PR does -->
 
-## Changes
+## Type of Change
+- [ ] Bug fix
+- [ ] New feature
+- [ ] Documentation
+- [ ] Refactor
+- [ ] Performance
 
--
-
-## Screenshots
-
-<!-- If applicable, add screenshots or screen recordings -->
-
-## Test Plan
-
-<!-- How did you test this? -->
-
-- [ ] Tested on iPhone simulator
-- [ ] Tested on physical device
+## Testing
+- [ ] Tested on real device
+- [ ] Tested on simulator
 - [ ] Unit tests pass
-- [ ] UI tests pass
+
+**Device / iOS:** [e.g. iPhone 14 Plus / 18.6]
 
 ## Checklist
+- [ ] Code follows `docs/CODING_STANDARDS.md`
+- [ ] AI calls use `AIConfigService.shared.requestParams(for:model:)`
+- [ ] No hardcoded API keys or secrets
+- [ ] Documentation updated if needed
 
-- [ ] I have updated documentation if needed
-- [ ] I have added tests if applicable
+## Screenshots
+<!-- If applicable -->
+
+## Related Issues
+<!-- e.g. Fixes #123 -->

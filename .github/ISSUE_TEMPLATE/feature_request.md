@@ -15,5 +15,8 @@ What you want to happen.
 **Describe alternatives you've considered**
 Alternative solutions or workarounds.
 
+**Use case**
+Who would benefit and how?
+
 **Additional context**
 Any other context or screenshots.
