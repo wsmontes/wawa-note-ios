@@ -360,25 +360,36 @@ struct ChatView: View {
                 suggestionBar
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            // Dictation recording status bar
+            // Dictation recording status bar — free recording, user stops when done
             if dictationPhase == .recording {
                 HStack(spacing: 10) {
-                    // Audio level bars (simulated waveform)
+                    // Pulsing red dot
+                    Circle()
+                        .fill(.red)
+                        .frame(width: 8, height: 8)
+                        .scaleEffect(1.0 + 0.3 * sin(dictationElapsed * 5))
+                        .animation(.easeInOut(duration: 0.3).repeatForever(autoreverses: true), value: dictationElapsed)
+                    // Audio level waveform
                     HStack(spacing: 2) {
-                        ForEach(0..<12, id: \.self) { i in
+                        ForEach(0..<10, id: \.self) { i in
                             RoundedRectangle(cornerRadius: 1)
-                                .fill(Color.red.opacity(0.6))
-                                .frame(width: 2, height: CGFloat(4 + 16 * abs(sin(dictationElapsed * 3 + Double(i) * 0.5))))
-                                .animation(.easeInOut(duration: 0.2).repeatForever(autoreverses: true), value: dictationElapsed)
+                                .fill(Color.red.opacity(0.5))
+                                .frame(width: 2, height: CGFloat(4 + 14 * abs(sin(dictationElapsed * 4 + Double(i) * 0.7))))
+                                .animation(.easeInOut(duration: 0.15).repeatForever(autoreverses: true), value: dictationElapsed)
                         }
                     }
-                    .frame(height: 20)
-                    // Countdown
-                    Text(String(format: "0:%02d", max(0, 8 - Int(dictationElapsed))))
+                    .frame(height: 18)
+                    // Elapsed time counting UP
+                    Text(formatElapsed(dictationElapsed))
                         .font(.caption).foregroundStyle(.secondary).monospacedDigit()
                     Spacer()
-                    Button(action: stopDictation) {
-                        Text("Cancel").font(.caption).foregroundStyle(.red)
+                    // Stop (finish and transcribe)
+                    Button(action: finishDictation) {
+                        Image(systemName: "stop.fill")
+                            .font(.body).foregroundStyle(.red)
+                            .frame(width: 36, height: 36)
+                            .background(Color.red.opacity(0.1))
+                            .clipShape(Circle())
                     }
                 }
                 .padding(.horizontal, 12).padding(.vertical, 6)
@@ -691,7 +702,7 @@ struct ChatView: View {
         HStack(alignment: .center, spacing: 8) {
             // Voice dictation button — polished
             Button {
-                if isDictating { stopDictation() } else { startDictation() }
+                if isDictating { finishDictation() } else { startDictation() }
             } label: {
                 ZStack {
                     // Pulse ring during recording
@@ -757,12 +768,17 @@ struct ChatView: View {
         .background(.bar)
     }
 
+    private func formatElapsed(_ seconds: Double) -> String {
+        let m = Int(seconds) / 60
+        let s = Int(seconds) % 60
+        return String(format: "%d:%02d", m, s)
+    }
+
     // MARK: - Dictation
 
     private func startDictation() {
         guard !isDictating else { return }
 
-        // Microphone permission check
         switch AVAudioSession.sharedInstance().recordPermission {
         case .undetermined:
             AVAudioSession.sharedInstance().requestRecordPermission { granted in
@@ -775,8 +791,7 @@ struct ChatView: View {
         case .denied:
             dictationError = "Microphone access denied. Enable in Settings > Privacy > Microphone."
             return
-        case .granted:
-            break
+        case .granted: break
         @unknown default: break
         }
 
@@ -785,28 +800,42 @@ struct ChatView: View {
         dictationElapsed = 0
         dictationPhase = .recording
 
-        // Start visual timer for waveform + countdown
+        // Timer for visual feedback (waveform, elapsed)
         dictationTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { timer in
             Task { @MainActor in
                 self.dictationElapsed += 0.1
-                if let recorder = self.audioRecorder, recorder.isMeteringEnabled {
-                    recorder.updateMeters()
-                    self.dictationLevel = (recorder.averagePower(forChannel: 0) + 40) / 40
+                if let r = self.audioRecorder, r.isMeteringEnabled {
+                    r.updateMeters()
+                    self.dictationLevel = (r.averagePower(forChannel: 0) + 40) / 40
+                }
+                // Safety: auto-stop at 60 seconds
+                if self.dictationElapsed >= 60 {
+                    self.finishDictation()
                 }
             }
         }
+    }
 
+    /// User tapped stop — finish recording and transcribe.
+    private func finishDictation() {
+        dictationTimer?.invalidate()
+        dictationTimer = nil
+        audioRecorder?.stop()
+        let recordedURL = audioRecorder?.url
+        audioRecorder = nil
+
+        guard let audioURL = recordedURL else {
+            dictationPhase = .idle
+            isDictating = false
+            dictationError = "Recording failed. Please try again."
+            return
+        }
+
+        dictationPhase = .transcribing
+        dictationTask?.cancel()
         dictationTask = Task {
-            let text: String?
-            // Try Whisper API first if available
-            if let whisperText = await transcribeViaWhisper() {
-                text = whisperText
-            } else if !Task.isCancelled {
-                // Fall back to Apple on-device using the already-captured audio
-                text = await transcribeViaApple()
-            } else {
-                text = nil
-            }
+            let text = await transcribeAudio(audioURL)
+            try? FileManager.default.removeItem(at: audioURL)
 
             await MainActor.run {
                 dictationTimer?.invalidate()
@@ -823,13 +852,21 @@ struct ChatView: View {
                     if dictationPhase == .done { dictationPhase = .idle }
                 }
                 isDictating = false
-                audioRecorder?.stop()
-                audioRecorder = nil
             }
         }
     }
 
-    private func transcribeViaWhisper() async -> String? {
+    private func transcribeAudio(_ audioURL: URL) async -> String? {
+        // Try Whisper first
+        if let result = await transcribeViaWhisperWithFile(audioURL) {
+            return result
+        }
+        // Fallback: Apple on-device with the same file
+        guard !Task.isCancelled else { return nil }
+        return await recognizeFile(audioURL)
+    }
+
+    private func transcribeViaWhisperWithFile(_ audioURL: URL) async -> String? {
         guard let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext),
               config.type == .openAI || config.type == .openAICompatible,
               let baseURL = config.baseURL else { return nil }
@@ -841,40 +878,52 @@ struct ChatView: View {
         }
         guard !apiKey.isEmpty else { return nil }
 
-        guard let audioURL = await captureAudioChunk() else { return nil }
-        defer { try? FileManager.default.removeItem(at: audioURL) }
-        guard !Task.isCancelled else { return nil }
-
-        await MainActor.run { dictationPhase = .transcribing }
-
         let engine = RemoteTranscriptionEngine(baseURL: baseURL, apiKey: apiKey)
         do {
             let transcript = try await engine.transcribeFile(audioURL)
             guard !Task.isCancelled else { return nil }
             return transcript.segments.map(\.text).joined(separator: " ")
-        } catch {
-            return nil
-        }
+        } catch { return nil }
     }
 
-    private func transcribeViaApple() async -> String? {
-        // Use the already-recorded .wav file if available, otherwise do live recognition
-        guard !Task.isCancelled else { return nil }
-        await MainActor.run { dictationPhase = .transcribing }
-
-        // Try to use the captured audio file first
-        if let audioURL = await captureAppleAudioURL() {
-            defer { try? FileManager.default.removeItem(at: audioURL) }
-            guard !Task.isCancelled else { return nil }
-            if let result = await recognizeFile(audioURL) {
-                return result
+    /// Start recording freely — returns audio URL when user taps stop.
+    private func captureAudioChunk() async -> URL? {
+        // This is now only used internally; finishDictation handles the real flow.
+        await withCheckedContinuation { continuation in
+            let audioURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("dictation_\(UUID().uuidString).wav")
+            let settings: [String: Any] = [
+                AVFormatIDKey: Int(kAudioFormatLinearPCM),
+                AVSampleRateKey: 16000,
+                AVNumberOfChannelsKey: 1,
+                AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsFloatKey: false,
+                AVLinearPCMIsBigEndianKey: false
+            ]
+            var hasResumed = false
+            do {
+                let recorder = try AVAudioRecorder(url: audioURL, settings: settings)
+                recorder.isMeteringEnabled = true
+                self.audioRecorder = recorder
+                recorder.record(forDuration: 60) // max safety
+                // The recorder stops itself at 60s
+                // But finishDictation() is called by the UI button before then
+                Task {
+                    try? await Task.sleep(nanoseconds: 60_000_000_000)
+                    if !hasResumed {
+                        hasResumed = true
+                        recorder.stop()
+                        self.audioRecorder = nil
+                        continuation.resume(returning: audioURL)
+                    }
+                }
+            } catch {
+                if !hasResumed { hasResumed = true; continuation.resume(returning: nil) }
             }
         }
-
-        // Fallback: live recognition
-        guard !Task.isCancelled else { return nil }
-        return await recognizeLive()
     }
+
+
 
     private func captureAppleAudioURL() async -> URL? {
         // SFSpeechRecognizer can work with audio files.
@@ -976,39 +1025,6 @@ struct ChatView: View {
         }
     }
 
-    private func captureAudioChunk() async -> URL? {
-        await withCheckedContinuation { continuation in
-            let audioURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent("dictation_\(UUID().uuidString).wav")
-            let settings: [String: Any] = [
-                AVFormatIDKey: Int(kAudioFormatLinearPCM),
-                AVSampleRateKey: 16000,
-                AVNumberOfChannelsKey: 1,
-                AVLinearPCMBitDepthKey: 16,
-                AVLinearPCMIsFloatKey: false,
-                AVLinearPCMIsBigEndianKey: false,
-                AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
-            ]
-            var hasResumed = false
-            do {
-                let recorder = try AVAudioRecorder(url: audioURL, settings: settings)
-                recorder.isMeteringEnabled = true
-                self.audioRecorder = recorder
-                recorder.record()
-                Task {
-                    try? await Task.sleep(nanoseconds: 8_000_000_000)
-                    if !hasResumed {
-                        hasResumed = true
-                        recorder.stop()
-                        self.audioRecorder = nil
-                        continuation.resume(returning: audioURL)
-                    }
-                }
-            } catch {
-                if !hasResumed { hasResumed = true; continuation.resume(returning: nil) }
-            }
-        }
-    }
 
     private func stopDictation() {
         dictationTimer?.invalidate()
