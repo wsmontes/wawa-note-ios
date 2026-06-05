@@ -205,7 +205,6 @@
 		2CCF082E9AB120A1FFC9563A /* ProviderConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderConnectView.swift; sourceTree = "<group>"; };
 		2CF0F37BF2684ED2F9B58CC3 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		2E15DA9D342C5166E57E3328 /* AutomationSettings.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AutomationSettings.swift; sourceTree = "<group>"; };
-		2E62DE4F0922FA4A09CC5F2F /* wawa-note-watch-widget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "wawa-note-watch-widget.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		2E92A52D1149AE9A148C7C40 /* AudioImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioImportService.swift; sourceTree = "<group>"; };
 		3198D949FAAC64CA3EF7148B /* EntityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntityService.swift; sourceTree = "<group>"; };
 		31A2B1BB54B1433A260D0169 /* compare.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = compare.md; sourceTree = "<group>"; };
@@ -314,7 +313,6 @@
 		E0C9AB5D2E877D2F0F3FC93A /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		E21B2C5623109BAB1DEBB84E /* wawa-note.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "wawa-note.entitlements"; sourceTree = "<group>"; };
 		E2D668D48F1992BA24FE7E81 /* JSONExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONExporter.swift; sourceTree = "<group>"; };
-		E48D6DB10D196A53BC644D70 /* wawa-note-watch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "wawa-note-watch.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		E57BE97B9454601F86DFA491 /* EntityExtractionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntityExtractionService.swift; sourceTree = "<group>"; };
 		E5A8A3B18B9BAD68974C2E1A /* AgentTool.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentTool.swift; sourceTree = "<group>"; };
 		E8DB1AF126EA25694D111839 /* AnalysisService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalysisService.swift; sourceTree = "<group>"; };
@@ -550,8 +548,6 @@
 			isa = PBXGroup;
 			children = (
 				3E1574D38EA98364330C1DC5 /* wawa-note-share.appex */,
-				2E62DE4F0922FA4A09CC5F2F /* wawa-note-watch-widget.appex */,
-				E48D6DB10D196A53BC644D70 /* wawa-note-watch.app */,
 				399953D1B0F721773F328253 /* wawa-note.app */,
 				CBF6ECE4B370149D2C8C5E51 /* wawa-noteTests.xctest */,
 			);
