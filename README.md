@@ -5,6 +5,10 @@
 </p>
 
 <p align="center">
+  <img src="docs/assets/logo-horizontal.png" width="400" alt="Wawa Note">
+</p>
+
+<p align="center">
   <strong>Local-first AI workspace for project memory. iOS. Provider-agnostic.</strong>
 </p>
 
