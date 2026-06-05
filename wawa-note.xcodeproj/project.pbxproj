@@ -1171,7 +1171,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = "wawa-note-share/wawa-note-share.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = 955573A4YH;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "wawa-note-share/Info.plist";
@@ -1252,7 +1252,7 @@
 				CODE_SIGN_ENTITLEMENTS = "wawa-note/wawa-note.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = 955573A4YH;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -1277,7 +1277,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = "wawa-note-share/wawa-note-share.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = 955573A4YH;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "wawa-note-share/Info.plist";
@@ -1303,7 +1303,7 @@
 				CODE_SIGN_ENTITLEMENTS = "wawa-note/wawa-note.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = 955573A4YH;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
