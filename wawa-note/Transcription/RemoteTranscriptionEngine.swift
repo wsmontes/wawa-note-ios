@@ -211,9 +211,17 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
         }
 
         let filename = audioURL.lastPathComponent
+        let mimeType: String = {
+            switch audioURL.pathExtension.lowercased() {
+            case "wav": return "audio/wav"
+            case "mp3": return "audio/mpeg"
+            case "m4a": return "audio/mp4"
+            default:    return "audio/mp4"
+            }
+        }()
         write("--\(boundary)\(lb)")
         write("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\(lb)")
-        write("Content-Type: audio/mp4\(lb)\(lb)")
+        write("Content-Type: \(mimeType)\(lb)\(lb)")
 
         // Stream audio file data into the body
         let audioData = try Data(contentsOf: audioURL)
