@@ -34,14 +34,15 @@ final class AgentLoop: @unchecked Sendable {
     init(
         registry: AgentToolRegistry,
         toolContext: ToolContext,
-        maxIterations: Int = 12,
+        maxIterations: Int? = nil,
         mode: AgentMode = .auto,
         executorModel: String = "gpt-5-nano",
         advisorModel: String = "gpt-5.5"
     ) {
         self.registry = registry
         self.toolContext = toolContext
-        self.maxIterations = maxIterations
+        // Deep mode gets more iterations for complex multi-step tasks (plan + execute)
+        self.maxIterations = maxIterations ?? (mode == .deep ? 24 : (mode == .fast ? 6 : 12))
         self.mode = mode
         self.executorModel = executorModel
         self.advisorModel = advisorModel
@@ -270,6 +271,16 @@ final class AgentLoop: @unchecked Sendable {
         5. touch /inbox/ for ITEMS. touch tasks/ for TASKS. echo '{...}' > path to UPDATE.
         6. rm is soft delete. mv moves between inbox and projects.
         7. ERROR: read it, fix it, retry once. Never retry the same failing command twice.
+
+        [COMPLEX TASK HANDLING]
+        When the user asks you to reorganize, restructure, audit, or perform multi-step work:
+        8. FIRST, explore the current state (cd, ls, cat) to understand what exists.
+        9. THEN, create a plan as numbered steps. Announce the plan to the user.
+        10. Create tasks for each step using: touch tasks/ --title "Step 1: ..."
+        11. Work through the tasks one by one. After completing each, mark it done:
+            echo '{"status":"done"}' > tasks/task-title
+        12. After all tasks are done, summarize what was accomplished.
+        13. If the user confirms the plan, proceed immediately without asking again.
 
         [QUICK REFERENCE — use 'help' for details]
         ls <path>  List contents. Flags: --long --type --status --tag --since --limit

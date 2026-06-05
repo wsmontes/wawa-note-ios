@@ -15,6 +15,11 @@ final class ToolContext: @unchecked Sendable {
     var activeProjectColorHex: String?
     var projectColorHexes: [UUID: String] = [:]
 
+    // Planning & agent iteration tracking
+    var isPlanning: Bool = false
+    var planTaskIDs: [UUID] = []
+    var planCreatedAt: Date?
+
     func projectColorHex(for projectID: UUID) -> String? {
         projectColorHexes[projectID]
     }
