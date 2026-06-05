@@ -324,7 +324,7 @@ struct HomeView: View {
                     .frame(width: 96, height: 96)
                     .shadow(color: .blue.opacity(0.15), radius: 16, y: 4)
                 Text("wawa-note").font(.title2).fontWeight(.semibold)
-                Text("A informação é sua. O processo é seu.")
+                Text("Your Knowledge, Your Process.")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
             .padding(.top, 0).padding(.bottom, 20)
