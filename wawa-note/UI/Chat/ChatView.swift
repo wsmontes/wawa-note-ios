@@ -800,6 +800,29 @@ struct ChatView: View {
         dictationElapsed = 0
         dictationPhase = .recording
 
+        // Start audio recorder
+        let audioURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dictation_\(UUID().uuidString).wav")
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatLinearPCM),
+            AVSampleRateKey: 16000,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false
+        ]
+        do {
+            let recorder = try AVAudioRecorder(url: audioURL, settings: settings)
+            recorder.isMeteringEnabled = true
+            recorder.record()
+            self.audioRecorder = recorder
+        } catch {
+            dictationError = "Could not start recording."
+            dictationPhase = .idle
+            isDictating = false
+            return
+        }
+
         // Timer for visual feedback (waveform, elapsed)
         dictationTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { timer in
             Task { @MainActor in
