@@ -1,10 +1,6 @@
 # Wawa Note
 
 <p align="center">
-  <img src="docs/assets/icon.png" width="120" alt="Wawa Note Logo">
-</p>
-
-<p align="center">
   <img src="docs/assets/logo-horizontal.png" width="400" alt="Wawa Note">
 </p>
 
