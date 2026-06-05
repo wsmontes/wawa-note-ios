@@ -133,9 +133,10 @@ enum ShellInterpreter {
         case "extract":result = handleExtract(cmd, ctx)
         case "js-eval":result = handleJsEval(cmd, ctx)
         case "help":  result = handleHelp(cmd, ctx)
+        case "ask_user": result = handleAskUser(cmd, ctx)
         default:
             // Try fuzzy matching
-            let suggestions = ["ls", "cd", "cat", "find", "grep", "touch", "echo", "rm", "mv", "head", "wc", "history", "extract", "help"]
+            let suggestions = ["ls", "cd", "cat", "find", "grep", "touch", "echo", "rm", "mv", "head", "wc", "history", "extract", "help", "ask_user"]
             let close = suggestions.filter { $0.hasPrefix(cmd.name) || levenshtein(cmd.name, $0) <= 2 }
             let hint = close.isEmpty ? "" : ". Did you mean: \(close.joined(separator: ", "))?"
             let tip = cmd.name.count > 0 && cmd.name.first?.isLowercase != true
@@ -1291,6 +1292,38 @@ enum ShellInterpreter {
         return ok(text)
     }
 
+    // MARK: - ask_user
+
+    /// Lets the agent ask the user a question mid-iteration without stopping the loop.
+    /// The question is displayed to the user as a choice prompt. The agent continues
+    /// iterating after the user responds. Usage:
+    ///   ask_user "Should I proceed with reorganizing tasks?" --yes "Yes, proceed" --no "No, cancel"
+    ///   ask_user "Which project?" --options "Project A,Project B"
+    private static func handleAskUser(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
+        let question = cmd.args.first ?? "Continue?"
+        let yesLabel = cmd.flags["yes"] ?? "Yes"
+        let noLabel = cmd.flags["no"] ?? "No"
+        let optionsStr = cmd.flags["options"]
+
+        if let opts = optionsStr {
+            let choices = opts.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            let options = choices.map { ChoiceOption(label: $0, value: $0) }
+            let block = ChatBlock.choicePrompt(ChoicePromptData(question: question, options: options))
+            return ToolResult(content: "[ASK_USER] \(question)", blocks: [block], citations: [], isError: false, displaySummary: "Asking: \(question.prefix(60))")
+        }
+
+        let options = [
+            ChoiceOption(label: yesLabel, value: "yes"),
+            ChoiceOption(label: noLabel, value: "no")
+        ]
+        let block = ChatBlock.confirmation(ConfirmationData(
+            title: "Confirmation", message: question,
+            confirmLabel: yesLabel, cancelLabel: noLabel,
+            confirmValue: "yes", cancelValue: "no"
+        ))
+        return ToolResult(content: "[ASK_USER] \(question)", blocks: [block], citations: [], isError: false, displaySummary: "Asking: \(question.prefix(60))")
+    }
+
     // MARK: - help
 
     private static func handleHelp(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
@@ -1336,7 +1369,7 @@ enum ShellInterpreter {
         case "rm", "mv", "head", "wc", "history", "extract", "status":
             return ok("\(topic) — Use 'help vfs' to see all commands and their descriptions.")
         default:
-            return ok("Help topics: vfs, ls, cd, cat, find, grep, touch, echo. Use 'help vfs' to see the full filesystem layout.")
+            return ok("Help topics: vfs, ls, cd, cat, find, grep, touch, echo, ask_user. Use 'help vfs' to see the full filesystem layout.")
         }
     }
 

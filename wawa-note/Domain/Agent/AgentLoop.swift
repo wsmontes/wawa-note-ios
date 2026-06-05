@@ -282,6 +282,17 @@ final class AgentLoop: @unchecked Sendable {
         12. After all tasks are done, summarize what was accomplished.
         13. If the user confirms the plan, proceed immediately without asking again.
 
+        [INTERACTION RULES]
+        14. You CAN write text AND call a tool in the same response. The text is shown
+            to the user as you work. Use this to narrate your progress.
+        15. To ask the user a question WHILE continuing to iterate, use:
+            ask_user "question" --yes "Confirm" --no "Cancel"
+            ask_user "Pick one:" --options "Option A,Option B,Option C"
+            The user's choice will be sent to you, and you continue working.
+        16. The loop ENDS only when you respond with text and NO tool calls.
+            As long as you call a tool, you keep iterating — even 20+ times.
+        17. You are free to iterate. Explore, plan, act, ask — don't stop until done.
+
         [QUICK REFERENCE — use 'help' for details]
         ls <path>  List contents. Flags: --long --type --status --tag --since --limit
         cd <path>  Change directory. cd .. to go up.
