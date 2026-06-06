@@ -1066,6 +1066,52 @@ struct ChatView: View {
 
 // MARK: - Message bubble
 
+// MARK: - Thinking Bubble (collapsible)
+
+struct ThinkingBubble: View {
+    let text: String
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "brain.head.profile")
+                        .font(.caption).foregroundStyle(.purple)
+                    Text("Thinking...").font(.caption).foregroundStyle(.purple)
+                    Spacer()
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 8)).foregroundStyle(.tertiary)
+                }
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
+                Text(text)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 8)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(10)
+        .background(Color.purple.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.purple.opacity(0.3))
+                .frame(width: 3)
+                .padding(.vertical, 6)
+                .padding(.leading, 1)
+        }
+    }
+}
+
+// MARK: - Message bubble
+
 struct ChatMessageBubbleView: View {
     let message: ChatMessage
     var projectColorHex: String? = nil
@@ -1083,14 +1129,8 @@ struct ChatMessageBubbleView: View {
                 if message.role == .user { Spacer(minLength: 60) }
                 VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 6) {
                     if message.isThinking == true {
-                        HStack(spacing: 4) {
-                            ProgressView().scaleEffect(0.7)
-                            Text("Thinking...").font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    // Render short messages with markdown; long agent responses as plain text
-                    // (AttributedString on large markdown tables can hang the main thread)
-                    if message.content.count < 500,
+                        ThinkingBubble(text: message.content)
+                    } else if message.content.count < 500,
                        let attr = try? AttributedString(markdown: message.content) {
                         Text(attr)
                             .font(.body)
@@ -1473,8 +1513,12 @@ struct ParsedMessageView: View {
 
     var body: some View {
         Group {
+            // 0. Thinking messages — collapsible, distinct visual style
+            if message.isThinking == true {
+                ThinkingBubble(text: message.content)
+            }
             // 1. Structured blocks from ShellInterpreter (touch, ls, etc.)
-            if let blocks = message.blocks, !blocks.isEmpty {
+            else if let blocks = message.blocks, !blocks.isEmpty {
                 blocksView(blocks)
             }
             // 2. Smart parser: detect patterns in text → interactive blocks

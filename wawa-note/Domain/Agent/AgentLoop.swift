@@ -182,8 +182,11 @@ final class AgentLoop: @unchecked Sendable {
             }
 
             if !pendingToolCalls.isEmpty {
+                // Mark message as thinking when there's text AND tool calls (shows thinking bubble)
+                let isThinking = !fullContent.trimmingCharacters(in: .whitespaces).isEmpty
                 messages.append(ChatMessage(conversationId: UUID(), role: .assistant, content: fullContent,
-                    toolCalls: pendingToolCalls.map { PersistedToolCall(id: $0.id, name: $0.name, arguments: $0.arguments, status: .running) }))
+                    toolCalls: pendingToolCalls.map { PersistedToolCall(id: $0.id, name: $0.name, arguments: $0.arguments, status: .running) },
+                    isThinking: isThinking))
 
                 for tc in pendingToolCalls {
                     continuation.yield(.toolCallStarted(name: tc.name, id: tc.id, arguments: tc.arguments))
