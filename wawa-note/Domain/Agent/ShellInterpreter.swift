@@ -966,6 +966,15 @@ enum ShellInterpreter {
             let loc = proj != nil ? "/projects/\(safeDirName(proj!))/items/" : "/inbox/"
             return ok("Created \(loc)\(item.id.uuidString.prefix(8)).json  (\(t))")
 
+        case .projects:
+            // Create a new project: touch /projects/ --name "Project Name" --summary "..."
+            guard let name = cmd.flags["name"] else { return err("touch: --name is required to create a project") }
+            let summary = cmd.flags["summary"]
+            let project = try? ProjectService(context: ctx.modelContext).create(name: name, summary: summary)
+            guard let p = project else { return err("touch: failed to create project") }
+            ctx.activeProjectID = p.id; ctx.activeProjectSlug = p.slug; ctx.activeProjectName = p.name
+            return ok("✅ Created project: \(p.name) (\(p.slug))")
+
         case .projectTasks, .projectTask:
             guard let t = effectiveTitle else { return err("touch: --title is required. Or use: touch tasks/my-task-name.json") }
             guard let pid = ctx.activeProjectID else { return err("touch: no active project. cd /projects/{slug} first") }
@@ -981,6 +990,23 @@ enum ShellInterpreter {
             )
             return ok("✅ Created: \(t) [\(priority)]",
                        blocks: [.taskCard(card)])
+
+        case .projectEdges:
+            // Create a relationship: touch edges/ --from <uuid> --to <uuid> --type relatesTo
+            guard let fromStr = cmd.flags["from"],
+                  let toStr = cmd.flags["to"],
+                  let fromID = UUID(uuidString: fromStr),
+                  let toID = UUID(uuidString: toStr) else {
+                return err("touch edges/: --from <uuid> --to <uuid> required. --type <edgeType> optional.")
+            }
+            let edgeType = EdgeType(rawValue: cmd.flags["type"] ?? "relatesTo") ?? .relatesTo
+            let weight = Double(cmd.flags["weight"] ?? "1.0") ?? 1.0
+            let edge = try? GraphEdgeService(context: ctx.modelContext).create(
+                fromID: fromID, toID: toID, edgeType: edgeType, weight: weight,
+                provenanceItemID: nil, provenanceSegmentIDs: []
+            )
+            guard let e = edge else { return err("touch: failed to create edge") }
+            return ok("✅ Created edge: \(e.id.uuidString.prefix(8)) (\(edgeType.rawValue))")
 
         case .unknown(let msg):
             // If path ends with a filename-like segment, try to create anyway in current context
@@ -1017,23 +1043,29 @@ enum ShellInterpreter {
             guard let task = try? TaskService(context: ctx.modelContext).fetch(id: taskID) else {
                 return err("echo: task not found")
             }
-            if let newStatus = json["status"] as? String,
-               let status = TaskStatus(rawValue: newStatus) {
-                try? TaskService(context: ctx.modelContext).updateStatus(task, to: status)
+            let svc = TaskService(context: ctx.modelContext)
+            var newStatus: TaskStatus?
+            if let s = json["status"] as? String { newStatus = TaskStatus(rawValue: s) }
+            var newPriority: TaskPriority?
+            if let p = json["priority"] as? String { newPriority = TaskPriority(rawValue: p) }
+            let newTitle = json["title"] as? String
+            let newOwner = json["owner"] as? String
+            var newDue: Date?
+            if let dueStr = json["due"] as? String ?? json["dueAt"] as? String {
+                let fmts: [ISO8601DateFormatter] = {
+                    let a = ISO8601DateFormatter(); let b = ISO8601DateFormatter()
+                    b.formatOptions = [.withFullDate]; return [a, b]
+                }()
+                for f in fmts { if let d = f.date(from: dueStr) { newDue = d; break } }
+                if newDue == nil {
+                    let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
+                    newDue = df.date(from: dueStr)
+                }
             }
-            if let newPriority = json["priority"] as? String,
-               let prio = TaskPriority(rawValue: newPriority) {
-                try? TaskService(context: ctx.modelContext).updateTask(task, title: nil, ownerName: nil, priority: prio, dueAt: nil)
-            }
-            if let newTitle = json["title"] as? String {
-                try? TaskService(context: ctx.modelContext).updateTask(task, title: newTitle, ownerName: nil, priority: nil, dueAt: nil)
-            }
-            if let newOwner = json["owner"] as? String {
-                try? TaskService(context: ctx.modelContext).updateTask(task, title: nil, ownerName: newOwner, priority: nil, dueAt: nil)
-            }
-            if let task = try? TaskService(context: ctx.modelContext).fetch(id: taskID) {
-                return ok("Updated: \(task.title)")
-            }
+
+            if let newStatus { try? svc.updateStatus(task, to: newStatus) }
+            try? svc.updateTask(task, title: newTitle, ownerName: newOwner, priority: newPriority, dueAt: newDue)
+            if let t = try? svc.fetch(id: taskID) { return ok("Updated: \(t.title)") }
             return ok("Updated")
 
         case .projectItem(_, _, let itemID):
@@ -1044,6 +1076,13 @@ enum ShellInterpreter {
             let newBody = json["body"] as? String
             let newTags = json["tags"] as? [String]
             try? KnowledgeItemService(context: ctx.modelContext).updateItem(item, title: newTitle, bodyText: newBody, tags: newTags)
+            if let flagged = json["isFlagged"] as? Bool {
+                item.isFlagged = flagged
+            }
+            if let statusStr = json["status"] as? String, let st = ItemStatus(rawValue: statusStr) {
+                item.status = st
+            }
+            try? ctx.modelContext.save()
             return ok("Updated item \(itemID.uuidString.prefix(8))")
 
         case .project(let slug, let pid):
@@ -1123,8 +1162,29 @@ enum ShellInterpreter {
             try? TaskService(context: ctx.modelContext).deleteTask(task)
             return ok("Deleted task '\(task.title)'. This is permanent.")
 
+        case .unknown(let msg):
+            // Handle edge deletion: rm edges/{edge-id}.json
+            if target.contains("edges/"), let pid = ctx.activeProjectID {
+                let edgeIDStr = target.components(separatedBy: "edges/").last?
+                    .replacingOccurrences(of: ".json", with: "").trimmingCharacters(in: .whitespaces)
+                let gsvc = GraphEdgeService(context: ctx.modelContext)
+                let edges = (try? gsvc.edges(from: pid)) ?? []
+                if let id = UUID(uuidString: edgeIDStr ?? ""),
+                   let edge = edges.first(where: { $0.id == id }) {
+                    try? gsvc.deleteEdge(edge)
+                    return ok("Deleted edge \(edgeIDStr?.prefix(8) ?? "?")")
+                }
+                // Try prefix match
+                if let prefix = edgeIDStr, let edge = edges.first(where: { $0.id.uuidString.hasPrefix(prefix) }) {
+                    try? gsvc.deleteEdge(edge)
+                    return ok("Deleted edge \(edge.id.uuidString.prefix(8))")
+                }
+                return err("rm: edge not found. Use ls edges/ to list edge IDs.")
+            }
+            return err("rm: \(msg)")
+
         default:
-            return err("rm: can only remove items or tasks. Use the app to delete projects.")
+            return err("rm: can only remove items, tasks, or edges. Use the app to delete projects.")
         }
     }
 
