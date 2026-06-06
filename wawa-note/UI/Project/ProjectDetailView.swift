@@ -96,17 +96,23 @@ struct ProjectHomeView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
+            VStack(spacing: 20) {
                 headerSection
                 metricsRow
-                healthSection
-                alertsSection
+                if project.healthStatus != nil || (project.healthScore ?? 0) > 0 {
+                    healthSection
+                }
+                if !signals.isEmpty {
+                    alertsSection
+                }
                 recentActivity
             }
-            .padding()
+            .padding(.horizontal)
+            .padding(.top, 8)
+            .padding(.bottom)
         }
         .navigationTitle(project.name)
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -161,7 +167,7 @@ struct ProjectHomeView: View {
                 HStack {
                     TextField("Qual é a intenção deste projeto?", text: $intentionDraft, axis: .vertical)
                         .font(.subheadline)
-                        .lineLimit(2)
+                        .lineLimit(3...6)
                     Button("Save") {
                         let trimmed = intentionDraft.trimmingCharacters(in: .whitespacesAndNewlines)
                         project.intention = trimmed.isEmpty ? nil : trimmed
@@ -212,7 +218,9 @@ struct ProjectHomeView: View {
     private var metricsRow: some View {
         VStack(spacing: 10) {
             // Items card
-            NavigationLink { ItemsView(projectID: project.id) } label: {
+            NavigationLink {
+                ItemsView(projectID: project.id)
+            } label: {
                 richMetricCard(
                     icon: "doc.fill", iconColor: .blue,
                     title: "Items", count: items.count,
@@ -220,10 +228,14 @@ struct ProjectHomeView: View {
                     accent: unprocessedCount > 0 ? "\(unprocessedCount) unprocessed" : nil,
                     accentColor: .orange
                 )
-            }.buttonStyle(.plain)
+            }
+            .buttonStyle(.plain)
+            .contentShape(Rectangle())
 
             // Tasks card
-            NavigationLink { BoardView(projectID: project.id) } label: {
+            NavigationLink {
+                BoardView(projectID: project.id)
+            } label: {
                 richMetricCard(
                     icon: "checklist", iconColor: .teal,
                     title: "Tasks", count: tasks.count,
@@ -231,11 +243,15 @@ struct ProjectHomeView: View {
                     accent: overdueCount > 0 ? "\(overdueCount) overdue" : nil,
                     accentColor: .red
                 )
-            }.buttonStyle(.plain)
+            }
+            .buttonStyle(.plain)
+            .contentShape(Rectangle())
 
             // Signals card
             if !signals.isEmpty {
-                NavigationLink { SignalsView(projectID: project.id) } label: {
+                NavigationLink {
+                    SignalsView(projectID: project.id)
+                } label: {
                     richMetricCard(
                         icon: "waveform.path.ecg", iconColor: activeSignals.contains { $0.type == "risk" || $0.type == "alert" } ? .red : .purple,
                         title: "Signals", count: activeSignals.count,
@@ -243,7 +259,9 @@ struct ProjectHomeView: View {
                         accent: criticalDoubts > 0 ? "\(criticalDoubts) critical doubts" : nil,
                         accentColor: .orange
                     )
-                }.buttonStyle(.plain)
+                }
+                .buttonStyle(.plain)
+                .contentShape(Rectangle())
             }
         }
     }
