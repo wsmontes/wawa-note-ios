@@ -314,6 +314,7 @@ struct ChatView: View {
                                         .padding(.horizontal, 6).padding(.vertical, 2).background(.ultraThinMaterial, in: Capsule())
                                 }
                                 Menu {
+                                    Button { viewModel.createNewConversation() } label: { Label("New Chat", systemImage: "square.and.pencil") }
                                     Button { showConversations = true } label: { Label("Chats", systemImage: "list.bullet.rectangle") }
                                     if !viewModel.messages.isEmpty {
                                         Divider()
