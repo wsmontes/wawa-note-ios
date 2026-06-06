@@ -314,10 +314,8 @@ struct ChatView: View {
                                         .padding(.horizontal, 6).padding(.vertical, 2).background(.ultraThinMaterial, in: Capsule())
                                 }
                                 Menu {
-                                    Button { viewModel.createNewConversation() } label: { Label("New Chat", systemImage: "square.and.pencil") }
                                     Button { showConversations = true } label: { Label("Chats", systemImage: "list.bullet.rectangle") }
                                     if !viewModel.messages.isEmpty {
-                                        Button { shareConversation(viewModel: viewModel) } label: { Label("Share", systemImage: "square.and.arrow.up") }
                                         Divider()
                                         Button(role: .destructive) { showClearConfirmation = true } label: { Label("Clear Chat", systemImage: "trash") }
                                     }
@@ -460,20 +458,6 @@ struct ChatView: View {
                     .pickerStyle(.segmented)
                     .frame(width: 110)
                     ActiveModelPicker(selectedModel: $viewModel.selectedModel, label: "Model")
-                    if !viewModel.messages.isEmpty {
-                        Button {
-                            shareConversation(viewModel: viewModel)
-                        } label: {
-                            Image(systemName: "square.and.arrow.up")
-                                .accessibilityLabel("Share conversation")
-                        }
-                    }
-                    Button {
-                        viewModel.createNewConversation()
-                    } label: {
-                        Image(systemName: "square.and.pencil")
-                            .accessibilityLabel("New conversation")
-                    }
                 }
             }
         }
