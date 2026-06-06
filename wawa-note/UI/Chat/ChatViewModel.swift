@@ -607,11 +607,27 @@ final class ChatViewModel: ObservableObject {
     }
 
     func createNewConversation() {
-        currentConversation = try? chatService.createConversation(contextKey: activeContext.key)
+        streamTask?.cancel()
+        streamTask = nil
+        greetingTask?.cancel()
+        greetingTask = nil
+
+        // Create with explicit error handling
+        let newConv: ChatConversation?
+        do {
+            newConv = try chatService.createConversation(contextKey: activeContext.key)
+        } catch {
+            AppLog.error("chat", "Failed to create new conversation: \(error)")
+            newConv = nil
+        }
+
+        currentConversation = newConv
         messages = []
         streamingText = ""
         activeToolCalls = []
         state = .idle
+        isGreetingLoading = false
+        error = nil
         greetingCache[activeContext.key] = nil
         loadConversations()
 
@@ -620,9 +636,7 @@ final class ChatViewModel: ObservableObject {
            let project = try? ProjectService(context: ctx).fetch(id: pid),
            let conv = currentConversation {
             injectProjectContext(project: project, conversationId: conv.id)
-            // Reload messages to include injected context
             messages = (try? chatService.messages(for: conv.id)) ?? []
-            // Strip old greeting prompts
             messages.removeAll { $0.role == .user && $0.content.hasPrefix("Greet the user") }
         }
 
@@ -630,7 +644,7 @@ final class ChatViewModel: ObservableObject {
         if messages.isEmpty, let conv = currentConversation {
             if let cached = greetingCache[activeContext.key] {
                 insertCachedGreeting(cached, conversationId: conv.id)
-            } else {
+            } else if newConv != nil {
                 generateWelcome(for: activeContext)
             }
         }
