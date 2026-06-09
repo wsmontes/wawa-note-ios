@@ -43,37 +43,65 @@ struct WriteAnalysisTool: AgentTool {
                               isError: true, displaySummary: "Missing JSON")
         }
 
-        // Validate JSON
+        // Parse JSON
         guard let data = jsonStr.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+              var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return ToolResult(content: "Error: analysisJson is not valid JSON",
                               isError: true, displaySummary: "Invalid JSON")
         }
 
+        // Normalize keys: accept both snake_case and camelCase
+        json = normalizeKeys(json)
+
         // Check required field
         let hasSummary = (json["shortSummary"] as? String)?.isEmpty == false
-            || (json["short_summary"] as? String)?.isEmpty == false
-            || (json["summary"] as? String)?.isEmpty == false
-
         if !hasSummary {
             return ToolResult(content: "Error: analysis must include 'shortSummary' field with a one-line summary",
                               isError: true, displaySummary: "Missing shortSummary")
         }
 
-        // Write the file
+        // Write normalized JSON
         let fileStore = FileArtifactStore()
         do {
+            let normalizedData = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
             try fileStore.createMeetingDirectory(for: itemId)
             let url = fileStore.itemDirectoryURL(for: itemId).appendingPathComponent("analysis.json")
-            try data.write(to: url, options: .atomic)
+            try normalizedData.write(to: url, options: .atomic)
             let fieldCount = json.count
             return ToolResult(
-                content: "Analysis written to analysis.json (\(fieldCount) fields, \(jsonStr.count) bytes)",
+                content: "Analysis written (\(fieldCount) fields)",
                 displaySummary: "Analysis saved (\(fieldCount) fields)"
             )
         } catch {
             return ToolResult(content: "Error writing analysis: \(error.localizedDescription)",
                               isError: true, displaySummary: "Write failed")
         }
+
+    }
+
+    /// Normalize JSON keys from snake_case to camelCase.
+    /// Both formats are accepted — output is always camelCase for MeetingAnalysis.
+    private func normalizeKeys(_ json: [String: Any]) -> [String: Any] {
+        let keyMap: [String: String] = [
+            "short_summary": "shortSummary",
+            "detailed_summary": "detailedSummary",
+            "action_items": "actionItems",
+            "open_questions": "openQuestions",
+            "important_dates": "importantDates",
+            "due_date": "dueDate",
+            "source_segment_ids": "sourceSegmentIds",
+        ]
+        var result: [String: Any] = [:]
+        for (key, value) in json {
+            let mapped = keyMap[key] ?? key
+            if let nested = value as? [String: Any] {
+                result[mapped] = normalizeKeys(nested)
+            } else if let arr = value as? [[String: Any]] {
+                result[mapped] = arr.map { normalizeKeys($0) }
+            } else {
+                result[mapped] = value
+            }
+        }
+        return result
     }
 }
