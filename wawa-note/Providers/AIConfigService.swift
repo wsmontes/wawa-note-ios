@@ -36,6 +36,12 @@ struct AIConfig: Codable, Sendable {
         let usesMaxCompletionTokens: Bool?
         let reasoningModel: Bool?
         let deprecated: String?
+        /// Explicitly disable thinking/reasoning mode (DeepSeek, Qwen, etc.).
+        /// Sends `{"thinking": {"type": "disabled"}}` in the request body.
+        let explicitlyDisableThinking: Bool?
+        /// Whether this model supports `response_format: json_object`.
+        /// Defaults to !reasoningModel if not set.
+        let supportsJSONFormat: Bool?
     }
 
     struct FeatureConfig: Codable, Sendable {
@@ -147,6 +153,18 @@ final class AIConfigService: @unchecked Sendable {
 
     func isReasoningModel(_ model: String) -> Bool {
         presetFor(model: model)?.reasoningModel ?? false
+    }
+
+    /// Whether to explicitly disable thinking mode (DeepSeek, Qwen, etc.).
+    func shouldDisableThinking(for model: String) -> Bool {
+        presetFor(model: model)?.explicitlyDisableThinking ?? false
+    }
+
+    /// Whether this model supports JSON format (response_format: json_object).
+    /// Defaults to !reasoningModel if not explicitly set.
+    func supportsJSONFormat(for model: String) -> Bool {
+        if let explicit = presetFor(model: model)?.supportsJSONFormat { return explicit }
+        return !isReasoningModel(model)
     }
 
     func supportsAudioTranscription(for providerType: String) -> Bool {

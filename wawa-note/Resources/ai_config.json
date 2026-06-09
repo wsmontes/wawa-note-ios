@@ -226,7 +226,9 @@
       "supportsTemperature": true,
       "supportsMaxTokens": true,
       "usesMaxCompletionTokens": false,
-      "reasoningModel": false
+      "reasoningModel": false,
+      "explicitlyDisableThinking": true,
+      "supportsJSONFormat": true
     },
     "deepseek-v4-flash": {
       "contextWindowTokens": 1048576,
@@ -234,7 +236,9 @@
       "supportsTemperature": true,
       "supportsMaxTokens": true,
       "usesMaxCompletionTokens": false,
-      "reasoningModel": false
+      "reasoningModel": false,
+      "explicitlyDisableThinking": true,
+      "supportsJSONFormat": true
     },
     "whisper-1": {
       "contextWindowTokens": 0,
