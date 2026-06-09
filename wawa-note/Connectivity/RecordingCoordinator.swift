@@ -58,7 +58,8 @@ final class RecordingCoordinator: ObservableObject {
         title: String? = nil,
         scheduledDate: Date? = nil,
         calendarEventIdentifier: String? = nil,
-        projectID: UUID? = nil
+        projectID: UUID? = nil,
+        profile: CaptureProfile = .voiceMemo
     ) {
         guard self.state == .idle else {
             AppLog.warn("audio", "RecordingCoordinator: startRecording called but state is \(String(describing: self.state))")

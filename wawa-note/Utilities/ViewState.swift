@@ -114,4 +114,11 @@ extension View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel(label)
     }
+
+    /// Respect Reduce Motion accessibility setting.
+    /// Replaces spring/bouncy animations with simple opacity transitions.
+    func respectReduceMotion(animation: Animation = .default) -> some View {
+        self.animation(UIAccessibility.isReduceMotionEnabled ? .none : animation, value: true)
+    }
 }
+

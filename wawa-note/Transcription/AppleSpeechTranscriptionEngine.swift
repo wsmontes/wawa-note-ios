@@ -30,21 +30,21 @@ enum TranscriptionError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notAuthorized:
-            "Speech recognition not authorized. Enable it in Settings > Privacy > Speech Recognition."
+            "Speech recognition is not authorized. Open Settings > Privacy > Speech Recognition to enable it."
         case .recognitionFailed(let detail):
-            "Speech recognition failed: \(detail)"
+            "Speech recognition could not process the audio. \(detail). Try recording at least 5 seconds of clear speech in a quiet environment."
         case .cancelled:
-            "Transcription was cancelled."
+            "Transcription was cancelled. You can restart it anytime."
         case .noSupportedLocale:
-            "No speech recognition language pack is available. Connect to Wi-Fi and wait a few minutes for the language pack to download automatically, then try again."
+            "The speech recognition language pack is not yet downloaded. Connect your device to Wi-Fi and wait a few minutes — it downloads automatically."
         case .fileTooLarge:
-            "The audio file is too large to transcribe (max 25 MB)."
+            "This audio file is too large (max 25 MB). Try splitting the recording into shorter segments or compressing the audio."
         case .fileTooLongForLocal(let d):
-            "Audio is too long for on-device transcription (\(Int(d)) seconds). Try using Whisper via API in Settings."
+            "This recording is \(Int(d))s long — too long for on-device processing. Go to Settings > AI Services and switch to Whisper via API for longer recordings."
         case .modelNotInstalled(let locale):
-            "On-device speech model for \(locale) is not installed. Connect to Wi-Fi to download."
+            "The on-device speech model for \(locale) is not installed. Connect to Wi-Fi and wait a few minutes for it to download automatically."
         case .onDeviceUnavailable:
-            "On-device speech recognition is not available on this device."
+            "On-device speech recognition is not supported on this device. Go to Settings > AI Services and switch to Whisper via API."
         }
     }
 }
