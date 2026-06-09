@@ -2589,6 +2589,13 @@
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
 		</dict>
+		<key>8C070AB6622F41E5BA0C4D9E</key>
+		<dict>
+			<key>fileRef</key>
+			<string>CBD8B331A84C4E2E9F73ED36</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
 		<key>8D7185211189C5DE1F66D425</key>
 		<dict>
 			<key>fileRef</key>
@@ -2840,6 +2847,7 @@
 				<string>A965BDE1A4DE4FD8A56165A9</string>
 				<string>3F895A95622C48CDBAE7E224</string>
 				<string>D74F488CBA694AA18D834B2C</string>
+				<string>8C070AB6622F41E5BA0C4D9E</string>
 			</array>
 			<key>isa</key>
 			<string>PBXSourcesBuildPhase</string>
@@ -3616,6 +3624,7 @@
 				<string>D07E7272C169D4BCDCA0B3B3</string>
 				<string>BF5BA146AB4E43638E8E0509</string>
 				<string>171144B6DE4340FFB4DBF4B7</string>
+				<string>CBD8B331A84C4E2E9F73ED36</string>
 			</array>
 			<key>isa</key>
 			<string>PBXGroup</string>
@@ -4167,6 +4176,17 @@
 			<string>E99E12405F2A75B0E343D763</string>
 			<key>isa</key>
 			<string>PBXBuildFile</string>
+		</dict>
+		<key>CBD8B331A84C4E2E9F73ED36</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>WriteAnalysisTool.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
 		</dict>
 		<key>CBF6ECE4B370149D2C8C5E51</key>
 		<dict>

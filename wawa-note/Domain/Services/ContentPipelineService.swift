@@ -15,48 +15,42 @@ enum PipelineTemplate {
     /// The standard content processing pipeline: Extract → Analyze → Ingest.
     /// Uses the virtual filesystem shell (run_command) for all operations.
     static let standard: String = """
-    You are a content processing agent in Wawa Note. Your job is to process a knowledge item \
-    through a structured pipeline autonomously using the virtual filesystem.
+    You are a content processing agent in Wawa Note. Process the item described in the first message.
 
-    ## CRITICAL RULES
-    - You MUST use the `run_command` tool for EVERY action. Never just describe what you would do.
-    - Your FIRST tool call MUST be: `extract <item-id>` to get the item's text.
-    - After extracting, you MUST write the analysis JSON using `echo '...' > path`.
-    - When done, respond with a brief text summary and STOP making tool calls.
+    ## TOOLS
 
-    ## YOUR TASK
+    You have two tools:
+    - run_command: shell commands for exploration (extract, ls, cat, grep)
+    - write_analysis: save your structured analysis
 
-    Process the item described in the first message. You have one tool: run_command.
+    ## MANDATORY STEPS
 
-    ### Phase 1: EXTRACT (MANDATORY FIRST STEP)
-    - Run: `extract <item-id>`
-    - If empty or fails, report the error and stop.
+    ### Step 1: EXTRACT (always first)
+    Use run_command: `extract <item-id>`
+    If empty or fails, report and stop.
 
-    ### Phase 2: ANALYZE (MANDATORY)
-    - Review the extracted content.
-    - Produce analysis as JSON with these fields (camelCase — EXACT names):
-      { "shortSummary": "...", "detailedSummary": "...",
+    ### Step 2: ANALYZE
+    Review the content and produce a JSON analysis. Then use write_analysis:
+    - itemId: the item's UUID
+    - analysisJson: JSON with these fields:
+      {
+        "shortSummary": "one-line summary",
+        "detailedSummary": "detailed summary text",
         "decisions": [{"title": "...", "details": "..."}],
         "actionItems": [{"task": "...", "owner": "...", "dueDate": "..."}],
         "risks": [{"risk": "...", "details": "..."}],
-        "openQuestions": [{"question": "..."}] }
-    - For inbox items: `echo '{"shortSummary":"...","decisions":[...],...}' > /inbox/<item-id>/analysis.json`
-    - For project items: `echo '{"shortSummary":"...","decisions":[...],...}' > /projects/<slug>/analysis/<item-id>.json`
+        "openQuestions": [{"question": "..."}]
+      }
 
-    ### Phase 3: SIGNALS (optional)
-    - If you found risks, alerts, or patterns, write up to 3 signals:
-      `echo '{"type":"risk","title":"...","body":"..."}' > /projects/<slug>/signals/`
+    ### Step 3: DONE
+    Respond with a brief text summary. Stop making tool calls.
 
-    ### Phase 4: INGEST (optional, only if item has a project)
-    - Create tasks: `touch /projects/<slug>/tasks/ --title "..." --priority high --owner "..."`
-
-    ## ERROR HANDLING
-    - If extract returns empty: report and stop.
-    - If a field doesn't apply, use null or empty array — but NEVER omit required fields.
-    - The "shortSummary" field is REQUIRED in all analysis outputs.
-
-    ## OUTPUT
-    When done, respond with a brief text summary of what you found. Be concise.
+    ## RULES
+    - ALWAYS start with extract
+    - ALWAYS use write_analysis to save your results (never just describe them)
+    - shortSummary is REQUIRED
+    - Empty fields: use null or []
+    - Be specific — reference what was actually said
     """
 
     /// Lightweight pipeline: extract and analyze only. No project ingestion.
@@ -162,7 +156,8 @@ final class ContentPipelineService: ObservableObject {
             )
 
             let tools: [any AgentTool] = [
-                ShellTool()
+                ShellTool(),
+                WriteAnalysisTool()
             ]
 
             let registry = AgentToolRegistry(tools: tools)
