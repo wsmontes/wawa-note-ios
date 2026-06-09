@@ -34,14 +34,14 @@ enum PipelineTemplate {
 
     ### Phase 2: ANALYZE (MANDATORY)
     - Review the extracted content.
-    - Produce analysis as JSON with these fields:
-      { "short_summary": "...", "detailed_summary": "...",
+    - Produce analysis as JSON with these fields (camelCase — EXACT names):
+      { "shortSummary": "...", "detailedSummary": "...",
         "decisions": [{"title": "...", "details": "..."}],
-        "action_items": [{"task": "...", "owner": "...", "due_date": "..."}],
+        "actionItems": [{"task": "...", "owner": "...", "dueDate": "..."}],
         "risks": [{"risk": "...", "details": "..."}],
-        "open_questions": [{"question": "..."}] }
-    - For inbox items: `echo '{"short_summary":"...","decisions":[...],...}' > /inbox/<item-id>/analysis.json`
-    - For project items: `echo '{"short_summary":"...","decisions":[...],...}' > /projects/<slug>/analysis/<item-id>.json`
+        "openQuestions": [{"question": "..."}] }
+    - For inbox items: `echo '{"shortSummary":"...","decisions":[...],...}' > /inbox/<item-id>/analysis.json`
+    - For project items: `echo '{"shortSummary":"...","decisions":[...],...}' > /projects/<slug>/analysis/<item-id>.json`
 
     ### Phase 3: SIGNALS (optional)
     - If you found risks, alerts, or patterns, write up to 3 signals:
@@ -53,7 +53,7 @@ enum PipelineTemplate {
     ## ERROR HANDLING
     - If extract returns empty: report and stop.
     - If a field doesn't apply, use null or empty array — but NEVER omit required fields.
-    - The "short_summary" field is REQUIRED in all analysis outputs.
+    - The "shortSummary" field is REQUIRED in all analysis outputs.
 
     ## OUTPUT
     When done, respond with a brief text summary of what you found. Be concise.
