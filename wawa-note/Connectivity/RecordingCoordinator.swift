@@ -443,13 +443,21 @@ final class RecordingCoordinator: ObservableObject {
         guard let item = try? context.fetch(descriptor).first else { return }
 
         let effectiveDuration = elapsedTime - pausedDuration
-        item.status = .recorded
         item.durationSeconds = effectiveDuration
         item.audioFileRelativePath = AppFileConstants.audioFileName
 
+        // Check if the audio file writer had errors — if so, mark as failed
+        if captureService.hasWriteErrors {
+            AppLog.error("audio", "Recording stopped with write errors — file may be corrupted. Marking as failed.")
+            item.status = .failed
+            errorMessage = "Recording file may be corrupted. Write errors occurred during recording."
+        } else {
+            item.status = .recorded
+        }
+
         do {
             try context.save()
-            AppLog.audio.info("Item updated: \(item.id)")
+            AppLog.audio.info("Item \(item.id) updated: status=\(item.status.rawValue) duration=\(Int(effectiveDuration))s")
         } catch {
             AppLog.error("audio", "Failed to save item update: \(error.localizedDescription)")
         }

@@ -33,11 +33,11 @@ final class VoiceActivityDetector: ObservableObject {
     var minSilenceDuration: TimeInterval = 0.4
 
     /// Pre-speech padding (seconds) — audio context added before speech starts.
-    /// Meetily default: 300ms.
+    /// Meetily default: 300ms. Applied during segment extraction.
     var preSpeechPad: TimeInterval = 0.3
 
     /// Post-speech padding (seconds) — audio context added after speech ends.
-    /// Meetily default: 400ms.
+    /// Meetily default: 400ms. Applied during segment extraction.
     var postSpeechPad: TimeInterval = 0.4
 
     /// Legacy energy threshold (kept for compatibility).
@@ -151,16 +151,24 @@ final class VoiceActivityDetector: ObservableObject {
     // MARK: - Segment extraction
 
     /// Extract speech segments as audio frame ranges for further processing.
+    /// Applies pre/post speech padding to capture natural speech boundaries.
     func extractSegments(from audioURL: URL, segments: [SpeechSegment]) throws -> [VADAudioSegment] {
         let audioFile = try AVAudioFile(forReading: audioURL)
         let sampleRate = audioFile.processingFormat.sampleRate
+        let totalFrames = AVAudioFramePosition(audioFile.length)
 
         return segments.map { segment in
-            let startFrame = AVAudioFramePosition(segment.startTime * sampleRate)
-            let frameCount = AVAudioFrameCount(segment.duration * sampleRate)
+            // Apply pre-speech pad (context before speech onset)
+            let paddedStart = max(0, segment.startTime - preSpeechPad)
+            // Apply post-speech pad (context after speech end)
+            let paddedEnd = min(Double(totalFrames) / sampleRate, segment.endTime + postSpeechPad)
+
+            let startFrame = AVAudioFramePosition(paddedStart * sampleRate)
+            let frameCount = AVAudioFrameCount((paddedEnd - paddedStart) * sampleRate)
+
             return VADAudioSegment(
-                startTime: segment.startTime,
-                endTime: segment.endTime,
+                startTime: paddedStart,
+                endTime: paddedEnd,
                 startFrame: startFrame,
                 frameCount: frameCount,
                 confidence: segment.confidence
