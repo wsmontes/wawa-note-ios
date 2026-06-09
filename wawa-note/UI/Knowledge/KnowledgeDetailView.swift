@@ -1236,6 +1236,7 @@ struct KnowledgeDetailView: View {
                     switch progress {
                     case .chunking(let c, let t): self.transcriptionProgress = "Splitting... (\(c)/\(t))"
                     case .transcribing(let c, let t): self.transcriptionProgress = "Part \(c) of \(t)..."
+                    case .downloadingModel(let name): self.transcriptionProgress = "Downloading \(name)..."
                     }
                 }
             }
@@ -1247,6 +1248,7 @@ struct KnowledgeDetailView: View {
                     switch progress {
                     case .chunking(let c, let t): self.transcriptionProgress = "Splitting... (\(c)/\(t))"
                     case .transcribing(let c, let t): self.transcriptionProgress = "Part \(c) of \(t)..."
+                    case .downloadingModel(let name): self.transcriptionProgress = "Downloading \(name)..."
                     }
                 }
             }
@@ -1284,6 +1286,8 @@ struct KnowledgeDetailView: View {
             case .fileTooLarge: transcriptionError = "File too large for remote API."
             case .recognitionFailed: transcriptionError = "No speech detected or recognition failed. Record at least 5s of clear speech."
             case .fileTooLongForLocal(let d): transcriptionError = "Audio too long for local (max \(Int(d))s)."
+            case .modelNotInstalled(let loc): transcriptionError = "On-device model for \(loc) not installed. Connect to Wi-Fi."
+            case .onDeviceUnavailable: transcriptionError = "On-device recognition not available. Try remote engine."
             }
         } catch {
             transcriptionError = "\(error.localizedDescription) [\(type(of: error))]"
