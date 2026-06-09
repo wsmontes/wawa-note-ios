@@ -312,6 +312,14 @@ struct HomeView: View {
         }
         .onOpenURL { if $0.scheme == "wawanote" { Task { await importVM.scanSharedDirectoryAndImport() } } }
         .alert("Import Error", isPresented: Binding(get: { importVM.importError != nil }, set: { if !$0 { importVM.importError = nil } })) { Button("OK") { importVM.importError = nil } } message: { Text(importVM.importError ?? "") }
+        .alert("Recording Error", isPresented: Binding(
+            get: { captureVM.errorMessage != nil && captureVM.recordingState == .idle },
+            set: { if !$0 { captureVM.errorMessage = nil } }
+        )) {
+            Button("OK") { captureVM.errorMessage = nil }
+        } message: {
+            Text(captureVM.errorMessage ?? "Could not start recording.")
+        }
         .sheet(isPresented: $showCreationSheet) { CreationSheetView() }
         .fullScreenCover(isPresented: $showScanner) {
             ScannerView(scannedImages: $scannerVM.scannedImages)

@@ -170,7 +170,8 @@ final class AudioSessionManager {
 
             // Select the best microphone BEFORE activation.
             // Guideline: "Configure AVAudioSession antes de tocar no grafo de áudio."
-            selectBestMicrophone()
+            // DISABLED: debugging recording issue
+            // selectBestMicrophone()
 
             try session.setActive(true)
             currentProfile = profile

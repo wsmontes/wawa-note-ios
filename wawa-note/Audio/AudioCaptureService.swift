@@ -161,41 +161,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             self.inputWatchdog?.feed()
             self.updateAudioLevel(from: buffer)
 
-            // AGC calibration: collect samples in first N seconds (thread-safe)
-            self.calibrationLock.lock()
-            let shouldCalibrate = !self.calibrationComplete
-            let start = self.calibrationStartTime
-            self.calibrationLock.unlock()
-
-            if shouldCalibrate, let start {
-                if Date().timeIntervalSince(start) < self.calibrationDuration {
-                    if let channelData = buffer.floatChannelData {
-                        let frames = Int(buffer.frameLength)
-                        var sumSq: Float = 0
-                        for j in 0..<min(frames, 256) { let s = channelData[0][j]; sumSq += s * s }
-                        let rms = sqrt(sumSq / Float(min(frames, 256)))
-                        self.calibrationLock.lock()
-                        self.calibrationSamples.append(rms)
-                        self.calibrationLock.unlock()
-                    }
-                } else {
-                    self.calibrationLock.lock()
-                    if !self.calibrationComplete {
-                        self.calibrationComplete = true
-                        let samples = self.calibrationSamples
-                        self.calibrationSamples.removeAll()
-                        self.calibrationLock.unlock()
-
-                        let avgRMS = samples.reduce(0, +) / Float(max(samples.count, 1))
-                        if avgRMS > 0 {
-                            self.softwareGain = min(4.0, Self.targetRMS / avgRMS)
-                        }
-                        AppLog.audio.info("AGC calibrated: avgRMS=\(String(format: "%.4f", avgRMS)) → gain=\(String(format: "%.2f", self.softwareGain))")
-                    } else {
-                        self.calibrationLock.unlock()
-                    }
-                }
-            }
+            // AGC calibration: DISABLED for debugging
+            // Will re-enable once recording works again
 
             guard self.state == .recording else { return }
 
@@ -204,16 +171,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             guard let channelData = buffer.floatChannelData else { return }
             let frameLength = Int(buffer.frameLength)
 
-            // Apply software gain
-            let gain = self.softwareGain
             let copiedFrames = UnsafeMutablePointer<Float>.allocate(capacity: frameLength)
-            if gain != 1.0 {
-                for i in 0..<frameLength {
-                    copiedFrames[i] = channelData[0][i] * gain
-                }
-            } else {
-                copiedFrames.initialize(from: channelData[0], count: frameLength)
-            }
+            copiedFrames.initialize(from: channelData[0], count: frameLength)
 
             // Dispatch the copied buffer to the write queue.
             self.audioWriteQueue.async { [weak self] in
