@@ -218,8 +218,17 @@ final class AgentLoop: @unchecked Sendable {
                         blocks: result.blocks))
                 }
             } else {
-                AppLog.event("agent", "Response: \(fullContent.prefix(300))")
+                AppLog.event("agent", "Response (no tool calls): \(fullContent.prefix(300))")
                 messages.append(ChatMessage(conversationId: UUID(), role: .assistant, content: fullContent, citations: allCitations))
+
+                // If the LLM responded with text but no tool calls, and we still have
+                // iterations left, push back — the agent MUST use tools to complete tasks.
+                if iteration + 1 < iterations {
+                    messages.append(ChatMessage(conversationId: UUID(), role: .user,
+                        content: "You must use the run_command tool to execute actions. Do not just describe what you would do — actually run the commands. Start with extract to read the item content."))
+                    continue
+                }
+
                 continuation.yield(.finished(citations: allCitations))
                 continuation.finish()
                 return
