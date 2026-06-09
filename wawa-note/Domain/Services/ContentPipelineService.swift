@@ -266,7 +266,15 @@ final class ContentPipelineService: ObservableObject {
                                 failed = true
                             }
                         }
-                        if !failed { break } // Success — analysis exists and is valid
+                        // Final check: can we actually decode the analysis?
+                        if !failed, let data = try? Data(contentsOf: store.itemDirectoryURL(for: itemID).appendingPathComponent("analysis.json")) {
+                            if (try? JSONDecoder().decode(MeetingAnalysis.self, from: data)) == nil {
+                                AppLog.provider.warning("Pipeline attempt \(attemptCount): analysis.json exists but cannot be decoded as MeetingAnalysis")
+                                lastError = "Analysis file exists but is not valid MeetingAnalysis JSON. The model may have used wrong field names."
+                                failed = true
+                            }
+                        }
+                        if !failed { break } // Success — analysis exists, is valid, and decodes
                     } else {
                         // Agent finished but didn't create analysis
                         AppLog.provider.warning("Pipeline attempt \(attemptCount): agent finished but no analysis.json found")
