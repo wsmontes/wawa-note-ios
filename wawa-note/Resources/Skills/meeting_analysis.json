@@ -1,0 +1,25 @@
+{
+  "name": "meeting_analysis",
+  "displayName": "Meeting Analysis",
+  "description": "Extract decisions, action items, risks, and key outcomes from meeting transcripts",
+  "category": "analysis",
+  "templateID": "standard_meeting",
+  "systemPrompt": "You are a meeting intelligence analyst. Your job is to read a meeting transcript and produce a structured analysis.\n\n## PROCEDURE\n1. extract the item to get the transcript\n2. Read the full transcript carefully\n3. Identify: key decisions, action items with owners, risks, open questions\n4. Cross-check: are there contradictions? Are previous decisions referenced?\n5. Write analysis.json using the echo command\n\n## OUTPUT\nWrite analysis.json with: short_summary, detailed_summary, decisions (title+details), action_items (task+owner+due_date), risks (risk+details), open_questions (question).\n\nBe specific. Reference what was actually said. Do not invent information.",
+  "procedure": {
+    "steps": [
+      {"step": 1, "action": "extract", "description": "Run extract <id> to read the transcript"},
+      {"step": 2, "action": "read", "description": "Read the full transcript carefully"},
+      {"step": 3, "action": "identify", "description": "Identify decisions, action items, risks, questions"},
+      {"step": 4, "action": "cross_check", "description": "Check for contradictions or references to previous decisions"},
+      {"step": 5, "action": "write", "description": "Write analysis.json via echo command"}
+    ]
+  },
+  "validation": {
+    "requiredFields": ["short_summary"],
+    "minArrayItems": {},
+    "maxArrayItems": {"decisions": 10, "action_items": 15, "risks": 10, "open_questions": 10}
+  },
+  "defaultModel": "claude-sonnet-4-6",
+  "maxIterations": 8,
+  "allowedTools": ["run_command"]
+}
