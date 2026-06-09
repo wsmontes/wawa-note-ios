@@ -1315,7 +1315,7 @@ enum ShellInterpreter {
             return err("extract: item not found")
         }
         let extractSvc = ContentExtractionService(modelContext: ctx.modelContext, fileStore: ctx.fileStore)
-        let text = extractSvc.bestAvailableText(for: item) ?? ""
+        let text = extractSvc.bestAvailableTextSync(for: item) ?? ""
         if text.isEmpty { return err("extract: no extractable text found for this item") }
         return ok(text)
     }

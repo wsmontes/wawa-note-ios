@@ -146,7 +146,7 @@ struct AnalysisSkillService {
         context: ModelContext
     ) async -> (prompt: String, textLength: Int) {
         let extractSvc = ContentExtractionService(modelContext: context, fileStore: fileStore)
-        let text = extractSvc.bestAvailableText(for: item) ?? item.bodyText ?? ""
+        let text = await extractSvc.bestAvailableText(for: item) ?? item.bodyText ?? ""
 
         var prompt = "Item: \(item.title)\nType: \(item.type.rawValue)\n\n"
         prompt += "CONTENT:\n\(text)\n\n"

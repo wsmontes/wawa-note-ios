@@ -20,7 +20,7 @@ enum PipelineTemplate {
     ## TOOLS
 
     You have two tools:
-    - run_command: shell commands for exploration (extract, ls, cat, grep)
+    - run_command: shell commands for exploration (extract, ls, cat, grep, echo)
     - write_analysis: save your structured analysis
 
     ## MANDATORY STEPS
@@ -30,16 +30,21 @@ enum PipelineTemplate {
     If empty or fails, report and stop.
 
     ### Step 2: ANALYZE
-    Review the content and produce a JSON analysis. Then use write_analysis:
+    Review the content and produce a JSON analysis. Then use write_analysis with these EXACT field names:
     - itemId: the item's UUID
-    - analysisJson: JSON with these fields:
+    - analysisJson: JSON with these fields (use null or [] for empty fields):
       {
-        "shortSummary": "one-line summary",
-        "detailedSummary": "detailed summary text",
+        "short_summary": "one-line summary (REQUIRED)",
+        "detailed_summary": "detailed summary text",
         "decisions": [{"title": "...", "details": "..."}],
-        "actionItems": [{"task": "...", "owner": "...", "dueDate": "..."}],
+        "action_items": [{"task": "...", "owner": "...", "due_date": "..."}],
         "risks": [{"risk": "...", "details": "..."}],
-        "openQuestions": [{"question": "..."}]
+        "open_questions": [{"question": "..."}],
+        "important_dates": [{"date": "...", "meaning": "..."}],
+        "mentioned_people": ["name"],
+        "mentioned_systems": ["name"],
+        "mentioned_organizations": ["name"],
+        "mentioned_locations": ["name"]
       }
 
     ### Step 3: DONE
@@ -48,9 +53,10 @@ enum PipelineTemplate {
     ## RULES
     - ALWAYS start with extract
     - ALWAYS use write_analysis to save your results (never just describe them)
-    - shortSummary is REQUIRED
+    - short_summary is REQUIRED
     - Empty fields: use null or []
     - Be specific — reference what was actually said
+    - Use EXACT field names as specified above (snake_case)
     """
 
     /// Lightweight pipeline: extract and analyze only. No project ingestion.
@@ -162,10 +168,24 @@ final class ContentPipelineService: ObservableObject {
 
             let registry = AgentToolRegistry(tools: tools)
             let config = AIConfigService.shared
-            let activeModel = ActiveProviderManager.shared.getActiveProvider(context: modelContext)?.defaultModel
-            let fallbackModel = config.modelFor(feature: "chat")
-            let executorModel = activeModel ?? config.featureConfig(for: "agent")?.model ?? fallbackModel
-            let advisorModel = activeModel ?? config.featureConfig(for: "analysis")?.model ?? fallbackModel
+            let activeProviderConfig = ActiveProviderManager.shared.getActiveProvider(context: modelContext)
+            let availableModels = activeProviderConfig.flatMap { config.availableModels(for: $0.typeRaw) } ?? []
+
+            // Resolve executor model: validate against active provider's available models
+            let executorModel: String = {
+                if let m = activeProviderConfig?.defaultModel, availableModels.contains(m) { return m }
+                if let m = config.featureConfig(for: "agent")?.model, availableModels.contains(m) { return m }
+                if let first = availableModels.first { return first }
+                return activeProviderConfig?.defaultModel ?? config.modelFor(feature: "chat") ?? "gpt-5-nano"
+            }()
+
+            // Resolve advisor model (for analysis): validate against available models
+            let advisorModel: String = {
+                if let m = config.featureConfig(for: "analysis")?.model, availableModels.contains(m) { return m }
+                if let m = activeProviderConfig?.defaultModel, availableModels.contains(m) { return m }
+                if let first = availableModels.first { return first }
+                return activeProviderConfig?.defaultModel ?? config.modelFor(feature: "chat") ?? "gpt-5-nano"
+            }()
 
             let loop = AgentLoop(
                 registry: registry, toolContext: toolContext,
@@ -181,7 +201,7 @@ final class ContentPipelineService: ObservableObject {
 
             // Verify we have content to analyze before launching the agent
             let extractionSvc = ContentExtractionService(modelContext: modelContext, fileStore: fileStore)
-            let availableText = extractionSvc.bestAvailableText(for: item) ?? ""
+            let availableText = await extractionSvc.bestAvailableText(for: item) ?? ""
             if availableText.trimmingCharacters(in: .whitespaces).isEmpty {
                 AppLog.provider.warning("ContentPipeline: no extractable text for item \(itemID) — skipping agent")
                 if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
