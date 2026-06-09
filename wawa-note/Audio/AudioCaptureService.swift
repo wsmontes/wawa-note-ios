@@ -138,6 +138,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         let hardwareFormat = inputNode.outputFormat(forBus: 0)
         try fileWriter.startRecording(format: hardwareFormat, meetingId: meetingId)
 
+        // Reset engine state from previous session before reconfiguring
+        engine.reset()
+
         // Install tap for audio level monitoring + file writing.
         // The engine must keep running (iOS forbids engine.start() in the
         // background), so the tap stays installed for the lifetime of the
