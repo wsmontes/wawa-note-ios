@@ -712,6 +712,17 @@
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
 		</dict>
+		<key>25B6D8AD27004C1C8843EFEA</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>ViewState.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
 		<key>25CBF706DD18F842C0EEEFD2</key>
 		<dict>
 			<key>isa</key>
@@ -2795,6 +2806,7 @@
 				<string>3142C2FA4A8C4DF98BE82797</string>
 				<string>B41D95F8F80B4C1787B66862</string>
 				<string>E6AE684B25F84AB6A2EDE8AF</string>
+				<string>AEE10C24076746E9AB20F678</string>
 			</array>
 			<key>isa</key>
 			<string>PBXSourcesBuildPhase</string>
@@ -3222,6 +3234,7 @@
 			<array>
 				<string>20E2998EA822EE4AE9A9A516</string>
 				<string>BE8DBE8C0AA1D37C4D3C63DC</string>
+				<string>25B6D8AD27004C1C8843EFEA</string>
 			</array>
 			<key>isa</key>
 			<string>PBXGroup</string>
@@ -3316,6 +3329,13 @@
 			<string>PersonService.swift</string>
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
+		</dict>
+		<key>AEE10C24076746E9AB20F678</key>
+		<dict>
+			<key>fileRef</key>
+			<string>25B6D8AD27004C1C8843EFEA</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
 		</dict>
 		<key>AFA815E6BDB6029E62C26930</key>
 		<dict>
