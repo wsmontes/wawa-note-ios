@@ -97,7 +97,17 @@ final class CaptureViewModel: ObservableObject {
     // MARK: - Pipeline
 
     private func launchPipeline() {
-        guard let itemId = savedItemId ?? coordinator?.savedItemId else { return }
-        _ = processingQueue?.enqueue(itemID: itemId, trigger: .newCapture)
+        guard let itemId = savedItemId ?? coordinator?.savedItemId else {
+            errorMessage = "Could not start processing. Try again."
+            AppLog.error("pipeline", "launchPipeline: savedItemId is nil — pipeline not started")
+            return
+        }
+        guard let queue = processingQueue else {
+            errorMessage = "Processing service unavailable. Restart the app."
+            AppLog.error("pipeline", "launchPipeline: processingQueue is nil")
+            return
+        }
+        _ = queue.enqueue(itemID: itemId, trigger: .newCapture)
+        AppLog.event("pipeline", "Item enqueued: \(itemId.uuidString.prefix(8))")
     }
 }
