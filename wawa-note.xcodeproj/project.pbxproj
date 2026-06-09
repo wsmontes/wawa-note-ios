@@ -467,6 +467,17 @@
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
 		</dict>
+		<key>1A13DC0E242A428D839BD056</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>AnarlogSyncSettingsView.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
 		<key>1A1A2957DCC626B8AA4AF9B8</key>
 		<dict>
 			<key>fileRef</key>
@@ -553,6 +564,13 @@
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
 		</dict>
+		<key>1DCBDE7DA752482480155E41</key>
+		<dict>
+			<key>fileRef</key>
+			<string>B995A94FEA0D4C8384FEA89B</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
 		<key>1E3DB54C7D6B745C9086F452</key>
 		<dict>
 			<key>fileRef</key>
@@ -566,6 +584,17 @@
 					<string>RemoveHeadersOnCopy</string>
 				</array>
 			</dict>
+		</dict>
+		<key>1E8D74AFC9064BCEBA4FEC68</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>AnarlogConfigBridge.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
 		</dict>
 		<key>1ED64B0004D8160A1E774EFE</key>
 		<dict>
@@ -1119,6 +1148,7 @@
 				<string>FDE499C4C6FBD48305E55385</string>
 				<string>832902E7908176DA271EE9E4</string>
 				<string>2CF0F37BF2684ED2F9B58CC3</string>
+				<string>1A13DC0E242A428D839BD056</string>
 			</array>
 			<key>isa</key>
 			<string>PBXGroup</string>
@@ -2137,6 +2167,17 @@
 			<key>isa</key>
 			<string>PBXBuildFile</string>
 		</dict>
+		<key>842E7677B6B6477590DE7705</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>TemplateMapper.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
 		<key>8473B4E7DB392AD331988803</key>
 		<dict>
 			<key>isa</key>
@@ -2601,6 +2642,10 @@
 				<string>86D70AC6D739493E872A4D96</string>
 				<string>D06C9DCDC9D44FD18DC3289A</string>
 				<string>9943EEFBF7A64C9AB0DB75ED</string>
+				<string>BC37A37A603446DD80DBC535</string>
+				<string>DED5C466E0BE423F96DE3B45</string>
+				<string>1DCBDE7DA752482480155E41</string>
+				<string>BF0D646B848B414189671792</string>
 			</array>
 			<key>isa</key>
 			<string>PBXSourcesBuildPhase</string>
@@ -2777,6 +2822,9 @@
 				<string>EF0B25A6B42B40249D991868</string>
 				<string>1994C6DF57B3436597BA9299</string>
 				<string>0D7447BF72074C69A5136933</string>
+				<string>842E7677B6B6477590DE7705</string>
+				<string>1E8D74AFC9064BCEBA4FEC68</string>
+				<string>B995A94FEA0D4C8384FEA89B</string>
 			</array>
 			<key>isa</key>
 			<string>PBXGroup</string>
@@ -3370,6 +3418,17 @@
 			<key>isa</key>
 			<string>PBXBuildFile</string>
 		</dict>
+		<key>B995A94FEA0D4C8384FEA89B</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>AnarlogParticipantBridge.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
 		<key>BA35513D7F4FC858E0D6621E</key>
 		<dict>
 			<key>isa</key>
@@ -3405,6 +3464,13 @@
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
 		</dict>
+		<key>BC37A37A603446DD80DBC535</key>
+		<dict>
+			<key>fileRef</key>
+			<string>842E7677B6B6477590DE7705</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
 		<key>BCB460E2F44F273C8C6222E2</key>
 		<dict>
 			<key>buildActionMask</key>
@@ -3439,6 +3505,13 @@
 			<string>Logging.swift</string>
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
+		</dict>
+		<key>BF0D646B848B414189671792</key>
+		<dict>
+			<key>fileRef</key>
+			<string>1A13DC0E242A428D839BD056</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
 		</dict>
 		<key>BF53C6404E3CD326484B43BB</key>
 		<dict>
@@ -4250,6 +4323,13 @@
 			<string>KnowledgeDetailView.swift</string>
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
+		</dict>
+		<key>DED5C466E0BE423F96DE3B45</key>
+		<dict>
+			<key>fileRef</key>
+			<string>1E8D74AFC9064BCEBA4FEC68</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
 		</dict>
 		<key>DEF2F8E71E35C1C273843EF5</key>
 		<dict>

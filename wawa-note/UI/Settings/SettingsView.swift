@@ -125,6 +125,19 @@ struct SettingsView: View {
                     Text("Exports all projects, items, analyses, signals, frames, prompts, and configuration as a complete JSON file. File may be large.")
                 }
 
+                // Anarlog Sync
+                Section {
+                    NavigationLink {
+                        AnarlogSyncSettingsView()
+                    } label: {
+                        Label("Anarlog Sync", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                } header: {
+                    Text("Synchronization")
+                } footer: {
+                    Text("Sync meeting notes with anarlog desktop app. Choose a shared folder to enable bidirectional import and export of .md session notes.")
+                }
+
                 // Debug Logs
                 Section {
                     NavigationLink {
