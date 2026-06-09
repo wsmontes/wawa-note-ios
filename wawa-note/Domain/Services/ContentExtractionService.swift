@@ -84,10 +84,11 @@ final class ContentExtractionService {
             AppLog.provider.info("ContentExtraction: transcription complete (\(result.segments.count) segments)")
             return result.segments.map(\.text).joined(separator: "\n")
         } catch {
-            AppLog.provider.error("ContentExtraction: transcription failed for item \(item.id): \(error)")
-            // Fall back to existing transcript if available (may have been saved by a prior run)
+            let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            AppLog.provider.error("ContentExtraction: transcription failed for item \(item.id): \(msg)")
+            item.status = .failed
+            try? modelContext.save()
             if let fallback = loadExistingTranscriptText(for: item.id) {
-                AppLog.provider.warning("ContentExtraction: falling back to existing transcript for item \(item.id)")
                 return fallback
             }
             return nil

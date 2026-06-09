@@ -19,7 +19,7 @@ enum AudioCaptureError: Error {
 final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private let engine: AVAudioEngine
     private let fileWriter: AudioFileWriter
-    let sessionManager: AudioSessionManager
+    private let sessionManager: AudioSessionManager
 
     @Published private(set) var state: AudioCaptureState = .idle
     @Published private(set) var audioLevel: Float = 0.0
@@ -37,11 +37,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     private let audioWriteQueue = DispatchQueue(label: "com.wawa-note.audio.write", qos: .userInitiated)
 
-    /// Input watchdog — fires if no buffers arrive within 2s.
-    private var inputWatchdog: InputWatchdog?
-
-    /// Buffer size reduced to ~23ms at 44.1kHz (1024 frames) for finer VAD granularity.
-    /// Meetily/anarlog use 30ms chunks; 1024 frames matches their precision.
+    /// 1024 frames = ~23ms at 44.1kHz (was 8192 = 186ms).
+    /// 8x finer granularity for VAD and audio level monitoring.
     private static let captureBufferSize: AVAudioFrameCount = 1024
     private static let levelDecayFactor: Float = 0.85
     private static let levelUpdateIntervalNS: UInt64 = 30_000_000
@@ -49,50 +46,6 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     var outputFileURL: URL? {
         fileWriter.currentFileURL
-    }
-
-    /// Whether the captured audio file had write errors (likely corrupted).
-    var hasWriteErrors: Bool { fileWriter.hasWriteErrors }
-
-    // MARK: - Software AGC (Automatic Gain Control)
-
-    /// Gain multiplier applied to samples before writing (1.0 = no change).
-    /// Increased automatically during auto-calibration if signal is too quiet.
-    private nonisolated(unsafe) var softwareGain: Float = 1.0
-
-    /// Samples collected during auto-calibration (first 3 seconds).
-    private var calibrationSamples: [Float] = []
-    private var calibrationComplete = false
-    private let calibrationDuration: TimeInterval = 3.0
-    private var calibrationStartTime: Date?
-    private let calibrationLock = NSLock()
-
-    /// Target RMS level for auto-calibration (-12dBFS ≈ 0.25 in normalized float).
-    private static let targetRMS: Float = 0.25
-
-    /// Boost gain for transcription when signal is very low.
-    /// Called after failed transcription to improve next attempt.
-    func boostGainForTranscription() {
-        let oldGain = self.softwareGain
-        self.softwareGain = min(4.0, self.softwareGain * 1.5)
-        AppLog.audio.info("AGC: boosted software gain \(String(format: "%.2f", oldGain)) → \(String(format: "%.2f", self.softwareGain))")
-    }
-
-    /// Reset software gain to neutral.
-    func resetGain() {
-        self.softwareGain = 1.0
-        self.calibrationComplete = false
-        self.calibrationSamples.removeAll()
-        AppLog.audio.info("AGC: gain reset to 1.0")
-    }
-
-    /// Get recommended hardware gain boost based on calibration.
-    func recommendedGainBoost() -> Float {
-        guard !calibrationSamples.isEmpty else { return 0 }
-        let avgRMS = calibrationSamples.reduce(0, +) / Float(calibrationSamples.count)
-        if avgRMS < 0.01 { return 0.4 }  // Very quiet → +40%
-        if avgRMS < 0.02 { return 0.2 }  // Quiet → +20%
-        return 0
     }
 
     init(
@@ -126,75 +79,40 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         try sessionManager.configureForRecording()
 
-        // Apply recommended hardware gain boost from previous calibration
-        // (safe to call after setActive; gain adjustment is allowed on active session)
-        let hwBoost = sessionManager.isInputGainSettable ? recommendedGainBoost() : 0
-        if hwBoost > 0 {
-            let applied = sessionManager.boostGain(by: hwBoost)
-            AppLog.audio.info("Applied hardware gain boost: +\(String(format: "%.0f", applied * 100))%")
-        }
-
         let inputNode = engine.inputNode
         let hardwareFormat = inputNode.outputFormat(forBus: 0)
         try fileWriter.startRecording(format: hardwareFormat, meetingId: meetingId)
 
-        // Reset engine state from previous session before reconfiguring
-        engine.reset()
-
-        // Install tap for audio level monitoring + file writing.
         // The engine must keep running (iOS forbids engine.start() in the
         // background), so the tap stays installed for the lifetime of the
         // recording.
-        //
-        // Buffer PCM data is reused by the audio system after callback return,
-        // so we copy frame data before dispatching async. Real-time thread
-        // must never do disk I/O or malloc — we do peak detection inline
-        // (O(n), no allocations) and copy buffer contents to a pre-allocated
-        // slice before dispatching to the write queue.
-        // Input watchdog: start monitoring for buffer stalls.
-        inputWatchdog = sessionManager.startInputWatchdog(timeout: 2.0) { [weak self] in
-            guard let self, self.state == .recording else { return }
-            AppLog.error("audio", "Input watchdog triggered — no audio buffers for 2s. Attempting engine rebuild.")
-            self.audioInterruptionReason = "Audio input stalled. Attempting recovery..."
-            self.rebuildEngine()
-        }
-
         inputNode.installTap(onBus: 0, bufferSize: Self.captureBufferSize, format: nil) { [weak self] buffer, _ in
             guard let self else { return }
-            self.inputWatchdog?.feed()
             self.updateAudioLevel(from: buffer)
-
-            // AGC calibration: DISABLED for debugging
-            // Will re-enable once recording works again
-
             guard self.state == .recording else { return }
 
-            // Copy buffer contents synchronously on the real-time thread
-            // (safe: floatChannelData is already allocated, memcpy only).
+            // Copy buffer data before dispatch — PCM is reused after callback return
             guard let channelData = buffer.floatChannelData else { return }
             let frameLength = Int(buffer.frameLength)
-
             let copiedFrames = UnsafeMutablePointer<Float>.allocate(capacity: frameLength)
             copiedFrames.initialize(from: channelData[0], count: frameLength)
 
-            // Dispatch the copied buffer to the write queue.
             self.audioWriteQueue.async { [weak self] in
                 guard let self, let file = self.fileWriter.activeFile else {
                     copiedFrames.deallocate()
                     return
                 }
-                let format = file.processingFormat
-                guard let writeBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameLength)) else {
+                let fmt = file.processingFormat
+                guard let wb = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(frameLength)) else {
                     copiedFrames.deallocate()
                     return
                 }
-                writeBuffer.frameLength = AVAudioFrameCount(frameLength)
-                if let destData = writeBuffer.floatChannelData {
-                    destData[0].initialize(from: copiedFrames, count: frameLength)
+                wb.frameLength = AVAudioFrameCount(frameLength)
+                if let dest = wb.floatChannelData {
+                    dest[0].initialize(from: copiedFrames, count: frameLength)
                 }
                 copiedFrames.deallocate()
-
-                self.fileWriter.write(buffer: writeBuffer)
+                self.fileWriter.write(buffer: wb)
             }
         }
 
@@ -212,7 +130,6 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         state = .recording
         currentInputPortName = sessionManager.currentInputPortName
-        calibrationStartTime = Date()
         startTimer()
         startLevelSmoothing()
         observeAudioNotifications()
@@ -243,8 +160,6 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     func stopRecording() {
         guard state == .recording || state == .paused || state == .interrupted else { return }
 
-        inputWatchdog?.cancel()
-        inputWatchdog = nil
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         timerTask?.cancel()
@@ -258,7 +173,6 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         audioLevel = 0.0
         elapsedTime = 0.0
         recordingStartTime = nil
-        calibrationStartTime = nil
         currentInputPortName = ""
         stateBeforeInterruption = nil
         AppLog.audio.info("Recording stopped")
@@ -277,7 +191,6 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         engine.reset()
 
         let inputNode = engine.inputNode
-        // Use the same tap pattern as startRecording — copy frames, dispatch async.
         inputNode.installTap(onBus: 0, bufferSize: Self.captureBufferSize, format: nil) { [weak self] buffer, _ in
             guard let self else { return }
             self.updateAudioLevel(from: buffer)
@@ -293,17 +206,17 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                     copiedFrames.deallocate()
                     return
                 }
-                let format = file.processingFormat
-                guard let writeBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameLength)) else {
+                let fmt = file.processingFormat
+                guard let wb = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(frameLength)) else {
                     copiedFrames.deallocate()
                     return
                 }
-                writeBuffer.frameLength = AVAudioFrameCount(frameLength)
-                if let destData = writeBuffer.floatChannelData {
-                    destData[0].initialize(from: copiedFrames, count: frameLength)
+                wb.frameLength = AVAudioFrameCount(frameLength)
+                if let dest = wb.floatChannelData {
+                    dest[0].initialize(from: copiedFrames, count: frameLength)
                 }
                 copiedFrames.deallocate()
-                self.fileWriter.write(buffer: writeBuffer)
+                self.fileWriter.write(buffer: wb)
             }
         }
 

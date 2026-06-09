@@ -1118,13 +1118,13 @@ struct KnowledgeDetailView: View {
     private var annotationsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Context").font(.headline)
-            ForEach(groupedAnnotationKeys.sorted(by: <), id: \.self) { key in
-                if let values = groupedAnnotations[key] {
+            ForEach(filteredAnnotationKeys.sorted(by: <), id: \.self) { key in
+                if let rawValue = groupedAnnotations[key]?.first {
                     HStack(spacing: 4) {
-                        Text(key.replacingOccurrences(of: "_", with: " ").capitalized)
+                        Text(contextLabel(for: key))
                             .font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        Text(values.joined(separator: ", "))
+                        Text(contextValue(for: key, raw: rawValue))
                             .font(.caption)
                     }
                     Divider()
@@ -1137,16 +1137,60 @@ struct KnowledgeDetailView: View {
         .padding(.horizontal, 16)
     }
 
+    // MARK: - Context label/value formatting
+
+    private func contextLabel(for key: String) -> String {
+        switch key {
+        case "route_name":  "Microphone"
+        case "route_type":  "Audio Type"
+        case "level":       "Battery"
+        case "state":       "Charging"
+        case "event_title": "Calendar"
+        case "event_proximity": "When"
+        case "event_location": "Event Location"
+        case "place_name", "city", "country": "Location"
+        case "lat", "lon", "accuracy": "GPS"
+        case "activity":    "Activity"
+        case "confidence":  "Confidence"
+        default: key.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+
+    private func contextValue(for key: String, raw: String) -> String {
+        switch key {
+        case "level":   "\(raw)%"
+        case "lat", "lon": String(raw.prefix(8))
+        case "accuracy": "±\(raw)m"
+        case "activity": raw.capitalized
+        case "focus_active": raw == "true" ? "On" : "Off"
+        case "event_proximity":
+            switch raw {
+            case "during": "During meeting"
+            case "before": "Upcoming"
+            case "after":  "Just ended"
+            default: raw
+            }
+        default: raw
+        }
+    }
+
     private var groupedAnnotations: [String: [String]] {
         var result: [String: [String]] = [:]
         for ann in annotations {
+            if ann.key == "focus_active" { continue }
             result[ann.key, default: []].append(ann.value)
         }
         return result
     }
 
-    private var groupedAnnotationKeys: [String] {
-        Array(groupedAnnotations.keys)
+    private var filteredAnnotationKeys: [String] {
+        // Show most important keys first
+        let priority = ["event_title", "event_proximity", "place_name", "city",
+                        "route_name", "activity", "level", "state"]
+        let all = Array(groupedAnnotations.keys)
+        let ordered = priority.filter { all.contains($0) }
+        let rest = all.filter { !priority.contains($0) }.sorted()
+        return ordered + rest
     }
 
     // MARK: - Locale picker

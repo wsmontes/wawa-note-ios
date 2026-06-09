@@ -58,17 +58,12 @@ final class RecordingCoordinator: ObservableObject {
         title: String? = nil,
         scheduledDate: Date? = nil,
         calendarEventIdentifier: String? = nil,
-        projectID: UUID? = nil,
-        profile: CaptureProfile = .voiceMemo
+        projectID: UUID? = nil
     ) {
-        // Auto-recover from stale state: if previous recording ended
-        // but finishCapture() wasn't called, force-reset to idle.
-        if self.state == .stopped {
-            AppLog.warn("audio", "RecordingCoordinator: state was .stopped — auto-resetting to idle")
-            returnToIdle()
-        }
+        // Auto-recover from stale state after previous recording
+        if self.state == .stopped { returnToIdle() }
         guard self.state == .idle else {
-            AppLog.warn("audio", "RecordingCoordinator: startRecording called but state is \(String(describing: self.state)) — ignoring")
+            AppLog.warn("audio", "RecordingCoordinator: startRecording called but state is \(String(describing: self.state))")
             return
         }
 
@@ -450,21 +445,13 @@ final class RecordingCoordinator: ObservableObject {
         guard let item = try? context.fetch(descriptor).first else { return }
 
         let effectiveDuration = elapsedTime - pausedDuration
+        item.status = .recorded
         item.durationSeconds = effectiveDuration
         item.audioFileRelativePath = AppFileConstants.audioFileName
 
-        // Check if the audio file writer had errors — if so, mark as failed
-        if captureService.hasWriteErrors {
-            AppLog.error("audio", "Recording stopped with write errors — file may be corrupted. Marking as failed.")
-            item.status = .failed
-            errorMessage = "Recording file may be corrupted. Write errors occurred during recording."
-        } else {
-            item.status = .recorded
-        }
-
         do {
             try context.save()
-            AppLog.audio.info("Item \(item.id) updated: status=\(item.status.rawValue) duration=\(Int(effectiveDuration))s")
+            AppLog.audio.info("Item updated: \(item.id)")
         } catch {
             AppLog.error("audio", "Failed to save item update: \(error.localizedDescription)")
         }

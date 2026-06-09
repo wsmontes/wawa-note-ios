@@ -140,18 +140,13 @@ final class ContentPipelineService: ObservableObject {
                 return
             }
 
-            guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
-                AppLog.provider.error("ContentPipeline: no active provider configured")
-                return
-            }
-
-            // Assemble pipeline tools — single shell tool
             let fileStore = FileArtifactStore()
 
-            // Pre-transcribe audio items before the agent runs.
-            // The agent's "extract" command only reads existing transcripts,
-            // so we must transcribe first. Uses TranscriptionSettings to
-            // respect user's engine preference (Apple Speech vs Whisper API).
+            // Pre-transcribe audio items BEFORE checking AI provider.
+            // Transcription uses Apple Speech (on-device) or Whisper API,
+            // neither of which requires the AI provider configured in Settings.
+            // Without this, recording audio items would never get transcribed
+            // unless the user first configures an LLM provider.
             if item.type == .audio && item.transcriptionEngineId == nil {
                 pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
                     itemType: item.type.rawValue, phase: "transcribing",
@@ -162,8 +157,19 @@ final class ContentPipelineService: ObservableObject {
                 if let transcribedText = await extractionSvc.extractTextFromAudio(item) {
                     AppLog.provider.info("ContentPipeline: pre-transcription complete for item \(itemID) — \(transcribedText.count) chars")
                 } else {
-                    AppLog.provider.warning("ContentPipeline: pre-transcription failed for item \(itemID) — agent will see empty text")
+                    AppLog.provider.warning("ContentPipeline: pre-transcription failed for item \(itemID)")
                 }
+            }
+
+            guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
+                AppLog.provider.error("ContentPipeline: no active provider configured — transcription-only mode")
+                // Mark as transcribed so the item isn't stuck; analysis skipped
+                if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+                    fresh.status = item.transcriptionEngineId != nil ? .transcribed : .recorded
+                    fresh.inboxDate = nil
+                    try? modelContext.save()
+                }
+                return
             }
             let project = item.projectID.flatMap { pid in try? ProjectService(context: modelContext).fetch(id: pid) }
             let toolContext = ToolContext(

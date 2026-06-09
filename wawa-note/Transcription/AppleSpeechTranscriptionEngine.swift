@@ -146,8 +146,11 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             }
 
             // Verify on-device recognition is actually supported
-            guard recognizer.supportsOnDeviceRecognition else {
-                return .hardwareUnsupported
+            let cloudAllowed = UserDefaults.standard.bool(forKey: "transcription_allow_cloud")
+            if !cloudAllowed {
+                guard recognizer.supportsOnDeviceRecognition else {
+                    return .hardwareUnsupported
+                }
             }
 
             return .available(localeIdentifier: recognizer.locale.identifier)
@@ -292,14 +295,15 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         request.shouldReportPartialResults = false
         request.addsPunctuation = true
 
-        // CRITICAL: Force on-device recognition. Without this, the request
-        // may silently send audio to Apple's servers.
-        // Guideline: "Sempre setar requiresOnDeviceRecognition = true."
-        guard recognizer.supportsOnDeviceRecognition else {
-            AppLog.transcription.error("On-device recognition not supported for locale \(recognizer.locale.identifier)")
-            throw TranscriptionError.onDeviceUnavailable
+        // On-device recognition: requires model download. Disable for testing.
+        let forceOnDevice = !UserDefaults.standard.bool(forKey: "transcription_allow_cloud")
+        if forceOnDevice {
+            guard recognizer.supportsOnDeviceRecognition else {
+                AppLog.transcription.error("On-device model not available for \(recognizer.locale.identifier)")
+                throw TranscriptionError.onDeviceUnavailable
+            }
         }
-        request.requiresOnDeviceRecognition = true
+        request.requiresOnDeviceRecognition = forceOnDevice
 
         // Domain-specific vocabulary for better accuracy
         if let contextTerms = buildContextualTerms() {
@@ -371,9 +375,9 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                     }
 
                     let request = SFSpeechURLRecognitionRequest(url: audioFileURL)
-                    request.shouldReportPartialResults = true  // Enable volatile results
+                    request.shouldReportPartialResults = true
                     request.addsPunctuation = true
-                    request.requiresOnDeviceRecognition = true
+                    request.requiresOnDeviceRecognition = !UserDefaults.standard.bool(forKey: "transcription_allow_cloud")
                     if let terms = contextualTerms, !terms.isEmpty {
                         request.contextualStrings = terms
                     }

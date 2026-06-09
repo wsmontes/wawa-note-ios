@@ -15,8 +15,6 @@ final class AudioFileWriter: @unchecked Sendable {
     private var currentMeetingId: UUID?
     private(set) var writeErrorCount: Int = 0
     private(set) var lastWriteError: Error?
-
-    /// Access to the underlying audio file for creating write buffers.
     var activeFile: AVAudioFile? { audioFile }
 
     init(fileManager: FileManager = .default, fileStore: FileArtifactStore = FileArtifactStore()) {
@@ -27,9 +25,6 @@ final class AudioFileWriter: @unchecked Sendable {
     var isWriting: Bool { audioFile != nil }
 
     var hasWriteErrors: Bool { writeErrorCount > 0 }
-
-    /// Whether the recording file is likely corrupted (had write errors).
-    var isFileCorrupted: Bool { writeErrorCount > 0 }
 
     var fileSize: Int64 {
         guard let url = currentFileURL else { return 0 }
@@ -67,24 +62,19 @@ final class AudioFileWriter: @unchecked Sendable {
 
     func write(buffer: AVAudioPCMBuffer) {
         guard let file = audioFile else { return }
-        let maxRetries = 3
-        let retryDelays = [0.1, 0.2, 0.4]  // Exponential backoff in seconds
-
-        for attempt in 0...maxRetries {
+        for attempt in 0...3 {
             do {
                 try file.write(from: buffer)
-                return  // Success
+                return
             } catch {
-                if attempt == maxRetries {
+                if attempt == 3 {
                     writeErrorCount += 1
                     lastWriteError = error
                     let nsError = error as NSError
-                    AppLog.error("audio", "Failed to write audio buffer after \(maxRetries) retries (#\(writeErrorCount)): \(error.localizedDescription) domain=\(nsError.domain) code=\(nsError.code)")
+                    AppLog.error("audio", "Failed to write audio buffer after 3 retries (#\(writeErrorCount)): \(error.localizedDescription)")
                     return
                 }
-                let delay = retryDelays[attempt]
-                AppLog.warn("audio", "Audio write retry \(attempt + 1)/\(maxRetries) after \(delay)s: \(error.localizedDescription)")
-                Thread.sleep(forTimeInterval: delay)
+                Thread.sleep(forTimeInterval: [0.1, 0.2, 0.4][attempt])
             }
         }
     }
