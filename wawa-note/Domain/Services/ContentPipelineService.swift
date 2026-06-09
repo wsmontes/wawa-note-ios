@@ -27,14 +27,32 @@ enum PipelineTemplate {
     - Use `grep "pattern" /agent/memories/` to find relevant memories.
     - If found, apply their proven strategies.
 
+    ### Phase 0.5: CHOOSE ANALYSIS SCHEMA (MANDATORY)
+    - Use `ls /projects/wawa-note-config/config/schemas/` to see all available schemas.
+    - Choose the schema that best matches the item type and content:
+      • meeting → Meeting Analysis (decisions, actions, risks, dates, entities)
+      • research → Research (hypotheses, findings, themes, sources)
+      • brainstorm → Brainstorm (ideas, clusters, themes, questions)
+      • journal → Journal (themes, people, places, moods)
+      • coaching → Coaching (competencies, commitments, breakthroughs)
+      • legal → Legal Brief (cases, depositions, statutes, privilege)
+      • product → Product Spec (stories, requirements, constraints, decisions)
+      • blank → Blank Slate (minimal — AI adapts to your content)
+    - Use `cat /projects/wawa-note-config/config/schemas/{name}.json` to read the full schema.
+    - The schema defines the REQUIRED output format. You MUST follow it exactly.
+    - Pay attention to: outputSchema.properties (field names, types, structure) and renderAs (how UI displays each field).
+
     ### Phase 1: EXTRACT
     - Use `extract <item-id>` to get the item's raw text.
     - If empty or fails, report the error and stop.
 
-    ### Phase 2: ANALYZE
-    - Review the extracted content and produce structured analysis.
+    ### Phase 2: ANALYZE (follow schema strictly)
+    - Review the extracted content and produce analysis matching the chosen schema's outputSchema.
+    - Every field in outputSchema.properties MUST be present in your analysis JSON.
+    - Array fields (decisions, action_items, risks, etc.) MUST use the exact object structure defined in the schema's items.properties.
     - For images: describe them first, then analyze.
-    - Use `echo '{"summary":"..."}' > /projects/{slug}/analysis/{item-id}.json` to save findings.
+    - Write analysis via: `echo '{"field":"value",...}' > /projects/{slug}/analysis/{item-id}.json`
+    - If the project has no slug (inbox item), use: `echo '...' > /inbox/{item-id}/analysis.json`
 
     ### Phase 3: DETECT SIGNALS
     - Review for risks, alerts, opportunities, contradictions, patterns.
@@ -53,9 +71,10 @@ enum PipelineTemplate {
     - If extract returns empty: report and stop.
     - If analyze fails: try once more with a different approach. If it still fails, stop.
     - Never loop more than 3 times with the same approach.
+    - If a schema field doesn't apply, use null or empty array — but NEVER omit required fields.
 
     ## OUTPUT
-    When done, summarize: item title, type, key findings. Be concise.
+    When done, summarize: item title, type, chosen schema, key findings. Be concise.
     """
 
     /// Lightweight pipeline: extract and analyze only. No project ingestion.
@@ -128,6 +147,24 @@ final class ContentPipelineService: ObservableObject {
 
             // Assemble pipeline tools — single shell tool
             let fileStore = FileArtifactStore()
+
+            // Pre-transcribe audio items before the agent runs.
+            // The agent's "extract" command only reads existing transcripts,
+            // so we must transcribe first. Uses TranscriptionSettings to
+            // respect user's engine preference (Apple Speech vs Whisper API).
+            if item.type == .audio && item.transcriptionEngineId == nil {
+                pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
+                    itemType: item.type.rawValue, phase: "transcribing",
+                    currentTool: nil, toolSummary: nil, toolLog: [])
+                NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
+                    userInfo: ["stage": "transcribing"])
+                let extractionSvc = ContentExtractionService(modelContext: modelContext, fileStore: fileStore)
+                if let transcribedText = await extractionSvc.extractTextFromAudio(item) {
+                    AppLog.provider.info("ContentPipeline: pre-transcription complete for item \(itemID) — \(transcribedText.count) chars")
+                } else {
+                    AppLog.provider.warning("ContentPipeline: pre-transcription failed for item \(itemID) — agent will see empty text")
+                }
+            }
             let project = item.projectID.flatMap { pid in try? ProjectService(context: modelContext).fetch(id: pid) }
             let toolContext = ToolContext(
                 modelContext: modelContext, fileStore: fileStore,
@@ -142,8 +179,10 @@ final class ContentPipelineService: ObservableObject {
 
             let registry = AgentToolRegistry(tools: tools)
             let config = AIConfigService.shared
-            let executorModel = config.featureConfig(for: "agent")?.model ?? "gpt-5-nano"
-            let advisorModel = config.featureConfig(for: "analysis")?.model ?? "gpt-5.5"
+            let activeModel = ActiveProviderManager.shared.getActiveProvider(context: modelContext)?.defaultModel
+            let fallbackModel = config.modelFor(feature: "chat")
+            let executorModel = activeModel ?? config.featureConfig(for: "agent")?.model ?? fallbackModel
+            let advisorModel = activeModel ?? config.featureConfig(for: "analysis")?.model ?? fallbackModel
 
             let loop = AgentLoop(
                 registry: registry, toolContext: toolContext,
@@ -228,16 +267,29 @@ final class ContentPipelineService: ObservableObject {
                     failed = true
                 }
 
-                // Verify: did the agent actually produce analysis?
+                // Verify: did the agent actually produce valid analysis?
                 if !failed {
                     let store = FileArtifactStore()
                     if store.artifactExists(fileName: "analysis.json", meetingId: itemID) {
-                        break // Success — analysis exists
+                        // Schema validation: ensure output matches the project's framework
+                        if let projectID = item.projectID,
+                           let project = try? ProjectService(context: modelContext).fetch(id: projectID) {
+                            let framework = FrameworkService.shared.resolve(for: project)
+                            let fileURL = store.itemDirectoryURL(for: itemID).appendingPathComponent("analysis.json")
+                            if let data = try? Data(contentsOf: fileURL),
+                               let validationError = FrameworkService.validateAnalysis(data: data, against: framework) {
+                                AppLog.provider.warning("Pipeline attempt \(attemptCount): analysis.json failed schema validation: \(validationError)")
+                                lastError = "Analysis failed schema validation: \(validationError)"
+                                failed = true
+                            }
+                        }
+                        if !failed { break } // Success — analysis exists and is valid
+                    } else {
+                        // Agent finished but didn't create analysis
+                        AppLog.provider.warning("Pipeline attempt \(attemptCount): agent finished but no analysis.json found")
+                        lastError = "Agent completed without producing analysis. The model may have failed to call analyze_content or the tool returned an error."
+                        failed = true
                     }
-                    // Agent finished but didn't create analysis
-                    AppLog.provider.warning("Pipeline attempt \(attemptCount): agent finished but no analysis.json found")
-                    lastError = "Agent completed without producing analysis. The model may have failed to call analyze_content or the tool returned an error."
-                    failed = true
                 }
 
                 if !failed { break }
@@ -254,10 +306,24 @@ final class ContentPipelineService: ObservableObject {
             if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
                 fresh.analysisProviderId = "pipeline" // marker to prevent re-enqueue
                 fresh.status = lastError == nil ? .analyzed : .failed
+                // Auto-archive from inbox after successful processing
+                // The item has been extracted, analyzed, and (if applicable) ingested.
+                if lastError == nil {
+                    fresh.inboxDate = nil
+                }
                 try? modelContext.save()
             }
             // Update project health after agent completes
             if let pid = item.projectID { ProjectHealthEngine.updateProject(pid, context: modelContext) }
+            // Generate embedding for semantic search
+            if lastError == nil, let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+                let provider = try? ProviderRouter.resolveActive(context: modelContext)
+                if let p = provider { try? await EmbeddingPipelineService().ensureEmbedding(for: fresh, using: p) }
+            }
+            // Index in Spotlight for system-wide search
+            if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+                SpotlightIndexService().indexItem(fresh)
+            }
             // Keep status visible so user can see agent trace
         }
     }
@@ -392,6 +458,26 @@ final class FrameworkService {
 
     private init() {}
 
+    /// Returns all 8 built-in analysis frameworks, keyed by ID.
+    /// Used by VFS `/projects/{slug}/config/schemas/` to list available schemas.
+    static var allBuiltInFrameworks: [String: ProjectFramework] {
+        [
+            "meeting": meetingFramework,
+            "research": researchFramework,
+            "brainstorm": brainstormFramework,
+            "journal": journalFramework,
+            "coaching": coachingFramework,
+            "legal": legalFramework,
+            "product": productFramework,
+            "blank": blankFramework
+        ]
+    }
+
+    /// Looks up a built-in framework by its short name (e.g., "meeting", "research").
+    static func builtInFramework(named name: String) -> ProjectFramework? {
+        allBuiltInFrameworks[name]
+    }
+
     func resolve(for project: Project) -> ProjectFramework {
         if let json = project.frameworkJSON,
            let data = json.data(using: .utf8),
@@ -424,6 +510,69 @@ final class FrameworkService {
     /// Validate all views in a framework. Returns invalid view IDs.
     func validateViews(_ framework: ProjectFramework) -> [String] {
         framework.views.filter { !$0.isValid }.map(\.id)
+    }
+
+    /// Validate analysis JSON against a framework's outputSchema.
+    /// Returns nil on success, or an error message describing what's wrong.
+    static func validateAnalysis(json: [String: Any], against framework: ProjectFramework) -> String? {
+        let schema = framework.itemAnalysis.outputSchema
+        let required = schema.required ?? Array(schema.properties.keys)
+
+        // Check required fields are present
+        for field in required {
+            if json[field] == nil {
+                return "Missing required field '\(field)'. Required fields: \(required.joined(separator: ", "))"
+            }
+        }
+
+        // Check field types against schema
+        for (field, prop) in schema.properties {
+            guard let value = json[field] else {
+                if required.contains(field) { return "Missing required field '\(field)'" }
+                continue // optional field not present, OK
+            }
+
+            switch prop.type {
+            case "string":
+                guard value is String else { return "Field '\(field)' must be a string" }
+            case "array":
+                guard let arr = value as? [Any] else { return "Field '\(field)' must be an array" }
+                // Validate array items if schema specifies item properties
+                if let itemProps = prop.items?.properties {
+                    for (idx, item) in arr.enumerated() {
+                        guard let obj = item as? [String: Any] else {
+                            return "Field '\(field)'[\(idx)] must be an object"
+                        }
+                        for (itemField, itemProp) in itemProps {
+                            if obj[itemField] == nil { continue } // optional
+                            switch itemProp.type {
+                            case "string": if !(obj[itemField] is String) { return "Field '\(field)'[\(idx)].\(itemField) must be a string" }
+                            case "number", "integer": if !(obj[itemField] is NSNumber) && !(obj[itemField] is Int) && !(obj[itemField] is Double) { return "Field '\(field)'[\(idx)].\(itemField) must be a number" }
+                            default: break
+                            }
+                        }
+                    }
+                }
+            case "object":
+                guard value is [String: Any] else { return "Field '\(field)' must be an object" }
+            case "number", "integer":
+                guard value is NSNumber || value is Int || value is Double else { return "Field '\(field)' must be a number" }
+            case "boolean":
+                guard value is Bool else { return "Field '\(field)' must be a boolean" }
+            default:
+                break
+            }
+        }
+
+        return nil // valid
+    }
+
+    /// Validate analysis JSON bytes against a framework. Convenience wrapper.
+    static func validateAnalysis(data: Data, against framework: ProjectFramework) -> String? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return "Analysis file is not valid JSON"
+        }
+        return validateAnalysis(json: json, against: framework)
     }
 
     /// Reset a project's framework to the meeting default.

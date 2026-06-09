@@ -34,6 +34,15 @@ final class KnowledgeItemService {
         )
         context.insert(item)
         try context.save()
+        // Write body.md for text-based items (notes, journals) — defense in depth
+        if let body = bodyText, !body.isEmpty,
+           type == .note || type == .journalEntry {
+            let dir = FileArtifactStore().itemDirectoryURL(for: item.id)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try? body.write(to: dir.appendingPathComponent("body.md"), atomically: true, encoding: .utf8)
+        }
+        // Index in Spotlight
+        SpotlightIndexService().indexItem(item)
         return item
     }
 
@@ -101,6 +110,8 @@ final class KnowledgeItemService {
         try fileStore.deleteMeetingDirectory(for: item.id)
         context.delete(item)
         try context.save()
+        // Remove from Spotlight
+        SpotlightIndexService().deleteItem(itemId)
     }
 
     // MARK: - Update

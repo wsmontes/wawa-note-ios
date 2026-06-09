@@ -43,11 +43,23 @@ final class ContentExtractionService {
         }
 
         let engine: TranscriptionEngine
+        let settings = TranscriptionSettings.shared
         let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext)
-        if let config, config.type == .openAI || config.type == .openAICompatible,
-           let baseURL = config.baseURL {
+
+        // Only use remote Whisper if the user explicitly chose it AND the provider supports it
+        let canUseRemoteWhisper: Bool = {
+            guard let config, config.baseURL != nil else { return false }
+            // Check provider config for audio transcription endpoint
+            let supportsTranscription = AIConfigService.shared.supportsAudioTranscription(for: config.providerConfigId)
+            // Also check the provider type config (for openAI etc.)
+            let typeSupports = AIConfigService.shared.supportsAudioTranscription(for: config.typeRaw)
+            return settings.useRemoteWhisper && (supportsTranscription || typeSupports)
+        }()
+
+        if canUseRemoteWhisper {
+            let baseURL = config!.baseURL!
             var apiKey = ""
-            if let keyId = config.apiKeyKeychainIdentifier {
+            if let keyId = config!.apiKeyKeychainIdentifier {
                 apiKey = (try? SecureKeyStore().loadAPIKey(for: keyId)) ?? ""
             }
             engine = RemoteTranscriptionEngine(baseURL: baseURL, apiKey: apiKey)
@@ -112,7 +124,8 @@ final class ContentExtractionService {
               let image = UIImage(data: imageData),
               let cgImage = image.cgImage else { return nil }
 
-        return await withCheckedContinuation { continuation in
+        // 1. OCR
+        let ocrText: String? = await withCheckedContinuation { continuation in
             let request = VNRecognizeTextRequest { request, _ in
                 let text = (request.results as? [VNRecognizedTextObservation] ?? [])
                     .compactMap { $0.topCandidates(1).first?.string }
@@ -123,6 +136,32 @@ final class ContentExtractionService {
             request.usesLanguageCorrection = true
             try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
         }
+
+        // 2. LLM vision analysis (try OpenAI-compatible providers)
+        if let provider = try? ProviderRouter.resolveActive(context: modelContext) {
+            let msg = AIMessage(role: .user, content: [.text("Describe this image."), .imageFile(imageURL)])
+            let model = AIConfigService.shared.modelFor(feature: "vision")
+            let req = AIRequest(model: model, messages: [msg],
+                temperature: AIConfigService.shared.requestParams(for: "vision", model: model).temperature,
+                maxTokens: 500)
+            if let response = try? await provider.send(req), !response.content.isEmpty {
+                let combined = [ocrText, "---", response.content].compactMap { $0 }.joined(separator: "\n")
+                // Save enriched text to body
+                if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: item.id) {
+                    fresh.bodyText = combined
+                    try? modelContext.save()
+                }
+                return combined
+            }
+        }
+
+        // Save OCR text to body if not already there
+        if let ocrText, !ocrText.isEmpty,
+           let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: item.id) {
+            fresh.bodyText = ocrText
+            try? modelContext.save()
+        }
+        return ocrText
     }
 
     // MARK: - Best-effort text retrieval
@@ -131,6 +170,12 @@ final class ContentExtractionService {
     /// Checks transcript (audio) or bodyText (documents). Falls back to analysis summary.
     /// Used when the pipeline needs text for Phase 3 but extraction isn't required.
     func bestAvailableText(for item: KnowledgeItem) -> String? {
+        // For webBookmark: try to fetch URL content
+        if item.type == .webBookmark, let urlStr = item.importSourceURL, let url = URL(string: urlStr) {
+            if let fetched = fetchBookmarkContent(url: url) {
+                return fetched
+            }
+        }
         if let transcript = loadExistingTranscriptText(for: item.id) {
             return transcript
         }
@@ -146,6 +191,25 @@ final class ContentExtractionService {
             return summary
         }
         return nil
+    }
+
+    /// Fetch and extract plain text from a webBookmark's URL.
+    private func fetchBookmarkContent(url: URL) -> String? {
+        guard let scheme = url.scheme, scheme.hasPrefix("http") else { return nil }
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: String?
+        let task = URLSession.shared.dataTask(with: url) { data, _, error in
+            defer { semaphore.signal() }
+            guard let data, error == nil, let html = String(data: data, encoding: .utf8) else { return }
+            let plainText = html.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+                .replacingOccurrences(of: "&[^;]+;", with: " ", options: .regularExpression)
+                .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            result = String(plainText.prefix(8000))
+        }
+        task.resume()
+        _ = semaphore.wait(timeout: .now() + 15)
+        return result
     }
 
     // MARK: - Analyze text (source-aware)
@@ -637,5 +701,6 @@ final class LocationIntelligenceService {
             return loc.distance(from: center) <= radiusMeters
         }
     }
+
 }
 

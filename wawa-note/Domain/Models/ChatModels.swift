@@ -234,6 +234,16 @@ enum ChatBlock: Codable, Sendable {
     // Action prompts
     case choicePrompt(ChoicePromptData)
     case confirmation(ConfirmationData)
+
+    // Document references
+    case fileLink(FileLinkData)
+    case documentHeader(DocumentHeaderData)
+
+    // Free-text input
+    case freeTextInput(FreeTextInputData)
+
+    // Progress tracking
+    case progressUpdate(ProgressUpdateData)
 }
 
 // MARK: - Block Data Types
@@ -323,4 +333,34 @@ struct ConfirmationData: Codable, Sendable {
     let cancelLabel: String
     let confirmValue: String
     let cancelValue: String
+}
+
+// MARK: - Document Link Data
+
+struct FileLinkData: Codable, Sendable {
+    let itemID: String
+    let title: String
+    let itemType: String
+    let snippet: String
+    let projectSlug: String?
+}
+
+struct DocumentHeaderData: Codable, Sendable {
+    let title: String
+    let documentType: String
+    let summary: String
+    let sectionCount: Int
+    let itemID: String
+}
+
+struct FreeTextInputData: Codable, Sendable {
+    let question: String
+    let placeholder: String
+    let submitLabel: String
+}
+
+struct ProgressUpdateData: Codable, Sendable {
+    let step: Int
+    let total: Int
+    let label: String
 }

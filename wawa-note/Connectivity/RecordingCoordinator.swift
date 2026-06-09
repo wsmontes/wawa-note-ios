@@ -241,15 +241,14 @@ final class RecordingCoordinator: ObservableObject {
             let descriptor = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.statusRaw == "recording" })
             guard let orphans = try? bgContext.fetch(descriptor), !orphans.isEmpty else { return }
 
-            AppLog.audio.info("Found \(orphans.count) orphaned recording(s) — cleaning up")
-            let store = FileArtifactStore()
+            AppLog.audio.info("Found \(orphans.count) interrupted recording(s) — recovering")
             for item in orphans {
-                AppLog.audio.info("Cleaning up orphaned recording: \(item.id)")
-                try? store.deleteMeetingDirectory(for: item.id)
-                bgContext.delete(item)
+                AppLog.audio.info("Recovering interrupted recording: \(item.id)")
+                item.status = .recorded
+                item.audioFileRelativePath = AppFileConstants.audioFileName
             }
             try bgContext.save()
-            AppLog.audio.info("Cleaned up \(orphans.count) orphaned recording(s)")
+            AppLog.audio.info("Recovered \(orphans.count) interrupted recording(s) — saved as recorded")
         } catch {
             AppLog.audio.error("Orphan cleanup failed: \(error.localizedDescription)")
         }

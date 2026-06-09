@@ -82,6 +82,8 @@ final class KnowledgeItem {
     var importSourceURL: String?
     // Field authority
     var fieldProvenanceJSON: String?
+    // Anarlog compatibility: preserves original YAML frontmatter for round-trip fidelity
+    var anarlogFrontmatterJSON: String?
 
     var type: KnowledgeItemType {
         get {

@@ -17,6 +17,9 @@ struct CreationSheetView: View {
     @State private var showTaskEditor = false
     @State private var showIdeaEditor = false
     @State private var showQuestionEditor = false
+    @State private var showBookmarkSheet = false
+    @State private var bookmarkURL = ""
+    @State private var bookmarkTitle = ""
     @State private var showProjectAlert = false
     @State private var newProjectName = ""
 
@@ -67,6 +70,12 @@ struct CreationSheetView: View {
                         color: .indigo,
                         action: { createProject() }
                     )
+                    creationButton(
+                        title: "Bookmark",
+                        icon: "bookmark",
+                        color: .green,
+                        action: { showBookmarkSheet = true }
+                    )
                 }
                 .padding(.horizontal, 32)
 
@@ -91,6 +100,17 @@ struct CreationSheetView: View {
             }
             .sheet(isPresented: $showQuestionEditor) {
                 NoteEditorView(mode: .create(type: .note, folderID: folderID, initialTag: "question"))
+            }
+            .alert("New Bookmark", isPresented: $showBookmarkSheet) {
+                TextField("URL", text: $bookmarkURL)
+                    .keyboardType(.URL)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                TextField("Title (optional)", text: $bookmarkTitle)
+                Button("Save") { createBookmark() }
+                Button("Cancel", role: .cancel) { bookmarkURL = ""; bookmarkTitle = "" }
+            } message: {
+                Text("Enter the URL to save as a bookmark.")
             }
             .alert("New Project", isPresented: $showProjectAlert) {
                 TextField("Name", text: $newProjectName)
@@ -142,6 +162,27 @@ struct CreationSheetView: View {
         modelContext.insert(project)
         try? modelContext.save()
         newProjectName = ""
+        dismiss()
+    }
+
+    private func createBookmark() {
+        let url = bookmarkURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !url.isEmpty else { return }
+        let title = bookmarkTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let svc = KnowledgeItemService(context: modelContext)
+        let item = try? svc.createItem(
+            type: .webBookmark,
+            title: title.isEmpty ? url : title,
+            bodyText: nil,
+            tags: ["bookmark"],
+            inboxDate: Date()
+        )
+        if let item {
+            item.importSourceURL = url
+            try? modelContext.save()
+        }
+        bookmarkURL = ""
+        bookmarkTitle = ""
         dismiss()
     }
 }

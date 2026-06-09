@@ -2,14 +2,15 @@ import SwiftUI
 import SwiftData
 import EventKit
 import LocalAuthentication
+import UserNotifications
 
 @main
 struct WawaNoteApp: App {
     private let modelContainer: ModelContainer
     private let recordingCoordinator: RecordingCoordinator
-    private let watchSessionManager: iOSWatchSessionManager
     private let calendarSyncService: CalendarSyncService
     private let sharedEventStore: EKEventStore
+    private let anarlogSyncService = AnarlogSyncService()
 
     private let ingestionState: ProjectIngestionState
     private let contentPipeline: ContentPipelineService
@@ -50,16 +51,24 @@ struct WawaNoteApp: App {
         coordinator.contentPipeline = contentPipeline
         recordingCoordinator = coordinator
 
-        watchSessionManager = iOSWatchSessionManager(coordinator: coordinator)
-        watchSessionManager.activate()
-
         sharedEventStore = EKEventStore()
         calendarSyncService = CalendarSyncService(eventStore: sharedEventStore)
+
+        // Restore anarlog sync bookmark and trigger initial scan
+        let syncSvc = anarlogSyncService
+        if syncSvc.hasWatchedFolder {
+            Task { @MainActor in
+                await syncSvc.scanAndImport()
+            }
+        }
 
         // Run one-time data migrations
         KnowledgeItemService.migrateMeetingToAudio(context: ModelContext(modelContainer))
         ProjectService.migrateProjectColors(context: ModelContext(modelContainer))
         ProjectService.migrateFieldProvenance(context: ModelContext(modelContainer))
+
+        // Setup notifications
+        setupNotifications()
 
         // Initialize persistent file logging (survives crashes)
         let fileLog = FileLogService.shared
@@ -108,6 +117,48 @@ struct WawaNoteApp: App {
             AppLog.event("general", "App did enter background")
         }
     }
+
+    // MARK: - Notifications & Badge
+
+    private func setupNotifications() {
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+            AppLog.general.info("Notification permission: \(granted ? "granted" : "denied")")
+        }
+    }
+
+    static func updateAppBadge(modelContext: ModelContext? = nil) {
+        Task { @MainActor in
+            guard let ctx = modelContext else { return }
+            do {
+                let allItems = try ctx.fetch(FetchDescriptor<KnowledgeItem>())
+                // Exclude trash items — matches InboxView.needsReviewCount logic
+                let trashFolderID = (try? TrashService(context: ctx).trashFolder())?.id
+                let inboxCount = allItems.filter { item in
+                    item.inboxDate != nil && (trashFolderID == nil || item.folderID != trashFolderID)
+                }.count
+                UIApplication.shared.applicationIconBadgeNumber = inboxCount
+            } catch {
+                AppLog.warn("general", "Failed to update app badge: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    static func sendLocalNotification(title: String, body: String) {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            guard settings.authorizationStatus == .authorized else { return }
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            content.sound = .default
+            content.badge = NSNumber(value: UIApplication.shared.applicationIconBadgeNumber + 1)
+            let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+            center.add(request)
+        }
+    }
+
+    // MARK: - Body
 
     var body: some Scene {
         WindowGroup {

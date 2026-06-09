@@ -3,249 +3,6 @@ import SwiftData
 import Speech
 import AVFoundation
 
-struct TableBlockView: View {
-    let table: TableBlock
-    @State private var sortColumn: Int? = nil
-    @State private var sortAscending = true
-
-    private var sortedRows: [[String]] {
-        guard let col = sortColumn, col < table.headers.count else { return table.rows }
-        return table.rows.sorted {
-            let a = col < $0.count ? $0[col] : ""
-            let b = col < $1.count ? $1[col] : ""
-            return sortAscending ? a < b : a > b
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let title = table.title {
-                Text(title).font(.headline)
-            }
-            ScrollView(.horizontal) {
-                VStack(spacing: 0) {
-                    // Header
-                    HStack(spacing: 0) {
-                        ForEach(Array(table.headers.enumerated()), id: \.offset) { idx, header in
-                            Button {
-                                if sortColumn == idx { sortAscending.toggle() }
-                                else { sortColumn = idx; sortAscending = true }
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Text(header).font(.caption).fontWeight(.bold)
-                                    if sortColumn == idx {
-                                        Image(systemName: sortAscending ? "chevron.up" : "chevron.down").font(.system(size: 8))
-                                    }
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 8).padding(.vertical, 6)
-                                .background(Color(.secondarySystemBackground))
-                            }
-                            .buttonStyle(.plain)
-                            if idx < table.headers.count - 1 {
-                                Divider().frame(width: 1)
-                            }
-                        }
-                    }
-                    Divider()
-                    // Rows
-                    ForEach(Array(sortedRows.enumerated()), id: \.offset) { _, row in
-                        HStack(spacing: 0) {
-                            ForEach(Array(row.enumerated()), id: \.offset) { idx, cell in
-                                Text(cell).font(.caption).foregroundStyle(.primary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 8).padding(.vertical, 4)
-                                if idx < row.count - 1 {
-                                    Divider().frame(width: 1)
-                                }
-                            }
-                        }
-                        Divider()
-                    }
-                }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(.separator)))
-            HStack { Spacer(); Text("\(table.rows.count) rows").font(.caption2).foregroundStyle(.tertiary) }
-        }
-        .padding(.vertical, 4)
-    }
-}
-struct ActionBlockView: View {
-    let actions: ActionBlock
-    @State private var checked: Set<Int> = []
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let title = actions.title {
-                Text(title).font(.headline)
-            }
-            ForEach(Array(actions.items.enumerated()), id: \.offset) { idx, item in
-                HStack(spacing: 8) {
-                    Button { checked.insert(idx) } label: {
-                        Image(systemName: checked.contains(idx) ? "checkmark.circle.fill" : "circle")
-                            .font(.title3).foregroundStyle(checked.contains(idx) ? .green : .secondary)
-                    }.buttonStyle(.plain)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(item.task).font(.subheadline).strikethrough(checked.contains(idx))
-                        HStack(spacing: 8) {
-                            if let owner = item.owner { Label(owner, systemImage: "person").font(.caption2).foregroundStyle(.secondary) }
-                            if let due = item.dueDate { Label(due, systemImage: "calendar").font(.caption2).foregroundStyle(.secondary) }
-                            if let pri = item.priority { Label(pri, systemImage: "flag").font(.caption2).foregroundStyle(pri == "high" ? .red : .secondary) }
-                        }
-                    }
-                }
-                .padding(.vertical, 2)
-            }
-        }
-        .padding(.vertical, 4)
-    }
-}
-struct CardBlockView: View {
-    let card: CardBlock
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(card.title).font(.headline)
-                Spacer()
-                if let badge = card.badge {
-                    Text(badge).font(.caption2).fontWeight(.semibold).padding(.horizontal, 8).padding(.vertical, 2)
-                        .background(Color.blue.opacity(0.1)).clipShape(Capsule())
-                }
-            }
-            Text(card.body).font(.subheadline).foregroundStyle(.secondary)
-            if !card.entities.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 4) {
-                        ForEach(card.entities, id: \.self) { entity in
-                            Text(entity).font(.caption2).padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color(.secondarySystemBackground)).clipShape(Capsule())
-                        }
-                    }
-                }
-            }
-        }
-        .padding(12)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator)))
-        .padding(.vertical, 4)
-    }
-}
-struct BulletListView: View {
-    let items: [String]
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                HStack(alignment: .top, spacing: 8) {
-                    Text("•").foregroundStyle(.secondary)
-                    Text(item).font(.subheadline)
-                }
-            }
-        }.padding(.vertical, 2)
-    }
-}
-struct OrderedListView: View {
-    let items: [String]
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(Array(items.enumerated()), id: \.offset) { idx, item in
-                HStack(alignment: .top, spacing: 8) {
-                    Text("\(idx + 1).").foregroundStyle(.secondary).monospacedDigit()
-                    Text(item).font(.subheadline)
-                }
-            }
-        }.padding(.vertical, 2)
-    }
-}
-struct CodeBlockView: View {
-    let codeBlock: CodeBlock
-    @State private var copied = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                if let lang = codeBlock.language {
-                    Text(lang).font(.caption2).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button {
-                    UIPasteboard.general.string = codeBlock.code
-                    copied = true
-                    Task { try? await Task.sleep(nanoseconds: 2_000_000_000); copied = false }
-                } label: {
-                    Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
-                        .font(.caption2)
-                }
-            }
-            Text(codeBlock.code).font(.system(.footnote, design: .monospaced))
-                .padding(8)
-                .background(Color(.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-            if let caption = codeBlock.caption {
-                Text(caption).font(.caption2).foregroundStyle(.tertiary)
-            }
-        }
-        .padding(.vertical, 4)
-    }
-}
-struct KnowledgeItemNavigationView: View {
-    let itemID: UUID
-    @Environment(\.modelContext) private var modelContext
-
-    var body: some View {
-        if let item = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
-            KnowledgeDetailView(item: item)
-        } else {
-            Text("Item not found").font(.headline).foregroundStyle(.secondary)
-        }
-    }
-}
-struct EvidenceCardView: View {
-    let itemTitle: String; let itemID: UUID; let snippet: String
-    let segmentID: String?; let confidence: Double?; let edgeType: String?
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "arrow.turn.down.right").font(.system(size: 9)).foregroundStyle(.blue)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(itemTitle).font(.caption).fontWeight(.medium).lineLimit(1)
-                Text(snippet.prefix(120)).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-                HStack(spacing: 6) {
-                    if let seg = segmentID { Text("Seg \(seg.prefix(8))").font(.system(size: 9)).foregroundStyle(.tertiary) }
-                    if let conf = confidence { ConfidenceBadge(value: conf) }
-                    if let et = edgeType { Text(et).font(.system(size: 9)).padding(.horizontal,4).padding(.vertical,1).background(Color.blue.opacity(0.1)).clipShape(Capsule()) }
-                }
-            }
-            Spacer()
-        }
-        .padding(8).background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 8))
-    }
-}
-struct ConfidenceBadge: View {
-    let value: Double
-    private var color: Color { value >= 0.8 ? .green : value >= 0.5 ? .orange : .gray }
-
-    var body: some View {
-        HStack(spacing: 2) {
-            Circle().fill(color).frame(width: 6, height: 6)
-            Text("\(Int(value * 100))%").font(.system(size: 9)).foregroundStyle(color)
-        }
-    }
-}
-struct AIGeneratedBadge: View {
-    let confidence: Double?; let source: String?
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "sparkles").font(.system(size: 8))
-            Text(source ?? "AI").font(.system(size: 9))
-            if let conf = confidence { ConfidenceBadge(value: conf) }
-        }
-        .padding(.horizontal, 6).padding(.vertical, 2).background(Color.blue.opacity(0.08)).clipShape(Capsule())
-    }
-}
 struct ChatView: View {
     @ObservedObject var viewModel: ChatViewModel
     var compact: Bool = false
@@ -257,77 +14,79 @@ struct ChatView: View {
     @State private var showConversations = false
     @State private var showClearConfirmation = false
     @FocusState private var isInputFocused: Bool
-    @State private var isDictating = false
-    @State private var dictationError: String?
-    @State private var dictationTask: Task<Void, Never>?
-    @State private var audioRecorder: AVAudioRecorder?
-    @State private var audioEngine: AVAudioEngine?
     @State private var showSuggestions = false
-    // Polished dictation UI states
-    @State private var dictationElapsed: Double = 0
-    @State private var dictationLevel: Float = 0
-    @State private var dictationPhase: DictationPhase = .idle
-    @State private var dictationTimer: Timer?
+    @State private var isNearBottom = true
+    @State private var dictation = DictationState()
 
     enum DictationPhase {
         case idle, recording, transcribing, done
     }
 
+    /// Consolidated dictation state replacing 9 individual @State variables.
+    struct DictationState {
+        var isDictating = false
+        var error: String?
+        var task: Task<Void, Never>?
+        var audioRecorder: AVAudioRecorder?
+        var audioEngine: AVAudioEngine?
+        var elapsed: Double = 0
+        var level: Float = 0
+        var phase: DictationPhase = .idle
+        var timer: Timer?
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if compact {
-                let showHeader = true  // Always show in compact mode
-                if showHeader {
-                    VStack(spacing: 0) {
-                        HStack {
-                            // Left: context + dismiss
-                            HStack(spacing: 8) {
-                                if let dismiss = onDismiss, !viewModel.messages.isEmpty {
-                                    Button { dismiss() } label: {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .font(.title3).foregroundStyle(.primary.opacity(0.7))
-                                    }.buttonStyle(.plain)
-                                }
-                                if let proj = viewModel.activeProjectName {
-                                    HStack(spacing: 4) {
-                                        Circle().fill(viewModel.activeProjectColorHex.flatMap { Color(hex: $0) } ?? .blue).frame(width: 7, height: 7)
-                                        Text(proj).font(.caption).fontWeight(.medium).lineLimit(1)
-                                    }
-                                    .padding(.horizontal, 8).padding(.vertical, 3)
-                                    .background(.ultraThinMaterial, in: Capsule())
-                                }
-                            }
-                            Spacer()
-                            // Right: status + actions
-                            HStack(spacing: 8) {
-                                if viewModel.isGreetingLoading {
-                                    HStack(spacing: 4) { ProgressView().scaleEffect(0.7); Text("Prep...").font(.caption2).foregroundStyle(.secondary) }
-                                        .padding(.horizontal, 6).padding(.vertical, 2).background(.ultraThinMaterial, in: Capsule())
-                                } else if viewModel.state == .thinking {
-                                    HStack(spacing: 4) { ProgressView().scaleEffect(0.7); Text("Thinking").font(.caption2).foregroundStyle(.secondary) }
-                                        .padding(.horizontal, 6).padding(.vertical, 2).background(.ultraThinMaterial, in: Capsule())
-                                } else if viewModel.state == .streaming {
-                                    HStack(spacing: 4) { Circle().fill(.blue).frame(width: 5, height: 5); Text("Writing").font(.caption2).foregroundStyle(.secondary) }
-                                        .padding(.horizontal, 6).padding(.vertical, 2).background(.ultraThinMaterial, in: Capsule())
-                                } else if !viewModel.activeToolCalls.isEmpty {
-                                    HStack(spacing: 4) { ProgressView().scaleEffect(0.6); Text(viewModel.activeToolCalls.last?.toolName ?? "Tool").font(.caption2).foregroundStyle(.secondary) }
-                                        .padding(.horizontal, 6).padding(.vertical, 2).background(.ultraThinMaterial, in: Capsule())
-                                }
-                                Menu {
-                                    Button { viewModel.createNewConversation() } label: { Label("New Chat", systemImage: "square.and.pencil") }
-                                    Button { showConversations = true } label: { Label("Chats", systemImage: "list.bullet.rectangle") }
-                                    if !viewModel.messages.isEmpty {
-                                        Divider()
-                                        Button(role: .destructive) { showClearConfirmation = true } label: { Label("Clear Chat", systemImage: "trash") }
-                                    }
-                                } label: {
-                                    Image(systemName: "ellipsis.circle")
+                VStack(spacing: 0) {
+                    HStack {
+                        // Left: context + dismiss
+                        HStack(spacing: 8) {
+                            if let dismiss = onDismiss, !viewModel.messages.isEmpty {
+                                Button { dismiss() } label: {
+                                    Image(systemName: "xmark.circle.fill")
                                         .font(.title3).foregroundStyle(.primary.opacity(0.7))
+                                }.buttonStyle(.plain)
+                            }
+                            if let proj = viewModel.activeProjectName {
+                                HStack(spacing: 4) {
+                                    Circle().fill(viewModel.activeProjectColorHex.flatMap { Color(hex: $0) } ?? .blue).frame(width: 7, height: 7)
+                                    Text(proj).font(.caption).fontWeight(.medium).lineLimit(1)
                                 }
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(.ultraThinMaterial, in: Capsule())
                             }
                         }
-                        .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 4)
+                        Spacer()
+                        // Right: status + actions
+                        HStack(spacing: 8) {
+                            if viewModel.isGreetingLoading {
+                                HStack(spacing: 4) { ProgressView().scaleEffect(0.7); Text("Loading...").font(.caption2).foregroundStyle(.secondary) }
+                                    .padding(.horizontal, 6).padding(.vertical, 2).background(.ultraThinMaterial, in: Capsule())
+                            } else if viewModel.state == .thinking {
+                                HStack(spacing: 4) { ProgressView().scaleEffect(0.7); Text("Thinking").font(.caption2).foregroundStyle(.secondary) }
+                                    .padding(.horizontal, 6).padding(.vertical, 2).background(.ultraThinMaterial, in: Capsule())
+                            } else if viewModel.state == .streaming {
+                                HStack(spacing: 4) { Circle().fill(.blue).frame(width: 5, height: 5); Text("Writing").font(.caption2).foregroundStyle(.secondary) }
+                                    .padding(.horizontal, 6).padding(.vertical, 2).background(.ultraThinMaterial, in: Capsule())
+                            } else if !viewModel.activeToolCalls.isEmpty {
+                                HStack(spacing: 4) { ProgressView().scaleEffect(0.6); Text(viewModel.activeToolCalls.last?.toolName ?? "Tool").font(.caption2).foregroundStyle(.secondary) }
+                                    .padding(.horizontal, 6).padding(.vertical, 2).background(.ultraThinMaterial, in: Capsule())
+                            }
+                            Menu {
+                                Button { viewModel.createNewConversation() } label: { Label("New Chat", systemImage: "square.and.pencil") }
+                                Button { showConversations = true } label: { Label("Chats", systemImage: "list.bullet.rectangle") }
+                                if !viewModel.messages.isEmpty {
+                                    Divider()
+                                    Button(role: .destructive) { showClearConfirmation = true } label: { Label("Clear Chat", systemImage: "trash") }
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis.circle")
+                                    .font(.title3).foregroundStyle(.primary.opacity(0.7))
+                            }
+                        }
                     }
+                    .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 4)
                 }
             }
             if !compact, let projectName = viewModel.activeProjectName {
@@ -353,6 +112,9 @@ struct ChatView: View {
                     .navigationDestination(for: UUID.self) { itemID in
                         KnowledgeItemNavigationView(itemID: itemID)
                     }
+                    .navigationDestination(for: String.self) { path in
+                        FileBrowserView(initialPath: path)
+                    }
             }
             // Suggestion bar — revealed when user scrolls up past newest content (Fix 17)
             if showSuggestions, !viewModel.messages.isEmpty {
@@ -360,26 +122,26 @@ struct ChatView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             // Dictation recording status bar — free recording, user stops when done
-            if dictationPhase == .recording {
+            if dictation.phase == .recording {
                 HStack(spacing: 10) {
                     // Pulsing red dot
                     Circle()
                         .fill(.red)
                         .frame(width: 8, height: 8)
-                        .scaleEffect(1.0 + 0.3 * sin(dictationElapsed * 5))
-                        .animation(.easeInOut(duration: 0.3).repeatForever(autoreverses: true), value: dictationElapsed)
+                        .scaleEffect(1.0 + 0.3 * sin(dictation.elapsed * 5))
+                        .animation(.easeInOut(duration: 0.3).repeatForever(autoreverses: true), value: dictation.elapsed)
                     // Audio level waveform
                     HStack(spacing: 2) {
                         ForEach(0..<10, id: \.self) { i in
                             RoundedRectangle(cornerRadius: 1)
                                 .fill(Color.red.opacity(0.5))
-                                .frame(width: 2, height: CGFloat(4 + 14 * abs(sin(dictationElapsed * 4 + Double(i) * 0.7))))
-                                .animation(.easeInOut(duration: 0.15).repeatForever(autoreverses: true), value: dictationElapsed)
+                                .frame(width: 2, height: CGFloat(4 + 14 * abs(sin(dictation.elapsed * 4 + Double(i) * 0.7))))
+                                .animation(.easeInOut(duration: 0.15).repeatForever(autoreverses: true), value: dictation.elapsed)
                         }
                     }
                     .frame(height: 18)
                     // Elapsed time counting UP
-                    Text(formatElapsed(dictationElapsed))
+                    Text(formatElapsed(dictation.elapsed))
                         .font(.caption).foregroundStyle(.secondary).monospacedDigit()
                     Spacer()
                     // Stop (finish and transcribe)
@@ -396,7 +158,7 @@ struct ChatView: View {
             }
 
             // Transcribing indicator
-            if dictationPhase == .transcribing {
+            if dictation.phase == .transcribing {
                 HStack(spacing: 8) {
                     ProgressView().scaleEffect(0.6)
                     Text("Transcribing...").font(.caption).foregroundStyle(.secondary)
@@ -407,7 +169,7 @@ struct ChatView: View {
             }
 
             // Dictation error (works in both compact and full mode)
-            if let dictErr = dictationError {
+            if let dictErr = dictation.error {
                 HStack(spacing: 8) {
                     Image(systemName: "mic.slash").foregroundStyle(.red).font(.caption)
                     Text(dictErr).font(.caption).foregroundStyle(.red)
@@ -419,7 +181,7 @@ struct ChatView: View {
                             }
                         }.font(.caption)
                     }
-                    Button("Dismiss") { dictationError = nil }.font(.caption).foregroundStyle(.secondary)
+                    Button("Dismiss") { dictation.error = nil }.font(.caption).foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 12).padding(.vertical, 4)
                 .background(Color.red.opacity(0.08))
@@ -479,6 +241,9 @@ struct ChatView: View {
         .onChange(of: autoFocus) { _, focus in
             isInputFocused = focus
         }
+        .onDisappear {
+            stopDictation()
+        }
     }
 
     // MARK: - Message list
@@ -486,11 +251,6 @@ struct ChatView: View {
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                // Dismiss keyboard on tap in message area
-                Color.clear.frame(height: 0)
-                    .contentShape(Rectangle())
-                    .onTapGesture { isInputFocused = false }
-
                 if viewModel.messages.isEmpty && viewModel.streamingText.isEmpty && viewModel.error == nil {
                     // Empty state centered in available space (outside LazyVStack so Spacer works)
                     GeometryReader { geometry in
@@ -547,14 +307,26 @@ struct ChatView: View {
                                     Spacer()
                                     Button("Retry") { viewModel.retryLastMessage() }
                                         .font(.subheadline.bold())
+                                    Button { viewModel.error = nil } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    .buttonStyle(.plain)
                                 }
                                 Text(error)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.red)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             .padding(12)
-                            .background(Color.red.opacity(0.08))
+                            .background(.red.opacity(0.12))
+                            .overlay(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(.red.opacity(0.4))
+                                    .frame(width: 3)
+                                    .padding(.vertical, 8)
+                                    .padding(.leading, 2)
+                            }
                             .clipShape(RoundedRectangle(cornerRadius: 10))
                             .padding(.horizontal)
                         }
@@ -567,17 +339,19 @@ struct ChatView: View {
             }
             .background(compact ? Color.clear : Color(.systemGroupedBackground))
             .scrollDismissesKeyboard(.interactively)
-            .onTapGesture { isInputFocused = false }
+            .coordinateSpace(name: "scrollSpace")
             .onChange(of: viewModel.messages.count) { oldCount, newCount in
                 if newCount > oldCount {
-                    showSuggestions = false // hide suggestions on new message
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                        proxy.scrollTo("bottom", anchor: .bottom)
+                    showSuggestions = false
+                    if isNearBottom {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                        }
                     }
                 }
             }
             .onChange(of: viewModel.streamingText) { _, newText in
-                if !newText.isEmpty {
+                if !newText.isEmpty, isNearBottom {
                     DispatchQueue.main.async {
                         proxy.scrollTo("streaming", anchor: .bottom)
                     }
@@ -592,13 +366,35 @@ struct ChatView: View {
                 }
                 .frame(height: 0)
             }
-        }
-        .coordinateSpace(name: "scrollSpace")
-        .onPreferenceChange(ScrollOffsetKey.self) { offset in
-            // When content is scrolled up (offset < -120), reveal suggestions
-            withAnimation(.easeInOut(duration: 0.2)) {
-                showSuggestions = offset < -120
+            // Scroll-to-bottom FAB — appears when user scrolls up
+            .overlay(alignment: .bottomTrailing) {
+                if !isNearBottom, !viewModel.messages.isEmpty {
+                    Button {
+                        withAnimation {
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                            isNearBottom = true
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(.blue)
+                            .symbolRenderingMode(.hierarchical)
+                            .background(Circle().fill(.regularMaterial))
+                            .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+                    }
+                    .padding(.trailing, 8)
+                    .padding(.bottom, 4)
+                    .transition(.scale.combined(with: .opacity))
+                }
             }
+        }
+        .onPreferenceChange(ScrollOffsetKey.self) { offset in
+            // When content is scrolled up (offset < -60), reveal suggestions
+            withAnimation(.easeInOut(duration: 0.2)) {
+                showSuggestions = offset < -60
+            }
+            // Track whether user is near the bottom for auto-scroll decisions
+            isNearBottom = offset > -200
         }
     }
 
@@ -684,73 +480,18 @@ struct ChatView: View {
     // MARK: - Input bar
 
     private var chatInputBar: some View {
-        HStack(alignment: .center, spacing: 8) {
-            // Voice dictation button — polished
-            Button {
-                if isDictating { finishDictation() } else { startDictation() }
-            } label: {
-                ZStack {
-                    // Pulse ring during recording
-                    if dictationPhase == .recording {
-                        Circle()
-                            .stroke(.red.opacity(0.3), lineWidth: 2)
-                            .frame(width: 44, height: 44)
-                            .scaleEffect(1.0 + 0.15 * sin(dictationElapsed * 4))
-                            .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true), value: dictationElapsed)
-                    }
-                    // Icon
-                    Group {
-                        switch dictationPhase {
-                        case .idle:
-                            Image(systemName: "mic").font(.body).foregroundStyle(.secondary)
-                        case .recording:
-                            Image(systemName: "mic.fill").font(.body).foregroundStyle(.red)
-                        case .transcribing:
-                            ProgressView().scaleEffect(0.7).tint(.orange)
-                        case .done:
-                            Image(systemName: "checkmark.circle.fill").font(.body).foregroundStyle(.green)
-                        }
-                    }
-                    .frame(width: 44, height: 44)
-                    .background(dictationPhase == .recording ? Color.red.opacity(0.08) : Color.clear)
-                    .clipShape(Circle())
-                }
-            }
-            .disabled(dictationPhase == .transcribing)
-
-            TextField("Ask anything...", text: $viewModel.inputText, axis: .vertical)
-                .lineLimit(1...5)
-                .textFieldStyle(.plain)
-                .padding(.vertical, 10)
-                .padding(.horizontal, 14)
-                .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 20))
-                .focused($isInputFocused)
-
-            if viewModel.state == .thinking || viewModel.state == .streaming {
-                Button {
-                    viewModel.cancelStreaming()
-                    isInputFocused = false
-                } label: {
-                    Image(systemName: "stop.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.red)
-                }
-            } else {
-                Button {
-                    viewModel.sendMessage()
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
-                        .foregroundColor(viewModel.inputText.trimmingCharacters(in: .whitespaces).isEmpty ? Color.secondary.opacity(0.3) : Color.blue)
-                }
-                .disabled(viewModel.inputText.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.top, compact ? 4 : 8)
-        .padding(.bottom, compact ? 0 : 8)
-        .background(.bar)
+        ChatInputBarView(
+            inputText: $viewModel.inputText,
+            isFocused: $isInputFocused,
+            state: viewModel.state,
+            compact: compact,
+            dictationPhase: dictation.phase,
+            dictationElapsed: dictation.elapsed,
+            isDictating: dictation.isDictating,
+            onSend: { viewModel.sendMessage() },
+            onCancel: { viewModel.cancelStreaming(); isInputFocused = false },
+            onDictate: { if dictation.isDictating { finishDictation() } else { startDictation() } }
+        )
     }
 
     private func formatElapsed(_ seconds: Double) -> String {
@@ -762,28 +503,28 @@ struct ChatView: View {
     // MARK: - Dictation
 
     private func startDictation() {
-        guard !isDictating else { return }
+        guard !dictation.isDictating else { return }
 
         switch AVAudioSession.sharedInstance().recordPermission {
         case .undetermined:
             AVAudioSession.sharedInstance().requestRecordPermission { granted in
                 DispatchQueue.main.async {
                     if granted { self.startDictation() }
-                    else { self.dictationError = "Microphone access denied. Enable in Settings." }
+                    else { self.dictation.error = "Microphone access denied. Enable in Settings." }
                 }
             }
             return
         case .denied:
-            dictationError = "Microphone access denied. Enable in Settings > Privacy > Microphone."
+            dictation.error = "Microphone access denied. Enable in Settings > Privacy > Microphone."
             return
         case .granted: break
         @unknown default: break
         }
 
-        isDictating = true
-        dictationError = nil
-        dictationElapsed = 0
-        dictationPhase = .recording
+        dictation.isDictating = true
+        dictation.error = nil
+        dictation.elapsed = 0
+        dictation.phase = .recording
 
         // Start audio recorder
         let audioURL = FileManager.default.temporaryDirectory
@@ -800,24 +541,24 @@ struct ChatView: View {
             let recorder = try AVAudioRecorder(url: audioURL, settings: settings)
             recorder.isMeteringEnabled = true
             recorder.record()
-            self.audioRecorder = recorder
+            self.dictation.audioRecorder = recorder
         } catch {
-            dictationError = "Could not start recording."
-            dictationPhase = .idle
-            isDictating = false
+            dictation.error = "Could not start recording."
+            dictation.phase = .idle
+            dictation.isDictating = false
             return
         }
 
         // Timer for visual feedback (waveform, elapsed)
-        dictationTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { timer in
+        dictation.timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
             Task { @MainActor in
-                self.dictationElapsed += 0.1
-                if let r = self.audioRecorder, r.isMeteringEnabled {
+                self.dictation.elapsed += 0.1
+                if let r = self.dictation.audioRecorder, r.isMeteringEnabled {
                     r.updateMeters()
-                    self.dictationLevel = (r.averagePower(forChannel: 0) + 40) / 40
+                    self.dictation.level = (r.averagePower(forChannel: 0) + 40) / 40
                 }
                 // Safety: auto-stop at 60 seconds
-                if self.dictationElapsed >= 60 {
+                if self.dictation.elapsed >= 60 {
                     self.finishDictation()
                 }
             }
@@ -826,40 +567,40 @@ struct ChatView: View {
 
     /// User tapped stop — finish recording and transcribe.
     private func finishDictation() {
-        dictationTimer?.invalidate()
-        dictationTimer = nil
-        audioRecorder?.stop()
-        let recordedURL = audioRecorder?.url
-        audioRecorder = nil
+        dictation.timer?.invalidate()
+        dictation.timer = nil
+        dictation.audioRecorder?.stop()
+        let recordedURL = dictation.audioRecorder?.url
+        dictation.audioRecorder = nil
 
         guard let audioURL = recordedURL else {
-            dictationPhase = .idle
-            isDictating = false
-            dictationError = "Recording failed. Please try again."
+            dictation.phase = .idle
+            dictation.isDictating = false
+            dictation.error = "Recording failed. Please try again."
             return
         }
 
-        dictationPhase = .transcribing
-        dictationTask?.cancel()
-        dictationTask = Task {
+        dictation.phase = .transcribing
+        dictation.task?.cancel()
+        dictation.task = Task {
             let text = await transcribeAudio(audioURL)
             try? FileManager.default.removeItem(at: audioURL)
 
             await MainActor.run {
-                dictationTimer?.invalidate()
-                dictationTimer = nil
+                dictation.timer?.invalidate()
+                dictation.timer = nil
                 if let text, !text.isEmpty {
                     viewModel.inputText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    dictationError = nil
-                    dictationPhase = .done
+                    dictation.error = nil
+                    dictation.phase = .done
                 } else if !Task.isCancelled {
-                    dictationError = "Couldn't transcribe audio. Check your network or try again."
-                    dictationPhase = .idle
+                    dictation.error = "Couldn't transcribe audio. Check your network or try again."
+                    dictation.phase = .idle
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                    if dictationPhase == .done { dictationPhase = .idle }
+                    if dictation.phase == .done { dictation.phase = .idle }
                 }
-                isDictating = false
+                dictation.isDictating = false
             }
         }
     }
@@ -876,8 +617,11 @@ struct ChatView: View {
 
     private func transcribeViaWhisperWithFile(_ audioURL: URL) async -> String? {
         guard let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext),
-              config.type == .openAI || config.type == .openAICompatible,
               let baseURL = config.baseURL else { return nil }
+        // Only use remote if the provider actually supports audio transcription
+        let supportsTranscription = AIConfigService.shared.supportsAudioTranscription(for: config.providerConfigId)
+            || AIConfigService.shared.supportsAudioTranscription(for: config.typeRaw)
+        guard supportsTranscription else { return nil }
         guard !Task.isCancelled else { return nil }
 
         var apiKey = ""
@@ -912,7 +656,7 @@ struct ChatView: View {
             do {
                 let recorder = try AVAudioRecorder(url: audioURL, settings: settings)
                 recorder.isMeteringEnabled = true
-                self.audioRecorder = recorder
+                self.dictation.audioRecorder = recorder
                 recorder.record(forDuration: 60) // max safety
                 // The recorder stops itself at 60s
                 // But finishDictation() is called by the UI button before then
@@ -921,7 +665,7 @@ struct ChatView: View {
                     if !hasResumed {
                         hasResumed = true
                         recorder.stop()
-                        self.audioRecorder = nil
+                        self.dictation.audioRecorder = nil
                         continuation.resume(returning: audioURL)
                     }
                 }
@@ -950,14 +694,14 @@ struct ChatView: View {
             do {
                 let recorder = try AVAudioRecorder(url: audioURL, settings: settings)
                 recorder.isMeteringEnabled = true
-                self.audioRecorder = recorder
+                self.dictation.audioRecorder = recorder
                 recorder.record()
                 Task {
                     try? await Task.sleep(nanoseconds: 8_000_000_000)
                     if !hasResumed {
                         hasResumed = true
                         recorder.stop()
-                        self.audioRecorder = nil
+                        self.dictation.audioRecorder = nil
                         continuation.resume(returning: audioURL)
                     }
                 }
@@ -1000,7 +744,7 @@ struct ChatView: View {
             request.shouldReportPartialResults = true
 
             let engine = AVAudioEngine()
-            self.audioEngine = engine // Store for proper cleanup
+            self.dictation.audioEngine = engine // Store for proper cleanup
             let inputNode = engine.inputNode
             let format = inputNode.outputFormat(forBus: 0)
             var resultText: String?
@@ -1035,17 +779,96 @@ struct ChatView: View {
 
 
     private func stopDictation() {
-        dictationTimer?.invalidate()
-        dictationTimer = nil
-        dictationTask?.cancel()
-        dictationTask = nil
-        audioRecorder?.stop()
-        audioRecorder = nil
-        audioEngine?.stop()
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        audioEngine = nil
-        isDictating = false
-        dictationPhase = .idle
+        dictation.timer?.invalidate()
+        dictation.timer = nil
+        dictation.task?.cancel()
+        dictation.task = nil
+        dictation.audioRecorder?.stop()
+        dictation.audioRecorder = nil
+        dictation.audioEngine?.stop()
+        dictation.audioEngine?.inputNode.removeTap(onBus: 0)
+        dictation.audioEngine = nil
+        dictation.isDictating = false
+        dictation.phase = .idle
+    }
+}
+
+// MARK: - Chat Input Bar (extracted for focused recomputation scope)
+
+/// Separate view for the chat input bar so that `inputText` changes (every keystroke)
+/// only recompute this view, not the entire ChatView including the message list.
+struct ChatInputBarView: View {
+    @Binding var inputText: String
+    var isFocused: FocusState<Bool>.Binding
+    let state: ChatViewModel.ChatState
+    let compact: Bool
+    let dictationPhase: ChatView.DictationPhase
+    let dictationElapsed: Double
+    let isDictating: Bool
+    let onSend: () -> Void
+    let onCancel: () -> Void
+    let onDictate: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            // Voice dictation button
+            Button(action: onDictate) {
+                ZStack {
+                    if dictationPhase == .recording {
+                        Circle()
+                            .stroke(.red.opacity(0.3), lineWidth: 2)
+                            .frame(width: 44, height: 44)
+                            .scaleEffect(1.0 + 0.15 * sin(dictationElapsed * 4))
+                            .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true), value: dictationElapsed)
+                    }
+                    Group {
+                        switch dictationPhase {
+                        case .idle:
+                            Image(systemName: "mic").font(.body).foregroundStyle(.secondary)
+                        case .recording:
+                            Image(systemName: "mic.fill").font(.body).foregroundStyle(.red)
+                        case .transcribing:
+                            ProgressView().scaleEffect(0.7).tint(.orange)
+                        case .done:
+                            Image(systemName: "checkmark.circle.fill").font(.body).foregroundStyle(.green)
+                        }
+                    }
+                    .frame(width: 44, height: 44)
+                    .background(dictationPhase == .recording ? Color.red.opacity(0.08) : Color.clear)
+                    .clipShape(Circle())
+                }
+            }
+            .disabled(dictationPhase == .transcribing)
+
+            TextField("Ask anything...", text: $inputText, axis: .vertical)
+                .lineLimit(1...5)
+                .textFieldStyle(.plain)
+                .padding(.vertical, 10)
+                .padding(.horizontal, 14)
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Color(.separator)))
+                .focused(isFocused)
+
+            if state == .thinking || state == .streaming {
+                Button(action: onCancel) {
+                    Image(systemName: "stop.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.red)
+                }
+            } else {
+                Button(action: onSend) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(inputText.trimmingCharacters(in: .whitespaces).isEmpty ? Color.secondary.opacity(0.5) : Color.blue)
+                }
+                .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, compact ? 4 : 8)
+        .padding(.bottom, compact ? 0 : 8)
+        .background(.bar)
     }
 }
 
@@ -1083,11 +906,11 @@ struct ThinkingBubble: View {
             }
         }
         .padding(10)
-        .background(Color.purple.opacity(0.06))
+        .background(.purple.opacity(0.10))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 12)
-                .fill(Color.purple.opacity(0.3))
+                .fill(.purple.opacity(0.4))
                 .frame(width: 3)
                 .padding(.vertical, 6)
                 .padding(.leading, 1)
@@ -1115,15 +938,14 @@ struct ChatMessageBubbleView: View {
                 VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 6) {
                     if message.isThinking == true {
                         ThinkingBubble(text: message.content)
-                    } else if message.content.count < 500,
-                       let attr = try? AttributedString(markdown: message.content) {
+                    } else if let attr = try? AttributedString(markdown: message.content) {
                         Text(attr)
-                            .font(.body)
+                            .font(.body).lineSpacing(4)
                             .foregroundStyle(message.role == .user ? .white : .primary)
                             .textSelection(.enabled)
                     } else {
                         Text(message.content)
-                            .font(.body)
+                            .font(.body).lineSpacing(4)
                             .foregroundStyle(message.role == .user ? .white : .primary)
                             .textSelection(.enabled)
                     }
@@ -1153,11 +975,11 @@ struct ChatMessageBubbleView: View {
                     }
                 }
                 .padding(12)
-                .background(message.role == .user ? effectiveColor : Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .background(message.role == .user ? AnyShapeStyle(effectiveColor) : AnyShapeStyle(.thinMaterial))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(alignment: .leading) {
                     if message.role == .assistant, projectColorHex ?? message.projectColorHex != nil {
-                        RoundedRectangle(cornerRadius: 16)
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
                             .fill(effectiveColor.opacity(0.4))
                             .frame(width: 3)
                             .padding(.vertical, 10)
@@ -1173,12 +995,47 @@ struct ChatMessageBubbleView: View {
 
 // MARK: - Agent Status Bar (compact, unified working indicator)
 
+/// Reusable collapsible status bar. Shared by AgentStatusBar and PipelineProgressCardView.
+/// Tap to expand/collapse detail content.
+struct ExpandableStatusBar<Detail: View>: View {
+    let label: AnyView
+    var showChevron: Bool = true
+    @ViewBuilder let detail: () -> Detail
+
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    label
+                    Spacer()
+                    if showChevron {
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 7)).foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 3)
+            }
+            .buttonStyle(.plain)
+            .background(.ultraThinMaterial)
+            .padding(.horizontal, 16)
+
+            if expanded {
+                detail()
+                    .padding(.vertical, 3)
+            }
+        }
+    }
+}
+
 /// A single compact bar showing agent activity — replaces individual tool call cards.
 /// Collapsed by default; tap to expand and see individual tool details.
 struct AgentStatusBar: View {
     let state: ChatViewModel.ChatState
     let toolCalls: [ToolCallProgress]
-    @State private var expanded = false
 
     private var runningCount: Int { toolCalls.filter { $0.status == .running }.count }
     private var completedCount: Int { toolCalls.filter { $0.status == .completed }.count }
@@ -1187,18 +1044,15 @@ struct AgentStatusBar: View {
 
     var body: some View {
         if totalCount == 0 && state != .thinking { EmptyView() } else {
-            VStack(spacing: 0) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
-                } label: {
+            ExpandableStatusBar(
+                label: AnyView(
                     HStack(spacing: 6) {
-                        // Status icon
                         if state == .thinking && totalCount == 0 {
-                            ProgressView().scaleEffect(0.55)
+                            ProgressView().scaleEffect(0.7)
                             Text("Thinking...").font(.caption2).foregroundStyle(.secondary)
                         } else {
                             if runningCount > 0 {
-                                ProgressView().scaleEffect(0.55)
+                                ProgressView().scaleEffect(0.7)
                             } else if failedCount > 0 {
                                 Image(systemName: "exclamationmark.triangle.fill")
                                     .font(.system(size: 9)).foregroundStyle(.orange)
@@ -1206,7 +1060,6 @@ struct AgentStatusBar: View {
                                 Image(systemName: "checkmark.circle.fill")
                                     .font(.system(size: 9)).foregroundStyle(.green)
                             }
-                            // Compact summary
                             Text("\(totalCount) tool\(totalCount == 1 ? "" : "s")")
                                 .font(.caption2).foregroundStyle(.secondary)
                             if runningCount > 0 {
@@ -1216,40 +1069,29 @@ struct AgentStatusBar: View {
                                 Text("· \(failedCount) failed").font(.caption2).foregroundStyle(.orange)
                             }
                         }
-                        Spacer()
-                        if totalCount > 0 {
-                            Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                                .font(.system(size: 7)).foregroundStyle(.tertiary)
-                        }
                     }
-                    .padding(.horizontal, 12).padding(.vertical, 3)
-                }
-                .buttonStyle(.plain)
-                .background(.ultraThinMaterial)
-                .padding(.horizontal, 16)
-
-                if expanded && totalCount > 0 {
-                    VStack(spacing: 1) {
-                        ForEach(toolCalls.suffix(6), id: \.id) { tc in
-                            HStack(spacing: 6) {
-                                Circle()
-                                    .fill(tc.status == .completed ? .green : tc.status == .failed ? .red : .orange)
-                                    .frame(width: 4, height: 4)
-                                Text(tc.toolName).font(.caption2).foregroundStyle(.secondary)
-                                if let summary = tc.displaySummary {
-                                    Text("—").font(.caption2).foregroundStyle(.tertiary)
-                                    Text(summary).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
-                                }
-                                Spacer()
+                ),
+                showChevron: totalCount > 0
+            ) {
+                VStack(spacing: 1) {
+                    ForEach(toolCalls.suffix(6), id: \.id) { tc in
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(tc.status == .completed ? .green : tc.status == .failed ? .red : .orange)
+                                .frame(width: 4, height: 4)
+                            Text(tc.toolName).font(.caption2).foregroundStyle(.secondary)
+                            if let summary = tc.displaySummary {
+                                Text("—").font(.caption2).foregroundStyle(.tertiary)
+                                Text(summary).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                             }
-                            .padding(.horizontal, 20).padding(.vertical, 1)
+                            Spacer()
                         }
-                        if totalCount > 6 {
-                            Text("... \(totalCount - 6) more").font(.caption2).foregroundStyle(.tertiary)
-                                .padding(.horizontal, 20)
-                        }
+                        .padding(.horizontal, 20).padding(.vertical, 1)
                     }
-                    .padding(.vertical, 3)
+                    if totalCount > 6 {
+                        Text("... \(totalCount - 6) more").font(.caption2).foregroundStyle(.tertiary)
+                            .padding(.horizontal, 20)
+                    }
                 }
             }
         }
@@ -1288,6 +1130,7 @@ struct ToolCallCardView: View {
 struct StreamingMessageView: View {
     let text: String
     var projectColorHex: String? = nil
+    @State private var cursorVisible = true
 
     private var cursorColor: Color {
         if let hex = projectColorHex { return Color(hex: hex) }
@@ -1299,18 +1142,24 @@ struct StreamingMessageView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 0) {
                     Text(text)
-                        .font(.body)
+                        .font(.body).lineSpacing(4)
                         .textSelection(.enabled)
                     Text(" ▌")
                         .foregroundColor(cursorColor)
+                        .opacity(cursorVisible ? 1 : 0)
                 }
             }
             .padding(12)
             .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             Spacer(minLength: 60)
         }
         .padding(.horizontal, 12)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+                cursorVisible = false
+            }
+        }
     }
 }
 
@@ -1429,7 +1278,6 @@ struct ConversationListView: View {
 
 struct PipelineProgressCardView: View {
     let status: PipelineProgress
-    @State private var expanded = false
 
     private var color: Color {
         switch status.phase {
@@ -1440,13 +1288,11 @@ struct PipelineProgressCardView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
-            } label: {
+        ExpandableStatusBar(
+            label: AnyView(
                 HStack(spacing: 6) {
                     if status.phase == "processing" {
-                        ProgressView().scaleEffect(0.55)
+                        ProgressView().scaleEffect(0.7)
                     } else {
                         Image(systemName: status.phase == "completed" ? "checkmark.circle.fill" : "xmark.circle.fill")
                             .font(.system(size: 9)).foregroundStyle(color)
@@ -1456,30 +1302,19 @@ struct PipelineProgressCardView: View {
                     if let tool = status.currentTool {
                         Text("· \(tool)").font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                     }
-                    Spacer()
-                    if !status.toolLog.isEmpty {
-                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 7)).foregroundStyle(.tertiary)
-                    }
                 }
-                .padding(.horizontal, 12).padding(.vertical, 3)
-            }
-            .buttonStyle(.plain)
-            .background(.ultraThinMaterial)
-            .padding(.horizontal, 16)
-
-            if expanded && !status.toolLog.isEmpty {
-                VStack(spacing: 1) {
-                    ForEach(status.toolLog, id: \.self) { entry in
-                        HStack(spacing: 4) {
-                            Circle().fill(color).frame(width: 4, height: 4)
-                            Text(entry).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                            Spacer()
-                        }
-                        .padding(.horizontal, 20).padding(.vertical, 1)
+            ),
+            showChevron: !status.toolLog.isEmpty
+        ) {
+            VStack(spacing: 1) {
+                ForEach(status.toolLog, id: \.self) { entry in
+                    HStack(spacing: 4) {
+                        Circle().fill(color).frame(width: 4, height: 4)
+                        Text(entry).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        Spacer()
                     }
+                    .padding(.horizontal, 20).padding(.vertical, 1)
                 }
-                .padding(.vertical, 3)
             }
         }
     }
@@ -1496,6 +1331,25 @@ struct ParsedMessageView: View {
     var onRunCommand: ((String) -> Void)?
     var onChooseOption: ((String) -> Void)?
 
+    @State private var cachedBlocks: [ChatBlock]?
+    @State private var cachedSmartBlocks: [ChatBlock]?
+    @State private var cachedParsedBlocks: [OutputBlock]?
+
+    init(message: ChatMessage, projectColorHex: String? = nil,
+         onSendMessage: ((String) -> Void)? = nil,
+         onRunCommand: ((String) -> Void)? = nil,
+         onChooseOption: ((String) -> Void)? = nil) {
+        self.message = message
+        self.projectColorHex = projectColorHex
+        self.onSendMessage = onSendMessage
+        self.onRunCommand = onRunCommand
+        self.onChooseOption = onChooseOption
+        // Eagerly parse blocks so first render uses final height — avoids two-phase height jump
+        self._cachedBlocks = State(initialValue: message.blocks)
+        self._cachedSmartBlocks = State(initialValue: SmartBlockParser.parse(message.content, role: message.role))
+        self._cachedParsedBlocks = State(initialValue: ContentParser.parse(message.content).0)
+    }
+
     var body: some View {
         Group {
             // 0. Thinking messages — collapsible, distinct visual style
@@ -1503,27 +1357,32 @@ struct ParsedMessageView: View {
                 ThinkingBubble(text: message.content)
             }
             // 1. Structured blocks from ShellInterpreter (touch, ls, etc.)
-            else if let blocks = message.blocks, !blocks.isEmpty {
+            else if let blocks = cachedBlocks, !blocks.isEmpty {
                 blocksView(blocks)
             }
             // 2. Smart parser: detect patterns in text → interactive blocks
-            else if !smartBlocks.isEmpty {
-                blocksView(smartBlocks)
+            else if let smart = cachedSmartBlocks, !smart.isEmpty {
+                blocksView(smart)
             }
-            // 3. Fallback: markdown parser
-            else if !parsedBlocks.isEmpty, !(parsedBlocks.count == 1 && message.role == .assistant) {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(parsedBlocks) { block in
-                        switch block {
-                        case .text(let t): Text(t).font(.body)
-                        case .bulletList(let items): ForEach(items, id: \.self) { Text("• \($0)").font(.body) }
-                        case .orderedList(let items): ForEach(Array(items.enumerated()), id: \.offset) { i, item in Text("\(i+1). \(item)").font(.body) }
-                        case .code(let c): Text(c.code).font(.caption).monospaced()
-                        default: Text(String(describing: block)).font(.body)
+            // 3. Fallback: markdown parser — skip only single .text blocks from assistant
+            else if let parsed = cachedParsedBlocks, !parsed.isEmpty {
+                let isLoneTextBlock = parsed.count == 1 && message.role == .assistant && { if case .text = parsed[0] { true } else { false } }()
+                if !isLoneTextBlock {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(parsed) { block in
+                            switch block {
+                            case .text(let t): Text(t).font(.body).lineSpacing(4)
+                            case .bulletList(let items): ForEach(items, id: \.self) { Text("• \($0)").font(.body) }
+                            case .orderedList(let items): ForEach(Array(items.enumerated()), id: \.offset) { i, item in Text("\(i+1). \(item)").font(.body) }
+                            case .code(let c): Text(c.code).font(.caption).monospaced()
+                            default: Text(String(describing: block)).font(.body)
+                            }
                         }
                     }
+                    .padding(12).background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                } else {
+                    ChatMessageBubbleView(message: message, projectColorHex: projectColorHex)
                 }
-                .padding(12).background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
             }
             // 4. Plain text bubble
             else {
@@ -1532,21 +1391,35 @@ struct ParsedMessageView: View {
         }
     }
 
-    private var smartBlocks: [ChatBlock] {
-        SmartBlockParser.parse(message.content, role: message.role)
-    }
-    private var parsedBlocks: [OutputBlock] {
-        ContentParser.parse(message.content).0
+    private func blocksView(_ blocks: [ChatBlock]) -> some View {
+        // Use dashboard grid for 4+ card-type blocks
+        let cardBlocks = blocks.filter {
+            if case .itemCard = $0 { true } else if case .taskCard = $0 { true } else { false }
+        }
+        if cardBlocks.count >= 4 {
+            return AnyView(dashboardGrid(cardBlocks))
+        }
+
+        return AnyView(
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                    ChatBlockView(block: block, projectColorHex: projectColorHex,
+                        onSendMessage: onSendMessage, onRunCommand: onRunCommand, onChooseOption: onChooseOption)
+                }
+            }
+            .padding(12).background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
+        )
     }
 
-    private func blocksView(_ blocks: [ChatBlock]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+    private func dashboardGrid(_ cards: [ChatBlock]) -> some View {
+        let columns = [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
+        return LazyVGrid(columns: columns, spacing: 8) {
+            ForEach(Array(cards.enumerated()), id: \.offset) { _, block in
                 ChatBlockView(block: block, projectColorHex: projectColorHex,
                     onSendMessage: onSendMessage, onRunCommand: onRunCommand, onChooseOption: onChooseOption)
             }
         }
-        .padding(12).background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(8).background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 
@@ -1556,9 +1429,57 @@ struct ParsedMessageView: View {
 enum SmartBlockParser {
     static func parse(_ text: String, role: AIRole) -> [ChatBlock] {
         guard role == .assistant || role == .tool else { return [] }
-        let blocks = extractBlocks(text)
-        if blocks.count >= 2 || blocks.containsNonText { return blocks }
-        return detectInlineCards(text)
+        var blocks = extractBlocks(text)
+        if blocks.count >= 2 || blocks.containsNonText { return injectVFSLinks(blocks, originalText: text) }
+        return injectVFSLinks(detectInlineCards(text), originalText: text)
+    }
+
+    /// Detect VFS paths in text blocks and convert to clickable fileLink blocks.
+    private static func injectVFSLinks(_ blocks: [ChatBlock], originalText: String) -> [ChatBlock] {
+        let pattern = #"(/[a-z0-9_-]+(?:/[a-z0-9_.\[\]-]+)*\.?(?:json|md|m4a|jpg|png)?)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return blocks }
+
+        var result: [ChatBlock] = []
+        for block in blocks {
+            if case .text(let content) = block {
+                let nsText = content as NSString
+                let matches = regex.matches(in: content, range: NSRange(location: 0, length: nsText.length))
+                guard !matches.isEmpty else { result.append(block); continue }
+
+                var lastEnd = 0
+                for match in matches {
+                    let range = match.range(at: 1)
+                    // Emit any text before this match
+                    if range.location > lastEnd {
+                        let before = nsText.substring(with: NSRange(location: lastEnd, length: range.location - lastEnd))
+                        if !before.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            result.append(.text(before))
+                        }
+                    }
+                    // Emit fileLink for the matched path
+                    let path = nsText.substring(with: range)
+                    let filename = path.split(separator: "/").last.map(String.init) ?? path
+                    result.append(.fileLink(FileLinkData(
+                        itemID: path,
+                        title: String(filename),
+                        itemType: path.hasSuffix(".md") ? "note" : path.hasSuffix(".json") ? "json" : "unknown",
+                        snippet: path,
+                        projectSlug: nil
+                    )))
+                    lastEnd = range.location + range.length
+                }
+                // Emit remaining text after last match
+                if lastEnd < nsText.length {
+                    let after = nsText.substring(with: NSRange(location: lastEnd, length: nsText.length - lastEnd))
+                    if !after.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        result.append(.text(after))
+                    }
+                }
+            } else {
+                result.append(block)
+            }
+        }
+        return result
     }
 
     private static func extractBlocks(_ text: String) -> [ChatBlock] {
@@ -1576,7 +1497,18 @@ enum SmartBlockParser {
             } else if let choice = detectChoicePrompt(section.content) {
                 blocks.append(.choicePrompt(choice))
             } else {
-                blocks.append(.text("**" + section.title + "**\n" + content.joined(separator: "\n")))
+                // Sub-parse section content through ContentParser for structural elements
+                let rawContent = content.joined(separator: "\n")
+                let parsed = ContentParser.parse(rawContent).0
+                if parsed.count > 1 || (parsed.count == 1 && { if case .text = parsed[0] { false } else { true } }()) {
+                    // ContentParser found structure — emit as separate blocks
+                    blocks.append(.text("**" + section.title + "**"))
+                    for block in parsed {
+                        blocks.append(convertOutputToChatBlock(block))
+                    }
+                } else {
+                    blocks.append(.text("**" + section.title + "**\n" + rawContent))
+                }
             }
             currentSection = nil
         }
@@ -1649,6 +1581,22 @@ enum SmartBlockParser {
         guard lower.contains("warning") || lower.contains("are you sure") || lower.contains("delete?") || lower.contains("confirm") else { return nil }
         let first = text.components(separatedBy: "\n").first ?? text
         return ConfirmationData(title: "Please confirm", message: String(first.prefix(200)), confirmLabel: "Yes, proceed", cancelLabel: "Cancel", confirmValue: "yes", cancelValue: "cancel")
+    }
+    /// Converts ContentParser OutputBlock to ChatBlock for unified rendering.
+    private static func convertOutputToChatBlock(_ output: OutputBlock) -> ChatBlock {
+        switch output {
+        case .text(let t): return .text(t)
+        case .table(let table): return .table(TableData(title: table.title, headers: table.headers, rows: table.rows))
+        case .code(let code): return .code(CodeData(code: code.code, language: code.language, caption: code.caption))
+        case .bulletList(let items): return .bulletList(items)
+        case .orderedList(let items): return .orderedList(items)
+        case .actions(let actions):
+            return .taskCard(TaskCardData(
+                taskID: UUID().uuidString, title: actions.title ?? "Actions",
+                status: "todo", priority: "medium", owner: nil, projectSlug: nil, needsConfirmation: false))
+        case .card(let card):
+            return .text("**\(card.title)**\n\(card.body)")
+        }
     }
 }
 
@@ -1745,6 +1693,14 @@ struct ChatBlockView: View {
             ChoicePromptView(data: prompt, onChooseOption: onChooseOption)
         case .confirmation(let confirm):
             ConfirmationView(data: confirm, onChooseOption: onChooseOption)
+        case .fileLink(let data):
+            FileLinkCardView(data: data, onRunCommand: onRunCommand)
+        case .documentHeader(let data):
+            DocumentHeaderCardView(data: data)
+        case .freeTextInput(let data):
+            FreeTextInputView(data: data, onSubmit: { text in onChooseOption?(text) })
+        case .progressUpdate(let data):
+            ProgressUpdateView(data: data)
         }
     }
 }

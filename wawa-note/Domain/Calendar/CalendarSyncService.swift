@@ -1,4 +1,5 @@
 import EventKit
+import SwiftData
 import OSLog
 import Foundation
 
@@ -177,6 +178,22 @@ final class CalendarSyncService: ObservableObject {
         event.calendar = eventStore.defaultCalendarForNewEvents ?? eventStore.calendars(for: .event).first
         try eventStore.save(event, span: .thisEvent, commit: true)
         return event.eventIdentifier
+    }
+
+    // MARK: - Anarlog participant bridge
+
+    /// Extract anarlog-format participants from a calendar event.
+    func anarlogParticipants(from event: EKEvent) -> [AnarlogParticipant] {
+        AnarlogParticipantBridge.fromCalendarEvent(event)
+    }
+
+    /// Annotate a KnowledgeItem with participants from its linked calendar event.
+    func annotateAnarlogParticipants(item: KnowledgeItem, context: ModelContext) {
+        guard let eventId = item.calendarEventIdentifier,
+              let event = eventStore.event(withIdentifier: eventId) else { return }
+        let participants = anarlogParticipants(from: event)
+        guard !participants.isEmpty else { return }
+        AnarlogParticipantBridge.annotateParticipants(participants, itemID: item.id, source: "calendar_event", context: context)
     }
 }
 

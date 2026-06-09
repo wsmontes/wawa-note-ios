@@ -16,6 +16,7 @@ struct ContentView: View {
     @State private var showQueue = false
     @State private var selectedTab = 0
     @State private var keyboardHeight: CGFloat = 0
+    @State private var safeAreaBottom: CGFloat = 0
     @StateObject private var chatState = ChatOverlayState()
     @StateObject private var chatViewModel = ChatViewModel()
 
@@ -100,7 +101,7 @@ struct ContentView: View {
                     .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                     .padding(.horizontal, 8)
                     .frame(maxHeight: UIScreen.main.bounds.height * 0.6, alignment: .bottom)
-                    .padding(.bottom, max(0, keyboardHeight - 6))
+                    .padding(.bottom, max(0, keyboardHeight - safeAreaBottom))
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -110,10 +111,24 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) { SettingsView() }
         .sheet(isPresented: $showQueue) { ProcessingQueueSheet() }
         .onReceive(keyboardPublisher) { keyboardHeight = $0 }
+        .onReceive(NotificationCenter.default.publisher(for: .pipelineCompleted)) { _ in
+            WawaNoteApp.updateAppBadge(modelContext: modelContext)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            WawaNoteApp.updateAppBadge(modelContext: modelContext)
+        }
         .onAppear {
             chatViewModel.setup(modelContext: modelContext)
             chatViewModel.observeContext(from: chatState)
+            ConfigProjectService.ensureConfigProject(context: modelContext)
+            ConfigProjectService.populateIfEmpty(context: modelContext)
+            WawaNoteApp.updateAppBadge(modelContext: modelContext)
             autoProcessPendingItems()
+            // Capture safe area bottom for keyboard positioning
+            if let window = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene }).first?.windows.first {
+                safeAreaBottom = window.safeAreaInsets.bottom
+            }
         }
     }
 
@@ -158,11 +173,13 @@ struct ExploreView: View {
 
     enum ExploreTab: String, CaseIterable {
         case projects = "Projects"
+        case files = "Files"
         case timeline = "Timeline"
 
         var icon: String {
             switch self {
             case .projects: "folder"
+            case .files: "filemenu.and.selection"
             case .timeline: "calendar.day.timeline.leading"
             }
         }
@@ -182,6 +199,8 @@ struct ExploreView: View {
             switch selectedTab {
             case .projects:
                 ProjectListView()
+            case .files:
+                FileBrowserView()
             case .timeline:
                 TimelineExplorerView()
             }
