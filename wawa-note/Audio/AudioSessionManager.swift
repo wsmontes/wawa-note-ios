@@ -262,6 +262,120 @@ final class AudioSessionManager {
         session.currentRoute.inputs.first?.selectedDataSource
     }
 
+    // MARK: - Microphone selection
+
+    /// Select the best microphone for meeting recording.
+    /// iPhone has multiple mics: bottom (calls), front (FaceTime), back (video).
+    /// For meetings: prefer front mic (closer to user's face, better voice pickup).
+    /// Guideline: "Não pense em 'o microfone do iPhone'; pense em array de microfones."
+    func selectBestMicrophone() {
+        guard let builtInMic = session.availableInputs?.first(where: {
+            $0.portType == .builtInMic
+        }) else {
+            AppLog.audio.info("No built-in mic found — using system default")
+            return
+        }
+
+        // Set the built-in mic as preferred input
+        do {
+            try session.setPreferredInput(builtInMic)
+            AppLog.audio.info("Selected built-in mic: \(builtInMic.portName)")
+        } catch {
+            AppLog.audio.warning("Failed to set preferred input: \(error.localizedDescription)")
+        }
+
+        // Now select the best data source on this mic
+        guard let dataSources = builtInMic.dataSources, !dataSources.isEmpty else {
+            AppLog.audio.info("No data sources available — using default")
+            return
+        }
+
+        // Log all available data sources for debugging
+        for ds in dataSources {
+            let patterns = ds.supportedPolarPatterns?.map(\.rawValue).joined(separator: ",") ?? "none"
+            AppLog.audio.debug("Mic DS: '\(ds.dataSourceName)' orientation=\(ds.orientation?.rawValue ?? "nil") polar=\(patterns)")
+        }
+
+        // Prefer front-facing mic for meeting recording (closest to user's face)
+        // iOS data source orientation: .front = FaceTime camera side, .bottom = Lightning port side
+        if let frontMic = dataSources.first(where: { $0.orientation == .front }) {
+            do {
+                try builtInMic.setPreferredDataSource(frontMic)
+                AppLog.audio.info("Selected front microphone: '\(frontMic.dataSourceName)'")
+            } catch {
+                AppLog.audio.warning("Failed to set front mic: \(error.localizedDescription)")
+            }
+        } else if let bottomMic = dataSources.first(where: { $0.orientation == .bottom }) {
+            do {
+                try builtInMic.setPreferredDataSource(bottomMic)
+                AppLog.audio.info("Selected bottom microphone (front not available): '\(bottomMic.dataSourceName)'")
+            } catch {
+                AppLog.audio.warning("Failed to set bottom mic: \(error.localizedDescription)")
+            }
+        }
+
+        // Select cardioid polar pattern for best voice pickup
+        if let selectedDS = session.currentRoute.inputs.first?.selectedDataSource {
+            let supportedPatterns = selectedDS.supportedPolarPatterns ?? []
+            if supportedPatterns.contains(.cardioid) {
+                try? selectedDS.setPreferredPolarPattern(.cardioid)
+                AppLog.audio.info("Set polar pattern: cardioid")
+            } else if supportedPatterns.contains(.omnidirectional) {
+                try? selectedDS.setPreferredPolarPattern(.omnidirectional)
+                AppLog.audio.info("Set polar pattern: omnidirectional")
+            }
+        }
+
+        // Log the final selection
+        let finalDS = session.currentRoute.inputs.first?.selectedDataSource
+        AppLog.audio.info("Final mic: '\(finalDS?.dataSourceName ?? "system default")'")
+
+        // Update input port name for UI
+        _ = currentInputPortName
+    }
+
+    // MARK: - Gain control
+
+    /// Whether the current input supports manual gain control.
+    var isInputGainSettable: Bool {
+        session.isInputGainSettable
+    }
+
+    /// Current input gain (0.0 - 1.0). Only valid if isInputGainSettable is true.
+    var inputGain: Float {
+        get { session.inputGain }
+        set {
+            guard session.isInputGainSettable else { return }
+            let clamped = max(0.0, min(1.0, newValue))
+            try? session.setInputGain(clamped)
+            AppLog.audio.info("Input gain: \(String(format: "%.2f", clamped))")
+        }
+    }
+
+    /// Boost input gain by a percentage (0.0 - 1.0).
+    func boostGain(by amount: Float = 0.2) -> Float {
+        guard session.isInputGainSettable else { return 0 }
+        let oldGain = session.inputGain
+        let newGain = min(1.0, oldGain + amount)
+        inputGain = newGain
+        return newGain - oldGain
+    }
+
+    /// Reset input gain to system default (0.5).
+    func resetGain() {
+        guard session.isInputGainSettable else { return }
+        try? session.setInputGain(0.5)
+        AppLog.audio.info("Input gain reset to 0.5")
+    }
+
+    /// Analyze whether gain is too low based on audio level samples.
+    /// Returns true if gain boost is recommended.
+    func shouldBoostGain(levelSamples: [Float], threshold: Float = 0.02) -> Bool {
+        guard session.isInputGainSettable, !levelSamples.isEmpty else { return false }
+        let avg = levelSamples.reduce(0, +) / Float(levelSamples.count)
+        return avg < threshold && session.inputGain < 0.9
+    }
+
     // MARK: - Input watchdog
 
     /// Start monitoring for input buffer stalls.

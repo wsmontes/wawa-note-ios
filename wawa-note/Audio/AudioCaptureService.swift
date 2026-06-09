@@ -54,6 +54,46 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// Whether the captured audio file had write errors (likely corrupted).
     var hasWriteErrors: Bool { fileWriter.hasWriteErrors }
 
+    // MARK: - Software AGC (Automatic Gain Control)
+
+    /// Gain multiplier applied to samples before writing (1.0 = no change).
+    /// Increased automatically during auto-calibration if signal is too quiet.
+    private nonisolated(unsafe) var softwareGain: Float = 1.0
+
+    /// Samples collected during auto-calibration (first 3 seconds).
+    private var calibrationSamples: [Float] = []
+    private var calibrationComplete = false
+    private let calibrationDuration: TimeInterval = 3.0
+    private var calibrationStartTime: Date?
+
+    /// Target RMS level for auto-calibration (-12dBFS ≈ 0.25 in normalized float).
+    private static let targetRMS: Float = 0.25
+
+    /// Boost gain for transcription when signal is very low.
+    /// Called after failed transcription to improve next attempt.
+    func boostGainForTranscription() {
+        let oldGain = self.softwareGain
+        self.softwareGain = min(4.0, self.softwareGain * 1.5)
+        AppLog.audio.info("AGC: boosted software gain \(String(format: "%.2f", oldGain)) → \(String(format: "%.2f", self.softwareGain))")
+    }
+
+    /// Reset software gain to neutral.
+    func resetGain() {
+        self.softwareGain = 1.0
+        self.calibrationComplete = false
+        self.calibrationSamples.removeAll()
+        AppLog.audio.info("AGC: gain reset to 1.0")
+    }
+
+    /// Get recommended hardware gain boost based on calibration.
+    func recommendedGainBoost() -> Float {
+        guard !calibrationSamples.isEmpty else { return 0 }
+        let avgRMS = calibrationSamples.reduce(0, +) / Float(calibrationSamples.count)
+        if avgRMS < 0.01 { return 0.4 }  // Very quiet → +40%
+        if avgRMS < 0.02 { return 0.2 }  // Quiet → +20%
+        return 0
+    }
+
     init(
         engine: AVAudioEngine = AVAudioEngine(),
         fileWriter: AudioFileWriter = AudioFileWriter(),
@@ -85,6 +125,16 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         try sessionManager.configureForRecording()
 
+        // Select the best available microphone
+        sessionManager.selectBestMicrophone()
+
+        // Apply recommended hardware gain boost from previous calibration
+        let hwBoost = sessionManager.isInputGainSettable ? recommendedGainBoost() : 0
+        if hwBoost > 0 {
+            let applied = sessionManager.boostGain(by: hwBoost)
+            AppLog.audio.info("Applied hardware gain boost: +\(String(format: "%.0f", applied * 100))%")
+        }
+
         let inputNode = engine.inputNode
         let hardwareFormat = inputNode.outputFormat(forBus: 0)
         try fileWriter.startRecording(format: hardwareFormat, meetingId: meetingId)
@@ -112,14 +162,43 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             self.inputWatchdog?.feed()
             self.updateAudioLevel(from: buffer)
 
+            // AGC calibration: collect samples in first N seconds
+            if !self.calibrationComplete, let start = self.calibrationStartTime {
+                if Date().timeIntervalSince(start) < self.calibrationDuration {
+                    if let channelData = buffer.floatChannelData {
+                        let frames = Int(buffer.frameLength)
+                        var sumSq: Float = 0
+                        for j in 0..<min(frames, 256) { let s = channelData[0][j]; sumSq += s * s }
+                        self.calibrationSamples.append(sqrt(sumSq / Float(min(frames, 256))))
+                    }
+                } else if !self.calibrationComplete {
+                    self.calibrationComplete = true
+                    let avgRMS = self.calibrationSamples.reduce(0, +) / Float(max(self.calibrationSamples.count, 1))
+                    if avgRMS > 0 {
+                        self.softwareGain = min(4.0, Self.targetRMS / avgRMS)
+                    }
+                    self.calibrationSamples.removeAll()
+                    AppLog.audio.info("AGC calibrated: avgRMS=\(String(format: "%.4f", avgRMS)) → gain=\(String(format: "%.2f", self.softwareGain))")
+                }
+            }
+
             guard self.state == .recording else { return }
 
             // Copy buffer contents synchronously on the real-time thread
             // (safe: floatChannelData is already allocated, memcpy only).
             guard let channelData = buffer.floatChannelData else { return }
             let frameLength = Int(buffer.frameLength)
+
+            // Apply software gain
+            let gain = self.softwareGain
             let copiedFrames = UnsafeMutablePointer<Float>.allocate(capacity: frameLength)
-            copiedFrames.initialize(from: channelData[0], count: frameLength)
+            if gain != 1.0 {
+                for i in 0..<frameLength {
+                    copiedFrames[i] = channelData[0][i] * gain
+                }
+            } else {
+                copiedFrames.initialize(from: channelData[0], count: frameLength)
+            }
 
             // Dispatch the copied buffer to the write queue.
             self.audioWriteQueue.async { [weak self] in
@@ -156,6 +235,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         state = .recording
         currentInputPortName = sessionManager.currentInputPortName
+        calibrationStartTime = Date()
         startTimer()
         startLevelSmoothing()
         observeAudioNotifications()
@@ -201,6 +281,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         audioLevel = 0.0
         elapsedTime = 0.0
         recordingStartTime = nil
+        calibrationStartTime = nil
         currentInputPortName = ""
         stateBeforeInterruption = nil
         AppLog.audio.info("Recording stopped")
