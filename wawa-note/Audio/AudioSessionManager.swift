@@ -168,6 +168,10 @@ final class AudioSessionManager {
             try session.setCategory(profile.category, mode: profile.mode, options: profile.options)
             try session.setAllowHapticsAndSystemSoundsDuringRecording(true)
 
+            // Select the best microphone BEFORE activation.
+            // Guideline: "Configure AVAudioSession antes de tocar no grafo de áudio."
+            selectBestMicrophone()
+
             try session.setActive(true)
             currentProfile = profile
 

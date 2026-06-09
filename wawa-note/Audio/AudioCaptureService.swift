@@ -126,10 +126,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         try sessionManager.configureForRecording()
 
-        // Select the best available microphone
-        sessionManager.selectBestMicrophone()
-
         // Apply recommended hardware gain boost from previous calibration
+        // (safe to call after setActive; gain adjustment is allowed on active session)
         let hwBoost = sessionManager.isInputGainSettable ? recommendedGainBoost() : 0
         if hwBoost > 0 {
             let applied = sessionManager.boostGain(by: hwBoost)
