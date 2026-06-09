@@ -23,7 +23,7 @@ final class HomeViewModel: ObservableObject {
     let importRouter = ImportRouter(importers: [
         AudioImportService(), PlainTextImporter(), MarkdownImporter(),
         JSONImporter(), PDFImporter(), HTMLImporter(), RTFImporter(),
-        SRTImporter(), ICSImporter(), AnarlogImporter()
+        SRTImporter(), ICSImporter(), AnarlogImporter(), MeetilyImporter()
     ])
 
     private var modelContext: ModelContext?

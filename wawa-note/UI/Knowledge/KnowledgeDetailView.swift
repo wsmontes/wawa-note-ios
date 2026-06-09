@@ -162,6 +162,10 @@ struct KnowledgeDetailView: View {
                             if let anarlogMD = try? AnarlogExporter().exportMarkdown(item: item) {
                                 ShareLink("Anarlog .md", item: anarlogMD)
                             }
+                            if let meetilyData = try? MeetilyExporter().exportJSON(item: item),
+                               let meetilyString = String(data: meetilyData, encoding: .utf8) {
+                                ShareLink("Meetily .json", item: meetilyString)
+                            }
                         } label: {
                             Label("Export", systemImage: "square.and.arrow.up")
                         }

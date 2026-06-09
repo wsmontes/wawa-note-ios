@@ -543,6 +543,13 @@
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
 		</dict>
+		<key>1C4D46AC9F2548789886969A</key>
+		<dict>
+			<key>fileRef</key>
+			<string>4DC1F74EDFCF435B8AE08D31</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
 		<key>1CC688D63060DF0FC4F11C74</key>
 		<dict>
 			<key>fileRef</key>
@@ -1280,6 +1287,17 @@
 			<key>isa</key>
 			<string>PBXBuildFile</string>
 		</dict>
+		<key>4DC1F74EDFCF435B8AE08D31</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>MeetilyImporter.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
 		<key>50DBBB4D4418D4D70D055D98</key>
 		<dict>
 			<key>buildSettings</key>
@@ -1410,6 +1428,13 @@
 		<dict>
 			<key>fileRef</key>
 			<string>76AD79307BAA416DA8803768</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
+		<key>5225E6D2AD4C4E3D8EDA78B4</key>
+		<dict>
+			<key>fileRef</key>
+			<string>CDE10C4451D64CAC93EABC3E</string>
 			<key>isa</key>
 			<string>PBXBuildFile</string>
 		</dict>
@@ -2734,6 +2759,8 @@
 				<string>362E0F6420EA44EDB38543C7</string>
 				<string>1E20CAB1900D4E10B767A3BE</string>
 				<string>21509F3B18304DA09A96F083</string>
+				<string>1C4D46AC9F2548789886969A</string>
+				<string>5225E6D2AD4C4E3D8EDA78B4</string>
 			</array>
 			<key>isa</key>
 			<string>PBXSourcesBuildPhase</string>
@@ -2922,6 +2949,8 @@
 				<string>A1B2C949491544F791AE85EE</string>
 				<string>2086ECCDDC13498C899FBEE1</string>
 				<string>5CF01E08E69645CA8C602EDC</string>
+				<string>4DC1F74EDFCF435B8AE08D31</string>
+				<string>CDE10C4451D64CAC93EABC3E</string>
 			</array>
 			<key>isa</key>
 			<string>PBXGroup</string>
@@ -4083,6 +4112,17 @@
 			<string>sourcecode.swift</string>
 			<key>path</key>
 			<string>iOSWatchSessionManager.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>CDE10C4451D64CAC93EABC3E</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>MeetilyExporter.swift</string>
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
 		</dict>
