@@ -10,8 +10,12 @@ import OSLog
 /// Guideline: "Persistir 'perfil de captura' é melhor que espalhar flags."
 enum CaptureProfile: String, CaseIterable, Sendable {
     /// General voice memo / meeting recording.
-    /// Uses .default mode to preserve signal for transcription/analysis.
+    /// Uses .spokenAudio for Apple's voice-optimized DSP (noise suppression, echo cancel).
     case voiceMemo
+
+    /// Voice memo without Apple's voice processing. Raw signal, better for
+    /// acoustic analysis or when you want your own DSP chain.
+    case voiceMemoRaw
 
     /// Raw capture for measurement, FFT, acoustic ML.
     /// Uses .measurement mode — minimal system DSP.
@@ -24,9 +28,17 @@ enum CaptureProfile: String, CaseIterable, Sendable {
     /// Uses .voiceChat for DSP optimized for real-time voice.
     case interview
 
+    /// Whether this profile applies Apple's voice DSP (noise suppression, AGC, echo cancel).
+    var usesVoiceProcessing: Bool {
+        switch self {
+        case .voiceMemo, .interview: true
+        case .voiceMemoRaw, .measurement, .video: false
+        }
+    }
+
     var category: AVAudioSession.Category {
         switch self {
-        case .voiceMemo, .measurement:
+        case .voiceMemo, .voiceMemoRaw, .measurement:
             return .record           // No playback needed — cleaner routing
         case .video:
             return .playAndRecord    // May play preview through speaker
@@ -38,7 +50,9 @@ enum CaptureProfile: String, CaseIterable, Sendable {
     var mode: AVAudioSession.Mode {
         switch self {
         case .voiceMemo:
-            return .default          // Preserves signal for transcription
+            return .spokenAudio      // Apple voice DSP: noise suppression, echo cancel, AGC
+        case .voiceMemoRaw:
+            return .default          // No DSP — raw signal for custom processing
         case .measurement:
             return .measurement      // Raw, no DSP
         case .video:
@@ -50,7 +64,7 @@ enum CaptureProfile: String, CaseIterable, Sendable {
 
     var options: AVAudioSession.CategoryOptions {
         switch self {
-        case .voiceMemo, .measurement:
+        case .voiceMemo, .voiceMemoRaw, .measurement:
             return [.allowBluetoothHFP]  // BT headset support, no speaker default
         case .video:
             return [.allowBluetoothHFP, .defaultToSpeaker]
@@ -61,7 +75,23 @@ enum CaptureProfile: String, CaseIterable, Sendable {
 
     /// Human-readable description for debug logs.
     var debugDescription: String {
-        "\(rawValue): category=\(category.rawValue) mode=\(mode.rawValue)"
+        "\(rawValue): category=\(category.rawValue) mode=\(mode.rawValue) voiceDSP=\(usesVoiceProcessing)"
+    }
+}
+
+// MARK: - Voice Processing Preference
+
+/// User preference for Apple's built-in voice processing.
+/// Stored in UserDefaults, defaults to enabled (.spokenAudio).
+enum VoiceProcessingMode: String, CaseIterable, Sendable {
+    case enhanced = "Enhanced (recommended)"
+    case raw = "Raw (no DSP)"
+
+    var profile: CaptureProfile {
+        switch self {
+        case .enhanced: .voiceMemo
+        case .raw: .voiceMemoRaw
+        }
     }
 }
 
@@ -92,8 +122,26 @@ final class AudioSessionManager {
     /// triggers a full rebuild (stop → reconfigure → restart).
     private(set) var currentProfile: CaptureProfile = .voiceMemo
 
+    /// User preference for voice processing mode. Persisted in UserDefaults.
+    static var voiceProcessingMode: VoiceProcessingMode {
+        get {
+            let raw = UserDefaults.standard.string(forKey: "voice_processing_mode") ?? ""
+            return VoiceProcessingMode(rawValue: raw) ?? .enhanced
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: "voice_processing_mode")
+        }
+    }
+
+    /// Resolved profile based on user preference.
+    static var resolvedVoiceProfile: CaptureProfile {
+        voiceProcessingMode.profile
+    }
+
     init(session: AVAudioSession = .sharedInstance()) {
         self.session = session
+        // Apply user preference on init
+        self.currentProfile = Self.resolvedVoiceProfile
     }
 
     // MARK: - Permission
