@@ -550,6 +550,13 @@
 			<key>isa</key>
 			<string>PBXBuildFile</string>
 		</dict>
+		<key>1D0E5F84FBFD41518BE0729D</key>
+		<dict>
+			<key>fileRef</key>
+			<string>F9055DD2056C4925A60A6299</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
 		<key>1D18C79EE2CCF9EF7A570556</key>
 		<dict>
 			<key>children</key>
@@ -1219,6 +1226,13 @@
 			<string>ShellTool.swift</string>
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
+		</dict>
+		<key>4D15F33B7FC448E2A7BDBF81</key>
+		<dict>
+			<key>fileRef</key>
+			<string>B8E71265D63B4090B22BF9DF</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
 		</dict>
 		<key>4D4AE8AD999F1574278682CA</key>
 		<dict>
@@ -2646,6 +2660,10 @@
 				<string>DED5C466E0BE423F96DE3B45</string>
 				<string>1DCBDE7DA752482480155E41</string>
 				<string>BF0D646B848B414189671792</string>
+				<string>E688A591A08742D49D5DC376</string>
+				<string>4D15F33B7FC448E2A7BDBF81</string>
+				<string>1D0E5F84FBFD41518BE0729D</string>
+				<string>DC832E488E364EF181EF70CD</string>
 			</array>
 			<key>isa</key>
 			<string>PBXSourcesBuildPhase</string>
@@ -2825,6 +2843,10 @@
 				<string>842E7677B6B6477590DE7705</string>
 				<string>1E8D74AFC9064BCEBA4FEC68</string>
 				<string>B995A94FEA0D4C8384FEA89B</string>
+				<string>BA2B9011022D44B189615A40</string>
+				<string>B8E71265D63B4090B22BF9DF</string>
+				<string>F9055DD2056C4925A60A6299</string>
+				<string>F62B07B30DFC4523B77C88BC</string>
 			</array>
 			<key>isa</key>
 			<string>PBXGroup</string>
@@ -3386,6 +3408,17 @@
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
 		</dict>
+		<key>B8E71265D63B4090B22BF9DF</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>SpeakerLabeler.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
 		<key>B96C7082C5E86A010A279726</key>
 		<dict>
 			<key>buildConfigurationList</key>
@@ -3426,6 +3459,17 @@
 			<string>sourcecode.swift</string>
 			<key>path</key>
 			<string>AnarlogParticipantBridge.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>BA2B9011022D44B189615A40</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>TranscriptPatchService.swift</string>
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
 		</dict>
@@ -4241,6 +4285,13 @@
 			<key>isa</key>
 			<string>PBXBuildFile</string>
 		</dict>
+		<key>DC832E488E364EF181EF70CD</key>
+		<dict>
+			<key>fileRef</key>
+			<string>F62B07B30DFC4523B77C88BC</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
 		<key>DC9CEAD50143D0711A3DE714</key>
 		<dict>
 			<key>fileRef</key>
@@ -4477,6 +4528,13 @@
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
 		</dict>
+		<key>E688A591A08742D49D5DC376</key>
+		<dict>
+			<key>fileRef</key>
+			<string>BA2B9011022D44B189615A40</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
 		<key>E7764EE194F82A3146570B01</key>
 		<dict>
 			<key>fileRef</key>
@@ -4694,6 +4752,17 @@
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
 		</dict>
+		<key>F62B07B30DFC4523B77C88BC</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>ModelResolver.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
 		<key>F63FECDA0CA220E10BB4F014</key>
 		<dict>
 			<key>includeInIndex</key>
@@ -4724,6 +4793,17 @@
 			<string>sourcecode.swift</string>
 			<key>path</key>
 			<string>JournalEditorView.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>F9055DD2056C4925A60A6299</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>TranscriptRenderer.swift</string>
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
 		</dict>
