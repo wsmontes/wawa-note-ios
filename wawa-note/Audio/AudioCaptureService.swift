@@ -19,7 +19,7 @@ enum AudioCaptureError: Error {
 final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private let engine: AVAudioEngine
     private let fileWriter: AudioFileWriter
-    private let sessionManager: AudioSessionManager
+    let sessionManager: AudioSessionManager
 
     @Published private(set) var state: AudioCaptureState = .idle
     @Published private(set) var audioLevel: Float = 0.0
@@ -36,6 +36,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private nonisolated(unsafe) var rawAudioLevel: Float = 0.0
 
     private let audioWriteQueue = DispatchQueue(label: "com.wawa-note.audio.write", qos: .userInitiated)
+
+    /// Input watchdog — fires if no buffers arrive within 2s.
+    private var inputWatchdog: InputWatchdog?
 
     /// Buffer size reduced to ~23ms at 44.1kHz (1024 frames) for finer VAD granularity.
     /// Meetily/anarlog use 30ms chunks; 1024 frames matches their precision.
@@ -96,8 +99,17 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // must never do disk I/O or malloc — we do peak detection inline
         // (O(n), no allocations) and copy buffer contents to a pre-allocated
         // slice before dispatching to the write queue.
+        // Input watchdog: start monitoring for buffer stalls.
+        inputWatchdog = sessionManager.startInputWatchdog(timeout: 2.0) { [weak self] in
+            guard let self, self.state == .recording else { return }
+            AppLog.error("audio", "Input watchdog triggered — no audio buffers for 2s. Attempting engine rebuild.")
+            self.audioInterruptionReason = "Audio input stalled. Attempting recovery..."
+            self.rebuildEngine()
+        }
+
         inputNode.installTap(onBus: 0, bufferSize: Self.captureBufferSize, format: nil) { [weak self] buffer, _ in
             guard let self else { return }
+            self.inputWatchdog?.feed()
             self.updateAudioLevel(from: buffer)
 
             guard self.state == .recording else { return }
@@ -106,14 +118,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             // (safe: floatChannelData is already allocated, memcpy only).
             guard let channelData = buffer.floatChannelData else { return }
             let frameLength = Int(buffer.frameLength)
-            let byteCount = frameLength * MemoryLayout<Float>.stride
             let copiedFrames = UnsafeMutablePointer<Float>.allocate(capacity: frameLength)
             copiedFrames.initialize(from: channelData[0], count: frameLength)
 
             // Dispatch the copied buffer to the write queue.
-            // AVAudioFile.write is optimized for real-time but NOT guaranteed
-            // non-blocking — disk contention can cause drops. Writing from
-            // a serial background queue isolates the audio thread.
             self.audioWriteQueue.async { [weak self] in
                 guard let self, let file = self.fileWriter.activeFile else {
                     copiedFrames.deallocate()
@@ -125,7 +133,6 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                     return
                 }
                 writeBuffer.frameLength = AVAudioFrameCount(frameLength)
-                // Copy into the new buffer's channel data
                 if let destData = writeBuffer.floatChannelData {
                     destData[0].initialize(from: copiedFrames, count: frameLength)
                 }
@@ -179,6 +186,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     func stopRecording() {
         guard state == .recording || state == .paused || state == .interrupted else { return }
 
+        inputWatchdog?.cancel()
+        inputWatchdog = nil
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         timerTask?.cancel()
