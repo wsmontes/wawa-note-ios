@@ -61,8 +61,14 @@ final class RecordingCoordinator: ObservableObject {
         projectID: UUID? = nil,
         profile: CaptureProfile = .voiceMemo
     ) {
+        // Auto-recover from stale state: if previous recording ended
+        // but finishCapture() wasn't called, force-reset to idle.
+        if self.state == .stopped {
+            AppLog.warn("audio", "RecordingCoordinator: state was .stopped — auto-resetting to idle")
+            returnToIdle()
+        }
         guard self.state == .idle else {
-            AppLog.warn("audio", "RecordingCoordinator: startRecording called but state is \(String(describing: self.state))")
+            AppLog.warn("audio", "RecordingCoordinator: startRecording called but state is \(String(describing: self.state)) — ignoring")
             return
         }
 
