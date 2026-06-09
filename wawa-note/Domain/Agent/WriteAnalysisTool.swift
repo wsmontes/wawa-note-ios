@@ -33,11 +33,14 @@ struct WriteAnalysisTool: AgentTool {
     func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
         guard let itemIdStr = arguments["itemId"] as? String,
               let itemId = UUID(uuidString: itemIdStr) else {
-            return ToolResult(content: "Error: itemId must be a valid UUID",
+            let raw = String(describing: arguments["itemId"])
+            AppLog.provider.error("write_analysis: invalid itemId '\(raw)'")
+            return ToolResult(content: "Error: itemId must be a valid UUID. Received: \(raw)",
                               isError: true, displaySummary: "Invalid itemId")
         }
 
         guard let jsonStr = arguments["analysisJson"] as? String else {
+            AppLog.provider.error("write_analysis: missing analysisJson")
             return ToolResult(content: "Error: analysisJson is required",
                               isError: true, displaySummary: "Missing JSON")
         }
@@ -46,7 +49,9 @@ struct WriteAnalysisTool: AgentTool {
         guard let data = jsonStr.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               !json.isEmpty else {
-            return ToolResult(content: "Error: analysisJson is not valid JSON or is empty",
+            let preview = String(jsonStr.prefix(200))
+            AppLog.provider.error("write_analysis: invalid JSON: \(preview)")
+            return ToolResult(content: "Error: analysisJson is not valid JSON. Check for unescaped quotes, trailing commas, or missing braces. First 200 chars: \(preview)",
                               isError: true, displaySummary: "Invalid JSON")
         }
 
@@ -61,11 +66,13 @@ struct WriteAnalysisTool: AgentTool {
             let url = fileStore.itemDirectoryURL(for: itemId).appendingPathComponent("analysis.json")
             try prettyData.write(to: url, options: .atomic)
 
+            AppLog.provider.info("write_analysis: saved \(json.count) sections to \(url.path)")
             return ToolResult(
-                content: "Analysis written (\(json.count) sections)",
+                content: "Analysis written (\(json.count) sections) to analysis.json",
                 displaySummary: "Analysis saved"
             )
         } catch {
+            AppLog.provider.error("write_analysis: write failed: \(error.localizedDescription)")
             return ToolResult(content: "Error writing analysis: \(error.localizedDescription)",
                               isError: true, displaySummary: "Write failed")
         }

@@ -145,10 +145,8 @@ final class ContentPipelineService: ObservableObject {
 
             guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
                 AppLog.provider.error("ContentPipeline: no active provider configured — transcription-only mode")
-                // Mark as transcribed so the item isn't stuck; analysis skipped
                 if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
                     fresh.status = item.transcriptionEngineId != nil ? .transcribed : .recorded
-                    fresh.inboxDate = nil
                     try? modelContext.save()
                 }
                 return
@@ -208,7 +206,6 @@ final class ContentPipelineService: ObservableObject {
                 AppLog.provider.warning("ContentPipeline: no extractable text for item \(itemID) — skipping agent")
                 if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
                     fresh.status = .failed
-                    fresh.inboxDate = nil
                     try? modelContext.save()
                 }
                 return
@@ -358,16 +355,11 @@ final class ContentPipelineService: ObservableObject {
                     currentTool: nil, toolSummary: error, toolLog: toolLog,
                     events: agentEvents, thinkingActive: false)
             }
-            // Mark item as processed so it's not re-enqueued forever
-            // (was the root cause of infinite pipeline loops for notes)
+            // Mark item as processed so it's not re-enqueued forever.
+            // Keep inboxDate so the item stays visible in the inbox for user review.
             if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
-                fresh.analysisProviderId = "pipeline" // marker to prevent re-enqueue
+                fresh.analysisProviderId = provider.id
                 fresh.status = lastError == nil ? .analyzed : .failed
-                // Auto-archive from inbox after successful processing
-                // The item has been extracted, analyzed, and (if applicable) ingested.
-                if lastError == nil {
-                    fresh.inboxDate = nil
-                }
                 try? modelContext.save()
             }
             // Update project health after agent completes
