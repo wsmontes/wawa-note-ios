@@ -32,6 +32,7 @@ struct KnowledgeDetailView: View {
     @State private var showReprocessWarning = false
     @State private var agentEvents: [PipelineAgentEvent] = []
     @State private var isAgentThinking = false
+    @State private var rawAnalysisJSON: [String: Any] = [:]
 
     private let fileStore = FileArtifactStore()
 
@@ -224,6 +225,7 @@ struct KnowledgeDetailView: View {
             }
             Task { @MainActor in
                 await Task.yield()
+                loadRawAnalysisJSON()
                 loadData()
             }
         }
@@ -231,7 +233,10 @@ struct KnowledgeDetailView: View {
             if n.object as? String == item.id.uuidString {
                 isPipelineProcessing = false
                 pipelineStage = ""
-                Task { @MainActor in loadData() }
+                Task { @MainActor in
+                    loadRawAnalysisJSON()
+                    loadData()
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .contentPipelineStageChanged)) { n in
@@ -264,13 +269,7 @@ struct KnowledgeDetailView: View {
             guard n.object as? String == item.id.uuidString else { return }
             Task { @MainActor in
                 analysis = try? fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id)
-                if analysis == nil {
-                    if let dynamic = try? fileStore.readArtifact(DynamicAnalysis.self, fileName: "analysis.dynamic.json", meetingId: item.id) {
-                        analysis = MeetingAnalysis(meetingId: item.id, providerId: dynamic.providerId, model: dynamic.model,
-                            shortSummary: dynamic.results.stringField("short_summary") ?? "Analysis available",
-                            detailedSummary: dynamic.results.stringField("detailed_summary") ?? "")
-                    }
-                }
+                loadRawAnalysisJSON()
                 isAnalyzing = false
                 loadData()
             }
@@ -465,21 +464,35 @@ struct KnowledgeDetailView: View {
 
     @ViewBuilder
     private var artifactSections: some View {
-        if let analysis {
-            // Use dynamic rendering when a non-meeting framework is active
-            if let fw = resolvedFramework, fw.id != "builtin/meeting" {
-                dynamicAnalysisSection(framework: fw)
-            } else {
-                // Meeting framework: render all analysis fields using the framework's renderAs
-                let meetingFW = FrameworkService.meetingFramework
-                sectionHeader("Summary", icon: "sparkles").padding(.horizontal, 16)
-                VStack(alignment: .leading, spacing: 16) {
-                    ForEach(meetingFW.itemAnalysis.renderAs, id: \.field) { renderer in
-                        meetingAnalysisCard(for: renderer, analysis: analysis)
+        // Dynamic JSON rendering — shows whatever the agent wrote to disk
+        if !rawAnalysisJSON.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                sectionHeader("Analysis", icon: "sparkles").padding(.horizontal, 16)
+                VStack(spacing: 12) {
+                    // Sort: short_summary first, then alphabetically
+                    let keys = rawAnalysisJSON.keys.sorted { a, b in
+                        if a == "short_summary" || a == "shortSummary" { return true }
+                        if b == "short_summary" || b == "shortSummary" { return false }
+                        return a < b
+                    }
+                    ForEach(keys, id: \.self) { key in
+                        if let value = rawAnalysisJSON[key] {
+                            dynamicFieldCard(key: key, value: value)
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
             }
+        } else if let analysis {
+            // Legacy MeetingAnalysis fallback
+            let meetingFW = FrameworkService.meetingFramework
+            sectionHeader("Summary", icon: "sparkles").padding(.horizontal, 16)
+            VStack(alignment: .leading, spacing: 16) {
+                ForEach(meetingFW.itemAnalysis.renderAs, id: \.field) { renderer in
+                    meetingAnalysisCard(for: renderer, analysis: analysis)
+                }
+            }
+            .padding(.horizontal, 16)
         }
 
         if let transcript {
@@ -725,6 +738,82 @@ struct KnowledgeDetailView: View {
         if let num = value as? Double { return String(format: "%.2f", num) }
         if let num = value as? Int { return String(num) }
         return String(describing: value)
+    }
+
+    // MARK: - Dynamic field card (renders any JSON value)
+
+    @ViewBuilder
+    private func dynamicFieldCard(key: String, value: Any) -> some View {
+        let title = key.replacingOccurrences(of: "_", with: " ").capitalized
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: iconForKey(key))
+                    .font(.caption).foregroundStyle(.secondary)
+                Text(title)
+                    .font(.subheadline).fontWeight(.semibold).foregroundStyle(.secondary)
+            }
+
+            switch value {
+            case let s as String:
+                Text(s).font(.body).textSelection(.enabled)
+            case let arr as [Any]:
+                ForEach(Array(arr.enumerated()), id: \.offset) { _, item in
+                    if let str = item as? String {
+                        HStack(spacing: 6) {
+                            Image(systemName: "circle.fill").font(.system(size: 5))
+                            Text(str).font(.body).textSelection(.enabled)
+                        }
+                    } else if let dict = item as? [String: Any] {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(dict.keys.sorted(), id: \.self) { k in
+                                if let v = dict[k] as? String, !v.isEmpty {
+                                    HStack(spacing: 6) {
+                                        Text(k.replacingOccurrences(of: "_", with: " ").capitalized + ":")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                        Text(v).font(.body).textSelection(.enabled)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 8)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    } else {
+                        Text(String(describing: item)).font(.body).textSelection(.enabled)
+                    }
+                }
+            case let n as NSNumber:
+                Text(n.stringValue).font(.body).textSelection(.enabled)
+            case let b as Bool:
+                Text(b ? "Yes" : "No").font(.body)
+            case is NSNull:
+                Text("—").font(.caption).foregroundStyle(.tertiary)
+            default:
+                Text(String(describing: value)).font(.body).textSelection(.enabled)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func iconForKey(_ key: String) -> String {
+        let k = key.lowercased()
+        if k.contains("summary") { return "text.alignleft" }
+        if k.contains("decision") { return "checkmark.shield" }
+        if k.contains("action") { return "checklist" }
+        if k.contains("risk") { return "exclamationmark.triangle" }
+        if k.contains("question") { return "questionmark.circle" }
+        if k.contains("date") || k.contains("timeline") { return "calendar" }
+        if k.contains("people") || k.contains("person") { return "person" }
+        if k.contains("system") { return "desktopcomputer" }
+        if k.contains("organi") { return "building.2" }
+        if k.contains("location") || k.contains("place") { return "mappin" }
+        if k.contains("email") || k.contains("draft") { return "envelope" }
+        if k.contains("entity") || k.contains("mention") { return "tag" }
+        return "doc.text"
     }
 
     @ViewBuilder
@@ -1383,12 +1472,27 @@ struct KnowledgeDetailView: View {
 
     // MARK: - Helpers
 
+    /// Load raw JSON from analysis.json or analysis.dynamic.json — no key expectations.
+    private func loadRawAnalysisJSON() {
+        let dir = fileStore.itemDirectoryURL(for: item.id)
+        if let data = try? Data(contentsOf: dir.appendingPathComponent("analysis.json")),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            rawAnalysisJSON = json
+        } else if let data = try? Data(contentsOf: dir.appendingPathComponent("analysis.dynamic.json")),
+                  let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let results = dict["results"] as? [String: Any],
+                  let storage = results["storage"] as? [String: Any] {
+            rawAnalysisJSON = storage
+        }
+    }
+
     private func loadData() {
         if selectedModel.isEmpty {
             selectedModel = ActiveModelPicker.effectiveModel(context: modelContext, feature: "analysis")
         }
         transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id)
         analysis = try? fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id)
+        if analysis == nil { loadRawAnalysisJSON() }
 
         let annService = AnnotationService(context: modelContext)
         annotations = (try? annService.annotations(for: item.id)) ?? []
