@@ -89,7 +89,11 @@ private struct ChatCompletionResponse: Decodable {
         struct Message: Decodable {
             let role: String?
             let content: String?
+            let reasoningContent: String?
             let toolCalls: [ToolCall]?
+
+            /// Returns content or reasoning_content (DeepSeek V4, o3, etc.)
+            var effectiveContent: String? { content ?? reasoningContent }
 
             struct ToolCall: Decodable {
                 let id: String?
@@ -104,6 +108,7 @@ private struct ChatCompletionResponse: Decodable {
 
             enum CodingKeys: String, CodingKey {
                 case role, content
+                case reasoningContent = "reasoning_content"
                 case toolCalls = "tool_calls"
             }
         }
@@ -328,7 +333,7 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
         }()
 
         let msg = decoded.choices.first?.message
-        let text = msg?.content ?? ""
+        let text = msg?.effectiveContent ?? ""
         let finishReason = decoded.choices.first?.finishReason
 
         let toolCalls: [AIToolCall]? = msg?.toolCalls?.compactMap { tc -> AIToolCall? in
