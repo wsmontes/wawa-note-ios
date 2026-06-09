@@ -3,13 +3,30 @@ import Speech
 import NaturalLanguage
 import OSLog
 
-enum TranscriptionError: Error {
+enum TranscriptionError: LocalizedError {
     case notAuthorized
     case recognitionFailed
     case cancelled
     case noSupportedLocale
     case fileTooLarge
     case fileTooLongForLocal(Double)
+
+    var errorDescription: String? {
+        switch self {
+        case .notAuthorized:
+            "Speech recognition not authorized. Enable it in Settings > Privacy > Speech Recognition."
+        case .recognitionFailed:
+            "Speech recognition failed. Check your internet connection and make sure the language pack is downloaded."
+        case .cancelled:
+            "Transcription was cancelled."
+        case .noSupportedLocale:
+            "No speech recognition language pack is available. Connect to Wi-Fi and wait a few minutes for the language pack to download automatically, then try again."
+        case .fileTooLarge:
+            "The audio file is too large to transcribe (max 25 MB)."
+        case .fileTooLongForLocal(let d):
+            "Audio is too long for on-device transcription (\(Int(d)) seconds). Try using Whisper via API in Settings."
+        }
+    }
 }
 
 final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Sendable {

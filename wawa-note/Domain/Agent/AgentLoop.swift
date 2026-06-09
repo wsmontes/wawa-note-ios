@@ -36,8 +36,8 @@ final class AgentLoop: @unchecked Sendable {
         toolContext: ToolContext,
         maxIterations: Int? = nil,
         mode: AgentMode = .auto,
-        executorModel: String = "gpt-5-nano",
-        advisorModel: String = "gpt-5.5"
+        executorModel: String = AIConfigService.shared.modelFor(feature: "chat"),
+        advisorModel: String = AIConfigService.shared.modelFor(feature: "chat")
     ) {
         self.registry = registry
         self.toolContext = toolContext
@@ -272,8 +272,9 @@ final class AgentLoop: @unchecked Sendable {
         3. The [CURRENT STATE] section below is authoritative — do not re-verify with ls / or ls /projects.
         4. For choices, use numbered lists (1. Option A, 2. Option B). They become buttons.
         5. touch /inbox/ for ITEMS. touch tasks/ for TASKS. echo '{...}' > path to UPDATE.
-        6. rm is soft delete. mv moves between inbox and projects.
+        6. rm is soft delete (items) or permanent (tasks). mv moves between inbox and projects.
         7. ERROR: read it, fix it, retry once. Never retry the same failing command twice.
+        8. DESTRUCTIVE commands (rm tasks, echo overwriting data): ask user first with ask_user --yes "Proceed" --no "Cancel"
 
         [COMPLEX TASK HANDLING]
         When the user asks you to reorganize, restructure, audit, or perform multi-step work:
@@ -291,7 +292,8 @@ final class AgentLoop: @unchecked Sendable {
         15. To ask the user a question WHILE continuing to iterate, use:
             ask_user "question" --yes "Confirm" --no "Cancel"
             ask_user "Pick one:" --options "Option A,Option B,Option C"
-            The user's choice will be sent to you, and you continue working.
+            ask_user "What should I name this?" --text --placeholder "Name..." --submit "Save"
+            The user's response (choice or free text) is sent to you, and you continue working.
         16. The loop ENDS only when you respond with text and NO tool calls.
             As long as you call a tool, you keep iterating — even 20+ times.
         17. You are free to iterate. Explore, plan, act, ask — don't stop until done.
@@ -306,6 +308,53 @@ final class AgentLoop: @unchecked Sendable {
         echo '{"field":"value"}' > <path>  Update item, task, project.
         help <command>  Show detailed docs for any command.
         help vfs  Show the virtual filesystem layout.
+
+        [DOCUMENT CREATION]
+        Create rich, well-structured documents as notes. Use markdown for formatting.
+        After creating, write the full body with echo '...' > items/{id}/body.md
+        Use --document-type to announce what kind of document you're creating.
+
+        Meeting Summary:
+        # Meeting: {title}  |  **Date:** ... **Duration:** ...
+        ## Summary  {paragraph}  ## Decisions  | Decision | Owner | Status |  ## Action Items  - [ ] Task (@owner)
+
+        Status Report:
+        # Status Report: {project}  |  **Period:** start - end
+        ## Progress  {paragraph}  ## Metrics  | Metric | Value | Change |  ## Risks  ## Next Steps
+
+        Decision Log:
+        # Decision: {title}  |  **Date:** ... **Status:** Confirmed|Pending|Rejected
+        ## Context  {paragraph}  ## Decision  {paragraph}  ## Rationale  ## Consequences
+
+        Checklist:
+        # Checklist: {title}
+        - [ ] Task (@owner, Due: date)  - [x] Completed task
+
+        Research Notes:
+        # Research: {topic}  |  ## Sources  ## Analysis  ## Conclusions  ## Citations
+
+        Comparative Table:
+        # Comparison: {topic}
+        | Feature | A | B |  |---|---|---|  | Price | ... | ... |
+
+        Digest:
+        # {Period} Digest  |  ## Highlights  ## Stats  | Metric | Value |  ## Items Processed
+
+        Always use: touch items/ --title "Title" --type note --document-type meeting-summary --body "summary"
+        Then: echo '# Full markdown...' > items/{id}/body.md
+        The user will see a card they can tap to open the document.
+
+        [NEW COMMANDS]
+        semantic "query" --limit 10    Semantic search (needs embedding model)
+        analyze <item-id>             Trigger pipeline processing on an item
+        cal list / cal add --title "X" --start "..." --end "..."   Calendar events
+        export <id> --format md|json  Export item or project
+        vision <item-id> --question "..." --save-as-note   Analyze image with AI
+        progress <step> <total> --label "..."   Show progress bar in chat
+        find /inbox/ --type note --exec "analyze {id}"   Batch process items ({id}, {title})
+        touch /inbox/ --type webBookmark --title "..." --url "https://..."   Create bookmark
+        touch /inbox/ --type journalEntry --title "..." --mood great --body "..."   Journal with mood
+        echo 'text' >> items/{id}/body.md   Append to file (>> = append, > = overwrite)
         """
 
         var dynamicPrompt = "Today's date: \(Date().formatted(date: .complete, time: .omitted))."
@@ -339,6 +388,7 @@ final class AgentLoop: @unchecked Sendable {
             dynamicPrompt += "\n\nFOCUSED ITEM: \(itemID.uuidString.prefix(8))"
             dynamicPrompt += "\nUse cat to read its full content."
         }
+
 
         return (static: staticPrompt, dynamic: dynamicPrompt)
     }

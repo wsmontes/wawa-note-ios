@@ -17,6 +17,7 @@ struct InboxView: View {
     @State private var searchResults: [SearchResult] = []
     @State private var matchingIDs: Set<UUID> = []
     @State private var trashFolderID: UUID?
+    @State private var showEmptyTrashConfirm = false
     @State private var navigateToProject: Project?
 
     private let searchService = SearchService()
@@ -24,6 +25,7 @@ struct InboxView: View {
     enum InboxFilter: String, CaseIterable {
         case needsReview = "Needs Review"
         case all = "All"
+        case anarlog = "Anarlog"
         case unassigned = "Unassigned"
         case flagged = "Flagged"
         case trash = "Trash"
@@ -32,6 +34,7 @@ struct InboxView: View {
             switch self {
             case .needsReview: "tray"
             case .all: "tray.full"
+            case .anarlog: "arrow.triangle.2.circlepath"
             case .unassigned: "questionmark.folder"
             case .flagged: "flag"
             case .trash: "trash"
@@ -52,6 +55,28 @@ struct InboxView: View {
         .navigationTitle("Inbox")
         .navigationDestination(item: $navigateToProject) { ProjectDetailView(project: $0) }
         .searchable(text: $searchText, prompt: "Search all sources...")
+        .toolbar {
+            if filterMode == .trash {
+                ToolbarItem(placement: .topBarTrailing) {
+                    let count = TrashService(context: modelContext).emptyTrashItemCount()
+                    if count > 0 {
+                        Button(role: .destructive) { showEmptyTrashConfirm = true } label: {
+                            Label("Empty Trash (\(count))", systemImage: "trash.slash")
+                        }
+                    }
+                }
+            }
+        }
+        .alert("Empty Trash?", isPresented: $showEmptyTrashConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete All Permanently", role: .destructive) {
+                try? TrashService(context: modelContext).deleteAllInTrash()
+                AppLog.event("trash", "User emptied trash: items permanently deleted")
+            }
+        } message: {
+            let count = TrashService(context: modelContext).emptyTrashItemCount()
+            Text("This will permanently delete \(count) item(s). This action cannot be undone.")
+        }
         .onChange(of: searchText) { _, newValue in
             if newValue.isEmpty { matchingIDs = []; searchResults = [] }
             else { performSearch() }
@@ -255,6 +280,7 @@ struct InboxView: View {
         switch filterMode {
         case .needsReview: "Everything is reviewed. New captures and imports will appear here."
         case .all: "No source items yet. Start recording, importing, or creating a note."
+        case .anarlog: "No anarlog notes imported yet. Configure the shared folder in Settings to sync."
         case .unassigned: "All items are assigned to a project. Nice work."
         case .flagged: "No flagged items. Flag items to mark them for follow-up."
         case .trash: "Trash is empty."
@@ -283,6 +309,7 @@ struct InboxView: View {
         switch filterMode {
         case .needsReview: result = result.filter { $0.inboxDate != nil }
         case .all, .trash: break
+        case .anarlog: result = result.filter { $0.anarlogFrontmatterJSON != nil }
         case .unassigned: result = result.filter { $0.projectID == nil && $0.folderID == nil }
         case .flagged: result = result.filter { $0.isFlagged }
         }
@@ -334,7 +361,12 @@ struct InboxView: View {
     }
 
     private var needsReviewCount: Int {
-        allItems.filter { $0.inboxDate != nil }.count
+        var items = allItems
+        // Exclude trash — same logic as filteredItems for .needsReview
+        if let trashID = trashFolderID {
+            items = items.filter { $0.folderID != trashID }
+        }
+        return items.filter { $0.inboxDate != nil }.count
     }
 
     // MARK: - Actions
@@ -342,6 +374,7 @@ struct InboxView: View {
     private func archiveItem(_ item: KnowledgeItem) {
         let service = KnowledgeItemService(context: modelContext)
         try? service.removeFromInbox(item)
+        WawaNoteApp.updateAppBadge(modelContext: modelContext)
     }
 
     private func loadTrashFolder() {

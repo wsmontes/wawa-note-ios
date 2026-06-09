@@ -50,6 +50,11 @@ final class ChatViewModel: ObservableObject {
     init() {
     }
 
+    /// Absolute fallback model name when no provider is configured. Uses the configured chat model default.
+    private static var defaultChatModel: String {
+        AIConfigService.shared.modelFor(feature: "chat")
+    }
+
     func setup(modelContext: ModelContext) {
         self.modelContext = modelContext
     }
@@ -283,7 +288,7 @@ final class ChatViewModel: ObservableObject {
 
         // Resolve model respecting the active provider — never hardcode a model name
         let model = selectedModel.isEmpty
-            ? (try? ActiveProviderManager.shared.getActiveProvider(context: ctx))?.defaultModel ?? "gpt-5.5"
+            ? (try? ActiveProviderManager.shared.getActiveProvider(context: ctx))?.defaultModel ?? Self.defaultChatModel
             : selectedModel
         let params = AIConfigService.shared.requestParams(for: "chat", model: model)
 
@@ -341,7 +346,7 @@ final class ChatViewModel: ObservableObject {
 
         // Resolve model respecting the active provider — same pattern as sendMessage()
         let model = selectedModel.isEmpty
-            ? (try? ActiveProviderManager.shared.getActiveProvider(context: ctx))?.defaultModel ?? "gpt-5.5"
+            ? (try? ActiveProviderManager.shared.getActiveProvider(context: ctx))?.defaultModel ?? Self.defaultChatModel
             : selectedModel
         let params = AIConfigService.shared.requestParams(for: "chat", model: model)
 
@@ -433,7 +438,7 @@ final class ChatViewModel: ObservableObject {
             error = "No AI provider configured. Go to Settings."
             return
         }
-        let model = selectedModel.isEmpty ? (try? ActiveProviderManager.shared.getActiveProvider(context: ctx))?.defaultModel ?? "gpt-5.5" : selectedModel
+        let model = selectedModel.isEmpty ? (try? ActiveProviderManager.shared.getActiveProvider(context: ctx))?.defaultModel ?? Self.defaultChatModel : selectedModel
 
         state = .thinking
         streamingText = ""
@@ -458,8 +463,9 @@ final class ChatViewModel: ObservableObject {
             activeProjectColorHex: activeProjectColorHex,
             projectColorHexes: projectColorCache
         )
-        let execModel = selectedModel.isEmpty ? "gpt-5-nano" : selectedModel
-        let advModel = "gpt-5.5"
+        let activeDefaultModel = (try? ActiveProviderManager.shared.getActiveProvider(context: ctx))?.defaultModel
+        let execModel = selectedModel.isEmpty ? (activeDefaultModel ?? ChatViewModel.defaultChatModel) : selectedModel
+        let advModel = selectedModel.isEmpty ? (activeDefaultModel ?? ChatViewModel.defaultChatModel) : selectedModel
         let loop = AgentLoop(registry: registry, toolContext: toolContext, mode: mode, executorModel: execModel, advisorModel: advModel)
 
         streamTask = Task { @MainActor [weak self] in
@@ -724,7 +730,7 @@ final class ChatViewModel: ObservableObject {
             error = "No AI provider configured. Go to Settings."
             return
         }
-        let model = selectedModel.isEmpty ? (try? ActiveProviderManager.shared.getActiveProvider(context: ctx))?.defaultModel ?? "gpt-5.5" : selectedModel
+        let model = selectedModel.isEmpty ? (try? ActiveProviderManager.shared.getActiveProvider(context: ctx))?.defaultModel ?? Self.defaultChatModel : selectedModel
 
         state = .thinking
         streamingText = ""
@@ -747,8 +753,9 @@ final class ChatViewModel: ObservableObject {
             activeProjectColorHex: activeProjectColorHex,
             projectColorHexes: projectColorCache
         )
-        let execModel = selectedModel.isEmpty ? "gpt-5-nano" : selectedModel
-        let advModel = "gpt-5.5"
+        let activeDefaultModel = (try? ActiveProviderManager.shared.getActiveProvider(context: ctx))?.defaultModel
+        let execModel = selectedModel.isEmpty ? (activeDefaultModel ?? ChatViewModel.defaultChatModel) : selectedModel
+        let advModel = selectedModel.isEmpty ? (activeDefaultModel ?? ChatViewModel.defaultChatModel) : selectedModel
         let loop = AgentLoop(registry: registry, toolContext: toolContext, mode: mode, executorModel: execModel, advisorModel: advModel)
 
         streamTask = Task { @MainActor [weak self] in

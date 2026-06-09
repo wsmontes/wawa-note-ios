@@ -23,7 +23,7 @@ final class HomeViewModel: ObservableObject {
     let importRouter = ImportRouter(importers: [
         AudioImportService(), PlainTextImporter(), MarkdownImporter(),
         JSONImporter(), PDFImporter(), HTMLImporter(), RTFImporter(),
-        SRTImporter(), ICSImporter(), GitHubIssuesImporter()
+        SRTImporter(), ICSImporter(), AnarlogImporter()
     ])
 
     private var modelContext: ModelContext?
@@ -119,12 +119,18 @@ final class HomeViewModel: ObservableObject {
             let didStart = url.startAccessingSecurityScopedResource()
             defer { if didStart { url.stopAccessingSecurityScopedResource() } }
 
-            guard let importer = importRouter.importer(for: url) else { continue }
-
-            if importer.formatIdentifier == "audio" {
-                await importAudioFile(url, importer: importer, deleteSource: deleteSource, modelContext: ctx, pipeline: pipeline)
+            // Try format importer first
+            if let importer = importRouter.importer(for: url) {
+                if importer.formatIdentifier == "audio" {
+                    await importAudioFile(url, importer: importer, deleteSource: deleteSource, modelContext: ctx, pipeline: pipeline)
+                } else {
+                    await importTextFile(url, importer: importer, deleteSource: deleteSource, modelContext: ctx, pipeline: pipeline)
+                }
+            } else if let imgType = detectImageType(url: url) {
+                // Import image files directly
+                await importImageFile(url, deleteSource: deleteSource, modelContext: ctx, pipeline: pipeline)
             } else {
-                await importTextFile(url, importer: importer, deleteSource: deleteSource, modelContext: ctx, pipeline: pipeline)
+                continue
             }
 
             imported += 1
@@ -190,6 +196,41 @@ final class HomeViewModel: ObservableObject {
         await EmbeddingPipelineService().backfillAll(items: items, using: provider) { _, _ in }
         UserDefaults.standard.set(true, forKey: flag)
     }
+
+    private func detectImageType(url: URL) -> String? {
+        let ext = url.pathExtension.lowercased()
+        if ["jpg", "jpeg", "png", "heic", "heif", "webp", "gif", "tiff", "bmp"].contains(ext) { return ext }
+        // Try UTI
+        if let resourceValues = try? url.resourceValues(forKeys: [.typeIdentifierKey]),
+           let uti = resourceValues.typeIdentifier {
+            if uti.hasPrefix("public.image") || uti.hasPrefix("public.jpeg") || uti.hasPrefix("public.png") { return "jpg" }
+        }
+        return nil
+    }
+
+    private func importImageFile(_ url: URL, deleteSource: Bool, modelContext: ModelContext, pipeline: ContentPipelineService) async {
+        guard let data = try? Data(contentsOf: url), let image = UIImage(data: data) else { return }
+        let itemService = KnowledgeItemService(context: modelContext)
+        let title = url.lastPathComponent
+        guard let item = try? itemService.createItem(type: .image, title: title, bodyText: nil, inboxDate: Date()) else { return }
+        // Save image
+        let dir = FileArtifactStore().itemDirectoryURL(for: item.id)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let destURL = dir.appendingPathComponent("scan_0.jpg")
+        try? data.write(to: destURL)
+        item.imageFileRelativePath = "scan_0.jpg"
+        item.imagePageCount = 1
+        try? modelContext.save()
+        // Run OCR + vision
+        let extractionSvc = ContentExtractionService(modelContext: modelContext, fileStore: FileArtifactStore())
+        if let text = await extractionSvc.extractTextFromImage(item) {
+            item.bodyText = text
+            try? modelContext.save()
+        }
+        // Clean up source
+        if deleteSource { try? FileManager.default.removeItem(at: url) }
+        await MainActor.run { importProgress = nil }
+    }
 }
 
 // MARK: - HomeView
@@ -212,6 +253,8 @@ struct HomeView: View {
     @State private var navigateToProject: Project?
     @State private var showCreationSheet = false
     @State private var showScanner = false
+    @State private var showScanMenu = false
+    @State private var showBarcodeScanner = false
     @State private var showPhotoPicker = false
     @State private var showCamera = false
     @State private var showPhotoSourceMenu = false
@@ -278,6 +321,14 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showPhotoPicker) {
             PhotoPickerView(selectedImage: $capturedPhoto)
+        }
+        .confirmationDialog("Scan", isPresented: $showScanMenu) {
+            Button("Scan Document") { showScanner = true }
+            Button("Scan QR / Barcode") { showBarcodeScanner = true }
+            Button("Cancel", role: .cancel) {}
+        }
+        .fullScreenCover(isPresented: $showBarcodeScanner) {
+            BarcodeScannerView()
         }
         .confirmationDialog("Photo Source", isPresented: $showPhotoSourceMenu) {
             Button("Take Photo") { showCamera = true }
@@ -395,7 +446,7 @@ struct HomeView: View {
                             .background(LinearGradient(colors: [.red, .red.opacity(0.85)], startPoint: .leading, endPoint: .trailing))
                             .clipShape(RoundedRectangle(cornerRadius: 14))
                         }
-                        Button(action: { showScanner = true }) {
+                        Button(action: { showScanMenu = true }) {
                             VStack(spacing: 4) {
                                 Image(systemName: "doc.text.viewfinder").font(.subheadline)
                                 Text("Scan").font(.caption2)

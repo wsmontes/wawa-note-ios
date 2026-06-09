@@ -261,6 +261,13 @@
       "maxCompletionTokens": null,
       "systemPrompt": "You are a helpful AI assistant. Be concise and accurate."
     },
+    "agent": {
+      "provider": "openai",
+      "model": "gpt-5-nano",
+      "temperature": null,
+      "maxCompletionTokens": 16000,
+      "systemPrompt": "You are an autonomous AI agent with tool access. Execute the task using the provided tools. Be thorough and systematic."
+    },
     "transcription": {
       "engine": "apple-speech",
       "fallbackEngine": "remote-whisper",
@@ -293,6 +300,13 @@
       "maxCompletionTokens": 2000,
       "systemPrompt": "You are a collaborative AI writing partner. Help the user expand, refine, and connect their ideas. Suggest connections to other items in their workspace when relevant. Be concise.",
       "userPrompt": "The user has written or selected the following content:\n\n{content}\n\nWorkspace context (relevant items):\n{context}\n\nUser instruction: {instruction}\n\nReturn your contribution as JSON:\n- expanded_text: string (your contribution, ready to merge)\n- suggestions: array of strings (2-3 concrete next steps or connections)\n- related_items: array of item IDs that connect to this content"
+    },
+    "vision": {
+      "provider": "openai",
+      "model": "gpt-5.5",
+      "temperature": null,
+      "maxCompletionTokens": 4000,
+      "systemPrompt": "You are a document reader. Analyze the provided image and describe what you see accurately. Read all visible text. Identify the document type and structure."
     }
   },
   "lenses": {

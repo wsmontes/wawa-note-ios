@@ -66,6 +66,10 @@ struct ProviderTemplate: Identifiable, Equatable {
         guard let t = byId["lmstudio"] else { fatalError("LM Studio provider not found in ai_config.json") }
         return t
     }
+    static var deepseek: ProviderTemplate {
+        guard let t = byId["deepseek"] else { fatalError("DeepSeek provider not found in ai_config.json") }
+        return t
+    }
     static var ollama: ProviderTemplate {
         guard let t = byId["ollama"] else { fatalError("Ollama provider not found in ai_config.json") }
         return t

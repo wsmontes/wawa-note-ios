@@ -14,6 +14,9 @@ struct KnowledgeDetailView: View {
     @State private var transcriptionError: String?
     @State private var transcriptionProgress: String?
     @State private var showPromoteSheet = false
+    @State private var showConnectSheet = false
+    @State private var connectSearchText = ""
+    @State private var connectableItems: [KnowledgeItem] = []
     @State private var isAnalyzing = false
     @State private var analysisError: String?
     @State private var selectedModel: String = ""
@@ -73,6 +76,13 @@ struct KnowledgeDetailView: View {
 
                 Divider().padding(.top, 16)
 
+                // Audio player — shown when item has an audio file
+                if item.audioFileRelativePath != nil {
+                    audioPlayerSection
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                }
+
                 // Analysis always at the top — like every other item type
                 if transcript != nil || analysis != nil { artifactSections }
 
@@ -84,8 +94,12 @@ struct KnowledgeDetailView: View {
                 if (item.bodyText != nil && item.type != .image) || item.type == .note || item.type == .journalEntry { textContentSection }
                 if item.type == .webBookmark { bookmarkSection }
 
-                // Debug: show raw LLM response when analysis exists but summary is empty
-                if let a = analysis, a.shortSummary.trimmingCharacters(in: .whitespaces).isEmpty {
+                // Context metadata (read-only display)
+                if hasContextFields { contextSection }
+
+                // Debug: show raw LLM response (Developer Mode only)
+                if UserDefaults.standard.bool(forKey: "developer_mode_enabled"),
+                   let a = analysis, a.shortSummary.trimmingCharacters(in: .whitespaces).isEmpty {
                     rawResponseSection
                         .padding(.top, 12)
                 }
@@ -123,6 +137,12 @@ struct KnowledgeDetailView: View {
                         Label("Turn into Project", systemImage: "sparkles.rectangle.stack")
                     }
 
+                    Button {
+                        showConnectSheet = true
+                    } label: {
+                        Label("Connect to Item", systemImage: "arrow.triangle.pull")
+                    }
+
                     if item.analysisProviderId != nil || isPipelineProcessing || isReprocessing {
                         Button {
                             Task { await reprocessItem() }
@@ -132,12 +152,15 @@ struct KnowledgeDetailView: View {
                         .disabled(isReprocessing || isPipelineProcessing)
                     }
 
-                    if transcript != nil || (item.type == .image && item.bodyText != nil) || item.type == .note || item.type == .journalEntry {
+                    if transcript != nil || (item.type == .image && item.bodyText != nil) || item.type == .note || item.type == .journalEntry || item.type == .webBookmark {
                         Menu {
                             ShareLink("Markdown", item: MarkdownExporter().export(item: item, transcript: transcript, analysis: analysis))
                             if let jsonData = try? JSONExporter().export(item: item, transcript: transcript, analysis: analysis),
                                let jsonString = String(data: jsonData, encoding: .utf8) {
                                 ShareLink("JSON Export", item: jsonString)
+                            }
+                            if let anarlogMD = try? AnarlogExporter().exportMarkdown(item: item) {
+                                ShareLink("Anarlog .md", item: anarlogMD)
                             }
                         } label: {
                             Label("Export", systemImage: "square.and.arrow.up")
@@ -150,6 +173,9 @@ struct KnowledgeDetailView: View {
             PromoteToProjectSheet(item: item) { _ in
                 showPromoteSheet = false
             }
+        }
+        .sheet(isPresented: $showConnectSheet) {
+            connectToItemSheet
         }
         .alert("Re-process Item", isPresented: $showReprocessWarning) {
             Button("Cancel", role: .cancel) { }
@@ -229,6 +255,19 @@ struct KnowledgeDetailView: View {
                     }
                     Text(item.type.label)
                         .font(.caption).foregroundStyle(.secondary)
+
+                    // Mood badge for journal entries
+                    if item.type == .journalEntry, let moodTag = item.tags.first(where: { $0.hasPrefix("mood/") }) {
+                        let mood = String(moodTag.dropFirst(5))
+                        HStack(spacing: 4) {
+                            Text(moodEmoji(mood))
+                            Text(mood.capitalized)
+                        }
+                        .font(.caption2).fontWeight(.medium)
+                        .padding(.horizontal, 8).padding(.vertical, 2)
+                        .background(moodColor(mood).opacity(0.12), in: Capsule())
+                        .foregroundStyle(moodColor(mood))
+                    }
                 }
             }
 
@@ -252,6 +291,105 @@ struct KnowledgeDetailView: View {
                 }
             }
         }
+    }
+
+    @StateObject private var audioPlayback = AudioPlaybackService()
+
+    private var connectToItemSheet: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                HStack {
+                    TextField("Search items...", text: $connectSearchText)
+                        .textFieldStyle(.roundedBorder)
+                        .padding()
+                        .onChange(of: connectSearchText) { _, _ in
+                            let all = (try? KnowledgeItemService(context: modelContext).allItems()) ?? []
+                            connectableItems = all
+                                .filter { $0.id != item.id && (connectSearchText.isEmpty || $0.title.localizedCaseInsensitiveContains(connectSearchText)) }
+                                .prefix(20).map { $0 }
+                        }
+                }
+                List {
+                    ForEach(connectableItems.prefix(20)) { other in
+                        Button {
+                            let gsvc = GraphEdgeService(context: modelContext)
+                            try? gsvc.create(
+                                fromID: item.id, toID: other.id,
+                                edgeType: .relatesTo, weight: 1.0,
+                                provenanceItemID: item.id, provenanceSegmentIDs: []
+                            )
+                            try? gsvc.create(
+                                fromID: other.id, toID: item.id,
+                                edgeType: .relatesTo, weight: 1.0,
+                                provenanceItemID: item.id, provenanceSegmentIDs: []
+                            )
+                            showConnectSheet = false
+                            connectSearchText = ""
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: other.type == .audio ? "mic" : other.type == .note ? "doc.text" : "doc")
+                                    .font(.caption).foregroundStyle(other.type == .audio ? .blue : other.type == .note ? .orange : .secondary)
+                                VStack(alignment: .leading) {
+                                    Text(other.title).font(.subheadline).lineLimit(1)
+                                    Text(other.type.label).font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+                .onAppear {
+                    let all = (try? KnowledgeItemService(context: modelContext).allItems()) ?? []
+                    connectableItems = all.filter { $0.id != item.id }
+                }
+            }
+            .navigationTitle("Connect to Item")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Cancel") { showConnectSheet = false; connectSearchText = "" }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private var hasContextFields: Bool {
+        item.contextPlaceName != nil || item.contextAudioRoute != nil ||
+        item.contextLatitude != nil || item.contextFocusActive != nil ||
+        item.contextMotionActivity != nil || item.contextBatteryLevel != nil ||
+        item.contextCalendarEventTitle != nil
+    }
+
+    private var contextSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sectionHeader("Context", icon: "location.fill.viewfinder")
+            HStack(spacing: 12) {
+                if let place = item.contextPlaceName { contextBadge(icon: "mappin", text: place) }
+                if let route = item.contextAudioRoute { contextBadge(icon: "airpodspro", text: route) }
+                if let cal = item.contextCalendarEventTitle { contextBadge(icon: "calendar", text: cal) }
+                if let motion = item.contextMotionActivity { contextBadge(icon: "figure.walk", text: motion) }
+                if let focus = item.contextFocusActive { contextBadge(icon: focus ? "moon.fill" : "sun.max", text: focus ? "Focus" : "Active") }
+                if let battery = item.contextBatteryLevel { contextBadge(icon: "battery.75", text: "\(Int(battery*100))%") }
+            }
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private func contextBadge(icon: String, text: String) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: icon).font(.system(size: 9))
+            Text(text).font(.caption2).lineLimit(1)
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 6).padding(.vertical, 2)
+        .background(Color(.tertiarySystemBackground), in: Capsule())
+    }
+
+    private var audioPlayerSection: some View {
+        AudioPlayerView(
+            audioURL: FileArtifactStore().audioFileURL(for: item.id),
+            title: item.title
+        )
     }
 
     private var badges: [(title: String, icon: String?, tone: BadgeTone)] {
@@ -701,9 +839,7 @@ struct KnowledgeDetailView: View {
                 }
             } else {
                 if let body = item.bodyText, !body.isEmpty {
-                    Text(body)
-                        .font(.body)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    RichBodyView(text: body)
                 } else {
                     VStack(spacing: 12) {
                         Text("No content yet")
@@ -762,15 +898,84 @@ struct KnowledgeDetailView: View {
 
     // MARK: - Bookmark
 
+    @State private var bookmarkFavicon: UIImage?
+
     private var bookmarkSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let urlStr = item.importSourceURL, let url = URL(string: urlStr) {
-                Link(destination: url) {
-                    Label("Open in Safari", systemImage: "safari")
+                VStack(spacing: 12) {
+                    // Preview card
+                    HStack(spacing: 12) {
+                        // Favicon
+                        if let favicon = bookmarkFavicon {
+                            Image(uiImage: favicon)
+                                .resizable().scaledToFit()
+                                .frame(width: 48, height: 48)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .background(Color(.systemBackground))
+                        } else {
+                            Image(systemName: "bookmark.fill")
+                                .font(.title).foregroundStyle(.green)
+                                .frame(width: 48, height: 48)
+                                .background(.green.opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.title).font(.subheadline).fontWeight(.medium)
+                            Text(urlStr)
+                                .font(.caption).foregroundStyle(.blue).lineLimit(1)
+                            if let host = url.host {
+                                Text(host).font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                    }
+
+                    // Actions
+                    HStack(spacing: 16) {
+                        Link(destination: url) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "safari")
+                                Text("Open")
+                            }
+                            .font(.subheadline).fontWeight(.medium)
+                            .padding(.horizontal, 16).padding(.vertical, 8)
+                            .background(.blue, in: RoundedRectangle(cornerRadius: 10))
+                            .foregroundStyle(.white)
+                        }
+
+                        Button {
+                            UIPasteboard.general.string = urlStr
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "doc.on.doc")
+                                Text("Copy URL")
+                            }
+                            .font(.subheadline)
+                            .padding(.horizontal, 16).padding(.vertical, 8)
+                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
                 }
+                .padding(14)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .onAppear { loadFavicon(url: url) }
             }
         }
         .padding(.horizontal, 16)
+    }
+
+    private func loadFavicon(url: URL) {
+        guard let host = url.host else { return }
+        let faviconURL = URL(string: "https://www.google.com/s2/favicons?domain=\(host)&sz=64")!
+        let task = URLSession.shared.dataTask(with: faviconURL) { data, _, _ in
+            if let data, let img = UIImage(data: data) {
+                Task { @MainActor in bookmarkFavicon = img }
+            }
+        }
+        task.resume()
     }
 
     // MARK: - Image
@@ -810,6 +1015,13 @@ struct KnowledgeDetailView: View {
                             .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
                             .padding(.horizontal, 16)
                             .tag(idx)
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    deletePage(idx)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: scannedPages.count > 1 ? .always : .never))
@@ -843,6 +1055,32 @@ struct KnowledgeDetailView: View {
             guard let data = try? Data(contentsOf: url) else { return nil }
             return UIImage(data: data)
         }
+    }
+
+    private func deletePage(_ index: Int) {
+        let dir = fileStore.itemDirectoryURL(for: item.id)
+        let count = scannedPages.count
+        guard count > 1 else { return } // Don't delete the only page
+
+        // Delete the page file
+        let pageURL = dir.appendingPathComponent("scan_\(index).jpg")
+        try? FileManager.default.removeItem(at: pageURL)
+
+        // Re-index remaining pages (shift down)
+        for i in (index + 1)..<count {
+            let oldURL = dir.appendingPathComponent("scan_\(i).jpg")
+            let newURL = dir.appendingPathComponent("scan_\(i - 1).jpg")
+            try? FileManager.default.moveItem(at: oldURL, to: newURL)
+        }
+
+        // Update metadata
+        item.imagePageCount = count - 1
+        if index == 0 { item.imageFileRelativePath = count > 1 ? "scan_0.jpg" : nil }
+        try? modelContext.save()
+
+        // Reload
+        if currentPage >= count - 1 { currentPage = max(0, count - 2) }
+        scannedPages = loadScannedPages(count: count - 1)
     }
 
     // MARK: - Raw Response (debug)
@@ -1283,4 +1521,62 @@ struct ChipFlowLayout: Layout {
 
     struct LayoutItem { let index: Int; let x: CGFloat; let width: CGFloat; let height: CGFloat }
     struct LayoutRow { let items: [LayoutItem]; let y: CGFloat; var maxY: CGFloat { (items.map(\.height).max() ?? 0) + y } }
+}
+
+// MARK: - Rich Body Renderer
+
+/// Renders markdown body text as native SwiftUI using ContentParser.
+/// Falls back to plain text if parsing fails or produces no structure.
+struct RichBodyView: View {
+    let text: String
+
+    var body: some View {
+        let (blocks, _) = ContentParser.parse(text)
+        if blocks.count > 1 || (blocks.count == 1 && { if case .text = blocks[0] { false } else { true } }()) {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(blocks) { block in
+                    OutputBlockRenderer(block: block)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            // Fallback: plain text with basic markdown
+            let md = (try? AttributedString(markdown: text,
+                options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+                ?? AttributedString(text)
+            Text(md)
+                .font(.body)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+// MARK: - Mood Helpers
+
+private func moodEmoji(_ mood: String) -> String {
+    switch mood.lowercased() {
+    case "great": return "😄"
+    case "good": return "🙂"
+    case "okay", "ok": return "😐"
+    case "bad": return "😞"
+    case "terrible": return "😢"
+    case "anxious": return "😰"
+    case "excited": return "🤩"
+    case "tired": return "😴"
+    case "grateful": return "🙏"
+    case "productive": return "💪"
+    case "reflective": return "🤔"
+    default: return mood.first.map { String($0) }?.uppercased() ?? "•"
+    }
+}
+
+private func moodColor(_ mood: String) -> Color {
+    switch mood.lowercased() {
+    case "great", "excited", "grateful", "productive": return .green
+    case "good": return .blue
+    case "okay", "ok", "reflective": return .secondary
+    case "bad", "tired": return .orange
+    case "terrible", "anxious": return .red
+    default: return .secondary
+    }
 }

@@ -3,14 +3,22 @@ import SwiftUI
 // MARK: - Color from Hex
 
 extension Color {
+    /// Creates a color from a hex string (e.g. "#2563EB").
+    /// Adapts to light/dark mode: slightly lightened in dark mode for visibility.
     init(hex: String) {
         let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         var int: UInt64 = 0
         Scanner(string: hex).scanHexInt64(&int)
-        let r = Double((int >> 16) & 0xFF) / 255
-        let g = Double((int >> 8) & 0xFF) / 255
-        let b = Double(int & 0xFF) / 255
-        self.init(red: r, green: g, blue: b)
+        let r = CGFloat((int >> 16) & 0xFF) / 255
+        let g = CGFloat((int >> 8) & 0xFF) / 255
+        let b = CGFloat(int & 0xFF) / 255
+        let uiColor = UIColor { traitCollection in
+            if traitCollection.userInterfaceStyle == .dark {
+                return UIColor(red: min(1, r + 0.12), green: min(1, g + 0.12), blue: min(1, b + 0.12), alpha: 1)
+            }
+            return UIColor(red: r, green: g, blue: b, alpha: 1)
+        }
+        self.init(uiColor: uiColor)
     }
 
     static let defaultProjectColor = Color(hex: ProjectPalette.allHexes.first!)

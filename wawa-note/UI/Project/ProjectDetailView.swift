@@ -521,7 +521,8 @@ struct ProjectHomeView: View {
         defer { if didStart { url.stopAccessingSecurityScopedResource() } }
         let router = ImportRouter(importers: [
             JSONImporter(), MarkdownImporter(), PlainTextImporter(),
-            SRTImporter(), ICSImporter(), PDFImporter(), HTMLImporter(), RTFImporter()
+            SRTImporter(), ICSImporter(), PDFImporter(), HTMLImporter(), RTFImporter(),
+            AnarlogImporter()
         ])
         guard let importer = router.importer(for: url) else { return }
         do {
@@ -606,6 +607,7 @@ struct ItemsView: View {
     @State private var items: [KnowledgeItem] = []
     @State private var searchText = ""
     @State private var selectedType: String? = nil
+    @State private var sortOrder: ItemSortOrder = .recent
 
     var body: some View {
         List {
@@ -633,7 +635,18 @@ struct ItemsView: View {
         .navigationTitle("Items")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                filterMenu
+                HStack(spacing: 8) {
+                    Menu {
+                        ForEach(ItemSortOrder.allCases, id: \.self) { order in
+                            Button { sortOrder = order } label: {
+                                Label(order.label, systemImage: sortOrder == order ? "checkmark" : "")
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down").font(.caption)
+                    }
+                    filterMenu
+                }
             }
         }
         .onAppear { loadItems() }
@@ -644,6 +657,12 @@ struct ItemsView: View {
         var result = items
         if !searchText.isEmpty {
             result = result.filter { $0.title.localizedCaseInsensitiveContains(searchText) }
+        }
+        switch sortOrder {
+        case .recent: result.sort { $0.updatedAt > $1.updatedAt }
+        case .name: result.sort { $0.title.localizedCompare($1.title) == .orderedAscending }
+        case .type: result.sort { ($0.typeRaw) < ($1.typeRaw) }
+        case .created: result.sort { $0.createdAt > $1.createdAt }
         }
         if let type = selectedType {
             result = result.filter { $0.type.rawValue == type }
@@ -1047,6 +1066,20 @@ struct SignalsView: View {
     }
 }
 
+
+// MARK: - Item Sort Order
+
+enum ItemSortOrder: CaseIterable {
+    case recent, name, type, created
+    var label: String {
+        switch self {
+        case .recent: "Recent"
+        case .name: "Name"
+        case .type: "Type"
+        case .created: "Created"
+        }
+    }
+}
 
 // MARK: - Document Scanner (VisionKit wrapper)
 
