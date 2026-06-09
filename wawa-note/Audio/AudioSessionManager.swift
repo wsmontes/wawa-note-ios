@@ -317,69 +317,46 @@ final class AudioSessionManager {
     /// For meetings: prefer front mic (closer to user's face, better voice pickup).
     /// Guideline: "Não pense em 'o microfone do iPhone'; pense em array de microfones."
     func selectBestMicrophone() {
-        guard let builtInMic = session.availableInputs?.first(where: {
-            $0.portType == .builtInMic
-        }) else {
-            AppLog.audio.info("No built-in mic found — using system default")
-            return
-        }
-
-        // Set the built-in mic as preferred input
+        // Wrapped entirely in do-catch: microphone selection is
+        // best-effort. If anything fails, the system default works fine.
         do {
+            guard let builtInMic = session.availableInputs?.first(where: {
+                $0.portType == .builtInMic
+            }) else {
+                AppLog.audio.info("No built-in mic found — using system default")
+                return
+            }
+
+            // Set the built-in mic as preferred input
             try session.setPreferredInput(builtInMic)
             AppLog.audio.info("Selected built-in mic: \(builtInMic.portName)")
+
+            // Log all available data sources
+            if let dataSources = builtInMic.dataSources {
+                for ds in dataSources {
+                    let patterns = ds.supportedPolarPatterns?.map(\.rawValue).joined(separator: ",") ?? "none"
+                    AppLog.audio.debug("Mic DS: '\(ds.dataSourceName)' orientation=\(ds.orientation?.rawValue ?? "nil") polar=\(patterns)")
+                }
+            }
+
+            // Set polar pattern if available (cardioid = directional voice)
+            if let selectedDS = builtInMic.selectedDataSource {
+                let supported = selectedDS.supportedPolarPatterns ?? []
+                if supported.contains(.cardioid) {
+                    try? selectedDS.setPreferredPolarPattern(.cardioid)
+                    AppLog.audio.info("Polar pattern: cardioid")
+                } else if supported.contains(.omnidirectional) {
+                    try? selectedDS.setPreferredPolarPattern(.omnidirectional)
+                    AppLog.audio.info("Polar pattern: omnidirectional")
+                }
+            }
+
+            let finalDS = builtInMic.selectedDataSource
+            AppLog.audio.info("Mic: '\(finalDS?.dataSourceName ?? "system default")'")
         } catch {
-            AppLog.audio.warning("Failed to set preferred input: \(error.localizedDescription)")
+            AppLog.audio.warning("Mic selection failed, using system default: \(error.localizedDescription)")
+            // Non-fatal — system default mic is perfectly fine
         }
-
-        // Now select the best data source on this mic
-        guard let dataSources = builtInMic.dataSources, !dataSources.isEmpty else {
-            AppLog.audio.info("No data sources available — using default")
-            return
-        }
-
-        // Log all available data sources for debugging
-        for ds in dataSources {
-            let patterns = ds.supportedPolarPatterns?.map(\.rawValue).joined(separator: ",") ?? "none"
-            AppLog.audio.debug("Mic DS: '\(ds.dataSourceName)' orientation=\(ds.orientation?.rawValue ?? "nil") polar=\(patterns)")
-        }
-
-        // Prefer front-facing mic for meeting recording (closest to user's face)
-        // iOS data source orientation: .front = FaceTime camera side, .bottom = Lightning port side
-        if let frontMic = dataSources.first(where: { $0.orientation == .front }) {
-            do {
-                try builtInMic.setPreferredDataSource(frontMic)
-                AppLog.audio.info("Selected front microphone: '\(frontMic.dataSourceName)'")
-            } catch {
-                AppLog.audio.warning("Failed to set front mic: \(error.localizedDescription)")
-            }
-        } else if let bottomMic = dataSources.first(where: { $0.orientation == .bottom }) {
-            do {
-                try builtInMic.setPreferredDataSource(bottomMic)
-                AppLog.audio.info("Selected bottom microphone (front not available): '\(bottomMic.dataSourceName)'")
-            } catch {
-                AppLog.audio.warning("Failed to set bottom mic: \(error.localizedDescription)")
-            }
-        }
-
-        // Select cardioid polar pattern for best voice pickup
-        if let selectedDS = session.currentRoute.inputs.first?.selectedDataSource {
-            let supportedPatterns = selectedDS.supportedPolarPatterns ?? []
-            if supportedPatterns.contains(.cardioid) {
-                try? selectedDS.setPreferredPolarPattern(.cardioid)
-                AppLog.audio.info("Set polar pattern: cardioid")
-            } else if supportedPatterns.contains(.omnidirectional) {
-                try? selectedDS.setPreferredPolarPattern(.omnidirectional)
-                AppLog.audio.info("Set polar pattern: omnidirectional")
-            }
-        }
-
-        // Log the final selection
-        let finalDS = session.currentRoute.inputs.first?.selectedDataSource
-        AppLog.audio.info("Final mic: '\(finalDS?.dataSourceName ?? "system default")'")
-
-        // Update input port name for UI
-        _ = currentInputPortName
     }
 
     // MARK: - Gain control
