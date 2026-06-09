@@ -2,19 +2,18 @@ import Foundation
 
 /// Dedicated tool for writing analysis JSON.
 ///
-/// Replaces the fragile `echo '{"complex":"json"}' > /path` VFS command
-/// with a clean parameter-based API the LLM can call directly.
+/// The LLM writes JSON using the template's section names as keys.
+/// The JSON is stored as-is — the UI renders dynamically from the template
+/// sections, so any template works without key normalization.
 ///
 /// Usage: write_analysis(itemId, analysisJson)
-/// - itemId: the knowledge item UUID
-/// - analysisJson: the complete analysis JSON string
 struct WriteAnalysisTool: AgentTool {
     let name = "write_analysis"
     let description = """
         Write the analysis result for a knowledge item.
         Use after extract to save your structured analysis.
-        The analysisJson must be valid JSON with shortSummary, decisions, actionItems, risks, openQuestions.
-        Example: write_analysis(itemId="...", analysisJson="{\\"shortSummary\\":\\"...\\",...}")
+        The JSON keys should match the section titles from the template.
+        Example: write_analysis(itemId="...", analysisJson='{"Summary":"...","Key Decisions":[...]}')
         """
     let parameters = AIToolParameters(
         properties: [
@@ -24,7 +23,7 @@ struct WriteAnalysisTool: AgentTool {
             ),
             "analysisJson": AIToolProperty(
                 type: "string",
-                description: "Complete analysis JSON string"
+                description: "Complete analysis JSON. Keys = template section titles."
             )
         ],
         required: ["itemId", "analysisJson"]
@@ -43,100 +42,32 @@ struct WriteAnalysisTool: AgentTool {
                               isError: true, displaySummary: "Missing JSON")
         }
 
-        // Parse JSON
+        // Validate JSON
         guard let data = jsonStr.data(using: .utf8),
-              var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return ToolResult(content: "Error: analysisJson is not valid JSON",
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              !json.isEmpty else {
+            return ToolResult(content: "Error: analysisJson is not valid JSON or is empty",
                               isError: true, displaySummary: "Invalid JSON")
         }
 
-        // Normalize keys: accept both snake_case and camelCase
-        json = normalizeKeys(json)
-
-        // Check required field
-        let hasSummary = (json["shortSummary"] as? String)?.isEmpty == false
-        if !hasSummary {
-            return ToolResult(content: "Error: analysis must include 'shortSummary' field with a one-line summary",
-                              isError: true, displaySummary: "Missing shortSummary")
-        }
-
-        // Write normalized JSON
+        // Write as-is — no key normalization. The template defines the section names,
+        // the LLM uses them as keys, the UI renders dynamically from the template.
         let fileStore = FileArtifactStore()
         do {
-            let normalizedData = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
             try fileStore.createMeetingDirectory(for: itemId)
+
+            // Write the original JSON for DynamicAnalysis rendering
+            let prettyData = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
             let url = fileStore.itemDirectoryURL(for: itemId).appendingPathComponent("analysis.json")
-            try normalizedData.write(to: url, options: .atomic)
-            let fieldCount = json.count
+            try prettyData.write(to: url, options: .atomic)
+
             return ToolResult(
-                content: "Analysis written (\(fieldCount) fields)",
-                displaySummary: "Analysis saved (\(fieldCount) fields)"
+                content: "Analysis written (\(json.count) sections)",
+                displaySummary: "Analysis saved"
             )
         } catch {
             return ToolResult(content: "Error writing analysis: \(error.localizedDescription)",
                               isError: true, displaySummary: "Write failed")
         }
-
-    }
-
-    /// Normalize JSON keys to match MeetingAnalysis property names.
-    /// Handles snake_case, Title Case, and common LLM variations.
-    private func normalizeKeys(_ json: [String: Any]) -> [String: Any] {
-        let keyMap: [String: String] = [
-            // snake_case → camelCase
-            "short_summary": "shortSummary",
-            "detailed_summary": "detailedSummary",
-            "action_items": "actionItems",
-            "open_questions": "openQuestions",
-            "important_dates": "importantDates",
-            "due_date": "dueDate",
-            "source_segment_ids": "sourceSegmentIds",
-            // Title Case (template section names)
-            "Summary": "shortSummary",
-            "Detailed Summary": "detailedSummary",
-            "Decisions": "decisions",
-            "Key Decisions": "decisions",
-            "Action Items": "actionItems",
-            "Actions": "actionItems",
-            "Next Steps": "actionItems",
-            "Risks": "risks",
-            "Risks & Issues": "risks",
-            "Open Questions": "openQuestions",
-            "Questions": "openQuestions",
-            "Discussion Highlights": "detailedSummary",
-            "Attendees": "entities",
-            // Common LLM variations
-            "summary": "shortSummary",
-            "detailedSummary": "detailedSummary",
-            "actionItems": "actionItems",
-            "openQuestions": "openQuestions",
-            // Lowercase variations
-            "decisions": "decisions",
-            "risks": "risks",
-        ]
-        var result: [String: Any] = [:]
-        for (key, value) in json {
-            let mapped = keyMap[key] ?? key
-            if let nested = value as? [String: Any] {
-                result[mapped] = normalizeKeys(nested)
-            } else if let arr = value as? [[String: Any]] {
-                result[mapped] = arr.map { normalizeKeys($0) }
-            } else if let arr = value as? [Any] {
-                // Array of strings (e.g., questions) — keep as-is
-                result[mapped] = arr
-            } else {
-                result[mapped] = value
-            }
-        }
-        // Ensure shortSummary always exists
-        if result["shortSummary"] == nil {
-            for fallback in ["summary", "Summary", "short_summary"] {
-                if let v = json[fallback] as? String {
-                    result["shortSummary"] = v
-                    break
-                }
-            }
-        }
-        return result
     }
 }

@@ -279,15 +279,21 @@ final class ContentPipelineService: ObservableObject {
                                 failed = true
                             }
                         }
-                        // Final check: can we actually decode the analysis?
-                        if !failed, let data = try? Data(contentsOf: store.itemDirectoryURL(for: itemID).appendingPathComponent("analysis.json")) {
-                            if (try? JSONDecoder().decode(MeetingAnalysis.self, from: data)) == nil {
-                                AppLog.provider.warning("Pipeline attempt \(attemptCount): analysis.json exists but cannot be decoded as MeetingAnalysis")
-                                lastError = "Analysis file exists but is not valid MeetingAnalysis JSON. The model may have used wrong field names."
-                                failed = true
+                        // Create DynamicAnalysis from the raw JSON (any keys work)
+                        if !failed, let data = try? Data(contentsOf: store.itemDirectoryURL(for: itemID).appendingPathComponent("analysis.json")),
+                           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                            let dynamicData = try? JSONEncoder().encode(DynamicAnalysis(
+                                itemId: itemID,
+                                providerId: provider.id,
+                                model: executorModel,
+                                schemaId: "write_analysis",
+                                results: AnalysisResults(storage: json.mapValues { AnyCodable($0) })
+                            ))
+                            if let dd = dynamicData {
+                                try? dd.write(to: store.itemDirectoryURL(for: itemID).appendingPathComponent("analysis.dynamic.json"))
                             }
                         }
-                        if !failed { break } // Success — analysis exists, is valid, and decodes
+                        if !failed { break } // Success — analysis exists and DynamicAnalysis created
                     } else {
                         // Agent finished but didn't create analysis
                         AppLog.provider.warning("Pipeline attempt \(attemptCount): agent finished but no analysis.json found")
