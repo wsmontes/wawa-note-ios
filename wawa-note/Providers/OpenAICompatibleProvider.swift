@@ -92,8 +92,12 @@ private struct ChatCompletionResponse: Decodable {
             let reasoningContent: String?
             let toolCalls: [ToolCall]?
 
-            /// Returns content or reasoning_content (DeepSeek V4, o3, etc.)
-            var effectiveContent: String? { content ?? reasoningContent }
+            /// DeepSeek V4 thinking mode: content is often empty string,
+            /// real output is in reasoning_content. Prefer non-empty content.
+            var effectiveContent: String {
+                if let c = content, !c.isEmpty { return c }
+                return reasoningContent ?? ""
+            }
 
             struct ToolCall: Decodable {
                 let id: String?
