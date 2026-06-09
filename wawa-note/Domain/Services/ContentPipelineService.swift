@@ -132,7 +132,7 @@ final class ContentPipelineService: ObservableObject {
             if item.type == .audio && item.transcriptionEngineId == nil {
                 pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
                     itemType: item.type.rawValue, phase: "transcribing",
-                    currentTool: nil, toolSummary: nil, toolLog: [])
+                    currentTool: nil, toolSummary: nil, toolLog: [], events: [], thinkingActive: false)
                 NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
                     userInfo: ["stage": "transcribing"])
                 let extractionSvc = ContentExtractionService(modelContext: modelContext, fileStore: fileStore)
@@ -195,9 +195,11 @@ final class ContentPipelineService: ObservableObject {
 
             // Report progress to UI
             var toolLog: [String] = []
+            var agentEvents: [PipelineAgentEvent] = []
             pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
                                               itemType: item.type.rawValue, phase: "starting",
-                                              currentTool: nil, toolSummary: nil, toolLog: toolLog)
+                                              currentTool: nil, toolSummary: nil, toolLog: toolLog,
+                                              events: agentEvents, thinkingActive: false)
 
             // Verify we have content to analyze before launching the agent
             let extractionSvc = ContentExtractionService(modelContext: modelContext, fileStore: fileStore)
@@ -241,40 +243,64 @@ final class ContentPipelineService: ObservableObject {
                 do {
                     for try await event in stream {
                         switch event {
-                        case .toolCallStarted(let name, _, _):
+                        case .toolCallStarted(let name, let id, let args):
                             AppLog.provider.info("Pipeline agent tool [attempt \(attemptCount)]: \(name)")
+                            agentEvents.append(PipelineAgentEvent(
+                                id: UUID(), kind: .toolCall, timestamp: Date(),
+                                detail: name, metadata: args))
+                            toolLog.append("\(name): \(args.prefix(80))")
                             pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
-                                itemType: item.type.rawValue, phase: "processing",
-                                currentTool: name, toolSummary: nil, toolLog: toolLog)
+                                itemType: item.type.rawValue, phase: "analyzing",
+                                currentTool: name, toolSummary: nil, toolLog: toolLog,
+                                events: agentEvents, thinkingActive: false)
                             NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
-                                userInfo: ["tool": name, "itemTitle": item.title])
-                        case .toolCallCompleted(let name, _, let summary):
+                                userInfo: ["tool": name, "args": args, "events": agentEvents, "itemTitle": item.title])
+                        case .toolCallCompleted(let name, let id, let summary):
                             AppLog.provider.info("Pipeline agent result [attempt \(attemptCount)]: \(name) — \(summary)")
+                            agentEvents.append(PipelineAgentEvent(
+                                id: UUID(), kind: .toolResult, timestamp: Date(),
+                                detail: name, metadata: summary))
                             toolLog.append("\(name): \(summary)")
                             pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
-                                itemType: item.type.rawValue, phase: "processing",
-                                currentTool: name, toolSummary: summary, toolLog: toolLog)
+                                itemType: item.type.rawValue, phase: "analyzing",
+                                currentTool: name, toolSummary: summary, toolLog: toolLog,
+                                events: agentEvents, thinkingActive: false)
                             NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
-                                userInfo: ["tool": name, "summary": summary, "itemTitle": item.title])
-                        case .textDelta:
-                            break
+                                userInfo: ["tool": name, "summary": summary, "events": agentEvents, "itemTitle": item.title])
+                        case .textDelta(let delta):
+                            agentEvents.append(PipelineAgentEvent(
+                                id: UUID(), kind: .textDelta, timestamp: Date(),
+                                detail: String(delta.prefix(100)), metadata: nil))
+                        case .thinking:
+                            pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
+                                itemType: item.type.rawValue, phase: "analyzing",
+                                currentTool: nil, toolSummary: nil, toolLog: toolLog,
+                                events: agentEvents, thinkingActive: true)
+                            NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
+                                userInfo: ["thinking": true, "events": agentEvents, "itemTitle": item.title])
                         case .finished:
                             AppLog.provider.info("Pipeline agent completed for item \(itemID) on attempt \(attemptCount)")
+                            agentEvents.append(PipelineAgentEvent(
+                                id: UUID(), kind: .done, timestamp: Date(),
+                                detail: "Agent finished", metadata: nil))
                             pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
                                 itemType: item.type.rawValue, phase: "completed",
-                                currentTool: nil, toolSummary: nil, toolLog: toolLog)
+                                currentTool: nil, toolSummary: nil, toolLog: toolLog,
+                                events: agentEvents, thinkingActive: false)
                             NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
-                                userInfo: ["phase": "completed", "itemTitle": item.title])
+                                userInfo: ["phase": "completed", "events": agentEvents, "itemTitle": item.title])
                             failed = false
                         case .error(let error):
                             AppLog.provider.error("Pipeline agent error [attempt \(attemptCount)]: \(error.localizedDescription)")
                             lastError = error.localizedDescription
+                            agentEvents.append(PipelineAgentEvent(
+                                id: UUID(), kind: .failed, timestamp: Date(),
+                                detail: error.localizedDescription, metadata: nil))
                             pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
                                 itemType: item.type.rawValue, phase: "error",
-                                currentTool: nil, toolSummary: error.localizedDescription, toolLog: toolLog)
+                                currentTool: nil, toolSummary: error.localizedDescription, toolLog: toolLog,
+                                events: agentEvents, thinkingActive: false)
                             failed = true
-                        case .thinking:
-                            break
                         }
                     }
                 } catch {
@@ -329,7 +355,8 @@ final class ContentPipelineService: ObservableObject {
             if let error = lastError {
                 pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
                     itemType: item.type.rawValue, phase: "error",
-                    currentTool: nil, toolSummary: error, toolLog: toolLog)
+                    currentTool: nil, toolSummary: error, toolLog: toolLog,
+                    events: agentEvents, thinkingActive: false)
             }
             // Mark item as processed so it's not re-enqueued forever
             // (was the root cause of infinite pipeline loops for notes)
@@ -1016,14 +1043,33 @@ enum PipelineStage: String, Sendable {
 
 // MARK: - Pipeline progress (observable)
 
+/// An individual event in the agent's processing trace, rendered in the UI.
+struct PipelineAgentEvent: Sendable, Identifiable {
+    enum Kind: String, Sendable {
+        case thinking      // Agent is reasoning (LLM thinking)
+        case toolCall      // Agent called a tool
+        case toolResult    // Tool returned a result
+        case textDelta     // Agent sent a text chunk
+        case done          // Agent finished successfully
+        case failed        // Agent errored
+    }
+    let id: UUID
+    let kind: Kind
+    let timestamp: Date
+    let detail: String     // tool name, summary, or thinking label
+    let metadata: String?  // arguments, full result, or thinking text
+}
+
 struct PipelineProgress: Sendable {
     let itemId: UUID
     let itemTitle: String
     let itemType: String
-    let phase: String       // "starting", "processing", "completed", "error"
+    let phase: String       // "starting", "transcribing", "analyzing", "ingesting", "completed", "error"
     let currentTool: String?
     let toolSummary: String?
     var toolLog: [String]   // ordered list of "tool_name: summary"
+    var events: [PipelineAgentEvent]  // full agent trace for UI rendering
+    var thinkingActive: Bool  // true when agent is in thinking/reasoning state
 }
 
 // MARK: - Editable Prompt

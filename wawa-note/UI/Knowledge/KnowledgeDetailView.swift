@@ -30,6 +30,8 @@ struct KnowledgeDetailView: View {
     @State private var pipelineStage: String = ""
     @State private var isReprocessing = false
     @State private var showReprocessWarning = false
+    @State private var agentEvents: [PipelineAgentEvent] = []
+    @State private var isAgentThinking = false
 
     private let fileStore = FileArtifactStore()
 
@@ -40,12 +42,38 @@ struct KnowledgeDetailView: View {
                     .padding(.horizontal, 16)
 
                 if isTranscribing || isPipelineProcessing {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                        Text(transcriptionProgress ?? (pipelineStage.isEmpty ? "Processing..." : pipelineStage))
-                            .font(.subheadline).foregroundStyle(.secondary)
+                    VStack(spacing: 0) {
+                        // Current status bar
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(transcriptionProgress ?? (pipelineStage.isEmpty ? "Processing..." : pipelineStage))
+                                    .font(.subheadline).foregroundStyle(.primary)
+                                if isAgentThinking {
+                                    Text("Agent is thinking…").font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            if !agentEvents.isEmpty {
+                                Text("\(agentEvents.count) steps").font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(12)
+
+                        // Agent trace — collapsible log of tool calls & results
+                        if !agentEvents.isEmpty {
+                            Divider().padding(.horizontal, 12)
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    ForEach(agentEvents) { evt in
+                                        agentEventBadge(evt)
+                                    }
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                            }
+                        }
                     }
-                    .padding(12)
                     .frame(maxWidth: .infinity)
                     .background(Color(.secondarySystemGroupedBackground))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -208,9 +236,21 @@ struct KnowledgeDetailView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .contentPipelineStageChanged)) { n in
             guard n.object as? String == item.id.uuidString else { return }
-            if let stage = n.userInfo?["stage"] as? String {
-                pipelineStage = stage
+            if let tool = n.userInfo?["tool"] as? String {
+                pipelineStage = "Agent: \(tool)"
                 isPipelineProcessing = true
+            }
+            if let summary = n.userInfo?["summary"] as? String {
+                pipelineStage = summary
+            }
+            if let phase = n.userInfo?["phase"] as? String {
+                pipelineStage = phase == "completed" ? "Analysis complete" : pipelineStage
+            }
+            if let events = n.userInfo?["events"] as? [PipelineAgentEvent] {
+                agentEvents = events
+            }
+            if let thinking = n.userInfo?["thinking"] as? Bool {
+                isAgentThinking = thinking
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .transcriptReady)) { n in
@@ -1497,6 +1537,59 @@ struct KnowledgeDetailView: View {
         let m = Int(seconds) / 60
         let s = Int(seconds) % 60
         return String(format: "%02d:%02d", m, s)
+    }
+
+    // MARK: - Agent event badge
+
+    @ViewBuilder
+    private func agentEventBadge(_ evt: PipelineAgentEvent) -> some View {
+        Group {
+            switch evt.kind {
+            case .thinking:
+                Label(evt.detail.isEmpty ? "Thinking" : evt.detail, systemImage: "brain")
+                    .font(.caption2)
+                    .foregroundStyle(.purple)
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Color.purple.opacity(0.1))
+                    .clipShape(Capsule())
+            case .toolCall:
+                Label(evt.detail, systemImage: "hammer")
+                    .font(.caption2)
+                    .foregroundStyle(.blue)
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Color.blue.opacity(0.1))
+                    .clipShape(Capsule())
+            case .toolResult:
+                Label(evt.detail, systemImage: "checkmark.circle")
+                    .font(.caption2)
+                    .foregroundStyle(.green)
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Color.green.opacity(0.1))
+                    .clipShape(Capsule())
+            case .textDelta:
+                Text(evt.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Color(.tertiarySystemFill))
+                    .clipShape(Capsule())
+            case .done:
+                Label("Done", systemImage: "checkmark")
+                    .font(.caption2)
+                    .foregroundStyle(.green)
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Color.green.opacity(0.1))
+                    .clipShape(Capsule())
+            case .failed:
+                Label(evt.detail.prefix(40), systemImage: "xmark.circle")
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Color.red.opacity(0.1))
+                    .clipShape(Capsule())
+            }
+        }
     }
 
     private func formatDuration(_ seconds: Double) -> String {
