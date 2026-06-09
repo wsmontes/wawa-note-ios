@@ -578,6 +578,13 @@
 			<key>isa</key>
 			<string>PBXBuildFile</string>
 		</dict>
+		<key>1E20CAB1900D4E10B767A3BE</key>
+		<dict>
+			<key>fileRef</key>
+			<string>2086ECCDDC13498C899FBEE1</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
 		<key>1E3DB54C7D6B745C9086F452</key>
 		<dict>
 			<key>fileRef</key>
@@ -614,6 +621,17 @@
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
 		</dict>
+		<key>2086ECCDDC13498C899FBEE1</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>MeetilyTemplateService.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
 		<key>20E2998EA822EE4AE9A9A516</key>
 		<dict>
 			<key>isa</key>
@@ -624,6 +642,13 @@
 			<string>AppDesign.swift</string>
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
+		</dict>
+		<key>21509F3B18304DA09A96F083</key>
+		<dict>
+			<key>fileRef</key>
+			<string>5CF01E08E69645CA8C602EDC</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
 		</dict>
 		<key>22E6296874D44763AC301D91</key>
 		<dict>
@@ -1574,6 +1599,17 @@
 			<string>sourcecode.swift</string>
 			<key>path</key>
 			<string>ProviderDetailView.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>5CF01E08E69645CA8C602EDC</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>SummaryCache.swift</string>
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
 		</dict>
@@ -2696,6 +2732,8 @@
 				<string>D697241796EC418BAC8779BA</string>
 				<string>D2505829C648429A921C3319</string>
 				<string>362E0F6420EA44EDB38543C7</string>
+				<string>1E20CAB1900D4E10B767A3BE</string>
+				<string>21509F3B18304DA09A96F083</string>
 			</array>
 			<key>isa</key>
 			<string>PBXSourcesBuildPhase</string>
@@ -2882,6 +2920,8 @@
 				<string>5568D497EC0742FFBF071E13</string>
 				<string>87E09DC88DA541A483642060</string>
 				<string>A1B2C949491544F791AE85EE</string>
+				<string>2086ECCDDC13498C899FBEE1</string>
+				<string>5CF01E08E69645CA8C602EDC</string>
 			</array>
 			<key>isa</key>
 			<string>PBXGroup</string>

@@ -6,29 +6,46 @@ import OSLog
 
 /// Energy-based Voice Activity Detection for offline audio segmentation.
 ///
-/// Inspired by anarlog's `vad` crate (Silero ONNX). Uses RMS energy
-/// threshold instead of ML — faster, works on all iOS versions, no model needed.
+/// Thresholds tuned with Meetily's anti-fragmentation parameters:
+/// - Speech threshold: 0.50 (prevents silence from leaking)
+/// - Silence threshold: 0.35 (allows natural pauses)
+/// - Min speech: 250ms (prevents Whisper-rejected <100ms fragments)
+/// - Redemption time: 2000ms (bridges natural pauses, was capped at 400ms)
+/// - Pre-speech pad: 300ms (context before speech)
+/// - Post-speech pad: 400ms (context after speech)
 ///
-/// For ML-based VAD in the future, Apple's SoundAnalysis framework
-/// (SNClassifySoundRequest) can be used on iOS 15+, or the Silero ONNX
-/// model can be converted to CoreML via coremltools.
-///
-/// Output: array of speech segments with start/end times, ready for
-/// transcription or speaker labeling.
+/// Reference: Meetily's `vad.rs` — ContinuousVadProcessor with Silero VAD.
+/// For ML-based VAD, convert Silero ONNX → CoreML via coremltools.
 @MainActor
 final class VoiceActivityDetector: ObservableObject {
     private let logger = Logger(subsystem: "com.wawa.note", category: "VAD")
 
-    /// Minimum duration (seconds) for a speech segment to be considered valid.
-    var minSpeechDuration: TimeInterval = 0.3
+    /// Positive speech threshold — RMS level above this is definitely speech.
+    /// Meetily default: 0.50 (higher = stricter, prevents false positives).
+    var speechThreshold: Float = 0.05
+
+    /// Minimum duration (seconds) for a speech segment to be valid.
+    /// Meetily default: 250ms (prevents Whisper-rejected fragments <100ms).
+    var minSpeechDuration: TimeInterval = 0.25
 
     /// Minimum silence duration (seconds) to split segments.
-    var minSilenceDuration: TimeInterval = 0.5
+    /// Meetily default: 400ms (bridges natural pauses in speech).
+    var minSilenceDuration: TimeInterval = 0.4
 
-    /// Energy threshold for RMS-based detection (0.0 - 1.0).
-    /// 0.02 is a good default for close-mic recordings.
-    /// Increase for noisy environments, decrease for quiet ones.
-    var energyThreshold: Float = 0.02
+    /// Pre-speech padding (seconds) — audio context added before speech starts.
+    /// Meetily default: 300ms.
+    var preSpeechPad: TimeInterval = 0.3
+
+    /// Post-speech padding (seconds) — audio context added after speech ends.
+    /// Meetily default: 400ms.
+    var postSpeechPad: TimeInterval = 0.4
+
+    /// Legacy energy threshold (kept for compatibility).
+    /// Use `speechThreshold` instead.
+    var energyThreshold: Float {
+        get { speechThreshold }
+        set { speechThreshold = newValue }
+    }
 
     // MARK: - Detection Result
 
