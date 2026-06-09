@@ -79,10 +79,11 @@ struct WriteAnalysisTool: AgentTool {
 
     }
 
-    /// Normalize JSON keys from snake_case to camelCase.
-    /// Both formats are accepted — output is always camelCase for MeetingAnalysis.
+    /// Normalize JSON keys to match MeetingAnalysis property names.
+    /// Handles snake_case, Title Case, and common LLM variations.
     private func normalizeKeys(_ json: [String: Any]) -> [String: Any] {
         let keyMap: [String: String] = [
+            // snake_case → camelCase
             "short_summary": "shortSummary",
             "detailed_summary": "detailedSummary",
             "action_items": "actionItems",
@@ -90,6 +91,28 @@ struct WriteAnalysisTool: AgentTool {
             "important_dates": "importantDates",
             "due_date": "dueDate",
             "source_segment_ids": "sourceSegmentIds",
+            // Title Case (template section names)
+            "Summary": "shortSummary",
+            "Detailed Summary": "detailedSummary",
+            "Decisions": "decisions",
+            "Key Decisions": "decisions",
+            "Action Items": "actionItems",
+            "Actions": "actionItems",
+            "Next Steps": "actionItems",
+            "Risks": "risks",
+            "Risks & Issues": "risks",
+            "Open Questions": "openQuestions",
+            "Questions": "openQuestions",
+            "Discussion Highlights": "detailedSummary",
+            "Attendees": "entities",
+            // Common LLM variations
+            "summary": "shortSummary",
+            "detailedSummary": "detailedSummary",
+            "actionItems": "actionItems",
+            "openQuestions": "openQuestions",
+            // Lowercase variations
+            "decisions": "decisions",
+            "risks": "risks",
         ]
         var result: [String: Any] = [:]
         for (key, value) in json {
@@ -98,8 +121,20 @@ struct WriteAnalysisTool: AgentTool {
                 result[mapped] = normalizeKeys(nested)
             } else if let arr = value as? [[String: Any]] {
                 result[mapped] = arr.map { normalizeKeys($0) }
+            } else if let arr = value as? [Any] {
+                // Array of strings (e.g., questions) — keep as-is
+                result[mapped] = arr
             } else {
                 result[mapped] = value
+            }
+        }
+        // Ensure shortSummary always exists
+        if result["shortSummary"] == nil {
+            for fallback in ["summary", "Summary", "short_summary"] {
+                if let v = json[fallback] as? String {
+                    result["shortSummary"] = v
+                    break
+                }
             }
         }
         return result
