@@ -83,14 +83,18 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
     var onCheckpoint: ((Transcript, Int) -> Void)?
     private(set) var isCancelled = false
 
+    /// Domain-specific terms for the current session.
+    /// Guideline: "Gere vocabulário contextual por sessão."
+    var contextualTerms: [String]?
+
     var capabilities: TranscriptionCapabilities {
         TranscriptionCapabilities(
-            supportsLive: false,         // File-based only for now
+            supportsLive: true,
             supportsFile: true,
-            isOnDevice: true,            // Guaranteed — requiresOnDevice=true
+            isOnDevice: true,
             maxDuration: Self.maxFileDuration,
             supportedLocales: candidateLocales,
-            hasModelDownload: true       // Apple manages model download
+            hasModelDownload: true
         )
     }
 
@@ -344,15 +348,108 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         }
     }
 
+    // MARK: - Live Transcription
+
+    /// Transcribe an audio file with live partial results.
+    /// Guideline: "Diferencie resultado volátil de resultado finalizado."
+    func transcribeLive(from audioFileURL: URL) -> LiveTranscriptionStream {
+        LiveTranscriptionStream { continuation in
+            let task = Task {
+                do {
+                    let availability = checkAvailability()
+                    guard case .available = availability else {
+                        continuation.finish(throwing: TranscriptionError.onDeviceUnavailable)
+                        return
+                    }
+                    guard let recognizer = firstAvailableRecognizer() else {
+                        continuation.finish(throwing: TranscriptionError.noSupportedLocale)
+                        return
+                    }
+                    guard recognizer.supportsOnDeviceRecognition else {
+                        continuation.finish(throwing: TranscriptionError.onDeviceUnavailable)
+                        return
+                    }
+
+                    let request = SFSpeechURLRecognitionRequest(url: audioFileURL)
+                    request.shouldReportPartialResults = true  // Enable volatile results
+                    request.addsPunctuation = true
+                    request.requiresOnDeviceRecognition = true
+                    if let terms = contextualTerms, !terms.isEmpty {
+                        request.contextualStrings = terms
+                    }
+                    request.taskHint = .dictation
+
+                    AppLog.transcription.info("Live transcription started — locale=\(recognizer.locale.identifier)")
+
+                    // Track seen segment indices to avoid duplicates
+                    var lastReportedSegmentCount = 0
+
+                    let recognitionTask = recognizer.recognitionTask(with: request) { result, error in
+                        guard !Task.isCancelled else {
+                            continuation.finish()
+                            return
+                        }
+
+                        if let error {
+                            AppLog.transcription.error("Live recognition error: \(error.localizedDescription)")
+                            continuation.finish(throwing: TranscriptionError.recognitionFailed(error.localizedDescription))
+                            return
+                        }
+
+                        guard let result = result else { return }
+
+                        let segments = result.bestTranscription.segments
+                        let isFinal = result.isFinal
+
+                        // Only emit new segments (incremental)
+                        if segments.count > lastReportedSegmentCount || isFinal {
+                            let newSegments = Array(segments[lastReportedSegmentCount...])
+                            lastReportedSegmentCount = segments.count
+
+                            let transcriptSegments = newSegments.map { seg in
+                                TranscriptSegment(
+                                    meetingId: UUID(),
+                                    startTime: seg.timestamp,
+                                    endTime: seg.timestamp + seg.duration,
+                                    text: seg.substring,
+                                    confidence: Double(seg.confidence),
+                                    languageCode: recognizer.locale.identifier,
+                                    sourceEngineId: "apple-speech"
+                                )
+                            }
+
+                            let liveResult = LiveTranscriptionResult(
+                                text: result.bestTranscription.formattedString,
+                                segments: transcriptSegments,
+                                isFinal: isFinal,
+                                confidence: nil
+                            )
+                            continuation.yield(liveResult)
+
+                            if isFinal {
+                                AppLog.transcription.info("Live transcription final: \(segments.count) segments")
+                                continuation.finish()
+                            }
+                        }
+                    }
+                    self.activeRecognitionTask = recognitionTask
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
+
     // MARK: - Contextual vocabulary
 
     /// Build domain-specific terms from current project context.
     /// Guideline: "Gere vocabulário contextual por sessão."
     private func buildContextualTerms() -> [String]? {
-        // Simple approach: no current session context available in engine scope.
-        // The caller (ContentPipelineService) should inject this via a property.
-        // For now, return nil — the engine works well without it.
-        nil
+        contextualTerms
     }
 
     // MARK: - Private helpers

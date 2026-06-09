@@ -31,6 +31,19 @@ struct TranscriptionCapabilities: Sendable {
     let hasModelDownload: Bool       // Needs asset download step
 }
 
+// MARK: - Live Transcription Types
+
+/// A single live transcription result — can be volatile or final.
+struct LiveTranscriptionResult: Sendable {
+    let text: String
+    let segments: [TranscriptSegment]
+    let isFinal: Bool
+    let confidence: Double?
+}
+
+/// Stream of live transcription results.
+typealias LiveTranscriptionStream = AsyncThrowingStream<LiveTranscriptionResult, Error>
+
 // MARK: - Engine Protocol
 
 protocol TranscriptionEngine: Sendable {
@@ -41,6 +54,11 @@ protocol TranscriptionEngine: Sendable {
 
     /// Transcribe a pre-recorded audio file.
     func transcribeFile(_ audioFileURL: URL) async throws -> Transcript
+
+    /// Transcribe a live audio stream (buffer-based).
+    /// Returns an async stream of volatile + final results.
+    /// Guideline: "Diferencie resultado volátil de resultado finalizado."
+    func transcribeLive(from audioFileURL: URL) -> LiveTranscriptionStream
 
     /// Cancel an in-progress transcription.
     func cancel()
@@ -56,18 +74,25 @@ protocol TranscriptionEngine: Sendable {
 // MARK: - Default implementations
 
 extension TranscriptionEngine {
+    /// Default: not all engines support live transcription.
+    func transcribeLive(from audioFileURL: URL) -> LiveTranscriptionStream {
+        LiveTranscriptionStream { continuation in
+            continuation.finish()
+        }
+    }
+
     func prepareIfNeeded() async throws {
         let availability = checkAvailability()
         switch availability {
         case .available:
-            return // Ready
+            return
         case .permissionDenied:
             throw TranscriptionError.notAuthorized
         case .hardwareUnsupported:
             throw TranscriptionError.onDeviceUnavailable
         case .modelMissing(let locale):
             throw TranscriptionError.modelNotInstalled(locale.identifier)
-        case .localeUnsupported(let locale):
+        case .localeUnsupported:
             throw TranscriptionError.noSupportedLocale
         case .failed(let message):
             throw TranscriptionError.recognitionFailed(message)
