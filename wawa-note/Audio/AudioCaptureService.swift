@@ -222,7 +222,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// may not fire new notifications when already in a waiting state.
     private func startWaitingInputProbe() {
         stopWaitingInputProbe()
-        waitingInputProbeTask = Task { [weak self] in
+        waitingInputProbeTask = Task { @MainActor [weak self] in
             var backoff = 0
             while !Task.isCancelled, let self {
                 let delay = backoff < 2 ? 1_000_000_000 : 2_000_000_000
