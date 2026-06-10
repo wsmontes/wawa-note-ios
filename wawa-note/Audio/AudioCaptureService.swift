@@ -368,30 +368,47 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         AppLog.audio.info("Recording resumed")
     }
 
-    func stopRecording() {
-        // Accept ANY active state. Only refuse .idle and .stopped.
-        let isFailed: Bool = if case .failedFatal = state { true } else { false }
-        guard state != .idle, state != .stopped else { return }
+    /// Force-finish from ANY state. Does NOT depend on Bluetooth, engine,
+    /// recovery tasks, or microphone state. Always works on first call.
+    /// Preserves already-committed valid segments via the coordinator.
+    func forceFinish() {
+        // 1. Kill all async recovery tasks immediately
+        routeChangeTask?.cancel()
+        routeChangeTask = nil
+        routeRecoveryGeneration = UUID()
 
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+        // 2. Mark intent as stopped — no recovery can resurrect
+        recordingIntent = .userStopped
+
+        // 3. Remove all observers
+        removeAudioNotificationObservers()
+
+        // 4. Stop timer
         timerTask?.cancel()
         timerTask = nil
         levelMonitorTask?.cancel()
-        removeAudioNotificationObservers()
+
+        // 5. Try to stop engine/tap safely — don't crash if already broken
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
         try? sessionManager.deactivate()
 
+        // 6. Close any open segment
         fileWriter.finishRecording()
-        transition(to: .stopped, reason: "user stopped")
-        recordingIntent = .userStopped
-        routeRecoveryGeneration = UUID()  // Invalidate all pending recoveries
+
+        // 7. Final transition
+        transition(to: .stopped, reason: "forceFinish")
         audioLevel = 0.0
         elapsedTime = 0.0
         recordingStartTime = nil
         currentInputPortName = ""
         currentMeetingId = nil
         stateBeforeSystemInterruption = nil
-        AppLog.audio.info("Recording stopped")
+        AppLog.audio.info("Recording force-finished")
+    }
+
+    func stopRecording() {
+        forceFinish()
     }
 
     func resetToIdle() {
