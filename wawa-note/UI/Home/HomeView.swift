@@ -264,7 +264,7 @@ struct HomeView: View {
     var body: some View {
         ZStack {
             switch captureVM.recordingState {
-            case .recording, .paused, .interrupted:
+            case .recording, .pausedByUser, .interruptedBySystem, .waitingForUsableInput, .reconfiguringRoute:
                 recordingPanel
             case .stopped:
                 defaultSurface
@@ -621,8 +621,9 @@ struct HomeView: View {
     // MARK: Recording panel
 
     private var recordingPanel: some View {
-        let isPaused = captureVM.recordingState == .paused
-        let isInterrupted = captureVM.recordingState == .interrupted
+        let isPaused = captureVM.recordingState == .pausedByUser
+        let isInterrupted = captureVM.recordingState == .interruptedBySystem || captureVM.recordingState == .waitingForUsableInput || captureVM.recordingState == .reconfiguringRoute
+        let isRecovering = captureVM.recordingState == .waitingForUsableInput || captureVM.recordingState == .reconfiguringRoute
         let isActive = captureVM.recordingState == .recording
         return VStack(spacing: 0) {
             Spacer()

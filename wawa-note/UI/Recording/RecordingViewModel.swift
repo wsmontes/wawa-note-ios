@@ -2,11 +2,14 @@ import Combine
 import SwiftUI
 import SwiftData
 
-enum RecordingUIState {
+enum RecordingUIState: Equatable {
     case idle
     case recording
-    case paused
-    case interrupted
+    case pausedByUser
+    case reconfiguringRoute
+    case waitingForUsableInput
+    case interruptedBySystem
+    case failedFatal(String)
     case stopped
 }
 

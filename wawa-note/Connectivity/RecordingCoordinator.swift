@@ -237,7 +237,7 @@ final class RecordingCoordinator: ObservableObject {
     func pauseRecording() {
         guard state == .recording else { return }
         captureService.pauseRecording()
-        state = .paused
+        state = .pausedByUser
         pauseStartDate = Date()
         observationTimer?.invalidate()
         nowPlayingTimer?.invalidate()
@@ -246,8 +246,8 @@ final class RecordingCoordinator: ObservableObject {
     }
 
     func resumeRecording() {
-        guard state == .paused || state == .interrupted else { return }
-        if state == .interrupted {
+        guard state == .pausedByUser || state == .interruptedBySystem || state == .waitingForUsableInput else { return }
+        if state == .interruptedBySystem || state == .waitingForUsableInput {
             // Route-loss / interruption recovery — force recording intent
             retryRecordingRecovery()
             return
@@ -270,7 +270,7 @@ final class RecordingCoordinator: ObservableObject {
     }
 
     func stopRecording() {
-        guard state == .recording || state == .paused || state == .interrupted else { return }
+        guard state == .recording || state == .pausedByUser || state == .interruptedBySystem || state == .waitingForUsableInput else { return }
         let itemId = savedItemId
         AppLog.event("audio", "Stopping recording — elapsed=\(elapsedTimeFormatted) pausedDur=\(Int(pausedDuration))s itemID=\(itemId?.uuidString.prefix(8) ?? "nil")")
         captureService.stopRecording()
@@ -331,7 +331,7 @@ final class RecordingCoordinator: ObservableObject {
     private func syncCaptureState(_ captureState: AudioCaptureState) {
         switch captureState {
         case .recording:
-            if state == .interrupted || state == .paused {
+            if state == .waitingForUsableInput || state == .interruptedBySystem || state == .waitingForUsableInput || state == .pausedByUser || state == .reconfiguringRoute {
                 if let ps = pauseStartDate {
                     pausedDuration += Date().timeIntervalSince(ps)
                     pauseStartDate = nil
@@ -341,23 +341,42 @@ final class RecordingCoordinator: ObservableObject {
                 nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: true)
                 notifyStatusChange()
             }
-        case .interrupted:
-            if state == .recording || state == .paused {
-                state = .interrupted
+        case .reconfiguringRoute:
+            if state == .recording || state == .pausedByUser {
+                // Stop timer but keep logical recording alive
+                if pauseStartDate == nil { pauseStartDate = Date() }
+                observationTimer?.invalidate()
+                nowPlayingTimer?.invalidate()
+                state = .reconfiguringRoute
+                nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: false)
+                notifyStatusChange()
+            }
+        case .waitingForUsableInput:
+            if state == .recording || state == .pausedByUser || state == .reconfiguringRoute {
+                if pauseStartDate == nil { pauseStartDate = Date() }
+                observationTimer?.invalidate()
+                nowPlayingTimer?.invalidate()
+                state = .waitingForUsableInput
+                nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: false)
+                notifyStatusChange()
+            }
+        case .interruptedBySystem:
+            if state == .recording || state == .pausedByUser {
+                state = .waitingForUsableInput
                 if pauseStartDate == nil { pauseStartDate = Date() }
                 observationTimer?.invalidate()
                 nowPlayingTimer?.invalidate()
                 nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: false)
                 notifyStatusChange()
             }
-        case .paused:
+        case .pausedByUser:
             if state == .recording {
-                state = .paused
+                state = .pausedByUser
                 if pauseStartDate == nil { pauseStartDate = Date() }
                 observationTimer?.invalidate()
                 notifyStatusChange()
             }
-        case .stopped:
+        case .stopped, .failedFatal:
             if state != .stopped {
                 state = .stopped
                 observationTimer?.invalidate()
@@ -408,7 +427,7 @@ final class RecordingCoordinator: ObservableObject {
                 }
             }
 
-            self.state = .interrupted
+            self.state = .waitingForUsableInput
             self.errorMessage = self.captureService.audioInterruptionReason
                 ?? "Could not resume recording. Try disconnecting Bluetooth or use iPhone mic."
             self.notifyStatusChange()
@@ -417,15 +436,15 @@ final class RecordingCoordinator: ObservableObject {
 
     /// Attempt to recover from audio interruptions when the app returns to the foreground.
     func onAppForeground() {
-        guard state == .interrupted else { return }
+        guard state == .interruptedBySystem || state == .waitingForUsableInput else { return }
         AppLog.event("audio", "App returned to foreground while interrupted — attempting recovery")
         captureService.resumeRecording()
         if captureService.state == .recording {
             state = .recording
             startObservation()
             notifyStatusChange()
-        } else if captureService.state == .paused {
-            state = .paused
+        } else if captureService.state == .pausedByUser {
+            state = .pausedByUser
             notifyStatusChange()
         }
     }
@@ -471,7 +490,7 @@ final class RecordingCoordinator: ObservableObject {
             audioLevel: audioLevel,
             errorMessage: errorMessage,
             recordingTitle: recordingTitle,
-            isActive: state == .recording || state == .paused || state == .interrupted
+            isActive: state == .recording || state == .pausedByUser || state == .interruptedBySystem || state == .waitingForUsableInput
         )
     }
 
@@ -479,8 +498,11 @@ final class RecordingCoordinator: ObservableObject {
         switch state {
         case .idle: return "idle"
         case .recording: return "recording"
-        case .paused: return "paused"
-        case .interrupted: return "interrupted"
+        case .pausedByUser: return "paused"
+        case .reconfiguringRoute: return "reconfiguring"
+        case .waitingForUsableInput: return "waitingForInput"
+        case .interruptedBySystem: return "interrupted"
+        case .failedFatal: return "failed"
         case .stopped: return "stopped"
         }
     }
@@ -513,7 +535,7 @@ final class RecordingCoordinator: ObservableObject {
                 guard let self else { return }
                 if self.state == .recording {
                     self.pauseRecording()
-                } else if self.state == .paused {
+                } else if self.state == .pausedByUser {
                     self.resumeRecording()
                 }
             }
@@ -548,8 +570,8 @@ final class RecordingCoordinator: ObservableObject {
                 self.observationTimer = nil
                 self.nowPlayingTimer?.invalidate()
                 self.nowPlayingTimer = nil
-            } else if self.captureService.state == .interrupted && self.state != .interrupted {
-                self.state = .interrupted
+            } else if (self.captureService.state == .interruptedBySystem || self.captureService.state == .waitingForUsableInput) && self.state != .waitingForUsableInput && self.state != .interruptedBySystem {
+                self.state = .waitingForUsableInput
                 self.pauseStartDate = Date()  // Freeze elapsed time
                 self.notifyStatusChange()
             }
@@ -559,7 +581,7 @@ final class RecordingCoordinator: ObservableObject {
         nowPlayingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self else { return }
             // Timer.scheduledTimer fires on main run loop — already on main thread.
-            guard self.state == .recording || self.state == .paused else { return }
+            guard self.state == .recording || self.state == .pausedByUser else { return }
             let effective = self.elapsedTime - self.pausedDuration
             self.nowPlayingController.update(
                 title: self.recordingTitle,
@@ -626,7 +648,7 @@ final class RecordingCoordinator: ObservableObject {
         let formatted = String(format: "%02d:%02d", mm, ss)
         let state = RecordingActivityAttributes.ContentState(
             elapsedTimeFormatted: formatted,
-            isPaused: state == .paused,
+            isPaused: state == .pausedByUser,
             title: recordingTitle
         )
         Task { @MainActor [activity] in await activity.update(using: state) }

@@ -9,7 +9,7 @@ enum AudioSessionError: Error {
 }
 
 final class AudioSessionManager {
-    private let session: AVAudioSession
+    let session: AVAudioSession  // internal — read by AudioCaptureService for route snapshots
 
     init(session: AVAudioSession = .sharedInstance()) {
         self.session = session
