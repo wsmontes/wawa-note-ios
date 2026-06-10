@@ -207,68 +207,108 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// Rebuild engine for a new audio route. Creates a new file segment.
+    /// Used by route changes, interruption ended, and media services reset.
+    /// - Parameter reason: why the rebuild is happening (for manifest).
+    /// - Parameter resumeRecording: whether to resume .recording after rebuild.
+    private func rebuildForNewRoute(reason: String, resumeRecording: Bool) {
+        let prevState = state
+        state = .interrupted  // Prevent tap from writing during transition
+        timerTask?.cancel()
+
+        // 1. Remove tap, stop engine, close current segment
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        fileWriter.closeCurrentSegment()
+
+        // 2. Reconfigure session
+        try? sessionManager.deactivate()
+        do {
+            try sessionManager.configureForRecording()
+        } catch {
+            AppLog.error("audio", "rebuildForNewRoute: session reconfigure failed: \(error)")
+            audioInterruptionReason = "Could not configure audio."
+            return
+        }
+
+        // 3. Rebuild engine
+        engine.reset()
+        installTap()
+        engine.prepare()
+
+        do {
+            try engine.start()
+        } catch {
+            AppLog.error("audio", "rebuildForNewRoute: engine start failed: \(error)")
+            audioInterruptionReason = "Could not start audio."
+            return
+        }
+
+        // 4. Open new file segment
+        let hwFmt = engine.inputNode.outputFormat(forBus: 0)
+        let segIndex = fileWriter.segmentIndex + 1
+        let segFileName = String(format: "segment-%03d.m4a", segIndex)
+
+        guard let meetingId = currentMeetingId else {
+            audioInterruptionReason = "Internal error."
+            return
+        }
+
+        do {
+            try fileWriter.startNewSegment(meetingId: meetingId, format: hwFmt)
+        } catch {
+            AppLog.error("audio", "rebuildForNewRoute: startNewSegment failed: \(error)")
+            audioInterruptionReason = "Could not create audio segment."
+            return
+        }
+
+        // 5. Emit new segment and restore state
+        let segment = RecordingSegment(
+            id: UUID(), index: segIndex,
+            fileName: segFileName,
+            startedAt: Date(),
+            inputPortName: self.sessionManager.currentInputPortName,
+            inputPortType: self.sessionManager.bestAvailableInput?.portType.rawValue ?? "unknown",
+            routeChangeReason: reason,
+            sampleRate: hwFmt.sampleRate
+        )
+        onSegmentCreated?(segment)
+
+        state = resumeRecording ? .recording : .paused
+        if resumeRecording { startTimer() }
+        AppLog.audio.info("Rebuilt for new route: \(self.sessionManager.currentInputPortName) segment=\(segIndex)")
+    }
+
+    // Simple engine rebuild without segment creation (used for startRecording only).
     private func rebuildEngine() {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         engine.reset()
-
         installTap()
         engine.prepare()
-
-        // Retry up to 2 times if engine start fails (can happen during rapid route changes)
         for attempt in 0...2 {
             do {
                 try engine.start()
-                AppLog.audio.info("Engine rebuilt successfully\(attempt > 0 ? " (attempt \(attempt + 1))" : "")")
                 return
             } catch {
-                AppLog.error("audio", "Engine rebuild attempt \(attempt + 1) failed: \(error.localizedDescription)")
                 if attempt < 2 {
-                    // Brief pause then retry — route may still be stabilizing
                     Thread.sleep(forTimeInterval: 0.25)
                     engine.reset()
                     engine.prepare()
                 }
             }
         }
-        // All attempts failed
         state = .interrupted
-        audioInterruptionReason = "Audio system unavailable. Check connected devices."
+        audioInterruptionReason = "Audio system unavailable."
     }
 
     // MARK: - Interruption recovery
 
     func attemptResume() {
         guard state == .interrupted else { return }
-
-        try? sessionManager.deactivate()
-        do {
-            try sessionManager.configureForRecording()
-        } catch {
-            AppLog.error("audio", "Failed to reconfigure session during resume attempt: \(error.localizedDescription)")
-            audioInterruptionReason = "Could not resume after interruption"
-            return
-        }
-
-        rebuildEngine()
-
-        guard state != .interrupted else {
-            // rebuildEngine set state to .interrupted — rebuild failed
-            audioInterruptionReason = "Could not resume after interruption"
-            return
-        }
-
-        currentInputPortName = sessionManager.currentInputPortName
-        if stateBeforeInterruption == .recording {
-            state = .recording
-            startTimer()
-            audioInterruptionReason = nil
-            AppLog.audio.info("Recording resumed after interruption on \(self.currentInputPortName)")
-        } else {
-            state = .paused
-            audioInterruptionReason = nil
-            AppLog.audio.info("Engine rebuilt, recording remains paused on \(self.currentInputPortName)")
-        }
+        let shouldRecord = stateBeforeInterruption == .recording
+        rebuildForNewRoute(reason: "interruptionEnded", resumeRecording: shouldRecord)
+        audioInterruptionReason = state == .interrupted ? "Could not resume after interruption" : nil
     }
 
     // MARK: - Notifications
@@ -331,41 +371,16 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 timerTask?.cancel()
             }
         case .ended:
-            // The InterruptionOptionKey may be absent (Apple DTS: no guarantee
-            // that every .began has a corresponding .ended with options).
             let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt
             let options = optionsValue.map { AVAudioSession.InterruptionOptions(rawValue: $0) }
             if options?.contains(.shouldResume) == true,
                stateBeforeInterruption == .recording || stateBeforeInterruption == .paused {
-                AppLog.audio.info("Audio interruption ended — attempting resume with engine rebuild")
-                audioInterruptionReason = "Attempting to resume after interruption..."
-
-                // Deactivate first to clear any stale session state
-                try? sessionManager.deactivate()
-                do {
-                    try sessionManager.configureForRecording()
-                } catch {
-                    AppLog.error("audio", "Failed to reconfigure session after interruption: \(error.localizedDescription)")
-                    state = .interrupted
-                    audioInterruptionReason = "Could not resume after interruption"
-                    stateBeforeInterruption = nil
-                    return
-                }
-
-                // Always rebuild engine after interruption to fix iOS bugs
-                // where tap stops firing after phone calls (e.g. iPhone 16e)
-                rebuildEngine()
-
-                if state != .interrupted {
-                    state = .recording
-                    audioInterruptionReason = nil
-                    startTimer()
-                    AppLog.event("audio", "Successfully resumed recording after interruption")
-                } else {
-                    audioInterruptionReason = "Could not resume after interruption"
-                }
+                AppLog.audio.info("Audio interruption ended — rebuilding with new segment")
+                let shouldRecord = stateBeforeInterruption == .recording
+                rebuildForNewRoute(reason: "interruptionEnded", resumeRecording: shouldRecord)
+                audioInterruptionReason = state == .interrupted ? "Could not resume after interruption" : nil
             } else if state == .interrupted {
-                AppLog.audio.info("Audio interruption ended without shouldResume — transitioning to paused")
+                AppLog.audio.info("Audio interruption ended without shouldResume — paused")
                 audioInterruptionReason = "Interruption ended. Recording paused."
                 state = .paused
             }
@@ -399,90 +414,23 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return
         }
 
-        // Only rebuild if actively recording
-        guard state == .recording else {
+        // Rebuild if recording OR paused (engine is alive in both states)
+        let wasRecording = state == .recording
+        guard wasRecording || state == .paused else {
             currentInputPortName = newPort
             return
         }
 
-        // Rebuild engine for the new input route
-        timerTask?.cancel()
-        state = .interrupted  // Prevent tap from writing during transition
-
-        // 1. Remove tap, stop engine
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-
-        // 2. Close current file segment
-        fileWriter.closeCurrentSegment()
-
-        // 3. Reconfigure session for the new device
-        try? sessionManager.deactivate()
-        do {
-            try sessionManager.configureForRecording()
-        } catch {
-            AppLog.error("audio", "Route change: failed to reconfigure session: \(error)")
-            audioInterruptionReason = "Could not switch to \(newPort)"
-            return  // state stays .interrupted
-        }
-
-        // 4. Rebuild engine for new route
-        engine.reset()
-        installTap()
-        engine.prepare()
-
-        do {
-            try engine.start()
-        } catch {
-            AppLog.error("audio", "Route change: engine start failed: \(error)")
-            audioInterruptionReason = "Could not start audio on \(newPort)"
-            return
-        }
-
-        // 5. Open new file segment — MUST succeed before we consider recording
-        let hwFmt = engine.inputNode.outputFormat(forBus: 0)
-        let segIndex = fileWriter.segmentIndex + 1
-        let segFileName = String(format: "segment-%03d.m4a", segIndex)
-
-        guard let meetingId = currentMeetingId else {
-            audioInterruptionReason = "Internal error: no meeting ID"
-            return
-        }
-
-        do {
-            try fileWriter.startNewSegment(meetingId: meetingId, format: hwFmt)
-        } catch {
-            AppLog.error("audio", "Route change: startNewSegment failed: \(error)")
-            audioInterruptionReason = "Could not create new audio segment."
-            return  // state stays .interrupted
-        }
-
-        // 6. Success — notify and resume
-        let segment = RecordingSegment(
-            id: UUID(), index: segIndex,
-            fileName: segFileName,
-            startedAt: Date(),
-            inputPortName: newPort,
-            inputPortType: sessionManager.bestAvailableInput?.portType.rawValue ?? "unknown",
-            routeChangeReason: String(reason.rawValue),
-            sampleRate: hwFmt.sampleRate
-        )
-        onSegmentCreated?(segment)
-
+        rebuildForNewRoute(reason: String(reason.rawValue), resumeRecording: wasRecording)
         currentInputPortName = newPort
-        state = .recording
-        startTimer()
-        AppLog.audio.info("Rebuilt engine for new route: \(newPort)")
+        AppLog.audio.info("Rebuilt for new route: \(newPort)")
     }
 
     private func handleMediaServicesReset(_ notification: Notification) {
-        AppLog.error("audio", "Catastrophic media services reset detected — engine must be rebuilt")
+        AppLog.error("audio", "Media services reset — rebuilding with new segment")
         if state == .recording || state == .paused {
-            state = .interrupted
-            audioInterruptionReason = "Audio system reset. Recording may be affected."
-            timerTask?.cancel()
+            rebuildForNewRoute(reason: "mediaServicesReset", resumeRecording: state == .recording)
         }
-        rebuildEngine()
     }
 
     private func startTimer() {

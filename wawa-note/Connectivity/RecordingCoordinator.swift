@@ -246,31 +246,21 @@ final class RecordingCoordinator: ObservableObject {
             saveManifest(m, meetingId: meetingId)
 
             // Concatenate segments into audio.m4a for backward compatibility
-            Task.detached(priority: .utility) {
-                await self.concatenateSegments(manifest: m, meetingId: meetingId)
-            }
-        }
-
-        // Trigger pipeline processing. CaptureViewModel also calls this from
-        // the UI, but remote commands (lock screen, CarPlay) come directly here.
-        if let itemId {
-            if let pipeline = contentPipeline {
-                AppLog.event("audio", "Launching pipeline for item \(itemId.uuidString.prefix(8))")
-                pipeline.process(itemId, using: modelContext)
-            } else {
-                AppLog.error("audio", "Cannot launch pipeline: contentPipeline is nil")
-            }
+            Task { await AudioSegmentConcatenator.concatenate(manifest: m, meetingId: meetingId) }
         }
 
         if let pauseStart = pauseStartDate {
             pausedDuration += Date().timeIntervalSince(pauseStart)
         }
 
+        // Update item FIRST, then trigger pipeline (lock screen/CarPlay path)
         updateItemOnStop()
         notifyStatusChange()
 
-        // Pipeline is launched by CaptureViewModel.stopRecording() which owns
-        // the recording lifecycle. RecordingCoordinator just manages audio state.
+        if let itemId, let pipeline = contentPipeline {
+            AppLog.event("audio", "Pipeline for item \(itemId.uuidString.prefix(8))")
+            pipeline.process(itemId, using: modelContext)
+        }
     }
 
     // MARK: - Segments
@@ -281,20 +271,20 @@ final class RecordingCoordinator: ObservableObject {
         try? store.writeRecordingManifest(manifest, for: meetingId)
     }
 
-    /// Concatenate all segments into a single audio.m4a for compatibility
-    /// with legacy playback, VFS, and exports. Runs on a background task.
-    private func concatenateSegments(manifest: RecordingManifest, meetingId: UUID) async {
+// MARK: - Segment concatenator (non-MainActor)
+
+/// Concatenates recording segments into a single audio.m4a for legacy compatibility.
+enum AudioSegmentConcatenator {
+    static func concatenate(manifest: RecordingManifest, meetingId: UUID) async {
         let store = FileArtifactStore()
         let sortedSegments = manifest.segments.sorted { $0.index < $1.index }
 
-        // Collect file URLs for existing segments
         let urls: [URL] = sortedSegments.compactMap { seg in
             let url = store.segmentURL(for: meetingId, fileName: seg.fileName)
             return FileManager.default.fileExists(atPath: url.path) ? url : nil
         }
 
         guard urls.count > 1 else {
-            // Single segment — just copy to audio.m4a
             if let src = urls.first {
                 let dest = store.audioFileURL(for: meetingId)
                 try? FileManager.default.removeItem(at: dest)
@@ -303,38 +293,30 @@ final class RecordingCoordinator: ObservableObject {
             return
         }
 
-        // Multi-segment: concatenate using AVAssetExportSession
         let composition = AVMutableComposition()
         var cursor = CMTime.zero
-
         for url in urls {
             let asset = AVAsset(url: url)
             guard let track = asset.tracks(withMediaType: .audio).first else { continue }
-            let range = CMTimeRange(start: .zero, duration: asset.duration)
-
             if let compTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
-                try? compTrack.insertTimeRange(range, of: track, at: cursor)
+                try? compTrack.insertTimeRange(CMTimeRange(start: .zero, duration: asset.duration), of: track, at: cursor)
                 cursor = CMTimeAdd(cursor, asset.duration)
             }
         }
 
         let destURL = store.audioFileURL(for: meetingId)
         try? FileManager.default.removeItem(at: destURL)
-
         guard let export = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetAppleM4A) else { return }
         export.outputURL = destURL
         export.outputFileType = .m4a
-
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            export.exportAsynchronously { continuation.resume() }
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            export.exportAsynchronously { c.resume() }
         }
-
         if export.status == .completed {
             AppLog.event("audio", "Segments concatenated → audio.m4a (\(urls.count) segments)")
-        } else {
-            AppLog.warn("audio", "Segment concatenation failed: \(export.error?.localizedDescription ?? "unknown")")
         }
     }
+}
 
     func returnToIdle() {
         state = .idle
@@ -376,7 +358,15 @@ final class RecordingCoordinator: ObservableObject {
             for item in orphans {
                 AppLog.audio.info("Recovering interrupted recording: \(item.id)")
                 item.status = .recorded
-                item.audioFileRelativePath = AppFileConstants.audioFileName
+                // Prefer manifest for new segmented recordings, fall back to audio.m4a
+                let store = FileArtifactStore()
+                if store.recordingManifestExists(for: item.id) {
+                    item.audioFileRelativePath = AppFileConstants.manifestFileName
+                } else if store.audioFileExists(for: item.id) {
+                    item.audioFileRelativePath = AppFileConstants.audioFileName
+                } else {
+                    item.status = .failed
+                }
             }
             try bgContext.save()
             AppLog.audio.info("Recovered \(orphans.count) interrupted recording(s) — saved as recorded")
