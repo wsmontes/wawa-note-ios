@@ -270,7 +270,8 @@ final class RecordingCoordinator: ObservableObject {
     }
 
     func stopRecording() {
-        guard state == .recording || state == .pausedByUser || state == .interruptedBySystem || state == .waitingForUsableInput else { return }
+        let isFailed: Bool = if case .failedFatal = state { true } else { false }
+        guard state == .recording || state == .pausedByUser || state == .interruptedBySystem || state == .waitingForUsableInput || state == .reconfiguringRoute || isFailed else { return }
         let itemId = savedItemId
         AppLog.event("audio", "Stopping recording — elapsed=\(elapsedTimeFormatted) pausedDur=\(Int(pausedDuration))s itemID=\(itemId?.uuidString.prefix(8) ?? "nil")")
         captureService.stopRecording()
@@ -331,7 +332,13 @@ final class RecordingCoordinator: ObservableObject {
     private func syncCaptureState(_ captureState: AudioCaptureState) {
         switch captureState {
         case .recording:
-            if state == .waitingForUsableInput || state == .interruptedBySystem || state == .waitingForUsableInput || state == .pausedByUser || state == .reconfiguringRoute {
+            // Only auto-transition from non-user-paused states. If the user
+            // explicitly paused, trust resumeRecording() / retryRecordingRecovery()
+            // to transition us — route changes must never auto-resume from pause.
+            let shouldAutoResume = state == .waitingForUsableInput
+                || state == .interruptedBySystem
+                || state == .reconfiguringRoute
+            if shouldAutoResume {
                 if let ps = pauseStartDate {
                     pausedDuration += Date().timeIntervalSince(ps)
                     pauseStartDate = nil
@@ -362,7 +369,7 @@ final class RecordingCoordinator: ObservableObject {
             }
         case .interruptedBySystem:
             if state == .recording || state == .pausedByUser {
-                state = .waitingForUsableInput
+                state = .interruptedBySystem
                 if pauseStartDate == nil { pauseStartDate = Date() }
                 observationTimer?.invalidate()
                 nowPlayingTimer?.invalidate()
@@ -376,11 +383,21 @@ final class RecordingCoordinator: ObservableObject {
                 observationTimer?.invalidate()
                 notifyStatusChange()
             }
-        case .stopped, .failedFatal:
+        case .stopped:
             if state != .stopped {
                 state = .stopped
                 observationTimer?.invalidate()
                 nowPlayingTimer?.invalidate()
+                notifyStatusChange()
+            }
+        case .failedFatal(let message):
+            let isAlreadyFailed: Bool = if case .failedFatal = state { true } else { false }
+            if !isAlreadyFailed || errorMessage != message {
+                state = .failedFatal(message)
+                errorMessage = message
+                observationTimer?.invalidate()
+                nowPlayingTimer?.invalidate()
+                nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: false)
                 notifyStatusChange()
             }
         case .idle:

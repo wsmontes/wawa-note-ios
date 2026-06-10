@@ -128,7 +128,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // Propagate write failures (e.g., disk full) — fatal, not recoverable.
         fileWriter.onWriteFailure = { [weak self] error in
             DispatchQueue.main.async {
-                guard let self, self.recordingIntent == .userWantsRecording else { return }
+                guard let self, self.recordingIntent != .userStopped, self.state != .idle, self.state != .stopped else { return }
 
                 let reason: String
                 let nsError = error as NSError
