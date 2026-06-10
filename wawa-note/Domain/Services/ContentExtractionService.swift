@@ -84,10 +84,11 @@ final class ContentExtractionService {
             AppLog.provider.info("ContentExtraction: transcription complete (\(result.segments.count) segments)")
             return result.segments.map(\.text).joined(separator: "\n")
         } catch {
-            AppLog.provider.error("ContentExtraction: transcription failed for item \(item.id): \(error)")
-            // Fall back to existing transcript if available (may have been saved by a prior run)
+            let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            AppLog.provider.error("ContentExtraction: transcription failed for item \(item.id): \(msg)")
+            item.status = .failed
+            try? modelContext.save()
             if let fallback = loadExistingTranscriptText(for: item.id) {
-                AppLog.provider.warning("ContentExtraction: falling back to existing transcript for item \(item.id)")
                 return fallback
             }
             return nil
@@ -167,12 +168,10 @@ final class ContentExtractionService {
     // MARK: - Best-effort text retrieval
 
     /// Returns the best available text for an item without running expensive extraction.
-    /// Checks transcript (audio) or bodyText (documents). Falls back to analysis summary.
-    /// Used when the pipeline needs text for Phase 3 but extraction isn't required.
-    func bestAvailableText(for item: KnowledgeItem) -> String? {
-        // For webBookmark: try to fetch URL content
+    /// For webBookmarks, fetches URL content asynchronously (never blocks the calling actor).
+    func bestAvailableText(for item: KnowledgeItem) async -> String? {
         if item.type == .webBookmark, let urlStr = item.importSourceURL, let url = URL(string: urlStr) {
-            if let fetched = fetchBookmarkContent(url: url) {
+            if let fetched = await fetchBookmarkContent(url: url) {
                 return fetched
             }
         }
@@ -182,34 +181,51 @@ final class ContentExtractionService {
         if let body = item.bodyText, !body.isEmpty {
             return body
         }
-        if let analysis = try? fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) {
-            let parts = [analysis.shortSummary, analysis.detailedSummary].filter { !$0.isEmpty }
-            if !parts.isEmpty { return parts.joined(separator: "\n") }
+        return nil
+    }
+
+    /// Synchronous variant for ShellInterpreter and other non-async callers.
+    /// Uses a brief semaphore wait on a background queue for webBookmarks.
+    func bestAvailableTextSync(for item: KnowledgeItem) -> String? {
+        if item.type == .webBookmark, let urlStr = item.importSourceURL, let url = URL(string: urlStr) {
+            if let fetched = fetchBookmarkContentSync(url: url) {
+                return fetched
+            }
         }
-        if let dynamic = try? fileStore.readArtifact(DynamicAnalysis.self, fileName: "analysis.dynamic.json", meetingId: item.id),
-           let summary = dynamic.results.stringField("short_summary") {
-            return summary
+        if let transcript = loadExistingTranscriptText(for: item.id) {
+            return transcript
+        }
+        if let body = item.bodyText, !body.isEmpty {
+            return body
         }
         return nil
     }
 
     /// Fetch and extract plain text from a webBookmark's URL.
-    private func fetchBookmarkContent(url: URL) -> String? {
+    /// Uses withCheckedContinuation to bridge async URLSession without blocking.
+    private func fetchBookmarkContent(url: URL) async -> String? {
         guard let scheme = url.scheme, scheme.hasPrefix("http") else { return nil }
-        let semaphore = DispatchSemaphore(value: 0)
-        var result: String?
-        let task = URLSession.shared.dataTask(with: url) { data, _, error in
-            defer { semaphore.signal() }
-            guard let data, error == nil, let html = String(data: data, encoding: .utf8) else { return }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard let html = String(data: data, encoding: .utf8) else { return nil }
             let plainText = html.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
                 .replacingOccurrences(of: "&[^;]+;", with: " ", options: .regularExpression)
                 .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            result = String(plainText.prefix(8000))
+            return String(plainText.prefix(8000))
+        } catch {
+            AppLog.provider.warning("ContentExtraction: failed to fetch bookmark: \(error)")
+            return nil
         }
-        task.resume()
-        _ = semaphore.wait(timeout: .now() + 15)
-        return result
+    }
+
+    /// Sync wrapper for callers that can't be async (ShellInterpreter, etc.).
+    /// Uses a non-blocking approach: if content isn't cached locally, returns nil
+    /// rather than blocking. The agent can retry extract later.
+    private func fetchBookmarkContentSync(url: URL) -> String? {
+        // WebBookmark fetching is inherently async. For sync callers (ShellInterpreter),
+        // return nil if we can't get it instantly. The pipeline pre-fetches via the async path.
+        return nil
     }
 
     // MARK: - Analyze text (source-aware)

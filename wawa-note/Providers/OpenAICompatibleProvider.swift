@@ -89,7 +89,15 @@ private struct ChatCompletionResponse: Decodable {
         struct Message: Decodable {
             let role: String?
             let content: String?
+            let reasoningContent: String?
             let toolCalls: [ToolCall]?
+
+            /// DeepSeek V4 thinking mode: content is often empty string,
+            /// real output is in reasoning_content. Prefer non-empty content.
+            var effectiveContent: String {
+                if let c = content, !c.isEmpty { return c }
+                return reasoningContent ?? ""
+            }
 
             struct ToolCall: Decodable {
                 let id: String?
@@ -104,6 +112,7 @@ private struct ChatCompletionResponse: Decodable {
 
             enum CodingKeys: String, CodingKey {
                 case role, content
+                case reasoningContent = "reasoning_content"
                 case toolCalls = "tool_calls"
             }
         }
@@ -225,13 +234,23 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
             return ["role": msg.role.apiName, "content": parts]
         }
 
+        let preset = AIConfigService.shared.presetFor(model: effectiveModel)
+
         var body: [String: Any] = [
             "model": effectiveModel,
             "messages": bodyMessages
         ]
-        if let t = request.temperature { body["temperature"] = t }
+
+        // Temperature: only send if the model supports it
+        if let t = request.temperature {
+            if preset?.supportsTemperature ?? true {
+                body["temperature"] = t
+            }
+            // else: reasoning models don't support temperature, omit silently
+        }
+
+        // Max tokens: use the correct parameter name per model
         if let mt = request.maxTokens {
-            let preset = AIConfigService.shared.presetFor(model: effectiveModel)
             if preset?.usesMaxCompletionTokens == true {
                 body["max_completion_tokens"] = mt
             } else {
@@ -239,25 +258,34 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
             }
         }
 
+        // Response format: only send if the model supports it
         if let fmt = request.responseFormat {
-            switch fmt {
-            case .jsonObject:
-                body["response_format"] = ["type": "json_object"]
-            case .jsonSchema(let name, let schemaJSON):
-                if let schemaData = schemaJSON.data(using: .utf8),
-                   let schemaObj = try? JSONSerialization.jsonObject(with: schemaData) {
-                    body["response_format"] = [
-                        "type": "json_schema",
-                        "json_schema": [
-                            "name": name,
-                            "strict": true,
-                            "schema": schemaObj
-                        ]
-                    ]
-                } else {
+            if AIConfigService.shared.supportsJSONFormat(for: effectiveModel) {
+                switch fmt {
+                case .jsonObject:
                     body["response_format"] = ["type": "json_object"]
+                case .jsonSchema(let name, let schemaJSON):
+                    if let schemaData = schemaJSON.data(using: .utf8),
+                       let schemaObj = try? JSONSerialization.jsonObject(with: schemaData) {
+                        body["response_format"] = [
+                            "type": "json_schema",
+                            "json_schema": [
+                                "name": name,
+                                "strict": true,
+                                "schema": schemaObj
+                            ]
+                        ]
+                    } else {
+                        body["response_format"] = ["type": "json_object"]
+                    }
                 }
             }
+            // else: reasoning models don't support response_format, omit silently
+        }
+
+        // Explicitly disable thinking mode (DeepSeek, Qwen, etc.)
+        if preset?.explicitlyDisableThinking == true {
+            body["thinking"] = ["type": "disabled"]
         }
 
         // Tools (function calling)
@@ -328,7 +356,7 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
         }()
 
         let msg = decoded.choices.first?.message
-        let text = msg?.content ?? ""
+        let text = msg?.effectiveContent ?? ""
         let finishReason = decoded.choices.first?.finishReason
 
         let toolCalls: [AIToolCall]? = msg?.toolCalls?.compactMap { tc -> AIToolCall? in

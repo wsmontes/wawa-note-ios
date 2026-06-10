@@ -3,6 +3,8 @@ import SwiftUI
 /// A single row in the file browser, representing a directory or file node.
 struct FileRowView: View {
     let node: VFSNode
+    let onOpen: (() -> Void)?
+    let onEdit: (() -> Void)?
     let onDelete: (() -> Void)?
     let onRename: ((String) -> Void)?
     let onMove: (() -> Void)?
@@ -106,16 +108,19 @@ struct FileRowView: View {
 
     @ViewBuilder
     private var contextMenuContent: some View {
-        if node.isDirectory {
-            Button { } label: {
-                Label("Open", systemImage: "arrow.right.circle")
+        if let onOpen {
+            Button { onOpen() } label: {
+                Label(node.isDirectory ? "Open Folder" : "Open File", systemImage: node.isDirectory ? "arrow.right.circle" : "doc.text.fill")
             }
-        } else {
-            Button { } label: {
-                Label("Open", systemImage: "doc.text.fill")
-            }
-            Divider()
         }
+
+        if onEdit != nil, !node.isDirectory {
+            Button { onEdit?() } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+        }
+
+        if onOpen != nil || onEdit != nil { Divider() }
 
         if onRename != nil {
             Button {

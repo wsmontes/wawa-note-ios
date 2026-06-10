@@ -138,6 +138,19 @@ struct SettingsView: View {
                     Text("Sync meeting notes with anarlog desktop app. Choose a shared folder to enable bidirectional import and export of .md session notes.")
                 }
 
+                // Analysis Skills
+                Section {
+                    NavigationLink {
+                        SkillsSettingsView()
+                    } label: {
+                        Label("Analysis Skills", systemImage: "sparkles")
+                    }
+                } header: {
+                    Text("AI Analysis")
+                } footer: {
+                    Text("Configure how the AI analyzes your content. Each skill defines a procedure and output format for a specific type of content.")
+                }
+
                 // Debug Logs
                 Section {
                     NavigationLink {

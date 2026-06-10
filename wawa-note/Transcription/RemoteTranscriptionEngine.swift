@@ -14,6 +14,17 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
     var onCheckpoint: ((Transcript, Int) -> Void)?
     private(set) var isCancelled = false
 
+    var capabilities: TranscriptionCapabilities {
+        TranscriptionCapabilities(
+            supportsLive: false,
+            supportsFile: true,
+            isOnDevice: false,
+            maxDuration: 3600,
+            supportedLocales: [],
+            hasModelDownload: false
+        )
+    }
+
     init(baseURL: URL, apiKey: String = "", session: URLSession = .shared) {
         self.baseURL = baseURL
         self.apiKey = apiKey
@@ -25,6 +36,11 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
 
     func cancel() {
         isCancelled = true
+    }
+
+    func checkAvailability() -> LocalTranscriptionAvailability {
+        // Remote engine is always "available" — it doesn't use on-device models
+        .available(localeIdentifier: "auto")
     }
 
     // MARK: - Duration
@@ -151,7 +167,7 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
 
         let (resData, response) = try await session.upload(for: request, fromFile: bodyURL)
         guard let http = response as? HTTPURLResponse else {
-            throw TranscriptionError.recognitionFailed
+            throw TranscriptionError.recognitionFailed("Remote transcription error")
         }
 
         guard (200...299).contains(http.statusCode) else {
@@ -160,14 +176,14 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
             if http.statusCode == 413 {
                 throw TranscriptionError.fileTooLarge
             }
-            throw TranscriptionError.recognitionFailed
+            throw TranscriptionError.recognitionFailed("Remote transcription error")
         }
 
         guard let json = try JSONSerialization.jsonObject(with: resData) as? [String: Any],
               let text = json["text"] as? String else {
             let body = String(data: resData, encoding: .utf8) ?? "<no body>"
             AppLog.transcription.error("Transcription response parse error: \(body.prefix(300))")
-            throw TranscriptionError.recognitionFailed
+            throw TranscriptionError.recognitionFailed("Remote transcription error")
         }
 
         return Transcript(

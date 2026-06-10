@@ -60,6 +60,8 @@ final class RecordingCoordinator: ObservableObject {
         calendarEventIdentifier: String? = nil,
         projectID: UUID? = nil
     ) {
+        // Auto-recover from stale state after previous recording
+        if self.state == .stopped { returnToIdle() }
         guard self.state == .idle else {
             AppLog.warn("audio", "RecordingCoordinator: startRecording called but state is \(String(describing: self.state))")
             return

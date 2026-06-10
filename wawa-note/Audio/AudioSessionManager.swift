@@ -23,15 +23,43 @@ final class AudioSessionManager {
         }
     }
 
+    /// User preference: .spokenAudio (enhanced, default) or .default (raw).
+    static var useVoiceProcessing: Bool {
+        get { !UserDefaults.standard.bool(forKey: "audio_raw_mode") }
+        set { UserDefaults.standard.set(!newValue, forKey: "audio_raw_mode") }
+    }
+
+    /// Speakerphone / viva-voz mode: activates front mic array + beamforming.
+    /// Uses .videoChat mode which engages the iPhone's multi-mic beamformer
+    /// for far-field voice pickup — ideal when the phone is on a table.
+    static var speakerphoneMode: Bool {
+        get { UserDefaults.standard.bool(forKey: "audio_speakerphone_mode") }
+        set { UserDefaults.standard.set(newValue, forKey: "audio_speakerphone_mode") }
+    }
+
     func configureForRecording() throws {
+        let mode: AVAudioSession.Mode
+        if Self.speakerphoneMode {
+            mode = .videoChat  // Front mic array + beamforming for far-field
+        } else {
+            mode = Self.useVoiceProcessing ? .spokenAudio : .default
+        }
         do {
-            try session.setCategory(.playAndRecord, mode: .spokenAudio, options: [
+            try session.setCategory(.playAndRecord, mode: mode, options: [
                 .allowBluetoothHFP,
                 .allowBluetooth,
                 .defaultToSpeaker
             ])
             try session.setAllowHapticsAndSystemSoundsDuringRecording(true)
             try session.setActive(true)
+
+            // Audit session state after activation
+            let s = self.session
+            let route = s.currentRoute
+            let inputs = route.inputs.map { "\($0.portName)" }.joined(separator: ", ")
+            let sr = s.sampleRate
+            let ioBuf = s.ioBufferDuration
+            AppLog.audio.info("Session: sampleRate=\(sr)Hz ioBuffer=\(String(format: "%.1f", ioBuf * 1000))ms inputs=[\(inputs.isEmpty ? "none" : inputs)]")
         } catch {
             AppLog.error("audio", "Failed to configure audio session: \(error.localizedDescription)")
             throw AudioSessionError.configurationFailed

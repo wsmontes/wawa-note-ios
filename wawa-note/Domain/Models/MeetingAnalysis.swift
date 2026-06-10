@@ -222,7 +222,12 @@ struct MeetingAnalysis: Identifiable, Codable {
         self.topicTimeline = topicTimeline
         self.rawProviderResponsePath = rawProviderResponsePath
     }
+
+    // Default Codable synthesis uses exact property names.
+    // WriteAnalysisTool normalizes JSON keys to camelCase before writing,
+    // so standard decoding works correctly.
 }
+
 
 // MARK: - Dynamic Analysis (framework-driven, replaces MeetingAnalysis for non-meeting projects)
 

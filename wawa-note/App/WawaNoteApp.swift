@@ -76,6 +76,9 @@ struct WawaNoteApp: App {
         // Clean up any recordings abandoned by a previous crash or force-quit
         coordinator.cleanupOrphanedRecordings()
 
+        // Request location permission early so it's ready when recording starts
+        LocationContextSensor().requestPermission()
+
         if fileLog.previousSessionCrashed {
             AppLog.warn("general", "⚠️ Previous session ended abnormally — crash log available in Settings > Debug Logs")
         }

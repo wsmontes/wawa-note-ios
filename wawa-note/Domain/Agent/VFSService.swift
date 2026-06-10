@@ -83,13 +83,12 @@ enum VFSService {
                 return hasSubPath ? .inboxItemFile(id: id) : .inboxItem(id: id)
             }
             let allItems = (try? KnowledgeItemService(context: context.modelContext).allItems()) ?? []
-            let inboxItems = allItems.filter { $0.inboxDate != nil }
-            if let matched = inboxItems.first(where: { $0.title.caseInsensitiveCompare(inboxItemStr) == .orderedSame }) {
+            if let matched = allItems.first(where: { $0.title.caseInsensitiveCompare(inboxItemStr) == .orderedSame }) {
                 return hasSubPath ? .inboxItemFile(id: matched.id) : .inboxItem(id: matched.id)
             }
-            let candidates = inboxItems.filter { $0.title.localizedCaseInsensitiveContains(inboxItemStr) }
+            let candidates = allItems.filter { $0.title.localizedCaseInsensitiveContains(inboxItemStr) }
             if candidates.count == 1 { return hasSubPath ? .inboxItemFile(id: candidates[0].id) : .inboxItem(id: candidates[0].id) }
-            if let matched = inboxItems.first(where: { $0.id.uuidString.hasPrefix(inboxItemStr) }) {
+            if let matched = allItems.first(where: { $0.id.uuidString.hasPrefix(inboxItemStr) }) {
                 return hasSubPath ? .inboxItemFile(id: matched.id) : .inboxItem(id: matched.id)
             }
             return .unknown("inbox: '\(parts[1])' not found")
@@ -313,12 +312,10 @@ enum VFSService {
         case .root:
             let projects = (try? ProjectService(context: context.modelContext).allProjects()) ?? []
             let allItems = (try? KnowledgeItemService(context: context.modelContext).allItems()) ?? []
-            let inboxCount = allItems.filter { $0.inboxDate != nil }.count
             return .directory(path: "/", name: "Workspace", childrenCount: 3,
-                metadata: VFSNodeMetadata(taskCount: inboxCount, itemCount: allItems.count))
+                metadata: VFSNodeMetadata(taskCount: allItems.count, itemCount: allItems.count))
         case .inbox:
-            let items = ((try? KnowledgeItemService(context: context.modelContext).allItems()) ?? [])
-                .filter { $0.inboxDate != nil }
+            let items = (try? KnowledgeItemService(context: context.modelContext).allItems()) ?? []
             return .directory(path: "/inbox", name: "Inbox", childrenCount: items.count)
         case .projects:
             let projects = (try? ProjectService(context: context.modelContext).allProjects()) ?? []
@@ -347,10 +344,9 @@ enum VFSService {
         case .root:
             let projects = (try? ProjectService(context: context.modelContext).allProjects()) ?? []
             let allItems = (try? KnowledgeItemService(context: context.modelContext).allItems()) ?? []
-            let inboxCount = allItems.filter { $0.inboxDate != nil }.count
             return [
-                .directory(path: "/inbox", name: "Inbox", childrenCount: inboxCount,
-                    metadata: VFSNodeMetadata(itemCount: inboxCount)),
+                .directory(path: "/inbox", name: "Inbox", childrenCount: allItems.count,
+                    metadata: VFSNodeMetadata(itemCount: allItems.count)),
                 .directory(path: "/projects", name: "Projects", childrenCount: projects.count,
                     metadata: VFSNodeMetadata(itemCount: projects.count)),
                 .directory(path: "/agent", name: "Agent", childrenCount: 3)
@@ -358,8 +354,7 @@ enum VFSService {
 
         case .inbox:
             let allItems = (try? KnowledgeItemService(context: context.modelContext).allItems()) ?? []
-            let inboxItems = allItems.filter { $0.inboxDate != nil }
-            return inboxItems.map { item in
+            return allItems.map { item in
                 let itemPath = "/inbox/\(item.id.uuidString)"
                 return makeItemDirNode(item: item, path: itemPath, context: context)
             }

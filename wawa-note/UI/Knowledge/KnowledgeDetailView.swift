@@ -30,6 +30,9 @@ struct KnowledgeDetailView: View {
     @State private var pipelineStage: String = ""
     @State private var isReprocessing = false
     @State private var showReprocessWarning = false
+    @State private var agentEvents: [PipelineAgentEvent] = []
+    @State private var isAgentThinking = false
+    @State private var rawAnalysisJSON: [String: Any] = [:]
 
     private let fileStore = FileArtifactStore()
 
@@ -40,12 +43,38 @@ struct KnowledgeDetailView: View {
                     .padding(.horizontal, 16)
 
                 if isTranscribing || isPipelineProcessing {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                        Text(transcriptionProgress ?? (pipelineStage.isEmpty ? "Processing..." : pipelineStage))
-                            .font(.subheadline).foregroundStyle(.secondary)
+                    VStack(spacing: 0) {
+                        // Current status bar
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(transcriptionProgress ?? (pipelineStage.isEmpty ? "Processing..." : pipelineStage))
+                                    .font(.subheadline).foregroundStyle(.primary)
+                                if isAgentThinking {
+                                    Text("Agent is thinking…").font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            if !agentEvents.isEmpty {
+                                Text("\(agentEvents.count) steps").font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(12)
+
+                        // Agent trace — collapsible log of tool calls & results
+                        if !agentEvents.isEmpty {
+                            Divider().padding(.horizontal, 12)
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    ForEach(agentEvents) { evt in
+                                        agentEventBadge(evt)
+                                    }
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                            }
+                        }
                     }
-                    .padding(12)
                     .frame(maxWidth: .infinity)
                     .background(Color(.secondarySystemGroupedBackground))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -196,6 +225,7 @@ struct KnowledgeDetailView: View {
             }
             Task { @MainActor in
                 await Task.yield()
+                loadRawAnalysisJSON()
                 loadData()
             }
         }
@@ -203,14 +233,29 @@ struct KnowledgeDetailView: View {
             if n.object as? String == item.id.uuidString {
                 isPipelineProcessing = false
                 pipelineStage = ""
-                Task { @MainActor in loadData() }
+                Task { @MainActor in
+                    loadRawAnalysisJSON()
+                    loadData()
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .contentPipelineStageChanged)) { n in
             guard n.object as? String == item.id.uuidString else { return }
-            if let stage = n.userInfo?["stage"] as? String {
-                pipelineStage = stage
+            if let tool = n.userInfo?["tool"] as? String {
+                pipelineStage = "Agent: \(tool)"
                 isPipelineProcessing = true
+            }
+            if let summary = n.userInfo?["summary"] as? String {
+                pipelineStage = summary
+            }
+            if let phase = n.userInfo?["phase"] as? String {
+                pipelineStage = phase == "completed" ? "Analysis complete" : pipelineStage
+            }
+            if let events = n.userInfo?["events"] as? [PipelineAgentEvent] {
+                agentEvents = events
+            }
+            if let thinking = n.userInfo?["thinking"] as? Bool {
+                isAgentThinking = thinking
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .transcriptReady)) { n in
@@ -224,13 +269,7 @@ struct KnowledgeDetailView: View {
             guard n.object as? String == item.id.uuidString else { return }
             Task { @MainActor in
                 analysis = try? fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id)
-                if analysis == nil {
-                    if let dynamic = try? fileStore.readArtifact(DynamicAnalysis.self, fileName: "analysis.dynamic.json", meetingId: item.id) {
-                        analysis = MeetingAnalysis(meetingId: item.id, providerId: dynamic.providerId, model: dynamic.model,
-                            shortSummary: dynamic.results.stringField("short_summary") ?? "Analysis available",
-                            detailedSummary: dynamic.results.stringField("detailed_summary") ?? "")
-                    }
-                }
+                loadRawAnalysisJSON()
                 isAnalyzing = false
                 loadData()
             }
@@ -425,21 +464,35 @@ struct KnowledgeDetailView: View {
 
     @ViewBuilder
     private var artifactSections: some View {
-        if let analysis {
-            // Use dynamic rendering when a non-meeting framework is active
-            if let fw = resolvedFramework, fw.id != "builtin/meeting" {
-                dynamicAnalysisSection(framework: fw)
-            } else {
-                // Meeting framework: render all analysis fields using the framework's renderAs
-                let meetingFW = FrameworkService.meetingFramework
-                sectionHeader("Summary", icon: "sparkles").padding(.horizontal, 16)
-                VStack(alignment: .leading, spacing: 16) {
-                    ForEach(meetingFW.itemAnalysis.renderAs, id: \.field) { renderer in
-                        meetingAnalysisCard(for: renderer, analysis: analysis)
+        // Dynamic JSON rendering — shows whatever the agent wrote to disk
+        if !rawAnalysisJSON.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                sectionHeader("Analysis", icon: "sparkles").padding(.horizontal, 16)
+                VStack(spacing: 12) {
+                    // Sort: short_summary first, then alphabetically
+                    let keys = rawAnalysisJSON.keys.sorted { a, b in
+                        if a == "short_summary" || a == "shortSummary" { return true }
+                        if b == "short_summary" || b == "shortSummary" { return false }
+                        return a < b
+                    }
+                    ForEach(keys, id: \.self) { key in
+                        if let value = rawAnalysisJSON[key] {
+                            dynamicFieldCard(key: key, value: value)
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
             }
+        } else if let analysis {
+            // Legacy MeetingAnalysis fallback
+            let meetingFW = FrameworkService.meetingFramework
+            sectionHeader("Summary", icon: "sparkles").padding(.horizontal, 16)
+            VStack(alignment: .leading, spacing: 16) {
+                ForEach(meetingFW.itemAnalysis.renderAs, id: \.field) { renderer in
+                    meetingAnalysisCard(for: renderer, analysis: analysis)
+                }
+            }
+            .padding(.horizontal, 16)
         }
 
         if let transcript {
@@ -685,6 +738,82 @@ struct KnowledgeDetailView: View {
         if let num = value as? Double { return String(format: "%.2f", num) }
         if let num = value as? Int { return String(num) }
         return String(describing: value)
+    }
+
+    // MARK: - Dynamic field card (renders any JSON value)
+
+    @ViewBuilder
+    private func dynamicFieldCard(key: String, value: Any) -> some View {
+        let title = key.replacingOccurrences(of: "_", with: " ").capitalized
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: iconForKey(key))
+                    .font(.caption).foregroundStyle(.secondary)
+                Text(title)
+                    .font(.subheadline).fontWeight(.semibold).foregroundStyle(.secondary)
+            }
+
+            switch value {
+            case let s as String:
+                Text(s).font(.body).textSelection(.enabled)
+            case let arr as [Any]:
+                ForEach(Array(arr.enumerated()), id: \.offset) { _, item in
+                    if let str = item as? String {
+                        HStack(spacing: 6) {
+                            Image(systemName: "circle.fill").font(.system(size: 5))
+                            Text(str).font(.body).textSelection(.enabled)
+                        }
+                    } else if let dict = item as? [String: Any] {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(dict.keys.sorted(), id: \.self) { k in
+                                if let v = dict[k] as? String, !v.isEmpty {
+                                    HStack(spacing: 6) {
+                                        Text(k.replacingOccurrences(of: "_", with: " ").capitalized + ":")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                        Text(v).font(.body).textSelection(.enabled)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 8)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    } else {
+                        Text(String(describing: item)).font(.body).textSelection(.enabled)
+                    }
+                }
+            case let n as NSNumber:
+                Text(n.stringValue).font(.body).textSelection(.enabled)
+            case let b as Bool:
+                Text(b ? "Yes" : "No").font(.body)
+            case is NSNull:
+                Text("—").font(.caption).foregroundStyle(.tertiary)
+            default:
+                Text(String(describing: value)).font(.body).textSelection(.enabled)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func iconForKey(_ key: String) -> String {
+        let k = key.lowercased()
+        if k.contains("summary") { return "text.alignleft" }
+        if k.contains("decision") { return "checkmark.shield" }
+        if k.contains("action") { return "checklist" }
+        if k.contains("risk") { return "exclamationmark.triangle" }
+        if k.contains("question") { return "questionmark.circle" }
+        if k.contains("date") || k.contains("timeline") { return "calendar" }
+        if k.contains("people") || k.contains("person") { return "person" }
+        if k.contains("system") { return "desktopcomputer" }
+        if k.contains("organi") { return "building.2" }
+        if k.contains("location") || k.contains("place") { return "mappin" }
+        if k.contains("email") || k.contains("draft") { return "envelope" }
+        if k.contains("entity") || k.contains("mention") { return "tag" }
+        return "doc.text"
     }
 
     @ViewBuilder
@@ -1118,13 +1247,13 @@ struct KnowledgeDetailView: View {
     private var annotationsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Context").font(.headline)
-            ForEach(groupedAnnotationKeys.sorted(by: <), id: \.self) { key in
-                if let values = groupedAnnotations[key] {
+            ForEach(filteredAnnotationKeys.sorted(by: <), id: \.self) { key in
+                if let rawValue = groupedAnnotations[key]?.first {
                     HStack(spacing: 4) {
-                        Text(key.replacingOccurrences(of: "_", with: " ").capitalized)
+                        Text(contextLabel(for: key))
                             .font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        Text(values.joined(separator: ", "))
+                        Text(contextValue(for: key, raw: rawValue))
                             .font(.caption)
                     }
                     Divider()
@@ -1137,16 +1266,60 @@ struct KnowledgeDetailView: View {
         .padding(.horizontal, 16)
     }
 
+    // MARK: - Context label/value formatting
+
+    private func contextLabel(for key: String) -> String {
+        switch key {
+        case "route_name":  "Microphone"
+        case "route_type":  "Audio Type"
+        case "level":       "Battery"
+        case "state":       "Charging"
+        case "event_title": "Calendar"
+        case "event_proximity": "When"
+        case "event_location": "Event Location"
+        case "place_name", "city", "country": "Location"
+        case "lat", "lon", "accuracy": "GPS"
+        case "activity":    "Activity"
+        case "confidence":  "Confidence"
+        default: key.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+
+    private func contextValue(for key: String, raw: String) -> String {
+        switch key {
+        case "level":   "\(raw)%"
+        case "lat", "lon": String(raw.prefix(8))
+        case "accuracy": "±\(raw)m"
+        case "activity": raw.capitalized
+        case "focus_active": raw == "true" ? "On" : "Off"
+        case "event_proximity":
+            switch raw {
+            case "during": "During meeting"
+            case "before": "Upcoming"
+            case "after":  "Just ended"
+            default: raw
+            }
+        default: raw
+        }
+    }
+
     private var groupedAnnotations: [String: [String]] {
         var result: [String: [String]] = [:]
         for ann in annotations {
+            if ann.key == "focus_active" { continue }
             result[ann.key, default: []].append(ann.value)
         }
         return result
     }
 
-    private var groupedAnnotationKeys: [String] {
-        Array(groupedAnnotations.keys)
+    private var filteredAnnotationKeys: [String] {
+        // Show most important keys first
+        let priority = ["event_title", "event_proximity", "place_name", "city",
+                        "route_name", "activity", "level", "state"]
+        let all = Array(groupedAnnotations.keys)
+        let ordered = priority.filter { all.contains($0) }
+        let rest = all.filter { !priority.contains($0) }.sorted()
+        return ordered + rest
     }
 
     // MARK: - Locale picker
@@ -1236,6 +1409,7 @@ struct KnowledgeDetailView: View {
                     switch progress {
                     case .chunking(let c, let t): self.transcriptionProgress = "Splitting... (\(c)/\(t))"
                     case .transcribing(let c, let t): self.transcriptionProgress = "Part \(c) of \(t)..."
+                    case .downloadingModel(let name): self.transcriptionProgress = "Downloading \(name)..."
                     }
                 }
             }
@@ -1247,6 +1421,7 @@ struct KnowledgeDetailView: View {
                     switch progress {
                     case .chunking(let c, let t): self.transcriptionProgress = "Splitting... (\(c)/\(t))"
                     case .transcribing(let c, let t): self.transcriptionProgress = "Part \(c) of \(t)..."
+                    case .downloadingModel(let name): self.transcriptionProgress = "Downloading \(name)..."
                     }
                 }
             }
@@ -1284,6 +1459,8 @@ struct KnowledgeDetailView: View {
             case .fileTooLarge: transcriptionError = "File too large for remote API."
             case .recognitionFailed: transcriptionError = "No speech detected or recognition failed. Record at least 5s of clear speech."
             case .fileTooLongForLocal(let d): transcriptionError = "Audio too long for local (max \(Int(d))s)."
+            case .modelNotInstalled(let loc): transcriptionError = "On-device model for \(loc) not installed. Connect to Wi-Fi."
+            case .onDeviceUnavailable: transcriptionError = "On-device recognition not available. Try remote engine."
             }
         } catch {
             transcriptionError = "\(error.localizedDescription) [\(type(of: error))]"
@@ -1295,12 +1472,27 @@ struct KnowledgeDetailView: View {
 
     // MARK: - Helpers
 
+    /// Load raw JSON from analysis.json or analysis.dynamic.json — no key expectations.
+    private func loadRawAnalysisJSON() {
+        let dir = fileStore.itemDirectoryURL(for: item.id)
+        if let data = try? Data(contentsOf: dir.appendingPathComponent("analysis.json")),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            rawAnalysisJSON = json
+        } else if let data = try? Data(contentsOf: dir.appendingPathComponent("analysis.dynamic.json")),
+                  let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let results = dict["results"] as? [String: Any],
+                  let storage = results["storage"] as? [String: Any] {
+            rawAnalysisJSON = storage
+        }
+    }
+
     private func loadData() {
         if selectedModel.isEmpty {
             selectedModel = ActiveModelPicker.effectiveModel(context: modelContext, feature: "analysis")
         }
         transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id)
         analysis = try? fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id)
+        if analysis == nil { loadRawAnalysisJSON() }
 
         let annService = AnnotationService(context: modelContext)
         annotations = (try? annService.annotations(for: item.id)) ?? []
@@ -1449,6 +1641,59 @@ struct KnowledgeDetailView: View {
         let m = Int(seconds) / 60
         let s = Int(seconds) % 60
         return String(format: "%02d:%02d", m, s)
+    }
+
+    // MARK: - Agent event badge
+
+    @ViewBuilder
+    private func agentEventBadge(_ evt: PipelineAgentEvent) -> some View {
+        Group {
+            switch evt.kind {
+            case .thinking:
+                Label(evt.detail.isEmpty ? "Thinking" : evt.detail, systemImage: "brain")
+                    .font(.caption2)
+                    .foregroundStyle(.purple)
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Color.purple.opacity(0.1))
+                    .clipShape(Capsule())
+            case .toolCall:
+                Label(evt.detail, systemImage: "hammer")
+                    .font(.caption2)
+                    .foregroundStyle(.blue)
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Color.blue.opacity(0.1))
+                    .clipShape(Capsule())
+            case .toolResult:
+                Label(evt.detail, systemImage: "checkmark.circle")
+                    .font(.caption2)
+                    .foregroundStyle(.green)
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Color.green.opacity(0.1))
+                    .clipShape(Capsule())
+            case .textDelta:
+                Text(evt.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Color(.tertiarySystemFill))
+                    .clipShape(Capsule())
+            case .done:
+                Label("Done", systemImage: "checkmark")
+                    .font(.caption2)
+                    .foregroundStyle(.green)
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Color.green.opacity(0.1))
+                    .clipShape(Capsule())
+            case .failed:
+                Label(evt.detail.prefix(40), systemImage: "xmark.circle")
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Color.red.opacity(0.1))
+                    .clipShape(Capsule())
+            }
+        }
     }
 
     private func formatDuration(_ seconds: Double) -> String {

@@ -15,66 +15,48 @@ enum PipelineTemplate {
     /// The standard content processing pipeline: Extract → Analyze → Ingest.
     /// Uses the virtual filesystem shell (run_command) for all operations.
     static let standard: String = """
-    You are a content processing agent in Wawa Note. Your job is to process a knowledge item \
-    through a structured pipeline autonomously using the virtual filesystem.
+    You are a content processing agent in Wawa Note. Process the item described in the first message.
 
-    ## YOUR TASK
+    ## TOOLS
 
-    Process the item described in the first message. You have one command: run_command.
+    You have two tools:
+    - run_command: shell commands for exploration (extract, ls, cat, grep, echo)
+    - write_analysis: save your structured analysis
 
-    ### Phase 0: LEARN FROM PAST (before processing)
-    - Use `ls /agent/memories/` to see past strategies.
-    - Use `grep "pattern" /agent/memories/` to find relevant memories.
-    - If found, apply their proven strategies.
+    ## MANDATORY STEPS
 
-    ### Phase 0.5: CHOOSE ANALYSIS SCHEMA (MANDATORY)
-    - Use `ls /projects/wawa-note-config/config/schemas/` to see all available schemas.
-    - Choose the schema that best matches the item type and content:
-      • meeting → Meeting Analysis (decisions, actions, risks, dates, entities)
-      • research → Research (hypotheses, findings, themes, sources)
-      • brainstorm → Brainstorm (ideas, clusters, themes, questions)
-      • journal → Journal (themes, people, places, moods)
-      • coaching → Coaching (competencies, commitments, breakthroughs)
-      • legal → Legal Brief (cases, depositions, statutes, privilege)
-      • product → Product Spec (stories, requirements, constraints, decisions)
-      • blank → Blank Slate (minimal — AI adapts to your content)
-    - Use `cat /projects/wawa-note-config/config/schemas/{name}.json` to read the full schema.
-    - The schema defines the REQUIRED output format. You MUST follow it exactly.
-    - Pay attention to: outputSchema.properties (field names, types, structure) and renderAs (how UI displays each field).
+    ### Step 1: EXTRACT (always first)
+    Use run_command: `extract <item-id>`
+    If empty or fails, report and stop.
 
-    ### Phase 1: EXTRACT
-    - Use `extract <item-id>` to get the item's raw text.
-    - If empty or fails, report the error and stop.
+    ### Step 2: ANALYZE
+    Review the content and produce a JSON analysis. Then use write_analysis with these EXACT field names:
+    - itemId: the item's UUID
+    - analysisJson: JSON with these fields (use null or [] for empty fields):
+      {
+        "short_summary": "one-line summary (REQUIRED)",
+        "detailed_summary": "detailed summary text",
+        "decisions": [{"title": "...", "details": "..."}],
+        "action_items": [{"task": "...", "owner": "...", "due_date": "..."}],
+        "risks": [{"risk": "...", "details": "..."}],
+        "open_questions": [{"question": "..."}],
+        "important_dates": [{"date": "...", "meaning": "..."}],
+        "mentioned_people": ["name"],
+        "mentioned_systems": ["name"],
+        "mentioned_organizations": ["name"],
+        "mentioned_locations": ["name"]
+      }
 
-    ### Phase 2: ANALYZE (follow schema strictly)
-    - Review the extracted content and produce analysis matching the chosen schema's outputSchema.
-    - Every field in outputSchema.properties MUST be present in your analysis JSON.
-    - Array fields (decisions, action_items, risks, etc.) MUST use the exact object structure defined in the schema's items.properties.
-    - For images: describe them first, then analyze.
-    - Write analysis via: `echo '{"field":"value",...}' > /projects/{slug}/analysis/{item-id}.json`
-    - If the project has no slug (inbox item), use: `echo '...' > /inbox/{item-id}/analysis.json`
+    ### Step 3: DONE
+    Respond with a brief text summary. Stop making tool calls.
 
-    ### Phase 3: DETECT SIGNALS
-    - Review for risks, alerts, opportunities, contradictions, patterns.
-    - Use `echo '{"type":"risk","title":"...","body":"..."}' > /projects/{slug}/signals/` for each finding.
-    - Max 3 signals per item. Skip if nothing significant.
-
-    ### Phase 4: INGEST (if item has a project)
-    - Use `touch /projects/{slug}/tasks/ --title "..." --priority high --owner "..."` for action items.
-    - Use `ls /projects/{slug}/items/` to find related items, then reference them.
-
-    ### Phase 5: REMEMBER (after processing)
-    - Use `echo '{"pattern":"...","strategy":"..."}' > /agent/memories/` to record what you learned.
-    - Only write memories for non-obvious discoveries.
-
-    ## ERROR HANDLING
-    - If extract returns empty: report and stop.
-    - If analyze fails: try once more with a different approach. If it still fails, stop.
-    - Never loop more than 3 times with the same approach.
-    - If a schema field doesn't apply, use null or empty array — but NEVER omit required fields.
-
-    ## OUTPUT
-    When done, summarize: item title, type, chosen schema, key findings. Be concise.
+    ## RULES
+    - ALWAYS start with extract
+    - ALWAYS use write_analysis to save your results (never just describe them)
+    - short_summary is REQUIRED
+    - Empty fields: use null or []
+    - Be specific — reference what was actually said
+    - Use EXACT field names as specified above (snake_case)
     """
 
     /// Lightweight pipeline: extract and analyze only. No project ingestion.
@@ -140,30 +122,34 @@ final class ContentPipelineService: ObservableObject {
                 return
             }
 
-            guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
-                AppLog.provider.error("ContentPipeline: no active provider configured")
-                return
-            }
-
-            // Assemble pipeline tools — single shell tool
             let fileStore = FileArtifactStore()
 
-            // Pre-transcribe audio items before the agent runs.
-            // The agent's "extract" command only reads existing transcripts,
-            // so we must transcribe first. Uses TranscriptionSettings to
-            // respect user's engine preference (Apple Speech vs Whisper API).
+            // Pre-transcribe audio items BEFORE checking AI provider.
+            // Transcription uses Apple Speech (on-device) or Whisper API,
+            // neither of which requires the AI provider configured in Settings.
+            // Without this, recording audio items would never get transcribed
+            // unless the user first configures an LLM provider.
             if item.type == .audio && item.transcriptionEngineId == nil {
                 pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
                     itemType: item.type.rawValue, phase: "transcribing",
-                    currentTool: nil, toolSummary: nil, toolLog: [])
+                    currentTool: nil, toolSummary: nil, toolLog: [], events: [], thinkingActive: false)
                 NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
                     userInfo: ["stage": "transcribing"])
                 let extractionSvc = ContentExtractionService(modelContext: modelContext, fileStore: fileStore)
                 if let transcribedText = await extractionSvc.extractTextFromAudio(item) {
                     AppLog.provider.info("ContentPipeline: pre-transcription complete for item \(itemID) — \(transcribedText.count) chars")
                 } else {
-                    AppLog.provider.warning("ContentPipeline: pre-transcription failed for item \(itemID) — agent will see empty text")
+                    AppLog.provider.warning("ContentPipeline: pre-transcription failed for item \(itemID)")
                 }
+            }
+
+            guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
+                AppLog.provider.error("ContentPipeline: no active provider configured — transcription-only mode")
+                if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+                    fresh.status = item.transcriptionEngineId != nil ? .transcribed : .recorded
+                    try? modelContext.save()
+                }
+                return
             }
             let project = item.projectID.flatMap { pid in try? ProjectService(context: modelContext).fetch(id: pid) }
             let toolContext = ToolContext(
@@ -174,15 +160,30 @@ final class ContentPipelineService: ObservableObject {
             )
 
             let tools: [any AgentTool] = [
-                ShellTool()
+                ShellTool(),
+                WriteAnalysisTool()
             ]
 
             let registry = AgentToolRegistry(tools: tools)
             let config = AIConfigService.shared
-            let activeModel = ActiveProviderManager.shared.getActiveProvider(context: modelContext)?.defaultModel
-            let fallbackModel = config.modelFor(feature: "chat")
-            let executorModel = activeModel ?? config.featureConfig(for: "agent")?.model ?? fallbackModel
-            let advisorModel = activeModel ?? config.featureConfig(for: "analysis")?.model ?? fallbackModel
+            let activeProviderConfig = ActiveProviderManager.shared.getActiveProvider(context: modelContext)
+            let availableModels = activeProviderConfig.flatMap { config.availableModels(for: $0.typeRaw) } ?? []
+
+            // Resolve executor model: validate against active provider's available models
+            let executorModel: String = {
+                if let m = activeProviderConfig?.defaultModel, availableModels.contains(m) { return m }
+                if let m = config.featureConfig(for: "agent")?.model, availableModels.contains(m) { return m }
+                if let first = availableModels.first { return first }
+                return activeProviderConfig?.defaultModel ?? config.modelFor(feature: "chat") ?? "gpt-5-nano"
+            }()
+
+            // Resolve advisor model (for analysis): validate against available models
+            let advisorModel: String = {
+                if let m = config.featureConfig(for: "analysis")?.model, availableModels.contains(m) { return m }
+                if let m = activeProviderConfig?.defaultModel, availableModels.contains(m) { return m }
+                if let first = availableModels.first { return first }
+                return activeProviderConfig?.defaultModel ?? config.modelFor(feature: "chat") ?? "gpt-5-nano"
+            }()
 
             let loop = AgentLoop(
                 registry: registry, toolContext: toolContext,
@@ -192,9 +193,23 @@ final class ContentPipelineService: ObservableObject {
 
             // Report progress to UI
             var toolLog: [String] = []
+            var agentEvents: [PipelineAgentEvent] = []
             pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
                                               itemType: item.type.rawValue, phase: "starting",
-                                              currentTool: nil, toolSummary: nil, toolLog: toolLog)
+                                              currentTool: nil, toolSummary: nil, toolLog: toolLog,
+                                              events: agentEvents, thinkingActive: false)
+
+            // Verify we have content to analyze before launching the agent
+            let extractionSvc = ContentExtractionService(modelContext: modelContext, fileStore: fileStore)
+            let availableText = await extractionSvc.bestAvailableText(for: item) ?? ""
+            if availableText.trimmingCharacters(in: .whitespaces).isEmpty {
+                AppLog.provider.warning("ContentPipeline: no extractable text for item \(itemID) — skipping agent")
+                if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+                    fresh.status = .failed
+                    try? modelContext.save()
+                }
+                return
+            }
 
             let taskDescription = """
             Process knowledge item with ID: \(itemID.uuidString)
@@ -225,40 +240,64 @@ final class ContentPipelineService: ObservableObject {
                 do {
                     for try await event in stream {
                         switch event {
-                        case .toolCallStarted(let name, _, _):
+                        case .toolCallStarted(let name, let id, let args):
                             AppLog.provider.info("Pipeline agent tool [attempt \(attemptCount)]: \(name)")
+                            agentEvents.append(PipelineAgentEvent(
+                                id: UUID(), kind: .toolCall, timestamp: Date(),
+                                detail: name, metadata: args))
+                            toolLog.append("\(name): \(args.prefix(80))")
                             pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
-                                itemType: item.type.rawValue, phase: "processing",
-                                currentTool: name, toolSummary: nil, toolLog: toolLog)
+                                itemType: item.type.rawValue, phase: "analyzing",
+                                currentTool: name, toolSummary: nil, toolLog: toolLog,
+                                events: agentEvents, thinkingActive: false)
                             NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
-                                userInfo: ["tool": name, "itemTitle": item.title])
-                        case .toolCallCompleted(let name, _, let summary):
+                                userInfo: ["tool": name, "args": args, "events": agentEvents, "itemTitle": item.title])
+                        case .toolCallCompleted(let name, let id, let summary):
                             AppLog.provider.info("Pipeline agent result [attempt \(attemptCount)]: \(name) — \(summary)")
+                            agentEvents.append(PipelineAgentEvent(
+                                id: UUID(), kind: .toolResult, timestamp: Date(),
+                                detail: name, metadata: summary))
                             toolLog.append("\(name): \(summary)")
                             pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
-                                itemType: item.type.rawValue, phase: "processing",
-                                currentTool: name, toolSummary: summary, toolLog: toolLog)
+                                itemType: item.type.rawValue, phase: "analyzing",
+                                currentTool: name, toolSummary: summary, toolLog: toolLog,
+                                events: agentEvents, thinkingActive: false)
                             NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
-                                userInfo: ["tool": name, "summary": summary, "itemTitle": item.title])
-                        case .textDelta:
-                            break
+                                userInfo: ["tool": name, "summary": summary, "events": agentEvents, "itemTitle": item.title])
+                        case .textDelta(let delta):
+                            agentEvents.append(PipelineAgentEvent(
+                                id: UUID(), kind: .textDelta, timestamp: Date(),
+                                detail: String(delta.prefix(100)), metadata: nil))
+                        case .thinking:
+                            pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
+                                itemType: item.type.rawValue, phase: "analyzing",
+                                currentTool: nil, toolSummary: nil, toolLog: toolLog,
+                                events: agentEvents, thinkingActive: true)
+                            NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
+                                userInfo: ["thinking": true, "events": agentEvents, "itemTitle": item.title])
                         case .finished:
                             AppLog.provider.info("Pipeline agent completed for item \(itemID) on attempt \(attemptCount)")
+                            agentEvents.append(PipelineAgentEvent(
+                                id: UUID(), kind: .done, timestamp: Date(),
+                                detail: "Agent finished", metadata: nil))
                             pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
                                 itemType: item.type.rawValue, phase: "completed",
-                                currentTool: nil, toolSummary: nil, toolLog: toolLog)
+                                currentTool: nil, toolSummary: nil, toolLog: toolLog,
+                                events: agentEvents, thinkingActive: false)
                             NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
-                                userInfo: ["phase": "completed", "itemTitle": item.title])
+                                userInfo: ["phase": "completed", "events": agentEvents, "itemTitle": item.title])
                             failed = false
                         case .error(let error):
                             AppLog.provider.error("Pipeline agent error [attempt \(attemptCount)]: \(error.localizedDescription)")
                             lastError = error.localizedDescription
+                            agentEvents.append(PipelineAgentEvent(
+                                id: UUID(), kind: .failed, timestamp: Date(),
+                                detail: error.localizedDescription, metadata: nil))
                             pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
                                 itemType: item.type.rawValue, phase: "error",
-                                currentTool: nil, toolSummary: error.localizedDescription, toolLog: toolLog)
+                                currentTool: nil, toolSummary: error.localizedDescription, toolLog: toolLog,
+                                events: agentEvents, thinkingActive: false)
                             failed = true
-                        case .thinking:
-                            break
                         }
                     }
                 } catch {
@@ -283,7 +322,21 @@ final class ContentPipelineService: ObservableObject {
                                 failed = true
                             }
                         }
-                        if !failed { break } // Success — analysis exists and is valid
+                        // Create DynamicAnalysis from the raw JSON (any keys work)
+                        if !failed, let data = try? Data(contentsOf: store.itemDirectoryURL(for: itemID).appendingPathComponent("analysis.json")),
+                           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                            let dynamicData = try? JSONEncoder().encode(DynamicAnalysis(
+                                itemId: itemID,
+                                providerId: provider.id,
+                                model: executorModel,
+                                schemaId: "write_analysis",
+                                results: AnalysisResults(storage: json.mapValues { AnyCodable($0) })
+                            ))
+                            if let dd = dynamicData {
+                                try? dd.write(to: store.itemDirectoryURL(for: itemID).appendingPathComponent("analysis.dynamic.json"))
+                            }
+                        }
+                        if !failed { break } // Success — analysis exists and DynamicAnalysis created
                     } else {
                         // Agent finished but didn't create analysis
                         AppLog.provider.warning("Pipeline attempt \(attemptCount): agent finished but no analysis.json found")
@@ -299,18 +352,14 @@ final class ContentPipelineService: ObservableObject {
             if let error = lastError {
                 pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
                     itemType: item.type.rawValue, phase: "error",
-                    currentTool: nil, toolSummary: error, toolLog: toolLog)
+                    currentTool: nil, toolSummary: error, toolLog: toolLog,
+                    events: agentEvents, thinkingActive: false)
             }
-            // Mark item as processed so it's not re-enqueued forever
-            // (was the root cause of infinite pipeline loops for notes)
+            // Mark item as processed so it's not re-enqueued forever.
+            // Keep inboxDate so the item stays visible in the inbox for user review.
             if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
-                fresh.analysisProviderId = "pipeline" // marker to prevent re-enqueue
+                fresh.analysisProviderId = provider.id
                 fresh.status = lastError == nil ? .analyzed : .failed
-                // Auto-archive from inbox after successful processing
-                // The item has been extracted, analyzed, and (if applicable) ingested.
-                if lastError == nil {
-                    fresh.inboxDate = nil
-                }
                 try? modelContext.save()
             }
             // Update project health after agent completes
@@ -986,14 +1035,33 @@ enum PipelineStage: String, Sendable {
 
 // MARK: - Pipeline progress (observable)
 
+/// An individual event in the agent's processing trace, rendered in the UI.
+struct PipelineAgentEvent: Sendable, Identifiable {
+    enum Kind: String, Sendable {
+        case thinking      // Agent is reasoning (LLM thinking)
+        case toolCall      // Agent called a tool
+        case toolResult    // Tool returned a result
+        case textDelta     // Agent sent a text chunk
+        case done          // Agent finished successfully
+        case failed        // Agent errored
+    }
+    let id: UUID
+    let kind: Kind
+    let timestamp: Date
+    let detail: String     // tool name, summary, or thinking label
+    let metadata: String?  // arguments, full result, or thinking text
+}
+
 struct PipelineProgress: Sendable {
     let itemId: UUID
     let itemTitle: String
     let itemType: String
-    let phase: String       // "starting", "processing", "completed", "error"
+    let phase: String       // "starting", "transcribing", "analyzing", "ingesting", "completed", "error"
     let currentTool: String?
     let toolSummary: String?
     var toolLog: [String]   // ordered list of "tool_name: summary"
+    var events: [PipelineAgentEvent]  // full agent trace for UI rendering
+    var thinkingActive: Bool  // true when agent is in thinking/reasoning state
 }
 
 // MARK: - Editable Prompt

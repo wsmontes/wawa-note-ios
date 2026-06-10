@@ -35,11 +35,13 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private let audioLevelLock = NSLock()
     private nonisolated(unsafe) var rawAudioLevel: Float = 0.0
 
-    private let audioProcessingQueue = DispatchQueue(label: "com.wawa-note.audio.processing", qos: .userInitiated)
+    private let audioWriteQueue = DispatchQueue(label: "com.wawa-note.audio.write", qos: .userInitiated)
 
-    private static let captureBufferSize: AVAudioFrameCount = 8192
+    /// 1024 frames = ~23ms at 44.1kHz (was 8192 = 186ms).
+    /// 8x finer granularity for VAD and audio level monitoring.
+    private static let captureBufferSize: AVAudioFrameCount = 1024
     private static let levelDecayFactor: Float = 0.85
-    private static let levelUpdateIntervalNS: UInt64 = 50_000_000
+    private static let levelUpdateIntervalNS: UInt64 = 30_000_000
     private static let timerUpdateInterval: TimeInterval = 0.1
 
     var outputFileURL: URL? {
@@ -81,20 +83,36 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         let hardwareFormat = inputNode.outputFormat(forBus: 0)
         try fileWriter.startRecording(format: hardwareFormat, meetingId: meetingId)
 
-        // Only write to file when actively recording; skip during pause.
         // The engine must keep running (iOS forbids engine.start() in the
         // background), so the tap stays installed for the lifetime of the
         // recording.
         inputNode.installTap(onBus: 0, bufferSize: Self.captureBufferSize, format: nil) { [weak self] buffer, _ in
             guard let self else { return }
             self.updateAudioLevel(from: buffer)
-            if self.state == .recording {
-                // Write synchronously on the real-time audio thread.
-                // AVAudioFile.write is optimized for real-time AAC encoding —
-                // at 8192 frames it completes in <1ms on modern devices.
-                // Async dispatch is NOT safe here because the buffer's
-                // PCM data is reused by the audio system after callback return.
-                self.fileWriter.write(buffer: buffer)
+            guard self.state == .recording else { return }
+
+            // Copy buffer data before dispatch — PCM is reused after callback return
+            guard let channelData = buffer.floatChannelData else { return }
+            let frameLength = Int(buffer.frameLength)
+            let copiedFrames = UnsafeMutablePointer<Float>.allocate(capacity: frameLength)
+            copiedFrames.initialize(from: channelData[0], count: frameLength)
+
+            self.audioWriteQueue.async { [weak self] in
+                guard let self, let file = self.fileWriter.activeFile else {
+                    copiedFrames.deallocate()
+                    return
+                }
+                let fmt = file.processingFormat
+                guard let wb = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(frameLength)) else {
+                    copiedFrames.deallocate()
+                    return
+                }
+                wb.frameLength = AVAudioFrameCount(frameLength)
+                if let dest = wb.floatChannelData {
+                    dest[0].initialize(from: copiedFrames, count: frameLength)
+                }
+                copiedFrames.deallocate()
+                self.fileWriter.write(buffer: wb)
             }
         }
 
@@ -177,8 +195,28 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             guard let self else { return }
             self.updateAudioLevel(from: buffer)
             guard self.state == .recording else { return }
-            self.audioProcessingQueue.async { [weak self] in
-                self?.fileWriter.write(buffer: buffer)
+
+            guard let channelData = buffer.floatChannelData else { return }
+            let frameLength = Int(buffer.frameLength)
+            let copiedFrames = UnsafeMutablePointer<Float>.allocate(capacity: frameLength)
+            copiedFrames.initialize(from: channelData[0], count: frameLength)
+
+            self.audioWriteQueue.async { [weak self] in
+                guard let self, let file = self.fileWriter.activeFile else {
+                    copiedFrames.deallocate()
+                    return
+                }
+                let fmt = file.processingFormat
+                guard let wb = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(frameLength)) else {
+                    copiedFrames.deallocate()
+                    return
+                }
+                wb.frameLength = AVAudioFrameCount(frameLength)
+                if let dest = wb.floatChannelData {
+                    dest[0].initialize(from: copiedFrames, count: frameLength)
+                }
+                copiedFrames.deallocate()
+                self.fileWriter.write(buffer: wb)
             }
         }
 

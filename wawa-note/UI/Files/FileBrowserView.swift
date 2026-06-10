@@ -208,35 +208,33 @@ struct FileBrowserView: View {
             ForEach(viewModel.sortedNodes(by: sortOrder)) { node in
                 Group {
                     if node.isDirectory {
-                        Button {
-                            navigateToChildPath = node.path
-                        } label: {
-                            FileRowView(
-                                node: node,
-                                onDelete: { confirmDelete(node) },
-                                onRename: { newName in viewModel.rename(node, to: newName) },
-                                onMove: nil,
-                                onDuplicate: { duplicateNode(node) },
-                                onExport: { exportNode(node) },
-                                onInfo: { selectedNode = node }
-                            )
-                        }
-                        .buttonStyle(.plain)
+                        FileRowView(
+                            node: node,
+                            onOpen: { navigateToChildPath = node.path },
+                            onEdit: nil,
+                            onDelete: { confirmDelete(node) },
+                            onRename: { newName in viewModel.rename(node, to: newName) },
+                            onMove: nil,
+                            onDuplicate: { duplicateNode(node) },
+                            onExport: { exportNode(node) },
+                            onInfo: { selectedNode = node }
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture { navigateToChildPath = node.path }
                     } else {
-                        Button {
-                            navigateToEditor = node
-                        } label: {
-                            FileRowView(
-                                node: node,
-                                onDelete: { confirmDelete(node) },
-                                onRename: { newName in viewModel.rename(node, to: newName) },
-                                onMove: { /* move sheet TODO */ },
-                                onDuplicate: { duplicateNode(node) },
-                                onExport: { exportNode(node) },
-                                onInfo: { selectedNode = node }
-                            )
-                        }
-                        .buttonStyle(.plain)
+                        FileRowView(
+                            node: node,
+                            onOpen: { navigateToEditor = node },
+                            onEdit: { navigateToEditor = node },
+                            onDelete: { confirmDelete(node) },
+                            onRename: { newName in viewModel.rename(node, to: newName) },
+                            onMove: nil,
+                            onDuplicate: { duplicateNode(node) },
+                            onExport: { exportNode(node) },
+                            onInfo: { selectedNode = node }
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture { navigateToEditor = node }
                     }
                 }
                 .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 12))

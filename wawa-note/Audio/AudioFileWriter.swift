@@ -15,6 +15,7 @@ final class AudioFileWriter: @unchecked Sendable {
     private var currentMeetingId: UUID?
     private(set) var writeErrorCount: Int = 0
     private(set) var lastWriteError: Error?
+    var activeFile: AVAudioFile? { audioFile }
 
     init(fileManager: FileManager = .default, fileStore: FileArtifactStore = FileArtifactStore()) {
         self.fileManager = fileManager
@@ -61,15 +62,20 @@ final class AudioFileWriter: @unchecked Sendable {
 
     func write(buffer: AVAudioPCMBuffer) {
         guard let file = audioFile else { return }
-        do {
-            try file.write(from: buffer)
-        } catch {
-            writeErrorCount += 1
-            lastWriteError = error
-            writeErrorCount += 1
-            lastWriteError = error
-            let nsError = error as NSError
-            AppLog.error("audio", "Failed to write audio buffer (#\(writeErrorCount)): \(error.localizedDescription) domain=\(nsError.domain) code=\(nsError.code)")
+        for attempt in 0...3 {
+            do {
+                try file.write(from: buffer)
+                return
+            } catch {
+                if attempt == 3 {
+                    writeErrorCount += 1
+                    lastWriteError = error
+                    let nsError = error as NSError
+                    AppLog.error("audio", "Failed to write audio buffer after 3 retries (#\(writeErrorCount)): \(error.localizedDescription)")
+                    return
+                }
+                Thread.sleep(forTimeInterval: [0.1, 0.2, 0.4][attempt])
+            }
         }
     }
 
