@@ -85,6 +85,14 @@ final class RecordingCoordinator: ObservableObject {
             }
         }
 
+        // Manifest is the source of truth for the next segment index — NOT
+        // the AudioFileWriter's internal counter, which can get confused
+        // across engine teardown/recreation cycles.
+        captureService.nextSegmentIndexProvider = { [weak self] in
+            guard let self, let m = self.manifest else { return 0 }
+            return (m.segments.map(\.index).max() ?? -1) + 1
+        }
+
         // Keep UI state in sync with the real capture service state.
         // The capture service owns the source of truth for recording state;
         // the coordinator mirrors it for the UI layer.

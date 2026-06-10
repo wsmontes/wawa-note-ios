@@ -52,6 +52,9 @@ final class AudioFileWriter: @unchecked Sendable {
 
     // MARK: - Public API (all serialized through queue)
 
+    /// Start a brand-new logical recording. Resets segment index to 0 and creates
+    /// the meeting directory. MUST only be called once per KnowledgeItem.
+    /// NEVER call this during route switching — use rotateToNewSegment instead.
     func startRecording(format: AVAudioFormat, meetingId: UUID) throws {
         try queue.sync {
             _segmentIndex = 0
@@ -86,6 +89,31 @@ final class AudioFileWriter: @unchecked Sendable {
     func startNewSegment(meetingId: UUID, format: AVAudioFormat) throws {
         try queue.sync {
             _segmentIndex += 1
+            try _openSegment(meetingId: meetingId, format: format)
+        }
+    }
+
+    /// Open the next segment for an existing recording, using the manifest as the
+    /// source of truth for the next segment index. NEVER resets the index to 0.
+    /// Callers MUST ensure the current segment is already closed.
+    ///
+    /// - Parameters:
+    ///   - meetingId: The existing recording's item ID.
+    ///   - format: Audio format for the new segment.
+    ///   - manifestNextIndex: The next available index from the manifest
+    ///     (`(manifest.segments.map(\.index).max() ?? -1) + 1`).
+    func startNextSegmentForExistingRecording(
+        meetingId: UUID,
+        format: AVAudioFormat,
+        manifestNextIndex: Int
+    ) throws {
+        try queue.sync {
+            // Safety: never allow the writer index to go backward. If the manifest
+            // says index N but the writer is at M > N, trust the writer (it owns the
+            // actual file state). If the writer is behind, sync to the manifest.
+            if manifestNextIndex > _segmentIndex {
+                _segmentIndex = manifestNextIndex
+            }
             try _openSegment(meetingId: meetingId, format: format)
         }
     }
@@ -188,9 +216,8 @@ final class AudioFileWriter: @unchecked Sendable {
         // Use Linear PCM WAV for low rates (Bluetooth HFP at 8kHz), AAC for standard rates.
         let usePCM = sampleRate < 16000
         let ext = usePCM ? "wav" : "m4a"
-        let fileName = String(format: "segment-%03d.\(ext)", _segmentIndex)
-        let fileURL = segmentsDir.appendingPathComponent(fileName)
 
+        // Build settings FIRST so we can use them in the overwrite guard below.
         let settings: [String: Any]
         if usePCM {
             settings = [
@@ -214,13 +241,47 @@ final class AudioFileWriter: @unchecked Sendable {
             ]
         }
 
-        _audioFile = try AVAudioFile(
+        let fileName = String(format: "segment-%03d.\(ext)", self._segmentIndex)
+        let fileURL = segmentsDir.appendingPathComponent(fileName)
+
+        // CRITICAL: never overwrite an existing segment file. Once a segment is
+        // closed and checkpointed, its audio belongs to the user. Overwriting it
+        // is irreversible data loss. If the file already exists, scan forward
+        // until we find a free index.
+        if fileManager.fileExists(atPath: fileURL.path) {
+            let existingSize = (try? fileManager.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0
+            if existingSize > 0 {
+                let segIdx = self._segmentIndex
+                AppLog.audio.warning("Segment \(segIdx): \(fileName) already exists (\(existingSize) bytes) — refusing to overwrite")
+                var nextIdx = segIdx + 1
+                var nextURL: URL
+                var nextName: String
+                repeat {
+                    nextName = String(format: "segment-%03d.\(ext)", nextIdx)
+                    nextURL = segmentsDir.appendingPathComponent(nextName)
+                    if !self.fileManager.fileExists(atPath: nextURL.path) { break }
+                    let sz = (try? self.fileManager.attributesOfItem(atPath: nextURL.path)[.size] as? Int64) ?? 0
+                    if sz == 0 { break }
+                    nextIdx += 1
+                } while nextIdx < segIdx + 1000
+                AppLog.audio.warning("Segment: skipping from index \(segIdx) to \(nextIdx) to avoid overwrite")
+                self._segmentIndex = nextIdx
+                let finalName = String(format: "segment-%03d.\(ext)", self._segmentIndex)
+                let finalURL = segmentsDir.appendingPathComponent(finalName)
+                self._audioFile = try AVAudioFile(forWriting: finalURL, settings: settings, commonFormat: format.commonFormat, interleaved: format.isInterleaved)
+                self._currentFileURL = finalURL
+                AppLog.audio.info("Segment \(self._segmentIndex): \(finalName) \(sampleRate)Hz \(usePCM ? "PCM" : "AAC") (index adjusted)")
+                return
+            }
+            AppLog.audio.info("Segment \(self._segmentIndex): \(fileName) exists but is 0 bytes — safe to reuse")
+        }
+        self._audioFile = try AVAudioFile(
             forWriting: fileURL,
             settings: settings,
             commonFormat: format.commonFormat,
             interleaved: format.isInterleaved
         )
-        _currentFileURL = fileURL
+        self._currentFileURL = fileURL
         AppLog.audio.info("Segment \(self._segmentIndex): \(fileName) \(sampleRate)Hz \(usePCM ? "PCM" : "AAC")")
     }
 }

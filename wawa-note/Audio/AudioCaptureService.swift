@@ -78,6 +78,12 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// The coordinator should finalize that segment's endedAt / fileSize in the manifest.
     var onSegmentClosed: ((_ closedInfo: ClosedSegmentInfo) -> Void)?
 
+    /// Called before opening a new segment during route change. The coordinator
+    /// provides the next available index from the manifest, which is the source
+    /// of truth — NOT the AudioFileWriter's internal _segmentIndex.
+    /// Formula: (manifest.segments.map(\.index).max() ?? -1) + 1
+    var nextSegmentIndexProvider: (() -> Int)?
+
     // MARK: - Internal state
 
     private var timerTask: Task<Void, Never>?
@@ -624,6 +630,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         }
 
         // 5. Open new segment with format matching the new route.
+        //    Manifest is the source of truth for the segment index, NOT the
+        //    AudioFileWriter's internal counter (which can drift across teardowns).
         let sessionRate = sessionManager.sampleRate
         guard let hwFmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sessionRate > 0 ? sessionRate : 44100, channels: 1, interleaved: false) else {
             AppLog.error("audio", "restartCapture: invalid audio format — rate=\(sessionRate)")
@@ -632,13 +640,14 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return .noUsableInput(takeRouteSnapshot(reason: reason))
         }
 
-        let closedInfo: ClosedSegmentInfo?
+        let nextIndex = nextSegmentIndexProvider?() ?? (fileWriter.segmentIndex + 1)
         do {
             // The old segment was already closed by checkpointCurrentSegment.
-            // rotateToNewSegment will close (nil), increment index, and open new.
-            closedInfo = try fileWriter.rotateToNewSegment(meetingId: meetingId, format: hwFmt)
+            // Use startNextSegmentForExistingRecording — it never resets the index.
+            try fileWriter.startNextSegmentForExistingRecording(
+                meetingId: meetingId, format: hwFmt, manifestNextIndex: nextIndex)
         } catch {
-            AppLog.error("audio", "restartCapture: rotateToNewSegment failed: \(error)")
+            AppLog.error("audio", "restartCapture: startNextSegment failed: \(error)")
             audioInterruptionReason = "Could not create audio segment."
             return .noUsableInput(takeRouteSnapshot(reason: reason))
         }
@@ -673,8 +682,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         if !engineStartSucceeded {
             audioInterruptionReason = "Could not start audio with this microphone."
-            fileWriter.closeCurrentSegment()
-            if let closed = closedInfo { onSegmentClosed?(closed) }
+            _ = checkpointCurrentSegment(reason: "engineStartFailed")
             try? sessionManager.deactivate()
             transition(to: .waitingForUsableInput, reason: "engine start failed")
             return .engineFailed(NSError(domain: "Audio", code: -1), takeRouteSnapshot(reason: reason))
@@ -699,7 +707,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 inputPortType: sessionManager.bestAvailableInput?.portType.rawValue ?? "unknown",
                 routeChangeReason: reason, sampleRate: hwFmt.sampleRate
             )
-            onSegmentCreated?(closedInfo, segment)
+            onSegmentCreated?(nil, segment)
             currentInputPortName = sessionManager.currentInputPortName
             audioInterruptionReason = nil
             let snap = takeRouteSnapshot(reason: reason)
@@ -714,8 +722,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         }
 
         // No buffers — route is silent. Try builtInMic before giving up.
-        fileWriter.closeCurrentSegment()
-        if let closed = closedInfo { onSegmentClosed?(closed) }
+        // Previous segment already checkpointed via checkpointCurrentSegment at top;
+        // just close the empty current segment and try builtInMic.
+        _ = checkpointCurrentSegment(reason: "validationFailed")
         try? sessionManager.deactivate()
         if sessionManager.session.availableInputs?.contains(where: { $0.portType == .builtInMic }) ?? false {
             AppLog.audio.info("restartCapture: validation failed but builtInMic available — forcing fallback")
@@ -803,7 +812,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return
         }
 
-        // Open new segment
+        // Open new segment — manifest is source of truth for the index
         let sessionRate = sessionManager.sampleRate
         guard let hwFmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sessionRate > 0 ? sessionRate : 44100, channels: 1, interleaved: false) else {
             AppLog.error("audio", "forceBuiltInMic: invalid audio format — rate=\(sessionRate)")
@@ -811,7 +820,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             transition(to: .waitingForUsableInput, reason: "invalid audio format")
             return
         }
-        let closedInfo = try? fileWriter.rotateToNewSegment(meetingId: meetingId, format: hwFmt)
+        let nextIndex = nextSegmentIndexProvider?() ?? (fileWriter.segmentIndex + 1)
+        try? fileWriter.startNextSegmentForExistingRecording(
+            meetingId: meetingId, format: hwFmt, manifestNextIndex: nextIndex)
         let segIndex = fileWriter.segmentIndex
         let segFileName = fileWriter.currentFileURL?.lastPathComponent ?? String(format: "segment-%03d.m4a", segIndex)
 
@@ -854,7 +865,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             inputPortType: "builtInMic",
             routeChangeReason: "forceBuiltInMic", sampleRate: hwFmt.sampleRate
         )
-        onSegmentCreated?(closedInfo, segment)
+        onSegmentCreated?(nil, segment)
         currentInputPortName = sessionManager.currentInputPortName
         audioInterruptionReason = nil
         _ = commitRecoveredRouteToRecording(generation: gen, reason: "forced built-in mic")
