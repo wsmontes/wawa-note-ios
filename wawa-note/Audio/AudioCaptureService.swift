@@ -77,19 +77,46 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             throw AudioCaptureError.diskFull
         }
 
+        // Configure audio session with appropriate mode for current route
         try sessionManager.configureForRecording()
 
-        let inputNode = engine.inputNode
-        let hardwareFormat = inputNode.outputFormat(forBus: 0)
-        try fileWriter.startRecording(format: hardwareFormat, meetingId: meetingId)
+        // Use the audio session's sample rate, not the input node's format.
+        // With Bluetooth devices (AirPods, CarPlay), the input node format
+        // isn't known until the engine is running — reading it before start
+        // returns a placeholder that can cause the engine start to fail.
+        let sessionRate = sessionManager.sampleRate
+        let recordFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sessionRate > 0 ? sessionRate : 44100,
+            channels: 1,
+            interleaved: false
+        ) ?? AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1)!
+        try fileWriter.startRecording(format: recordFormat, meetingId: meetingId)
 
         installTap()
         engine.prepare()
 
-        do {
-            try engine.start()
-        } catch {
-            AppLog.error("audio", "Failed to start audio engine: \(error.localizedDescription)")
+        // Retry engine start for Bluetooth devices that need time to stabilize
+        var engineError: Error?
+        for attempt in 0...2 {
+            do {
+                try engine.start()
+                engineError = nil
+                break
+            } catch {
+                engineError = error
+                AppLog.error("audio", "Engine start attempt \(attempt + 1) failed: \(error.localizedDescription)")
+                if attempt < 2 {
+                    // Brief pause for Bluetooth route to stabilize
+                    try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
+                    engine.reset()
+                    engine.prepare()
+                }
+            }
+        }
+
+        if let engineError {
+            AppLog.error("audio", "All engine start attempts failed: \(engineError.localizedDescription)")
             engine.inputNode.removeTap(onBus: 0)
             fileWriter.finishRecording()
             try? sessionManager.deactivate()
@@ -101,7 +128,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         startTimer()
         startLevelSmoothing()
         observeAudioNotifications()
-        AppLog.event("audio", "Audio engine started — input=\(self.currentInputPortName)")
+        AppLog.event("audio", "Audio engine started — input=\(self.currentInputPortName) rate=\(recordFormat.sampleRate)Hz")
     }
 
     func pauseRecording() {
@@ -202,7 +229,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 AppLog.audio.info("Engine rebuilt successfully\(attempt > 0 ? " (attempt \(attempt + 1))" : "")")
                 return
             } catch {
-                AppLog.audio.error("Engine rebuild attempt \(attempt + 1) failed: \(error.localizedDescription)")
+                AppLog.error("audio", "Engine rebuild attempt \(attempt + 1) failed: \(error.localizedDescription)")
                 if attempt < 2 {
                     // Brief pause then retry — route may still be stabilizing
                     Thread.sleep(forTimeInterval: 0.25)
@@ -225,7 +252,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         do {
             try sessionManager.configureForRecording()
         } catch {
-            AppLog.audio.error("Failed to reconfigure session during resume attempt: \(error.localizedDescription)")
+            AppLog.error("audio", "Failed to reconfigure session during resume attempt: \(error.localizedDescription)")
             audioInterruptionReason = "Could not resume after interruption"
             return
         }
@@ -427,7 +454,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 currentInputPortName = newPort
             }
         case .noSuitableRouteForCategory:
-            AppLog.audio.error("Audio route: no suitable route for category — current route: \(self.sessionManager.routeDescription)")
+            AppLog.error("audio", "Audio route: no suitable route for category — current route: \(self.sessionManager.routeDescription)")
             if state == .recording || state == .paused {
                 state = .interrupted
                 audioInterruptionReason = "No audio input available. Check microphone connection."
