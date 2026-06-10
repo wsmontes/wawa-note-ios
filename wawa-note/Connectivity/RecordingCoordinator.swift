@@ -175,14 +175,20 @@ final class RecordingCoordinator: ObservableObject {
     func resumeRecording() {
         guard state == .paused || state == .interrupted else { return }
         captureService.resumeRecording()
-        state = .recording
-        if let pauseStart = pauseStartDate {
-            pausedDuration += Date().timeIntervalSince(pauseStart)
+        // Only transition to .recording if the capture service actually recovered
+        if captureService.state == .recording {
+            state = .recording
+            if let pauseStart = pauseStartDate {
+                pausedDuration += Date().timeIntervalSince(pauseStart)
+            }
+            pauseStartDate = nil
+            nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: true)
+            startObservation()
+            notifyStatusChange()
+        } else {
+            // Recovery failed — stay interrupted, timer remains frozen
+            notifyStatusChange()
         }
-        pauseStartDate = nil
-        nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: true)
-        startObservation()
-        notifyStatusChange()
     }
 
     func stopRecording() {
@@ -356,6 +362,7 @@ final class RecordingCoordinator: ObservableObject {
                 self.nowPlayingTimer = nil
             } else if self.captureService.state == .interrupted && self.state != .interrupted {
                 self.state = .interrupted
+                self.pauseStartDate = Date()  // Freeze elapsed time
                 self.notifyStatusChange()
             }
         }
