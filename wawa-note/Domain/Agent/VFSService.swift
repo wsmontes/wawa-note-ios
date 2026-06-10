@@ -617,6 +617,29 @@ enum VFSService {
             ))
         }
 
+        // recording.manifest.json (segmented recordings)
+        let manifestURL = context.fileStore.recordingManifestURL(for: item.id)
+        if fm.fileExists(atPath: manifestURL.path) {
+            let attrs = try? fm.attributesOfItem(atPath: manifestURL.path)
+            nodes.append(.file(
+                path: "\(base)/recording.manifest.json", name: "recording.manifest.json",
+                nodeType: .jsonFile,
+                size: attrs?[.size] as? Int64,
+                modifiedAt: attrs?[.modificationDate] as? Date
+            ))
+        }
+
+        // segments/ directory
+        let segmentsDir = context.fileStore.segmentsDirectoryURL(for: item.id)
+        if fm.fileExists(atPath: segmentsDir.path) {
+            let segFiles = (try? fm.contentsOfDirectory(at: segmentsDir, includingPropertiesForKeys: [.fileSizeKey])) ?? []
+            nodes.append(.directory(
+                path: "\(base)/segments", name: "segments",
+                childrenCount: segFiles.count,
+                modifiedAt: item.updatedAt
+            ))
+        }
+
         // transcript.json
         let transcriptURL = dir.appendingPathComponent("transcript.json")
         if fm.fileExists(atPath: transcriptURL.path) {
