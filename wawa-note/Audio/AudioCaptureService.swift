@@ -233,14 +233,15 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                       self.recordingIntent == .userWantsRecording,
                       self.currentMeetingId != nil else { break }
 
-                // Re-read session state — things may have changed
-                let hasInput = self.sessionManager.isInputAvailable
+                // Re-read session state — things may have changed.
+                // isInputAvailable may be false even when builtInMic is in
+                // availableInputs (e.g., stale route after Bluetooth disconnect).
+                // If builtInMic exists, always try it — don't wait passively.
                 let hasBuiltInMic = self.sessionManager.session.availableInputs?.contains { $0.portType == .builtInMic } ?? false
 
-                AppLog.audio.info("Waiting probe: input=\(hasInput) builtInMic=\(hasBuiltInMic) backoff=\(backoff)")
+                AppLog.audio.info("Waiting probe: builtInMic=\(hasBuiltInMic) backoff=\(backoff)")
 
-                if hasInput && hasBuiltInMic {
-                    // Built-in mic is available — attempt recovery
+                if hasBuiltInMic {
                     await self.forceBuiltInMicRecovery()
                     // If recovery succeeded, we're out of waiting → probe stops naturally
                     if self.state != .waitingForUsableInput { break }
@@ -534,6 +535,12 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         }
 
         guard sessionManager.isInputAvailable else {
+            // Try builtInMic before giving up — the iPhone mic is the reliable fallback.
+            if sessionManager.session.availableInputs?.contains(where: { $0.portType == .builtInMic }) ?? false {
+                AppLog.audio.info("restartCapture: no input but builtInMic available — forcing fallback")
+                await forceBuiltInMicRecovery()
+                return .resumed(takeRouteSnapshot(reason: reason))
+            }
             audioInterruptionReason = "No microphone available."
             transition(to: .waitingForUsableInput, reason: "no input after restart")
             return .noUsableInput(takeRouteSnapshot(reason: reason))
@@ -624,10 +631,15 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             }
         }
 
-        // No buffers — discard empty segment, wait.
+        // No buffers — route is silent. Try builtInMic before giving up.
         fileWriter.closeCurrentSegment()
         if let closed = closedInfo { onSegmentClosed?(closed) }
         try? sessionManager.deactivate()
+        if sessionManager.session.availableInputs?.contains(where: { $0.portType == .builtInMic }) ?? false {
+            AppLog.audio.info("restartCapture: validation failed but builtInMic available — forcing fallback")
+            await forceBuiltInMicRecovery()
+            return .resumed(takeRouteSnapshot(reason: reason))
+        }
         audioInterruptionReason = "Microphone not delivering audio. Waiting…"
         transition(to: .waitingForUsableInput, reason: "validation failed")
         return .noUsableInput(takeRouteSnapshot(reason: reason))
@@ -868,9 +880,16 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         let inputAvailable = sessionManager.isInputAvailable
         AppLog.audio.info("Route settled: reason=\(reason.rawValue) port=\(portName) inputAvailable=\(inputAvailable)")
 
-        // Input lost while recording or user-paused → checkpoint and wait
+        // Input lost while recording or user-paused — try builtInMic first
         guard inputAvailable else {
             if recordingIntent == .userWantsRecording || recordingIntent == .userPaused {
+                AppLog.audio.info("Input lost — checking builtInMic availability")
+                if sessionManager.session.availableInputs?.contains(where: { $0.portType == .builtInMic }) ?? false {
+                    AppLog.audio.info("Input lost but builtInMic available — forcing fallback")
+                    await forceBuiltInMicRecovery()
+                    currentInputPortName = sessionManager.currentInputPortName
+                    return
+                }
                 transition(to: .waitingForUsableInput, reason: "input lost")
                 audioInterruptionReason = "Microphone disconnected. Waiting for input…"
                 timerTask?.cancel()

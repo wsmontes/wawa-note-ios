@@ -85,7 +85,8 @@ final class CaptureViewModel: ObservableObject {
 
     func stopRecording() {
         coordinator?.stopRecording()
-        launchPipeline()
+        // Pipeline is triggered internally by RecordingCoordinator after
+        // concatenation and validation complete — no duplicate trigger here.
     }
 
     func finishCapture() {

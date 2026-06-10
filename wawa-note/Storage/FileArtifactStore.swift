@@ -127,6 +127,60 @@ final class FileArtifactStore: @unchecked Sendable {
         fileManager.fileExists(atPath: recordingManifestURL(for: itemId).path)
     }
 
+    /// Structured debug report of all recording artifacts for a meeting.
+    /// Logs segment files, sizes, manifest validity, and audio.m4a status.
+    /// Used on every Finish until route switching is stable.
+    func debugRecordingArtifacts(meetingId: UUID) -> String {
+        var lines: [String] = []
+        let itemDir = meetingDirectoryURL(for: meetingId)
+        lines.append("  itemId: \(meetingId.uuidString)")
+        lines.append("  meetingDir: \(itemDir.path)")
+        lines.append("  meetingDirExists: \(fileManager.fileExists(atPath: itemDir.path))")
+
+        // Manifest
+        let manifestExists = recordingManifestExists(for: meetingId)
+        lines.append("  manifestExists: \(manifestExists)")
+
+        var totalValidBytes: Int64 = 0
+        var validSegmentCount = 0
+        var segmentCount = 0
+
+        if manifestExists, let manifest = try? readRecordingManifest(for: meetingId) {
+            segmentCount = manifest.segments.count
+            lines.append("  segmentCount: \(segmentCount)")
+            for seg in manifest.segments {
+                let url = segmentURL(for: meetingId, fileName: seg.fileName)
+                let exists = fileManager.fileExists(atPath: url.path)
+                let size: Int64 = exists ? (try? fileManager.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0 : 0
+                let marker = size > 0 ? "✓" : "✗"
+                lines.append("    \(seg.fileName): \(size) bytes \(marker) (endedAt=\(seg.endedAt?.description ?? "nil"))")
+                if size > 0 { validSegmentCount += 1; totalValidBytes += size }
+            }
+            lines.append("  validSegmentCount: \(validSegmentCount)")
+            lines.append("  totalValidSegmentBytes: \(totalValidBytes)")
+        }
+
+        // Single audio file
+        let audioM4AURL = meetingDirectoryURL(for: meetingId).appendingPathComponent(AppFileConstants.audioFileName)
+        let audioM4AExists = fileManager.fileExists(atPath: audioM4AURL.path)
+        let audioM4ASize: Int64 = audioM4AExists ? (try? fileManager.attributesOfItem(atPath: audioM4AURL.path)[.size] as? Int64) ?? 0 : 0
+        lines.append("  audioM4AExists: \(audioM4AExists)")
+        lines.append("  audioM4ASize: \(audioM4ASize)")
+
+        // Pipeline input decision
+        let pipelineInput: String
+        if audioM4AExists && audioM4ASize > 0 {
+            pipelineInput = "audio.m4a"
+        } else if validSegmentCount > 0 {
+            pipelineInput = "manifest (\(validSegmentCount) valid segments)"
+        } else {
+            pipelineInput = "none — no valid audio"
+        }
+        lines.append("  pipelineInput: \(pipelineInput)")
+
+        return lines.joined(separator: "\n")
+    }
+
     // MARK: - Artifacts
 
     func writeArtifact<T: Encodable>(_ value: T, fileName: String, meetingId: UUID) throws {

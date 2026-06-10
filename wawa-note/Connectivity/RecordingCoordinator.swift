@@ -285,22 +285,31 @@ final class RecordingCoordinator: ObservableObject {
             if let idx = m.segments.indices.last { m.segments[idx].endedAt = Date() }
             m.endedAt = Date()
             saveManifest(m, meetingId: meetingId)
-
-            // Concatenate segments into audio.m4a for backward compatibility
-            Task { await AudioSegmentConcatenator.concatenate(manifest: m, meetingId: meetingId) }
         }
 
         if let pauseStart = pauseStartDate {
             pausedDuration += Date().timeIntervalSince(pauseStart)
         }
 
-        // Update item FIRST, then trigger pipeline (lock screen/CarPlay path)
+        // Update item — validates audio, marks as recorded or failed
         updateItemOnStop()
         notifyStatusChange()
 
-        if let itemId, let pipeline = contentPipeline {
-            AppLog.event("audio", "Pipeline for item \(itemId.uuidString.prefix(8))")
-            pipeline.process(itemId, using: modelContext)
+        // Trigger pipeline AFTER concatenation and validation complete.
+        // The Task is non-blocking for the UI (stop returns immediately),
+        // but the pipeline is gated behind concat so audio.m4a is ready.
+        if let itemId, let pipeline = contentPipeline, let m = manifest {
+            Task {
+                // 1. Concatenate segments into audio.m4a (await, not fire-and-forget)
+                await AudioSegmentConcatenator.concatenate(manifest: m, meetingId: itemId)
+
+                // 2. Debug validation report — mandatory until route switching is stable
+                logRecordingArtifactReport(itemId: itemId)
+
+                // 3. Only then trigger pipeline — audio is confirmed ready
+                AppLog.event("audio", "Pipeline for item \(itemId.uuidString.prefix(8))")
+                pipeline.process(itemId, using: modelContext)
+            }
         }
     }
 
@@ -685,6 +694,16 @@ final class RecordingCoordinator: ObservableObject {
         )
         Task { @MainActor [activity] in await activity.end(using: state, dismissalPolicy: .immediate) }
         liveActivity = nil
+    }
+
+    // MARK: - Debug
+
+    /// Log a structured recording artifact report. Mandatory until route switching is stable.
+    /// Called on every Finish after concatenation completes.
+    private func logRecordingArtifactReport(itemId: UUID) {
+        let store = FileArtifactStore()
+        let report = store.debugRecordingArtifacts(meetingId: itemId)
+        AppLog.audio.info("RecordingArtifactValidation:\n\(report)")
     }
 
     // MARK: - Save
