@@ -464,8 +464,11 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // 3. Create a fresh engine — same as init(). Don't reuse the old one.
         engine = AVAudioEngine()
 
-        // 4. Configure session directly (no prior deactivate).
-        //    Mirror startRecording's proven pattern exactly.
+        // 4. Deactivate before reconfiguring. Unlike startRecording (fresh session),
+        //    the session is already active from the previous capture. setCategory
+        //    may not take full effect on an active session.
+        try? sessionManager.deactivate()
+
         do {
             try sessionManager.configureForRecording()
         } catch {
@@ -527,6 +530,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             audioInterruptionReason = "Could not start audio with this microphone."
             fileWriter.closeCurrentSegment()
             if let closed = closedInfo { onSegmentClosed?(closed) }
+            try? sessionManager.deactivate()
             transition(to: .waitingForUsableInput, reason: "engine start failed")
             return .engineFailed(NSError(domain: "Audio", code: -1), takeRouteSnapshot(reason: reason))
         }
@@ -567,6 +571,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // No buffers — discard empty segment, wait.
         fileWriter.closeCurrentSegment()
         if let closed = closedInfo { onSegmentClosed?(closed) }
+        try? sessionManager.deactivate()
         audioInterruptionReason = "Microphone not delivering audio. Waiting…"
         transition(to: .waitingForUsableInput, reason: "validation failed")
         return .noUsableInput(takeRouteSnapshot(reason: reason))
@@ -609,8 +614,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
 
-        // Fresh engine + configure for built-in mic specifically
+        // Fresh engine + deactivate old session + configure for built-in mic
         engine = AVAudioEngine()
+        try? sessionManager.deactivate()
         try? sessionManager.configureForRecording()
 
         // Force select built-in mic
