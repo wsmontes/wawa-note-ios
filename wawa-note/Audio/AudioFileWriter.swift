@@ -36,29 +36,32 @@ final class AudioFileWriter: @unchecked Sendable {
 
         let fileURL = fileStore.audioFileURL(for: meetingId)
 
-        // Always use 44.1kHz for AAC encoding — the encoder rejects sample rates
-        // below ~16kHz when combined with 128kbps bitrate (AirPods HFP = 8kHz).
-        // AVAudioFile.write() converts automatically from the hardware format,
-        // so the tap can deliver any sample rate and the file gets it right.
-        let outputRate: Double = 44100
+        // Use the hardware format directly. AAC encoder needs a matching bitrate
+        // for the sample rate. Built-in mic: 44.1kHz/96kbps. AirPods HFP: 8kHz/24kbps.
+        // This avoids any manual upsampling that could introduce artifacts.
+        let sampleRate = format.sampleRate
+        let bitRate: Int = sampleRate >= 44100 ? 96000
+            : sampleRate >= 22050 ? 64000
+            : sampleRate >= 16000 ? 32000
+            : 24000
 
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: outputRate,
+            AVSampleRateKey: sampleRate,
             AVNumberOfChannelsKey: 1,
-            AVEncoderBitRateKey: 96000
+            AVEncoderBitRateKey: bitRate
         ]
 
         do {
             audioFile = try AVAudioFile(
                 forWriting: fileURL,
                 settings: settings,
-                commonFormat: .pcmFormatFloat32,
-                interleaved: false
+                commonFormat: format.commonFormat,
+                interleaved: format.isInterleaved
             )
             currentFileURL = fileURL
             currentMeetingId = meetingId
-            AppLog.audio.info("Audio file created: \(fileURL.lastPathComponent) output=\(outputRate)Hz hardware=\(format.sampleRate)Hz meeting=\(meetingId.uuidString.prefix(8))")
+            AppLog.audio.info("Audio file created: \(fileURL.lastPathComponent) \(sampleRate)Hz AAC \(bitRate)bps meeting=\(meetingId.uuidString.prefix(8))")
         } catch {
             AppLog.error("audio", "Failed to create audio file: \(error.localizedDescription)")
             throw AudioFileWriterError.fileCreationFailed
@@ -85,16 +88,17 @@ final class AudioFileWriter: @unchecked Sendable {
     }
 
     func finishRecording() {
-        // Force the file to be properly finalized by setting to nil,
-        // which triggers AVAudioFile's deinit and closes the fd.
         let hadErrors = hasWriteErrors
         let errorCount = writeErrorCount
+        let finalSize = fileSize
+        // Explicitly nil out the file reference to flush and close.
+        // AVAudioFile deinit triggers final AAC frame flush and closes the fd.
         audioFile = nil
         currentMeetingId = nil
         if hadErrors {
-            AppLog.warn("audio", "Audio file writer finished with \(errorCount) write error(s) — file may be incomplete")
+            AppLog.warn("audio", "Audio file writer finished with \(errorCount) write error(s) — file may be incomplete. size=\(finalSize) bytes")
         } else {
-            AppLog.event("audio", "Audio file writer finished cleanly — size=\(fileSize) bytes")
+            AppLog.event("audio", "Audio file writer finished cleanly — size=\(finalSize) bytes")
         }
     }
 

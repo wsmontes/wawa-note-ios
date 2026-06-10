@@ -39,8 +39,6 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     /// 1024 frames = ~23ms at 44.1kHz (was 8192 = 186ms).
     private static let captureBufferSize: AVAudioFrameCount = 1024
-    /// Standard output sample rate — always 44.1kHz for AAC compatibility.
-    private static let outputSampleRate: Double = 44100
     private static let levelDecayFactor: Float = 0.85
     private static let levelUpdateIntervalNS: UInt64 = 30_000_000
     private static let timerUpdateInterval: TimeInterval = 0.1
@@ -81,10 +79,13 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // Configure audio session with appropriate mode for current route
         try sessionManager.configureForRecording()
 
-        // Create file at 44.1kHz BEFORE engine start — the tap upsamples from
-        // any hardware rate, so the file format is always known. If we create
-        // the file after engine.start(), initial buffers are dropped (no file).
-        let recordFormat = AVAudioFormat(standardFormatWithSampleRate: Self.outputSampleRate, channels: 1)!
+        // Create file BEFORE engine start using session sample rate (reflects
+        // current audio route). The tap writes raw hardware PCM — file format
+        // matches exactly, no upsampling needed.
+        let sessionRate = sessionManager.sampleRate > 0 ? sessionManager.sampleRate : 44100
+        guard let recordFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sessionRate, channels: 1, interleaved: false) else {
+            throw AudioCaptureError.engineStartFailed
+        }
         try fileWriter.startRecording(format: recordFormat, meetingId: meetingId)
 
         installTap()
@@ -173,12 +174,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     // MARK: - Engine rebuild
 
-    /// Install the audio tap. Upsamples from hardware rate to 44.1kHz via
-    /// linear interpolation, then dispatches to the write queue as [Float].
+    /// Install the audio tap. Copies raw PCM samples and dispatches to the
+    /// write queue. No upsampling — file format matches hardware format exactly.
     private func installTap() {
         let inputNode = engine.inputNode
-        let outputRate = Self.outputSampleRate
-
         inputNode.installTap(onBus: 0, bufferSize: Self.captureBufferSize, format: nil) { [weak self] buffer, _ in
             guard let self else { return }
             self.updateAudioLevel(from: buffer)
@@ -186,29 +185,15 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
             guard let channelData = buffer.floatChannelData else { return }
             let frameLength = Int(buffer.frameLength)
-            let inputRate = buffer.format.sampleRate
-
-            // Upsample to 44.1kHz via linear interpolation
-            let ratio = outputRate / inputRate
-            let outCount = Int(Double(frameLength) * ratio)
-            var output = [Float](repeating: 0, count: outCount)
-            let src = UnsafeBufferPointer(start: channelData[0], count: frameLength)
-
-            for i in 0..<outCount {
-                let srcIdx = Double(i) / ratio
-                let lo = Int(srcIdx)
-                let hi = min(lo + 1, frameLength - 1)
-                let frac = Float(srcIdx - Double(lo))
-                output[i] = src[lo] * (1 - frac) + src[hi] * frac
-            }
+            let samples = Array(UnsafeBufferPointer(start: channelData[0], count: frameLength))
 
             self.audioWriteQueue.async { [weak self] in
                 guard let self, let file = self.fileWriter.activeFile else { return }
-                let fmt = file.processingFormat  // 44.1kHz PCM
-                guard let wb = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(outCount)) else { return }
-                wb.frameLength = AVAudioFrameCount(outCount)
+                let fmt = file.processingFormat
+                guard let wb = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(frameLength)) else { return }
+                wb.frameLength = AVAudioFrameCount(frameLength)
                 if let dest = wb.floatChannelData {
-                    dest[0].initialize(from: output, count: outCount)
+                    dest[0].initialize(from: samples, count: frameLength)
                 }
                 self.fileWriter.write(buffer: wb)
             }
