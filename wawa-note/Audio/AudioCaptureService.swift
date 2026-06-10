@@ -40,7 +40,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private let audioLevelLock = NSLock()
     private nonisolated(unsafe) var rawAudioLevel: Float = 0.0
 
-    private let audioWriteQueue = DispatchQueue(label: "com.wawa-note.audio.write", qos: .userInitiated)
+    // AudioFileWriter serializes all writes internally — no external write queue needed.
 
     /// 1024 frames = ~23ms at 44.1kHz (was 8192 = 186ms).
     private static let captureBufferSize: AVAudioFrameCount = 1024
@@ -182,7 +182,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     // MARK: - Engine rebuild
 
     /// Install the audio tap. Copies raw PCM samples and dispatches to the
-    /// write queue. No upsampling — file format matches hardware format exactly.
+    /// AudioFileWriter's internal serial queue. The writer is the single
+    /// serialization point for all audio data — no external write queue needed.
     private func installTap() {
         let inputNode = engine.inputNode
         inputNode.installTap(onBus: 0, bufferSize: Self.captureBufferSize, format: nil) { [weak self] buffer, _ in
@@ -194,15 +195,11 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             let frameLength = Int(buffer.frameLength)
             let samples = Array(UnsafeBufferPointer(start: channelData[0], count: frameLength))
 
-            self.audioWriteQueue.async { [weak self] in
-                guard let self, let file = self.fileWriter.activeFile else { return }
-                let fmt = file.processingFormat
-                guard let wb = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(frameLength)) else { return }
-                wb.frameLength = AVAudioFrameCount(frameLength)
-                if let dest = wb.floatChannelData {
-                    dest[0].initialize(from: samples, count: frameLength)
-                }
-                self.fileWriter.write(buffer: wb)
+            // AudioFileWriter serializes all writes internally.
+            // The tap callback creates the Array on the real-time thread (fast copy),
+            // then the writer's queue owns buffer creation and file I/O.
+            if let fmt = buffer.format {
+                self.fileWriter.write(samples: samples, frameLength: frameLength, format: fmt)
             }
         }
     }
@@ -216,12 +213,12 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         state = .interrupted  // Prevent tap from writing during transition
         timerTask?.cancel()
 
-        // 1. Remove tap, stop engine, close current segment
+        // 1. Remove tap, stop engine
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        let closedInfo = fileWriter.closeCurrentSegment()  // Thread-safe: sync on writer's queue
 
-        // 2. Reconfigure session
+        // 2. Reconfigure session BEFORE rotating segments (session changes
+        //    sample rate, which determines file format)
         try? sessionManager.deactivate()
         do {
             try sessionManager.configureForRecording()
@@ -236,23 +233,26 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         let sessionRate = sessionManager.sampleRate
         let hwFmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sessionRate > 0 ? sessionRate : 44100, channels: 1, interleaved: false)!
         engine.reset()
-        let segIndex = fileWriter.segmentIndex + 1
-        let segFileName = String(format: "segment-%03d.m4a", segIndex)
 
         guard let meetingId = currentMeetingId else {
             audioInterruptionReason = "Internal error."
             return
         }
 
-        // 4. Open new file segment BEFORE engine starts (no gap)
+        // 4. Atomically rotate to new segment — close old + open new.
+        //    The writer owns fileName, index, and extension decisions.
+        let closedInfo: ClosedSegmentInfo?
         do {
-            try fileWriter.startNewSegment(meetingId: meetingId, format: hwFmt)
+            closedInfo = try fileWriter.rotateToNewSegment(meetingId: meetingId, format: hwFmt)
         } catch {
-            AppLog.error("audio", "rebuildForNewRoute: startNewSegment failed: \(error)")
+            AppLog.error("audio", "rebuildForNewRoute: rotateToNewSegment failed: \(error)")
             audioInterruptionReason = "Could not create audio segment."
             try? sessionManager.deactivate()
-            return  // Engine is not running, clean stop
+            return
         }
+
+        let segIndex = fileWriter.segmentIndex
+        let segFileName = fileWriter.currentFileURL?.lastPathComponent ?? String(format: "segment-%03d.m4a", segIndex)
 
         // 5. Start engine — file is already open
         installTap()
@@ -267,7 +267,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return
         }
 
-        // 5. Emit new segment and restore state
+        // 6. Emit new segment and restore state
         let segment = RecordingSegment(
             id: UUID(), index: segIndex,
             fileName: segFileName,

@@ -102,7 +102,7 @@ final class HomeViewModel: ObservableObject {
     func scanSharedDirectoryAndImport() async {
         guard let ctx = modelContext else { return }
         guard let c = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.wawa-note") else { return }
-        let d = c.appendingPathComponent("Shared", isDirectory: true)
+        let d = c.appendingPathComponent("shared", isDirectory: true)
         guard FileManager.default.fileExists(atPath: d.path) else { return }
         guard let files = try? FileManager.default.contentsOfDirectory(at: d, includingPropertiesForKeys: nil) else { return }
         let pending = files.filter { !$0.lastPathComponent.hasPrefix(".") }

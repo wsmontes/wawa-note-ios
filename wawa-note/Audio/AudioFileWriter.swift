@@ -62,14 +62,58 @@ final class AudioFileWriter: @unchecked Sendable {
         queue.sync { _closeCurrentSegment() }
     }
 
+    /// Atomically close the current segment and open a new one.
+    /// Returns the closed segment's metadata so the caller can finalize the manifest.
+    @discardableResult
+    func rotateToNewSegment(meetingId: UUID, format: AVAudioFormat) throws -> ClosedSegmentInfo? {
+        try queue.sync {
+            let closed = _closeCurrentSegment()
+            _segmentIndex += 1
+            try _openSegment(meetingId: meetingId, format: format)
+            return closed
+        }
+    }
+
+    /// Open a new segment without closing the current one.
+    /// Callers MUST ensure the current segment is already closed (via closeCurrentSegment()
+    /// or rotateToNewSegment()) before calling this. Increments the segment index.
     func startNewSegment(meetingId: UUID, format: AVAudioFormat) throws {
         try queue.sync {
-            _closeCurrentSegment()
             _segmentIndex += 1
             try _openSegment(meetingId: meetingId, format: format)
         }
     }
 
+    /// Write raw float samples. Creates the PCM buffer on the writer's queue
+    /// and appends to the current file. This is the single serialization point
+    /// for all audio data — callers do NOT need their own write queue.
+    func write(samples: [Float], frameLength: Int, format: AVAudioFormat) {
+        queue.async { [weak self] in
+            guard let self, let file = self._audioFile else { return }
+            guard let wb = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameLength)) else { return }
+            wb.frameLength = AVAudioFrameCount(frameLength)
+            if let dest = wb.floatChannelData {
+                dest[0].initialize(from: samples, count: frameLength)
+            }
+            for attempt in 0...3 {
+                do {
+                    try file.write(from: wb)
+                    return
+                } catch {
+                    if attempt == 3 {
+                        self._writeErrorCount += 1
+                        self._lastWriteError = error
+                        AppLog.error("audio", "Write failed #\(self._writeErrorCount): \(error.localizedDescription)")
+                        return
+                    }
+                    Thread.sleep(forTimeInterval: [0.1, 0.2, 0.4][attempt])
+                }
+            }
+        }
+    }
+
+    /// Write an already-constructed PCM buffer. Used when the caller already
+    /// has a buffer (e.g., concatenation, testing).
     func write(buffer: AVAudioPCMBuffer) {
         queue.async { [weak self] in
             guard let self, let file = self._audioFile else { return }
@@ -117,12 +161,13 @@ final class AudioFileWriter: @unchecked Sendable {
     private func _closeCurrentSegment() -> ClosedSegmentInfo? {
         guard _audioFile != nil, let meetingId = _currentMeetingId else { return nil }
         let idx = _segmentIndex
-        let fileName = String(format: "segment-%03d.m4a", idx)
+        // Use the actual file name from _openSegment (may be .wav for low sample rates).
+        let fileName = _currentFileURL?.lastPathComponent ?? String(format: "segment-%03d.m4a", idx)
         let size = _fileSize
         let endedAt = Date()
         _audioFile = nil
         _currentFileURL = nil
-        AppLog.audio.info("Segment \(idx) closed — \(size) bytes")
+        AppLog.audio.info("Segment \(idx) closed — \(fileName) \(size) bytes")
         return ClosedSegmentInfo(index: idx, fileName: fileName, endedAt: endedAt, fileSize: size)
     }
 

@@ -130,14 +130,19 @@ final class RecordingCoordinator: ObservableObject {
                 activateLockScreenControls()
                 notifyStatusChange()
                 captureContextSafely(for: itemId)
-                // First segment
+                // First segment — read actual file name from the writer (may be .wav for
+                // low sample rates like Bluetooth HFP 8kHz). The writer is the source of truth.
+        let writer = captureService.fileWriter
+        let segIndex = writer.segmentIndex
+        let segFileName = writer.currentFileURL?.lastPathComponent ?? String(format: "segment-%03d.m4a", segIndex)
         let firstSegment = RecordingSegment(
-            id: UUID(), index: 0,
-            fileName: "segment-000.m4a",
+            id: UUID(), index: segIndex,
+            fileName: segFileName,
             startedAt: Date(),
             inputPortName: captureService.currentInputPortName,
             inputPortType: AudioSessionManager().bestAvailableInput?.portType.rawValue ?? "unknown",
-            routeChangeReason: "initial"
+            routeChangeReason: "initial",
+            sampleRate: nil
         )
         manifest = RecordingManifest(
             recordingId: itemId, title: recordingTitle,

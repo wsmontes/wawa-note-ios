@@ -112,6 +112,9 @@ final class ShareViewController: UIViewController {
                 shared?.set(saved, forKey: pendingImportFilesKey)
             }
             self.processingDone = true
+            if self.isViewLoaded, self.view.window != nil {
+                self.complete()
+            }
         }
     }
 

@@ -127,9 +127,10 @@ final class ContentPipelineService: ObservableObject {
             // Pre-transcribe audio items BEFORE checking AI provider.
             // Transcription uses Apple Speech (on-device) or Whisper API,
             // neither of which requires the AI provider configured in Settings.
-            // Without this, recording audio items would never get transcribed
-            // unless the user first configures an LLM provider.
-            if item.type == .audio && item.transcriptionEngineId == nil {
+            // Respect the user's autoTranscribe preference.
+            if AutomationSettings.shared.autoTranscribe,
+               item.type == .audio,
+               item.transcriptionEngineId == nil {
                 pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
                     itemType: item.type.rawValue, phase: "transcribing",
                     currentTool: nil, toolSummary: nil, toolLog: [], events: [], thinkingActive: false)
@@ -146,7 +147,7 @@ final class ContentPipelineService: ObservableObject {
             guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
                 AppLog.provider.error("ContentPipeline: no active provider configured — transcription-only mode")
                 if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
-                    fresh.status = item.transcriptionEngineId != nil ? .transcribed : .recorded
+                    fresh.status = fresh.transcriptionEngineId != nil ? .transcribed : .recorded
                     try? modelContext.save()
                 }
                 return

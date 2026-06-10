@@ -72,7 +72,6 @@ final class AudioSessionManager {
         let mode = bestModeForCurrentRoute()
         do {
             try session.setCategory(.playAndRecord, mode: mode, options: [
-                .allowBluetoothHFP,
                 .allowBluetooth,
                 .defaultToSpeaker
             ])
@@ -98,7 +97,6 @@ final class AudioSessionManager {
         let mode = bestModeForCurrentRoute()
         do {
             try session.setCategory(.playAndRecord, mode: mode, options: [
-                .allowBluetoothHFP,
                 .allowBluetooth,
                 .defaultToSpeaker
             ])
