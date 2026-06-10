@@ -408,6 +408,18 @@ final class RecordingCoordinator: ObservableObject {
         }
     }
 
+    /// Force recovery using the built-in iPhone microphone.
+    /// Call when Bluetooth fails and the user wants to fall back.
+    func forceBuiltInMicRecovery() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.captureService.forceBuiltInMicRecovery()
+            if self.captureService.state == .recording {
+                self.commitUIRecordingState()
+            }
+        }
+    }
+
     /// Manual retry when the user presses Resume after a route-loss interruption.
     /// Forces .recording intent with up to 3 attempts and progressive delay —
     /// Bluetooth devices take time to stabilize after connection.

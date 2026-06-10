@@ -621,10 +621,12 @@ struct HomeView: View {
     // MARK: Recording panel
 
     private var recordingPanel: some View {
-        let isPaused = captureVM.recordingState == .pausedByUser
-        let isInterrupted = captureVM.recordingState == .interruptedBySystem || captureVM.recordingState == .waitingForUsableInput || captureVM.recordingState == .reconfiguringRoute
-        let isRecovering = captureVM.recordingState == .waitingForUsableInput || captureVM.recordingState == .reconfiguringRoute
         let isActive = captureVM.recordingState == .recording
+        let isPaused = captureVM.recordingState == .pausedByUser
+        let isWaiting = captureVM.recordingState == .waitingForUsableInput
+        let isSwitching = captureVM.recordingState == .reconfiguringRoute || captureVM.recordingState == .validatingRoute
+        let isSystemInterrupted = captureVM.recordingState == .interruptedBySystem
+        let isTroubled = isWaiting || isSwitching || isSystemInterrupted
         return VStack(spacing: 0) {
             Spacer()
             ScrollingWaveformView(level: captureVM.audioLevel, isRunning: isActive)
@@ -643,9 +645,15 @@ struct HomeView: View {
             Spacer().frame(height: 16)
             Text(captureVM.elapsedTimeFormatted)
                 .font(.system(size: 48, weight: .thin, design: .monospaced))
-                .foregroundStyle(isInterrupted ? .red : (isPaused ? .orange : .primary))
-            if isInterrupted {
-                Text(captureVM.errorMessage ?? "Recording interrupted")
+                .foregroundStyle(isTroubled ? .orange : (isPaused ? .orange : .primary))
+            if isSwitching {
+                Text("Switching microphone…")
+                    .font(.subheadline).foregroundStyle(.orange)
+            } else if isWaiting {
+                Text("Waiting for microphone…")
+                    .font(.subheadline).foregroundStyle(.orange)
+            } else if isSystemInterrupted {
+                Text("Recording interrupted")
                     .font(.subheadline).foregroundStyle(.red)
             } else {
                 Text(isPaused ? "Paused" : "Recording")
@@ -655,26 +663,58 @@ struct HomeView: View {
                 Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 32).multilineTextAlignment(.center)
             }
             Spacer()
-            HStack(spacing: 40) {
-                if isPaused || isInterrupted {
-                    Button(action: { captureVM.resumeRecording() }) {
-                        ZStack {
-                            Circle().fill(isInterrupted ? .orange : .red).frame(width: 64, height: 64)
-                            Image(systemName: isInterrupted ? "arrow.clockwise.circle.fill" : "record.circle.fill")
-                                .font(.system(size: 28)).foregroundStyle(.white)
+            VStack(spacing: 16) {
+                if isActive {
+                    HStack(spacing: 40) {
+                        Button(action: { captureVM.pauseRecording() }) {
+                            ZStack {
+                                Circle().fill(.white).frame(width: 64, height: 64)
+                                Image(systemName: "pause.fill").font(.system(size: 24)).foregroundStyle(.orange)
+                            }
+                        }
+                        Button(action: { UINotificationFeedbackGenerator().notificationOccurred(.success); captureVM.stopRecording() }) {
+                            Text("Finish").font(.headline).foregroundStyle(.primary)
+                                .frame(width: 80, height: 44)
+                                .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 22))
                         }
                     }
+                } else if isPaused || isSystemInterrupted {
+                    HStack(spacing: 40) {
+                        Button(action: { captureVM.resumeRecording() }) {
+                            ZStack {
+                                Circle().fill(isSystemInterrupted ? .orange : .red).frame(width: 64, height: 64)
+                                Image(systemName: isSystemInterrupted ? "arrow.clockwise.circle.fill" : "record.circle.fill")
+                                    .font(.system(size: 28)).foregroundStyle(.white)
+                            }
+                        }
+                        Button(action: { UINotificationFeedbackGenerator().notificationOccurred(.success); captureVM.stopRecording() }) {
+                            Text("Finish").font(.headline).foregroundStyle(.primary)
+                                .frame(width: 80, height: 44)
+                                .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 22))
+                        }
+                    }
+                } else if isWaiting {
+                    VStack(spacing: 12) {
+                        Button(action: { captureVM.resumeRecording() }) {
+                            Label("Try Again", systemImage: "arrow.clockwise")
+                                .font(.headline).frame(maxWidth: 200, minHeight: 40)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        Button(action: { captureVM.forceBuiltInMic() }) {
+                            Label("Use iPhone Microphone", systemImage: "iphone")
+                                .font(.subheadline).frame(maxWidth: 200, minHeight: 36)
+                        }
+                        .buttonStyle(.bordered)
+                        Button(action: { UINotificationFeedbackGenerator().notificationOccurred(.success); captureVM.stopRecording() }) {
+                            Text("Finish").font(.headline).foregroundStyle(.secondary)
+                                .frame(width: 80, height: 44)
+                        }
+                    }
+                } else if isSwitching {
                     Button(action: { UINotificationFeedbackGenerator().notificationOccurred(.success); captureVM.stopRecording() }) {
                         Text("Finish").font(.headline).foregroundStyle(.primary)
                             .frame(width: 80, height: 44)
                             .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 22))
-                    }
-                } else {
-                    Button(action: { captureVM.pauseRecording() }) {
-                        ZStack {
-                            Circle().fill(.white).frame(width: 64, height: 64)
-                            Image(systemName: "pause.fill").font(.system(size: 24)).foregroundStyle(.orange)
-                        }
                     }
                 }
             }.padding(.bottom, 48)

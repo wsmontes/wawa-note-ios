@@ -81,6 +81,7 @@ final class CaptureViewModel: ObservableObject {
 
     func pauseRecording() { coordinator?.pauseRecording() }
     func resumeRecording() { coordinator?.resumeRecording() }
+    func forceBuiltInMic() { coordinator?.forceBuiltInMicRecovery() }
 
     func stopRecording() {
         coordinator?.stopRecording()

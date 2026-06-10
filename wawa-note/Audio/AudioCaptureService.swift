@@ -578,6 +578,87 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     // MARK: - Interruption recovery
 
+    /// Force recovery using the built-in iPhone microphone.
+    /// Explicitly selects builtInMic and restarts capture from scratch.
+    func forceBuiltInMicRecovery() async {
+        guard state == .waitingForUsableInput || state == .interruptedBySystem else { return }
+        guard let meetingId = currentMeetingId else { return }
+
+        AppLog.audio.info("Force built-in mic recovery")
+
+        // Clean stop
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+
+        // Fresh engine + configure for built-in mic specifically
+        engine = AVAudioEngine()
+        try? sessionManager.configureForRecording()
+
+        // Force select built-in mic
+        if let builtIn = sessionManager.session.availableInputs?.first(where: { $0.portType == .builtInMic }) {
+            try? sessionManager.session.setPreferredInput(builtIn)
+            AppLog.audio.info("Forced built-in mic: \(builtIn.portName)")
+        }
+
+        guard sessionManager.isInputAvailable else {
+            audioInterruptionReason = "iPhone microphone not available."
+            transition(to: .waitingForUsableInput, reason: "built-in mic not available")
+            return
+        }
+
+        // Open new segment
+        let sessionRate = sessionManager.sampleRate
+        let hwFmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sessionRate > 0 ? sessionRate : 44100, channels: 1, interleaved: false)!
+        let closedInfo = try? fileWriter.rotateToNewSegment(meetingId: meetingId, format: hwFmt)
+        let segIndex = fileWriter.segmentIndex
+        let segFileName = fileWriter.currentFileURL?.lastPathComponent ?? String(format: "segment-%03d.m4a", segIndex)
+
+        // Start engine
+        installTap()
+        engine.prepare()
+        var started = false
+        for attempt in 0...2 {
+            do { try engine.start(); started = true; break }
+            catch {
+                if attempt < 2 { try? await Task.sleep(nanoseconds: 300_000_000); engine.reset(); engine.prepare() }
+            }
+        }
+
+        guard started else {
+            fileWriter.closeCurrentSegment()
+            audioInterruptionReason = "Could not start iPhone microphone."
+            transition(to: .waitingForUsableInput, reason: "built-in mic engine failed")
+            return
+        }
+
+        // Validate
+        let gen = routeRecoveryGeneration
+        transition(to: .validatingRoute, reason: "validating built-in mic")
+        let bufStart = lastBufferReceivedAt
+        for _ in 0..<20 where lastBufferReceivedAt <= bufStart {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+
+        guard lastBufferReceivedAt > bufStart else {
+            fileWriter.closeCurrentSegment()
+            audioInterruptionReason = "iPhone microphone not delivering audio."
+            transition(to: .waitingForUsableInput, reason: "built-in mic validation failed")
+            return
+        }
+
+        // Commit
+        let segment = RecordingSegment(
+            id: UUID(), index: segIndex, fileName: segFileName, startedAt: Date(),
+            inputPortName: sessionManager.currentInputPortName,
+            inputPortType: "builtInMic",
+            routeChangeReason: "forceBuiltInMic", sampleRate: hwFmt.sampleRate
+        )
+        onSegmentCreated?(closedInfo, segment)
+        currentInputPortName = sessionManager.currentInputPortName
+        audioInterruptionReason = nil
+        _ = commitRecoveredRouteToRecording(generation: gen, reason: "forced built-in mic")
+    }
+
     /// Attempt to recover from an interrupted/waiting state.
     /// - Parameter forceRecording: if true, always resume as .recording.
     func attemptResume(forceRecording: Bool = false) async {

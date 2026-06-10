@@ -68,6 +68,7 @@ final class RecordingViewModel: ObservableObject {
     func pauseRecording() { coordinator.pauseRecording() }
     func resumeRecording() { coordinator.resumeRecording() }
     func stopRecording() { coordinator.stopRecording() }
+    func forceBuiltInMic() { coordinator.forceBuiltInMicRecovery() }
 
     // MARK: - Markers
 
