@@ -31,6 +31,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// (nil for the first segment). newSegment is the segment just created.
     var onSegmentCreated: ((_ closedInfo: ClosedSegmentInfo?, _ newSegment: RecordingSegment) -> Void)?
 
+    /// Called when a segment is closed without a new one opening (e.g., interruption began).
+    /// The coordinator should finalize that segment's endedAt / fileSize in the manifest.
+    var onSegmentClosed: ((_ closedInfo: ClosedSegmentInfo) -> Void)?
+
     private var timerTask: Task<Void, Never>?
     private var levelMonitorTask: Task<Void, Never>?
     private var recordingStartTime: Date?
@@ -60,6 +64,16 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         self.engine = engine
         self.fileWriter = fileWriter
         self.sessionManager = sessionManager
+        // Propagate write failures (e.g., disk full) to recording state
+        fileWriter.onWriteFailure = { [weak self] in
+            DispatchQueue.main.async {
+                guard let self, self.state == .recording || self.state == .paused else { return }
+                self.state = .interrupted
+                self.audioInterruptionReason = "Recording stopped — storage is full."
+                self.timerTask?.cancel()
+                AppLog.error("audio", "Recording interrupted by write failure")
+            }
+        }
     }
 
     deinit {
@@ -278,6 +292,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         )
         onSegmentCreated?(closedInfo, segment)
 
+        // Update published port info so the UI reflects the new route immediately.
+        currentInputPortName = sessionManager.currentInputPortName
+
         state = resumeRecording ? .recording : .paused
         if resumeRecording { startTimer() }
         AppLog.audio.info("Rebuilt for new route: \(self.sessionManager.currentInputPortName) segment=\(segIndex)")
@@ -373,6 +390,11 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 state = .interrupted
                 audioInterruptionReason = "Recording paused due to interruption (phone call, alarm, etc.)."
                 timerTask?.cancel()
+                // Close the current segment now so the manifest records the
+                // actual audio end time — not the wall-clock time including the gap.
+                if let closed = fileWriter.closeCurrentSegment() {
+                    onSegmentClosed?(closed)
+                }
             }
         case .ended:
             let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt

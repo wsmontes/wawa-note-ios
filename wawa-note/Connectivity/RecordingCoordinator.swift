@@ -69,6 +69,19 @@ final class RecordingCoordinator: ObservableObject {
                 self.saveManifest(m, meetingId: itemId)
             }
         }
+
+        // Interruption began → segment closed without opening a new one.
+        // Finalize the last segment's end time so the manifest doesn't
+        // include interruption silence as audio duration.
+        captureService.onSegmentClosed = { [weak self] closedInfo in
+            guard let self, var m = self.manifest, let lastIdx = m.segments.indices.last else { return }
+            m.segments[lastIdx].endedAt = closedInfo.endedAt
+            m.segments[lastIdx].fileSize = closedInfo.fileSize
+            self.manifest = m
+            if let itemId = self.savedItemId {
+                self.saveManifest(m, meetingId: itemId)
+            }
+        }
     }
 
     // MARK: - Recording lifecycle
