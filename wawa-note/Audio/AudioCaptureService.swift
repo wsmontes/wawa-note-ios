@@ -231,9 +231,11 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return
         }
 
-        // 3. Configure session and get input format BEFORE engine runs
+        // 3. Get format BEFORE engine.reset() destroys it. Use session sampleRate
+        //    as source of truth — reflects the actual hardware route.
+        let sessionRate = sessionManager.sampleRate
+        let hwFmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sessionRate > 0 ? sessionRate : 44100, channels: 1, interleaved: false)!
         engine.reset()
-        let hwFmt = engine.inputNode.outputFormat(forBus: 0)
         let segIndex = fileWriter.segmentIndex + 1
         let segFileName = String(format: "segment-%03d.m4a", segIndex)
 
