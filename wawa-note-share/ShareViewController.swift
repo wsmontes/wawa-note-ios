@@ -95,6 +95,10 @@ final class ShareViewController: UIViewController {
                 let shared = UserDefaults(suiteName: appGroupIdentifier)
                 shared?.set(saved, forKey: pendingImportFilesKey)
                 NSLog("[WawaShare] Saved \(saved.count) files (errors: \(errorCount)): \(saved)")
+                // Open the main app to trigger import
+                if let url = URL(string: "wawanote://import") {
+                    self?.extensionContext?.open(url)
+                }
             }
             self?.processingDone = true
             if self?.isViewLoaded == true, self?.view.window != nil {
@@ -110,6 +114,10 @@ final class ShareViewController: UIViewController {
             if !saved.isEmpty {
                 let shared = UserDefaults(suiteName: appGroupIdentifier)
                 shared?.set(saved, forKey: pendingImportFilesKey)
+                // Open the main app to trigger import
+                if let url = URL(string: "wawanote://import") {
+                    self.extensionContext?.open(url)
+                }
             }
             self.processingDone = true
             if self.isViewLoaded, self.view.window != nil {

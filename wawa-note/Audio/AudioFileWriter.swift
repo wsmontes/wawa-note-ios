@@ -51,6 +51,8 @@ final class AudioFileWriter: @unchecked Sendable {
     func startRecording(format: AVAudioFormat, meetingId: UUID) throws {
         try queue.sync {
             _segmentIndex = 0
+            _writeErrorCount = 0
+            _lastWriteError = nil
             try fileStore.createMeetingDirectory(for: meetingId)
             _currentMeetingId = meetingId
             try _openSegment(meetingId: meetingId, format: format)

@@ -75,6 +75,9 @@ final class AudioSessionManager {
                 .allowBluetooth,
                 .defaultToSpeaker
             ])
+            if let preferredInput = bestAvailableInput {
+                try? session.setPreferredInput(preferredInput)
+            }
             try session.setAllowHapticsAndSystemSoundsDuringRecording(true)
             try session.setActive(true)
 

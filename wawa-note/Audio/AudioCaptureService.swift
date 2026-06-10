@@ -198,9 +198,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             // AudioFileWriter serializes all writes internally.
             // The tap callback creates the Array on the real-time thread (fast copy),
             // then the writer's queue owns buffer creation and file I/O.
-            if let fmt = buffer.format {
-                self.fileWriter.write(samples: samples, frameLength: frameLength, format: fmt)
-            }
+            let fmt = buffer.format
+            self.fileWriter.write(samples: samples, frameLength: frameLength, format: fmt)
         }
     }
 

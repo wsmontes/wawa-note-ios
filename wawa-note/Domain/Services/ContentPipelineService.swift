@@ -200,15 +200,15 @@ final class ContentPipelineService: ObservableObject {
                                               currentTool: nil, toolSummary: nil, toolLog: toolLog,
                                               events: agentEvents, thinkingActive: false)
 
-            // Verify we have content to analyze before launching the agent
+            // Verify we have content to analyze before launching the agent.
+            // Don't mark as .failed here — empty text may be temporary
+            // (OCR pending, transcription disabled, import still processing).
             let extractionSvc = ContentExtractionService(modelContext: modelContext, fileStore: fileStore)
             let availableText = await extractionSvc.bestAvailableText(for: item) ?? ""
             if availableText.trimmingCharacters(in: .whitespaces).isEmpty {
-                AppLog.provider.warning("ContentPipeline: no extractable text for item \(itemID) — skipping agent")
-                if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
-                    fresh.status = .failed
-                    try? modelContext.save()
-                }
+                AppLog.provider.warning("ContentPipeline: no extractable text for item \(itemID) — deferring")
+                // Keep current status (.recorded, .transcribed, etc.) — don't mark failed.
+                // The item can be re-processed later when text becomes available.
                 return
             }
 
