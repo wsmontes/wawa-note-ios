@@ -80,13 +80,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // Configure audio session with appropriate mode for current route
         try sessionManager.configureForRecording()
 
-        // Always use 44.1kHz PCM for the file format — the tap handles any
-        // sample rate conversion automatically (format: nil adapts to input).
-        // Bluetooth devices (AirPods HFP) can have 8kHz or 16kHz sample rates
-        // which AAC encoder rejects, causing fileCreationFailed.
-        let recordFormat = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1)!
-        try fileWriter.startRecording(format: recordFormat, meetingId: meetingId)
-
+        // Install tap before engine starts — the tap adapts automatically (format: nil)
         installTap()
         engine.prepare()
 
@@ -101,8 +95,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 engineError = error
                 AppLog.error("audio", "Engine start attempt \(attempt + 1) failed: \(error.localizedDescription)")
                 if attempt < 2 {
-                    // Brief pause for Bluetooth route to stabilize
-                    try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
+                    try? await Task.sleep(nanoseconds: 300_000_000)
                     engine.reset()
                     engine.prepare()
                 }
@@ -112,17 +105,21 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         if let engineError {
             AppLog.error("audio", "All engine start attempts failed: \(engineError.localizedDescription)")
             engine.inputNode.removeTap(onBus: 0)
-            fileWriter.finishRecording()
             try? sessionManager.deactivate()
             throw AudioCaptureError.engineStartFailed
         }
+
+        // File created AFTER engine start: the real hardware format is available now.
+        // Matches what the tap delivers — no sample rate mismatch (no chipmunk audio).
+        let hardwareFormat = engine.inputNode.outputFormat(forBus: 0)
+        try fileWriter.startRecording(format: hardwareFormat, meetingId: meetingId)
 
         state = .recording
         currentInputPortName = sessionManager.currentInputPortName
         startTimer()
         startLevelSmoothing()
         observeAudioNotifications()
-        AppLog.event("audio", "Audio engine started — input=\(self.currentInputPortName) rate=\(recordFormat.sampleRate)Hz")
+        AppLog.event("audio", "Audio engine started — input=\(self.currentInputPortName) rate=\(hardwareFormat.sampleRate)Hz")
     }
 
     func pauseRecording() {
@@ -174,8 +171,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     // MARK: - Engine rebuild
 
-    /// Install the audio tap on the engine's input node. Extracted to avoid
-    /// duplication between startRecording and rebuildEngine.
+    /// Install the audio tap on the engine's input node.
+    /// Copies PCM samples and dispatches to the write queue as a [Float] array
+    /// (Sendable) to avoid non-Sendable AVAudioPCMBuffer across actor boundaries.
     private func installTap() {
         let inputNode = engine.inputNode
         inputNode.installTap(onBus: 0, bufferSize: Self.captureBufferSize, format: nil) { [weak self] buffer, _ in
@@ -185,24 +183,16 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
             guard let channelData = buffer.floatChannelData else { return }
             let frameLength = Int(buffer.frameLength)
-            let copiedFrames = UnsafeMutablePointer<Float>.allocate(capacity: frameLength)
-            copiedFrames.initialize(from: channelData[0], count: frameLength)
+            let samples = Array(UnsafeBufferPointer(start: channelData[0], count: frameLength))
 
             self.audioWriteQueue.async { [weak self] in
-                guard let self, let file = self.fileWriter.activeFile else {
-                    copiedFrames.deallocate()
-                    return
-                }
+                guard let self, let file = self.fileWriter.activeFile else { return }
                 let fmt = file.processingFormat
-                guard let wb = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(frameLength)) else {
-                    copiedFrames.deallocate()
-                    return
-                }
+                guard let wb = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(frameLength)) else { return }
                 wb.frameLength = AVAudioFrameCount(frameLength)
                 if let dest = wb.floatChannelData {
-                    dest[0].initialize(from: copiedFrames, count: frameLength)
+                    dest[0].initialize(from: samples, count: frameLength)
                 }
-                copiedFrames.deallocate()
                 self.fileWriter.write(buffer: wb)
             }
         }

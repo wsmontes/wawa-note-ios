@@ -187,7 +187,8 @@ final class RecordingCoordinator: ObservableObject {
 
     func stopRecording() {
         guard state == .recording || state == .paused || state == .interrupted else { return }
-        AppLog.event("audio", "Stopping recording — elapsed=\(elapsedTimeFormatted) pausedDur=\(Int(pausedDuration))s itemID=\(savedItemId?.uuidString.prefix(8) ?? "nil")")
+        let itemId = savedItemId
+        AppLog.event("audio", "Stopping recording — elapsed=\(elapsedTimeFormatted) pausedDur=\(Int(pausedDuration))s itemID=\(itemId?.uuidString.prefix(8) ?? "nil")")
         captureService.stopRecording()
         state = .stopped
         nowPlayingController.deactivate()
@@ -196,6 +197,12 @@ final class RecordingCoordinator: ObservableObject {
         observationTimer = nil
         nowPlayingTimer?.invalidate()
         nowPlayingTimer = nil
+
+        // Trigger pipeline processing. CaptureViewModel also calls this from
+        // the UI, but remote commands (lock screen, CarPlay) come directly here.
+        if let itemId {
+            contentPipeline?.process(itemId, using: modelContext)
+        }
 
         if let pauseStart = pauseStartDate {
             pausedDuration += Date().timeIntervalSince(pauseStart)
