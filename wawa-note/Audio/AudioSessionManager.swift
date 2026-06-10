@@ -141,20 +141,27 @@ final class AudioSessionManager {
     }
 
     var isInputAvailable: Bool {
-        session.currentRoute.inputs.contains(where: { (port: AVAudioSessionPortDescription) -> Bool in
-            (port.channels?.count ?? 0) > 0
-        })
+        // Check current route first, fall back to availableInputs during Bluetooth transitions.
+        let current = session.currentRoute.inputs.contains { ($0.channels?.count ?? 0) > 0 }
+        if current { return true }
+        return session.availableInputs?.contains { ($0.channels?.count ?? 0) > 0 } ?? false
     }
 
-    /// Best available input port — prefers built-in mic over A2DP-only Bluetooth devices.
+    /// Best available input port — prefers availableInputs (all known devices) over
+    /// currentRoute.inputs (only active right now). During Bluetooth transitions,
+    /// currentRoute may be empty while availableInputs still lists valid mics.
     var bestAvailableInput: AVAudioSessionPortDescription? {
-        let inputs = session.currentRoute.inputs
-        // Filter to only inputs with actual channels
-        let viable = inputs.filter { ($0.channels?.count ?? 0) > 0 }
-        // Prefer non-A2DP inputs (A2DP is music-only, no mic)
-        if let hfp = viable.first(where: { $0.portType != .bluetoothA2DP && $0.portType != .bluetoothLE }) {
-            return hfp
+        let candidates = session.availableInputs ?? session.currentRoute.inputs
+        // Exclude A2DP/LE (music-only, no mic)
+        let viable = candidates.filter { input in
+            input.portType != .bluetoothA2DP &&
+            input.portType != .bluetoothLE &&
+            (input.channels?.count ?? 0) > 0
         }
+        // Prefer HFP headsets, then wired, then built-in
+        if let hfp = viable.first(where: { $0.portType == .bluetoothHFP }) { return hfp }
+        if let wired = viable.first(where: { $0.portType == .headsetMic || $0.portType == .usbAudio }) { return wired }
+        if let builtIn = viable.first(where: { $0.portType == .builtInMic }) { return builtIn }
         return viable.first
     }
 

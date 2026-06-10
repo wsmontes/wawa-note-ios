@@ -41,6 +41,15 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private var currentMeetingId: UUID?
     private var stateBeforeInterruption: AudioCaptureState?
 
+    /// When input is lost during recording, remember whether we should auto-resume
+    /// once a valid input returns. Set to true only if state was .recording at loss.
+    private var shouldResumeAfterRouteRecovery = false
+
+    /// Debounce task for route change notifications — Bluetooth transitions can fire
+    /// multiple notifications in quick succession. We collapse them into one settled
+    /// evaluation after 500ms.
+    private var routeChangeTask: Task<Void, Never>?
+
     private let audioLevelLock = NSLock()
     private nonisolated(unsafe) var rawAudioLevel: Float = 0.0
 
@@ -342,10 +351,18 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     // MARK: - Interruption recovery
 
-    func attemptResume() {
+    /// Attempt to recover from an interrupted state.
+    /// - Parameter forceRecording: if true, always resume as .recording regardless
+    ///   of stored previous state. Use this for manual "Resume" button presses.
+    func attemptResume(forceRecording: Bool = false) {
         guard state == .interrupted else { return }
-        let shouldRecord = stateBeforeInterruption == .recording
-        rebuildForNewRoute(reason: "interruptionEnded", resumeRecording: shouldRecord)
+        let shouldRecord = forceRecording
+            || shouldResumeAfterRouteRecovery
+            || stateBeforeInterruption == .recording
+        rebuildForNewRoute(reason: forceRecording ? "manualResume" : "interruptionEnded", resumeRecording: shouldRecord)
+        if state != .interrupted {
+            shouldResumeAfterRouteRecovery = false
+        }
         audioInterruptionReason = state == .interrupted ? "Could not resume after interruption" : nil
     }
 
@@ -437,36 +454,68 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// The tap(format: nil) auto-adapts to format, but the engine MUST be
     /// restarted to capture from the new device.
     ///
-    /// With segmented recording, this is safe: the segment closes before rebuild
-    /// and a new segment opens after. The logical recording is uninterrupted.
+    /// Bluetooth transitions fire multiple notifications rapidly — debounce by
+    /// 500ms so we evaluate the settled route, not an intermediate state where
+    /// input may appear unavailable.
     private func handleRouteChange(_ notification: Notification) {
         guard let userInfo = notification.userInfo,
               let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
 
-        let newPort = sessionManager.currentInputPortName
-        AppLog.audio.info("Audio route changed: reason=\(reason.rawValue) port=\(newPort)")
+        AppLog.audio.info("Audio route change notification: reason=\(reason.rawValue)")
 
-        // No input available → pause
-        guard sessionManager.isInputAvailable else {
+        routeChangeTask?.cancel()
+        routeChangeTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.processSettledRouteChange(reason)
+        }
+    }
+
+    @MainActor
+    private func processSettledRouteChange(_ reason: AVAudioSession.RouteChangeReason) {
+        let portName = sessionManager.currentInputPortName
+        let inputAvailable = sessionManager.isInputAvailable
+        AppLog.audio.info("Route settled: reason=\(reason.rawValue) port=\(portName) inputAvailable=\(inputAvailable)")
+
+        // Input lost while recording or paused
+        guard inputAvailable else {
             if state == .recording || state == .paused {
+                // Remember intent so we auto-resume when input returns
+                self.shouldResumeAfterRouteRecovery = (state == .recording)
+                stateBeforeInterruption = state
+
                 state = .interrupted
-                audioInterruptionReason = "No microphone available."
+                audioInterruptionReason = "Microphone disconnected. Waiting for input…"
                 timerTask?.cancel()
+
+                // Close current segment so manifest metadata is accurate
+                if let closed = fileWriter.closeCurrentSegment() {
+                    onSegmentClosed?(closed)
+                }
+                AppLog.audio.info("Input lost — shouldResume=\(self.shouldResumeAfterRouteRecovery)")
             }
             return
         }
 
-        // Rebuild if recording OR paused (engine is alive in both states)
+        // Input returned while interrupted — auto-recover
+        if state == .interrupted, currentMeetingId != nil {
+            AppLog.audio.info("Input recovered — auto-rebuilding (shouldResume=\(self.shouldResumeAfterRouteRecovery))")
+            rebuildForNewRoute(reason: "routeRecovered", resumeRecording: self.shouldResumeAfterRouteRecovery)
+            self.shouldResumeAfterRouteRecovery = false
+            return
+        }
+
+        // Input changed while recording or paused — rebuild with new route
         let wasRecording = state == .recording
         guard wasRecording || state == .paused else {
-            currentInputPortName = newPort
+            currentInputPortName = portName
             return
         }
 
         rebuildForNewRoute(reason: String(reason.rawValue), resumeRecording: wasRecording)
-        currentInputPortName = newPort
-        AppLog.audio.info("Rebuilt for new route: \(newPort)")
+        currentInputPortName = portName
+        AppLog.audio.info("Rebuilt for new route: \(portName)")
     }
 
     private func handleMediaServicesReset(_ notification: Notification) {

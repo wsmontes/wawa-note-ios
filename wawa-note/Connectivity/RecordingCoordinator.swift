@@ -1,6 +1,7 @@
 import SwiftData
 import OSLog
 import AVFoundation
+import Combine
 @preconcurrency import ActivityKit
 
 @MainActor
@@ -28,6 +29,7 @@ final class RecordingCoordinator: ObservableObject {
     private var recordingTitle: String = ""
     private var observationTimer: Timer?
     private var nowPlayingTimer: Timer?
+    private var cancellables = Set<AnyCancellable>()
 
     // Segmented recording manifest (segments managed by AudioCaptureService)
     private var manifest: RecordingManifest?
@@ -82,6 +84,24 @@ final class RecordingCoordinator: ObservableObject {
                 self.saveManifest(m, meetingId: itemId)
             }
         }
+
+        // Keep UI state in sync with the real capture service state.
+        // The capture service owns the source of truth for recording state;
+        // the coordinator mirrors it for the UI layer.
+        captureService.$state
+            .receive(on: RunLoop.main)
+            .sink { [weak self] captureState in
+                self?.syncCaptureState(captureState)
+            }
+            .store(in: &cancellables)
+
+        captureService.$audioInterruptionReason
+            .receive(on: RunLoop.main)
+            .sink { [weak self] reason in
+                self?.errorMessage = reason
+                self?.notifyStatusChange()
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Recording lifecycle
@@ -227,6 +247,11 @@ final class RecordingCoordinator: ObservableObject {
 
     func resumeRecording() {
         guard state == .paused || state == .interrupted else { return }
+        if state == .interrupted {
+            // Route-loss / interruption recovery — force recording intent
+            retryRecordingRecovery()
+            return
+        }
         captureService.resumeRecording()
         // Only transition to .recording if the capture service actually recovered
         if captureService.state == .recording {
@@ -297,6 +322,70 @@ final class RecordingCoordinator: ObservableObject {
         savedItemId = nil
         errorMessage = nil
         captureService.resetToIdle()
+    }
+
+    // MARK: - State sync with capture service
+
+    /// Mirror the capture service's real state. The capture service owns the
+    /// source of truth for recording state — this coordinator mirrors it for UI.
+    private func syncCaptureState(_ captureState: AudioCaptureState) {
+        switch captureState {
+        case .recording:
+            if state == .interrupted || state == .paused {
+                if let ps = pauseStartDate {
+                    pausedDuration += Date().timeIntervalSince(ps)
+                    pauseStartDate = nil
+                }
+                state = .recording
+                startObservation()
+                nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: true)
+                notifyStatusChange()
+            }
+        case .interrupted:
+            if state == .recording || state == .paused {
+                state = .interrupted
+                if pauseStartDate == nil { pauseStartDate = Date() }
+                observationTimer?.invalidate()
+                nowPlayingTimer?.invalidate()
+                nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: false)
+                notifyStatusChange()
+            }
+        case .paused:
+            if state == .recording {
+                state = .paused
+                if pauseStartDate == nil { pauseStartDate = Date() }
+                observationTimer?.invalidate()
+                notifyStatusChange()
+            }
+        case .stopped:
+            if state != .stopped {
+                state = .stopped
+                observationTimer?.invalidate()
+                nowPlayingTimer?.invalidate()
+                notifyStatusChange()
+            }
+        case .idle:
+            break
+        }
+    }
+
+    /// Manual retry when the user presses Resume after a route-loss interruption.
+    /// Forces .recording intent regardless of stored previous state.
+    func retryRecordingRecovery() {
+        captureService.attemptResume(forceRecording: true)
+        // Sync immediately from the capture service's actual state
+        if captureService.state == .recording {
+            state = .recording
+            if let ps = pauseStartDate {
+                pausedDuration += Date().timeIntervalSince(ps)
+                pauseStartDate = nil
+            }
+            startObservation()
+        } else {
+            state = .interrupted
+            errorMessage = captureService.audioInterruptionReason ?? "Could not resume recording."
+        }
+        notifyStatusChange()
     }
 
     /// Attempt to recover from audio interruptions when the app returns to the foreground.
