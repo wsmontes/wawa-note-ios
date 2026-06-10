@@ -30,39 +30,99 @@ final class ContentExtractionService {
     /// Never returns nil as long as a transcript exists on disk — extraction failure
     /// falls back to the existing transcript instead of blocking Phase 3.
     func extractTextFromAudio(_ item: KnowledgeItem) async -> String? {
-        // Reuse existing transcript when available — avoids re-transcribing
-        // and prevents a failed re-transcription from blocking project ingestion.
+        // Reuse existing transcript when available
         if let existing = loadExistingTranscriptText(for: item.id) {
             AppLog.provider.info("ContentExtraction: reusing existing transcript for item \(item.id)")
             return existing
         }
 
-        let audioURL = fileStore.audioFileURL(for: item.id)
-        guard FileManager.default.fileExists(atPath: audioURL.path) else {
-            AppLog.provider.warning("ContentExtraction: no audio file for item \(item.id)")
-            return nil
+        // Check for segmented recording (manifest.json) first
+        if fileStore.recordingManifestExists(for: item.id),
+           let manifest = try? fileStore.readRecordingManifest(for: item.id),
+           !manifest.segments.isEmpty {
+            return await transcribeSegmented(manifest: manifest, item: item)
         }
 
-        // Convert to 16kHz mono WAV for transcription compatibility.
-        // AAC from AirPods (8kHz) or built-in mic (44.1kHz) gets standardized
-        // to the format SFSpeechRecognizer and Whisper expect natively.
-        let transcriptionURL: URL
-        if let converted = try? await convertToTranscriptionFormat(audioURL) {
-            transcriptionURL = converted
-        } else {
-            transcriptionURL = audioURL  // Fall back to original
+        // Legacy: single audio.m4a file
+        return await transcribeSingleFile(item: item)
+    }
+
+    /// Transcribe a segmented recording — all segments in order with merged timestamps.
+    private func transcribeSegmented(manifest: RecordingManifest, item: KnowledgeItem) async -> String? {
+        let engine = resolveTranscriptionEngine()
+        guard let engine else { return nil }
+
+        var allSegments: [TranscriptSegment] = []
+        var timeOffset: Double = 0
+        var hadError = false
+
+        for segment in manifest.segments.sorted(by: { $0.index < $1.index }) {
+            let segURL = fileStore.segmentURL(for: item.id, fileName: segment.fileName)
+            guard FileManager.default.fileExists(atPath: segURL.path) else {
+                AppLog.provider.warning("ContentExtraction: segment \(segment.index) file not found: \(segURL.path)")
+                hadError = true
+                continue
+            }
+
+            let inputURL: URL
+            if let converted = try? await convertToTranscriptionFormat(segURL) {
+                inputURL = converted
+            } else {
+                inputURL = segURL
+            }
+
+            do {
+                let result = try await engine.transcribeFile(inputURL)
+                // Offset segment timestamps
+                let shifted = result.segments.map { seg -> TranscriptSegment in
+                    var s = seg
+                    s.startTime += timeOffset
+                    s.meetingId = item.id
+                    return s
+                }
+                allSegments.append(contentsOf: shifted)
+
+                // Accumulate time offset for next segment
+                if let lastSeg = result.segments.last, let end = lastSeg.endTime {
+                    timeOffset = max(timeOffset, end)
+                }
+                AppLog.provider.info("ContentExtraction: segment \(segment.index) transcribed — \(result.segments.count) segments, offset=\(timeOffset)s")
+            } catch {
+                AppLog.provider.error("ContentExtraction: segment \(segment.index) transcription failed: \(error)")
+                hadError = true
+            }
         }
 
-        let engine: TranscriptionEngine
+        guard !allSegments.isEmpty else { return nil }
+
+        // Save unified transcript
+        let unified = Transcript(
+            meetingId: item.id,
+            languageCode: manifest.segments.first.flatMap { _ in nil },
+            segments: allSegments,
+            sourceEngineId: "segmented-apple-speech"
+        )
+
+        do {
+            try fileStore.createMeetingDirectory(for: item.id)
+            try fileStore.writeArtifact(unified, fileName: "transcript.json", meetingId: item.id)
+            try modelContext.save()
+            AppLog.provider.info("ContentExtraction: unified transcript saved — \(allSegments.count) segments total")
+        } catch {
+            AppLog.provider.error("ContentExtraction: failed to save unified transcript: \(error)")
+        }
+
+        return allSegments.map(\.text).joined(separator: "\n")
+    }
+
+    /// Resolve which transcription engine to use based on settings and provider config.
+    private func resolveTranscriptionEngine() -> (any TranscriptionEngine)? {
         let settings = TranscriptionSettings.shared
         let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext)
 
-        // Only use remote Whisper if the user explicitly chose it AND the provider supports it
         let canUseRemoteWhisper: Bool = {
             guard let config, config.baseURL != nil else { return false }
-            // Check provider config for audio transcription endpoint
             let supportsTranscription = AIConfigService.shared.supportsAudioTranscription(for: config.providerConfigId)
-            // Also check the provider type config (for openAI etc.)
             let typeSupports = AIConfigService.shared.supportsAudioTranscription(for: config.typeRaw)
             return settings.useRemoteWhisper && (supportsTranscription || typeSupports)
         }()
@@ -73,13 +133,31 @@ final class ContentExtractionService {
             if let keyId = config!.apiKeyKeychainIdentifier {
                 apiKey = (try? SecureKeyStore().loadAPIKey(for: keyId)) ?? ""
             }
-            engine = RemoteTranscriptionEngine(baseURL: baseURL, apiKey: apiKey)
+            return RemoteTranscriptionEngine(baseURL: baseURL, apiKey: apiKey)
+        }
+        return AppleSpeechTranscriptionEngine()
+    }
+
+    /// Transcribe a single audio.m4a file (legacy path).
+    private func transcribeSingleFile(item: KnowledgeItem) async -> String? {
+        let audioURL = fileStore.audioFileURL(for: item.id)
+        guard FileManager.default.fileExists(atPath: audioURL.path) else {
+            AppLog.provider.warning("ContentExtraction: no audio file for item \(item.id)")
+            return nil
+        }
+
+        let engine = resolveTranscriptionEngine()
+        guard let engine else { return nil }
+
+        let inputURL: URL
+        if let converted = try? await convertToTranscriptionFormat(audioURL) {
+            inputURL = converted
         } else {
-            engine = AppleSpeechTranscriptionEngine()
+            inputURL = audioURL
         }
 
         do {
-            var result = try await engine.transcribeFile(transcriptionURL)
+            var result = try await engine.transcribeFile(inputURL)
             result.meetingId = item.id
             result.segments = result.segments.map { var f = $0; f.meetingId = item.id; return f }
 
