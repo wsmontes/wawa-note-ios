@@ -368,100 +368,25 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// Route changes (Bluetooth connect/disconnect, AirPods in/out, etc.) are handled
+    /// automatically by AVAudioEngine when the tap uses format: nil. The engine keeps
+    /// running and adapts to the new input format. We only update the port name for UI.
     private func handleRouteChange(_ notification: Notification) {
         guard let userInfo = notification.userInfo,
               let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
 
-        switch reason {
-        case .oldDeviceUnavailable:
-            let wasRecording = state == .recording
-            AppLog.audio.info("Audio route: old device unavailable — interrupting")
-            if state == .recording || state == .paused {
-                state = .interrupted
-                audioInterruptionReason = "Headphones disconnected. Recording interrupted."
-                timerTask?.cancel()
-            }
-            rebuildEngine()
-            currentInputPortName = sessionManager.currentInputPortName
-            if wasRecording, state != .interrupted {
-                state = .recording
-                audioInterruptionReason = nil
-                startTimer()
-                AppLog.audio.info("Resumed recording after route change to \(self.currentInputPortName)")
-            } else if wasRecording {
-                audioInterruptionReason = "Could not resume after audio route change."
-            }
-        case .newDeviceAvailable:
-            let newPort = sessionManager.currentInputPortName
-            AppLog.audio.info("Audio route: new device available — \(newPort)")
+        let newPort = sessionManager.currentInputPortName
+        AppLog.audio.info("Audio route changed: reason=\(reason.rawValue) port=\(newPort)")
 
-            // Validate the new device actually has input
-            guard sessionManager.isInputAvailable else {
-                AppLog.audio.warning("New device \(newPort) has no input channels — staying on current route")
-                return
-            }
+        // Update UI
+        currentInputPortName = newPort
 
-            // If we were recording (or interrupted while recording), rebuild engine
-            let wasRecording = state == .recording || stateBeforeInterruption == .recording
-            if state == .recording || state == .paused || state == .interrupted {
-                audioInterruptionReason = "Switching to \(newPort)..."
-                let prevState = state
-                state = .interrupted
-                timerTask?.cancel()
-
-                // Reconfigure session for the new route (CarPlay needs .default mode)
-                try? sessionManager.deactivate()
-                do {
-                    try sessionManager.configureForRecording()
-                } catch {
-                    AppLog.error("audio", "Failed to reconfigure for \(newPort): \(error.localizedDescription)")
-                    audioInterruptionReason = "Could not configure audio for \(newPort)"
-                    state = prevState
-                    return
-                }
-
-                rebuildEngine()
-                if state != .interrupted {
-                    currentInputPortName = newPort
-                    if wasRecording {
-                        state = .recording
-                        startTimer()
-                    } else {
-                        state = .paused
-                    }
-                    audioInterruptionReason = nil
-                    AppLog.audio.info("Successfully switched to \(newPort)")
-                } else {
-                    audioInterruptionReason = "Could not switch to \(newPort)"
-                }
-            } else {
-                // Not recording — just update the port name for UI
-                currentInputPortName = newPort
-            }
-        case .noSuitableRouteForCategory:
-            AppLog.error("audio", "Audio route: no suitable route for category — current route: \(self.sessionManager.routeDescription)")
-            if state == .recording || state == .paused {
-                state = .interrupted
-                audioInterruptionReason = "No audio input available. Check microphone connection."
-                timerTask?.cancel()
-            }
-        case .override, .categoryChange:
-            break
-        default:
-            AppLog.audio.info("Audio route changed: reason=\(reason.rawValue) route=\(self.sessionManager.routeDescription)")
-            // For unknown reasons during recording, attempt engine rebuild as safety
-            if state == .recording {
-                let wasRecording = true
-                state = .interrupted
-                timerTask?.cancel()
-                rebuildEngine()
-                currentInputPortName = sessionManager.currentInputPortName
-                if state != .interrupted, wasRecording {
-                    state = .recording
-                    startTimer()
-                }
-            }
+        // If no input is available at all, pause recording
+        if !sessionManager.isInputAvailable && (state == .recording || state == .paused) {
+            state = .interrupted
+            audioInterruptionReason = "No microphone available."
+            timerTask?.cancel()
         }
     }
 
