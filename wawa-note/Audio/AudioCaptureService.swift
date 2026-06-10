@@ -352,7 +352,12 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             let desc = lastEngineError?.localizedDescription ?? "unknown error"
             audioInterruptionReason = "Bluetooth audio not ready. Try again or disconnect."
             AppLog.error("audio", "rebuildForNewRoute: engine start failed after 5 attempts: \(desc)")
-            fileWriter.closeCurrentSegment()
+            fileWriter.closeCurrentSegment()  // Discard empty new segment
+            // Report the old segment's final metadata — the audio up to this
+            // point is preserved on disk. The manifest must record its endedAt.
+            if let closed = closedInfo {
+                onSegmentClosed?(closed)
+            }
             try? sessionManager.deactivate()
             return .failed(audioInterruptionReason!)
         }
