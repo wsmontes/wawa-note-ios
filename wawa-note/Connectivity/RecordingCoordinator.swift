@@ -509,7 +509,10 @@ final class RecordingCoordinator: ObservableObject {
         let effectiveDuration = elapsedTime - pausedDuration
         item.status = .recorded
         item.durationSeconds = effectiveDuration
-        item.audioFileRelativePath = AppFileConstants.audioFileName
+        // Use manifest for new segmented recordings, audio.m4a for legacy
+        item.audioFileRelativePath = FileArtifactStore().recordingManifestExists(for: itemId)
+            ? AppFileConstants.manifestFileName
+            : AppFileConstants.audioFileName
 
         do {
             try context.save()
