@@ -235,7 +235,11 @@ final class RecordingCoordinator: ObservableObject {
     }
 
     func pauseRecording() {
-        guard state == .recording else { return }
+        // Pause in any active state — the capture service handles the transition.
+        // Guard only against truly inactive states (idle, stopped).
+        let isFailed: Bool = if case .failedFatal = state { true } else { false }
+        guard state != .idle, state != .stopped, !isFailed else { return }
+
         captureService.pauseRecording()
         state = .pausedByUser
         pauseStartDate = Date()
@@ -255,14 +259,7 @@ final class RecordingCoordinator: ObservableObject {
         captureService.resumeRecording()
         // Only transition to .recording if the capture service actually recovered
         if captureService.state == .recording {
-            state = .recording
-            if let pauseStart = pauseStartDate {
-                pausedDuration += Date().timeIntervalSince(pauseStart)
-            }
-            pauseStartDate = nil
-            nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: true)
-            startObservation()
-            notifyStatusChange()
+            commitUIRecordingState()
         } else {
             // Recovery failed — stay interrupted, timer remains frozen
             notifyStatusChange()
@@ -327,26 +324,32 @@ final class RecordingCoordinator: ObservableObject {
 
     // MARK: - State sync with capture service
 
+    /// Atomically commit the UI to `.recording`. The capture service has already
+    /// validated that the engine is running and buffers are arriving. This is
+    /// the ONLY path that sets coordinator state to `.recording` from sync.
+    private func commitUIRecordingState() {
+        if let ps = pauseStartDate {
+            pausedDuration += Date().timeIntervalSince(ps)
+            pauseStartDate = nil
+        }
+        state = .recording
+        startObservation()
+        nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: true)
+        notifyStatusChange()
+    }
+
     /// Mirror the capture service's real state. The capture service owns the
     /// source of truth for recording state — this coordinator mirrors it for UI.
     private func syncCaptureState(_ captureState: AudioCaptureState) {
         switch captureState {
         case .recording:
-            // Only auto-transition from non-user-paused states. If the user
-            // explicitly paused, trust resumeRecording() / retryRecordingRecovery()
-            // to transition us — route changes must never auto-resume from pause.
+            // Only auto-transition from non-user-paused states.
             let shouldAutoResume = state == .waitingForUsableInput
                 || state == .interruptedBySystem
                 || state == .reconfiguringRoute
+                || state == .validatingRoute
             if shouldAutoResume {
-                if let ps = pauseStartDate {
-                    pausedDuration += Date().timeIntervalSince(ps)
-                    pauseStartDate = nil
-                }
-                state = .recording
-                startObservation()
-                nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: true)
-                notifyStatusChange()
+                commitUIRecordingState()
             }
         case .reconfiguringRoute, .validatingRoute:
             if state == .recording || state == .pausedByUser || state == .reconfiguringRoute {
@@ -415,18 +418,7 @@ final class RecordingCoordinator: ObservableObject {
                 await self.captureService.attemptResume(forceRecording: true)
 
                 if self.captureService.state == .recording {
-                    self.state = .recording
-                    if let ps = self.pauseStartDate {
-                        self.pausedDuration += Date().timeIntervalSince(ps)
-                        self.pauseStartDate = nil
-                    }
-                    self.startObservation()
-                    self.nowPlayingController.update(
-                        title: self.recordingTitle,
-                        elapsedTime: self.elapsedTime - self.pausedDuration,
-                        isPlaying: true
-                    )
-                    self.notifyStatusChange()
+                    self.commitUIRecordingState()
                     AppLog.audio.info("Recording resumed after \(attempt) attempt(s)")
                     return
                 }

@@ -182,6 +182,36 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         AppLog.audio.info("State: \(String(describing: oldState)) → \(String(describing: newState)) — \(reason)")
     }
 
+    /// Atomically commit a recovered route to `.recording`. Validates all
+    /// preconditions before transitioning. This is the ONLY path that sets
+    /// `.recording` from a route recovery — never set it directly.
+    private func commitRecoveredRouteToRecording(generation: UUID, reason: String) -> Bool {
+        guard generation == routeRecoveryGeneration else {
+            AppLog.audio.info("commitRecoveredRouteToRecording: generation mismatch — cancelled")
+            return false
+        }
+        guard recordingIntent == .userWantsRecording else {
+            AppLog.audio.info("commitRecoveredRouteToRecording: intent is not userWantsRecording")
+            return false
+        }
+        guard self.engine.isRunning else {
+            AppLog.audio.info("commitRecoveredRouteToRecording: engine is not running")
+            return false
+        }
+        guard currentMeetingId != nil else {
+            AppLog.audio.info("commitRecoveredRouteToRecording: no current meeting")
+            return false
+        }
+        // All checks passed — commit
+        transition(to: .recording, reason: reason)
+        startTimer()
+        audioInterruptionReason = nil
+        currentInputPortName = sessionManager.currentInputPortName
+        let port = currentInputPortName
+        AppLog.audio.info("Route committed to recording: \(port)")
+        return true
+    }
+
     /// Capture the current audio route for diagnostics and state-machine decisions.
     private func takeRouteSnapshot(reason: String, previousInputs: [String]? = nil, previousOutputs: [String]? = nil) -> AudioRouteSnapshot {
         let inputs = sessionManager.session.currentRoute.inputs
@@ -270,14 +300,41 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     }
 
     func pauseRecording() {
-        guard state == .recording else { return }
-        // Keep the engine running — iOS forbids engine.start() from the
-        // background, so we never stop the engine mid-recording. The tap
-        // callback skips file writes while state is .pausedByUser.
-        transition(to: .pausedByUser, reason: "user paused")
-        recordingIntent = .userPaused
-        timerTask?.cancel()
-        AppLog.audio.info("Recording paused (engine kept alive)")
+        switch state {
+        case .recording:
+            // Normal pause — engine stays alive, tap stops writing.
+            transition(to: .pausedByUser, reason: "user paused")
+            recordingIntent = .userPaused
+            timerTask?.cancel()
+            AppLog.audio.info("Recording paused (engine kept alive)")
+
+        case .reconfiguringRoute, .validatingRoute:
+            // User paused during route switch — cancel recovery, stay paused.
+            activeRecoveryTask?.cancel()
+            activeRecoveryTask = nil
+            pendingRouteChangeReason = nil
+            routeRecoveryGeneration = UUID()
+            transition(to: .pausedByUser, reason: "user paused during route switch")
+            recordingIntent = .userPaused
+            AppLog.audio.info("Recording paused — route switch cancelled")
+
+        case .waitingForUsableInput:
+            // User paused while waiting for mic.
+            transition(to: .pausedByUser, reason: "user paused while waiting for mic")
+            recordingIntent = .userPaused
+            routeRecoveryGeneration = UUID()
+            AppLog.audio.info("Recording paused — waiting cancelled")
+
+        case .interruptedBySystem:
+            // User explicitly paused during system interruption.
+            transition(to: .pausedByUser, reason: "user paused during system interruption")
+            recordingIntent = .userPaused
+            AppLog.audio.info("Recording paused (system interruption overridden)")
+
+        default:
+            AppLog.audio.info("pauseRecording ignored — state not active")
+            return
+        }
     }
 
     func resumeRecording() {
@@ -487,8 +544,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             audioInterruptionReason = nil
 
             if resumeRecording {
-                transition(to: .recording, reason: "validated: \(reason)")
-                startTimer()
+                _ = commitRecoveredRouteToRecording(generation: generation, reason: "validated: \(reason)")
                 return .resumed(snap)
             } else {
                 transition(to: .pausedByUser, reason: "validated (paused): \(reason)")
@@ -550,8 +606,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                         audioInterruptionReason = nil
                         let fbSnap = takeRouteSnapshot(reason: "fallbackFromBluetooth")
                         if resumeRecording {
-                            transition(to: .recording, reason: "fallback to built-in mic")
-                            startTimer()
+                            _ = commitRecoveredRouteToRecording(generation: generation, reason: "fallback to built-in mic")
                             return .resumed(fbSnap)
                         } else {
                             transition(to: .pausedByUser, reason: "fallback (paused)")
