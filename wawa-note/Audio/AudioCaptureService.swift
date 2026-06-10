@@ -584,6 +584,12 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         let result = await rebuildForNewRoute(reason: String(reason.rawValue), resumeRecording: wasRecording)
         currentInputPortName = portName
+        if case .failed = result, wasRecording {
+            // Engine start failed on the new route, but the user was recording.
+            // If they disconnect this device and the original mic returns,
+            // auto-resume instead of staying paused.
+            shouldResumeAfterRouteRecovery = true
+        }
         AppLog.audio.info("Rebuilt for new route: \(portName)")
     }
 
