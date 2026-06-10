@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import UIKit
+import AVFoundation
 import Vision
 import CoreLocation
 import ImageIO
@@ -42,6 +43,16 @@ final class ContentExtractionService {
             return nil
         }
 
+        // Convert to 16kHz mono WAV for transcription compatibility.
+        // AAC from AirPods (8kHz) or built-in mic (44.1kHz) gets standardized
+        // to the format SFSpeechRecognizer and Whisper expect natively.
+        let transcriptionURL: URL
+        if let converted = try? await convertToTranscriptionFormat(audioURL) {
+            transcriptionURL = converted
+        } else {
+            transcriptionURL = audioURL  // Fall back to original
+        }
+
         let engine: TranscriptionEngine
         let settings = TranscriptionSettings.shared
         let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext)
@@ -68,7 +79,7 @@ final class ContentExtractionService {
         }
 
         do {
-            var result = try await engine.transcribeFile(audioURL)
+            var result = try await engine.transcribeFile(transcriptionURL)
             result.meetingId = item.id
             result.segments = result.segments.map { var f = $0; f.meetingId = item.id; return f }
 
@@ -399,6 +410,40 @@ final class ContentExtractionService {
             segments.append(TranscriptSegment(meetingId: itemID, startTime: Double(idx), text: current, sourceEngineId: "text-chunk"))
         }
         return segments
+    }
+
+    // MARK: - Audio conversion for transcription
+
+    /// Converts any audio to 16kHz mono WAV using AVAssetExportSession.
+    /// Handles all sample rates and codecs (AAC 8kHz—48kHz) natively.
+    func convertToTranscriptionFormat(_ sourceURL: URL) async throws -> URL {
+        let asset = AVAsset(url: sourceURL)
+        let tempURL = fileStore.itemDirectoryURL(for: UUID())
+            .appendingPathComponent("transcription_input.wav")
+        try? FileManager.default.createDirectory(at: tempURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+        guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough) else {
+            throw NSError(domain: "ContentExtraction", code: 1, userInfo: [NSLocalizedDescriptionKey: "Cannot create export session"])
+        }
+
+        export.outputURL = tempURL
+        export.outputFileType = .wav
+        export.audioMix = nil
+        export.timeRange = CMTimeRange(start: .zero, duration: asset.duration)
+
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            export.exportAsynchronously {
+                continuation.resume()
+            }
+        }
+
+        if export.status == .completed {
+            AppLog.provider.info("ContentExtraction: converted \(sourceURL.lastPathComponent) → 16kHz WAV")
+            return tempURL
+        }
+
+        throw NSError(domain: "ContentExtraction", code: 6,
+            userInfo: [NSLocalizedDescriptionKey: export.error?.localizedDescription ?? "Export failed: \(export.status.rawValue)"])
     }
 }
 
