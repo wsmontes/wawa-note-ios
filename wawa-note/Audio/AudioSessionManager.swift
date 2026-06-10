@@ -68,6 +68,36 @@ final class AudioSessionManager {
         return Self.useVoiceProcessing ? .spokenAudio : .default
     }
 
+    /// Select the best available input for recording, preferring Bluetooth HFP
+    /// but falling back to wired USB, headset, and ultimately built-in mic.
+    /// Called after setActive(true) so availableInputs are fully populated.
+    func selectBestInputForRecording() {
+        let inputs = session.availableInputs ?? session.currentRoute.inputs
+        let viable = inputs.filter {
+            $0.portType != .bluetoothA2DP &&
+            $0.portType != .bluetoothLE &&
+            ($0.channels?.count ?? 0) > 0
+        }
+        let preferred =
+            viable.first(where: { $0.portType == .bluetoothHFP }) ??
+            viable.first(where: { $0.portType == .headsetMic }) ??
+            viable.first(where: { $0.portType == .usbAudio }) ??
+            viable.first(where: { $0.portType == .builtInMic }) ??
+            viable.first
+
+        if let preferred {
+            do {
+                try session.setPreferredInput(preferred)
+                AppLog.audio.info("Preferred input: \(preferred.portName) (\(preferred.portType.rawValue))")
+            } catch {
+                AppLog.audio.error("setPreferredInput failed: \(error.localizedDescription)")
+            }
+        } else {
+            let names = session.availableInputs?.map(\.portName) ?? []
+            AppLog.audio.error("No valid recording input. availableInputs=\(names)")
+        }
+    }
+
     func configureForRecording() throws {
         let mode = bestModeForCurrentRoute()
         do {
@@ -80,6 +110,10 @@ final class AudioSessionManager {
             }
             try session.setAllowHapticsAndSystemSoundsDuringRecording(true)
             try session.setActive(true)
+
+            // Select best input AFTER activation — some inputs only appear
+            // in availableInputs once the session is active.
+            selectBestInputForRecording()
 
             // Audit session state after activation
             let s = self.session

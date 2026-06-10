@@ -370,22 +370,49 @@ final class RecordingCoordinator: ObservableObject {
     }
 
     /// Manual retry when the user presses Resume after a route-loss interruption.
-    /// Forces .recording intent regardless of stored previous state.
+    /// Forces .recording intent with up to 3 attempts and progressive delay —
+    /// Bluetooth devices take time to stabilize after connection.
     func retryRecordingRecovery() {
-        captureService.attemptResume(forceRecording: true)
-        // Sync immediately from the capture service's actual state
-        if captureService.state == .recording {
-            state = .recording
-            if let ps = pauseStartDate {
-                pausedDuration += Date().timeIntervalSince(ps)
-                pauseStartDate = nil
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            for attempt in 1...3 {
+                self.captureService.attemptResume(forceRecording: true)
+
+                if self.captureService.state == .recording {
+                    self.state = .recording
+                    if let ps = self.pauseStartDate {
+                        self.pausedDuration += Date().timeIntervalSince(ps)
+                        self.pauseStartDate = nil
+                    }
+                    self.startObservation()
+                    self.nowPlayingController.update(
+                        title: self.recordingTitle,
+                        elapsedTime: self.elapsedTime - self.pausedDuration,
+                        isPlaying: true
+                    )
+                    self.notifyStatusChange()
+                    AppLog.audio.info("Recording resumed after \(attempt) attempt(s)")
+                    return
+                }
+
+                // Don't retry if the failure is permanent (not a transient Bluetooth issue)
+                let reason = self.captureService.audioInterruptionReason ?? ""
+                if reason.contains("storage") || reason.contains("Internal error") {
+                    break
+                }
+
+                if attempt < 3 {
+                    let delayNs = UInt64(attempt) * 700_000_000
+                    AppLog.audio.info("Resume attempt \(attempt) failed — retrying in \(delayNs / 1_000_000)ms")
+                    try? await Task.sleep(nanoseconds: delayNs)
+                }
             }
-            startObservation()
-        } else {
-            state = .interrupted
-            errorMessage = captureService.audioInterruptionReason ?? "Could not resume recording."
+
+            self.state = .interrupted
+            self.errorMessage = self.captureService.audioInterruptionReason
+                ?? "Could not resume recording. Try disconnecting Bluetooth or use iPhone mic."
+            self.notifyStatusChange()
         }
-        notifyStatusChange()
     }
 
     /// Attempt to recover from audio interruptions when the app returns to the foreground.
