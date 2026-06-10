@@ -1,5 +1,5 @@
 import XCTest
-@testable import wawa_note
+@testable import Wawa_Note
 
 final class SemanticSearchServiceTests: XCTestCase {
 
@@ -456,5 +456,330 @@ final class AgentSuggestionTests: XCTestCase {
     func testDefaultStatusIsVisible() {
         let signal = AgentSuggestion(type: "opportunity", title: "Test")
         XCTAssertEqual(signal.status, "visible")
+    }
+}
+
+// MARK: - Audio Capture State Tests
+
+final class AudioCaptureStateTests: XCTestCase {
+
+    func testAllStatesAreDistinct() {
+        let states: [AudioCaptureState] = [
+            .idle, .recording, .pausedByUser,
+            .reconfiguringRoute, .validatingRoute,
+            .waitingForUsableInput, .interruptedBySystem,
+            .failedFatal("test"), .stopped
+        ]
+        for i in 0..<states.count {
+            for j in (i + 1)..<states.count {
+                XCTAssertNotEqual(states[i], states[j], "\(states[i]) should differ from \(states[j])")
+            }
+        }
+    }
+
+    func testFailedFatalEquality() {
+        XCTAssertEqual(AudioCaptureState.failedFatal("disk full"), AudioCaptureState.failedFatal("disk full"))
+        XCTAssertNotEqual(AudioCaptureState.failedFatal("disk full"), AudioCaptureState.failedFatal("write error"))
+    }
+
+    func testStoppedVsIdle() {
+        XCTAssertNotEqual(AudioCaptureState.stopped, AudioCaptureState.idle)
+    }
+
+    func testRecordingIntentAllCases() {
+        // Verify all cases exist
+        let intents: [RecordingIntent] = [.none, .userWantsRecording, .userPaused, .userStopped]
+        XCTAssertEqual(intents.count, 4)
+    }
+}
+
+// MARK: - Audio Route Snapshot Tests
+
+final class AudioRouteSnapshotTests: XCTestCase {
+
+    func testSnapshotInitialization() {
+        let snap = AudioRouteSnapshot(
+            currentInputs: ["iPhone"],
+            currentOutputs: ["Speaker"],
+            availableInputs: ["iPhone", "AirPods"],
+            selectedInput: "iPhone",
+            selectedInputType: "builtInMic",
+            isInputUsable: true,
+            previousInputs: nil,
+            previousOutputs: nil,
+            sampleRate: 44100,
+            bufferDuration: 0.023,
+            routeChangeReason: "test"
+        )
+        XCTAssertEqual(snap.currentInputs, ["iPhone"])
+        XCTAssertEqual(snap.currentOutputs, ["Speaker"])
+        XCTAssertEqual(snap.availableInputs, ["iPhone", "AirPods"])
+        XCTAssertEqual(snap.selectedInput, "iPhone")
+        XCTAssertEqual(snap.selectedInputType, "builtInMic")
+        XCTAssertTrue(snap.isInputUsable)
+        XCTAssertNil(snap.previousInputs)
+        XCTAssertEqual(snap.sampleRate, 44100)
+        XCTAssertEqual(snap.bufferDuration, 0.023)
+        XCTAssertEqual(snap.routeChangeReason, "test")
+    }
+
+    func testSnapshotWithPreviousRoute() {
+        let snap = AudioRouteSnapshot(
+            currentInputs: ["AirPods"],
+            currentOutputs: ["AirPods"],
+            availableInputs: ["AirPods", "iPhone"],
+            selectedInput: "AirPods",
+            selectedInputType: "bluetoothHFP",
+            isInputUsable: true,
+            previousInputs: ["iPhone"],
+            previousOutputs: ["Speaker"],
+            sampleRate: 16000,
+            bufferDuration: 0.046,
+            routeChangeReason: "bluetooth connected"
+        )
+        XCTAssertEqual(snap.previousInputs, ["iPhone"])
+        XCTAssertEqual(snap.previousOutputs, ["Speaker"])
+        XCTAssertEqual(snap.sampleRate, 16000)
+    }
+
+    func testSnapshotNoUsableInput() {
+        let snap = AudioRouteSnapshot(
+            currentInputs: [],
+            currentOutputs: ["Speaker"],
+            availableInputs: [],
+            selectedInput: nil,
+            selectedInputType: nil,
+            isInputUsable: false,
+            previousInputs: ["iPhone"],
+            previousOutputs: nil,
+            sampleRate: 0,
+            bufferDuration: 0,
+            routeChangeReason: "input lost"
+        )
+        XCTAssertFalse(snap.isInputUsable)
+        XCTAssertNil(snap.selectedInput)
+        XCTAssertTrue(snap.currentInputs.isEmpty)
+    }
+}
+
+// MARK: - Audio Rebuild Result Tests
+
+final class AudioRebuildResultTests: XCTestCase {
+
+    func testResumedResult() {
+        let snap = AudioRouteSnapshot(
+            currentInputs: ["iPhone"], currentOutputs: ["Speaker"],
+            availableInputs: ["iPhone"], selectedInput: "iPhone",
+            selectedInputType: "builtInMic", isInputUsable: true,
+            previousInputs: nil, previousOutputs: nil,
+            sampleRate: 44100, bufferDuration: 0.023,
+            routeChangeReason: "restart"
+        )
+        let result = AudioRebuildResult.resumed(snap)
+        if case .resumed(let s) = result {
+            XCTAssertEqual(s.currentInputs, ["iPhone"])
+        } else {
+            XCTFail("Expected .resumed")
+        }
+    }
+
+    func testNoUsableInputResult() {
+        let snap = AudioRouteSnapshot(
+            currentInputs: [], currentOutputs: ["Speaker"],
+            availableInputs: [], selectedInput: nil,
+            selectedInputType: nil, isInputUsable: false,
+            previousInputs: nil, previousOutputs: nil,
+            sampleRate: 0, bufferDuration: 0,
+            routeChangeReason: "no mic"
+        )
+        let result = AudioRebuildResult.noUsableInput(snap)
+        if case .noUsableInput(let s) = result {
+            XCTAssertFalse(s.isInputUsable)
+        } else {
+            XCTFail("Expected .noUsableInput")
+        }
+    }
+
+    func testEngineFailedResult() {
+        let snap = AudioRouteSnapshot(
+            currentInputs: ["AirPods"], currentOutputs: ["AirPods"],
+            availableInputs: ["AirPods"], selectedInput: "AirPods",
+            selectedInputType: "bluetoothHFP", isInputUsable: true,
+            previousInputs: nil, previousOutputs: nil,
+            sampleRate: 8000, bufferDuration: 0.1,
+            routeChangeReason: "restart"
+        )
+        let error = NSError(domain: "Audio", code: -1)
+        let result = AudioRebuildResult.engineFailed(error, snap)
+        if case .engineFailed(let e, let s) = result {
+            XCTAssertEqual((e as NSError).code, -1)
+            XCTAssertEqual(s.selectedInputType, "bluetoothHFP")
+        } else {
+            XCTFail("Expected .engineFailed")
+        }
+    }
+}
+
+// MARK: - Recording Segment Tests
+
+final class RecordingSegmentTests: XCTestCase {
+
+    func testSegmentInitialization() {
+        let seg = RecordingSegment(
+            id: UUID(), index: 0, fileName: "segment-000.m4a",
+            startedAt: Date(), inputPortName: "iPhone",
+            inputPortType: "builtInMic",
+            routeChangeReason: "initial",
+            sampleRate: 44100
+        )
+        XCTAssertEqual(seg.index, 0)
+        XCTAssertEqual(seg.fileName, "segment-000.m4a")
+        XCTAssertNil(seg.endedAt)
+        XCTAssertNil(seg.fileSize)
+        XCTAssertEqual(seg.inputPortName, "iPhone")
+        XCTAssertEqual(seg.routeChangeReason, "initial")
+    }
+
+    func testSegmentWithEndedAtAndFileSize() {
+        var seg = RecordingSegment(
+            id: UUID(), index: 1, fileName: "segment-001.wav",
+            startedAt: Date(), inputPortName: "AirPods",
+            inputPortType: "bluetoothHFP",
+            routeChangeReason: "bluetooth connected",
+            sampleRate: 8000
+        )
+        seg.endedAt = Date()
+        seg.fileSize = 12345
+        XCTAssertNotNil(seg.endedAt)
+        XCTAssertEqual(seg.fileSize, 12345)
+    }
+}
+
+// MARK: - Recording Manifest Index Tests
+
+final class RecordingManifestIndexProviderTests: XCTestCase {
+
+    func testEmptyManifestNextIndex() {
+        let manifest = RecordingManifest(
+            recordingId: UUID(), title: "Test",
+            startedAt: Date(), segments: []
+        )
+        let nextIndex = (manifest.segments.map(\.index).max() ?? -1) + 1
+        XCTAssertEqual(nextIndex, 0)
+    }
+
+    func testSingleSegmentNextIndex() {
+        let seg = RecordingSegment(
+            id: UUID(), index: 0, fileName: "segment-000.m4a",
+            startedAt: Date(), inputPortName: "iPhone",
+            inputPortType: "builtInMic",
+            routeChangeReason: "initial", sampleRate: 44100
+        )
+        let manifest = RecordingManifest(
+            recordingId: UUID(), title: "Test",
+            startedAt: Date(), segments: [seg]
+        )
+        let nextIndex = (manifest.segments.map(\.index).max() ?? -1) + 1
+        XCTAssertEqual(nextIndex, 1)
+    }
+
+    func testMultipleSegmentsNextIndex() {
+        var segments: [RecordingSegment] = []
+        for i in 0..<3 {
+            segments.append(RecordingSegment(
+                id: UUID(), index: i,
+                fileName: "segment-\(String(format: "%03d", i)).m4a",
+                startedAt: Date(), inputPortName: "iPhone",
+                inputPortType: "builtInMic",
+                routeChangeReason: i == 0 ? "initial" : "route switch",
+                sampleRate: 44100
+            ))
+        }
+        let manifest = RecordingManifest(
+            recordingId: UUID(), title: "Test",
+            startedAt: Date(), segments: segments
+        )
+        let nextIndex = (manifest.segments.map(\.index).max() ?? -1) + 1
+        XCTAssertEqual(nextIndex, 3)
+    }
+
+    func testNonContiguousIndices() {
+        // Simulate segment-000 and segment-002 (segment-001 was discarded)
+        let seg0 = RecordingSegment(
+            id: UUID(), index: 0, fileName: "segment-000.m4a",
+            startedAt: Date(), inputPortName: "iPhone",
+            inputPortType: "builtInMic",
+            routeChangeReason: "initial", sampleRate: 44100
+        )
+        let seg2 = RecordingSegment(
+            id: UUID(), index: 2, fileName: "segment-002.m4a",
+            startedAt: Date(), inputPortName: "iPhone",
+            inputPortType: "builtInMic",
+            routeChangeReason: "forceBuiltInMic", sampleRate: 44100
+        )
+        let manifest = RecordingManifest(
+            recordingId: UUID(), title: "Test",
+            startedAt: Date(), segments: [seg0, seg2]
+        )
+        let nextIndex = (manifest.segments.map(\.index).max() ?? -1) + 1
+        XCTAssertEqual(nextIndex, 3)
+    }
+
+    func testManifestTotalDuration() {
+        let now = Date()
+        var seg0 = RecordingSegment(
+            id: UUID(), index: 0, fileName: "segment-000.m4a",
+            startedAt: now, inputPortName: "iPhone",
+            inputPortType: "builtInMic",
+            routeChangeReason: "initial", sampleRate: 44100
+        )
+        seg0.endedAt = now.addingTimeInterval(10)
+        var seg1 = RecordingSegment(
+            id: UUID(), index: 1, fileName: "segment-001.m4a",
+            startedAt: now.addingTimeInterval(11),
+            inputPortName: "iPhone",
+            inputPortType: "builtInMic",
+            routeChangeReason: "restart", sampleRate: 44100
+        )
+        seg1.endedAt = now.addingTimeInterval(20)
+        let manifest = RecordingManifest(
+            recordingId: UUID(), title: "Test",
+            startedAt: now, segments: [seg0, seg1]
+        )
+        XCTAssertEqual(manifest.totalDuration, 19.0, accuracy: 0.1)
+    }
+}
+
+// MARK: - Audio Capture Error Tests
+
+final class AudioCaptureErrorTests: XCTestCase {
+
+    func testErrorDescriptions() {
+        XCTAssertNotNil(AudioCaptureError.engineStartFailed)
+        XCTAssertNotNil(AudioCaptureError.inputNodeUnavailable)
+        XCTAssertNotNil(AudioCaptureError.permissionDenied)
+        XCTAssertNotNil(AudioCaptureError.diskFull)
+    }
+}
+
+// MARK: - Closed Segment Info Tests
+
+final class ClosedSegmentInfoTests: XCTestCase {
+
+    func testClosedSegmentInfoInitialization() {
+        let info = ClosedSegmentInfo(
+            index: 0, fileName: "segment-000.m4a",
+            endedAt: Date(), fileSize: 44100
+        )
+        XCTAssertEqual(info.index, 0)
+        XCTAssertEqual(info.fileName, "segment-000.m4a")
+        XCTAssertEqual(info.fileSize, 44100)
+    }
+
+    func testClosedSegmentInfoDifferentIndices() {
+        let info0 = ClosedSegmentInfo(index: 0, fileName: "s0.m4a", endedAt: Date(), fileSize: 100)
+        let info1 = ClosedSegmentInfo(index: 1, fileName: "s1.m4a", endedAt: Date(), fileSize: 200)
+        XCTAssertNotEqual(info0.index, info1.index)
+        XCTAssertLessThan(info0.fileSize, info1.fileSize)
     }
 }

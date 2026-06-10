@@ -647,8 +647,13 @@ struct HomeView: View {
                 .font(.system(size: 48, weight: .thin, design: .monospaced))
                 .foregroundStyle(isTroubled ? .orange : (isPaused ? .orange : .primary))
             if isSwitching {
-                Text("Switching microphone…")
-                    .font(.subheadline).foregroundStyle(.orange)
+                VStack(spacing: 4) {
+                    ProgressView().tint(.orange)
+                    Text("Switching microphone…")
+                        .font(.subheadline).foregroundStyle(.orange)
+                    Text("Your recording is safe — this may take a moment")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
             } else if isWaiting {
                 Text("Waiting for microphone…")
                     .font(.subheadline).foregroundStyle(.orange)

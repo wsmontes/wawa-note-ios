@@ -602,8 +602,11 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // 3. Return audio resources to the system BEFORE creating anything new.
         //    Deactivate the session, let the system settle, then reconfigure
         //    from a completely clean state — exactly like startRecording.
+        //    Bluetooth routes need longer settle time (750ms vs 500ms).
         try? sessionManager.deactivate()
-        try? await Task.sleep(nanoseconds: 200_000_000) // 200ms for system to settle
+        let settleNs = sessionManager.settleDelayNs
+        AppLog.audio.info("restartCapture: settle delay \(settleNs / 1_000_000)ms")
+        try? await Task.sleep(nanoseconds: settleNs)
 
         // 4. Now create a fresh engine on a clean session.
         engine = AVAudioEngine()
@@ -688,10 +691,14 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return .engineFailed(NSError(domain: "Audio", code: -1), takeRouteSnapshot(reason: reason))
         }
 
-        // 7. Quick validation — wait for first buffer
+        // 7. Validation — wait for first buffer with adaptive timeout.
+        //    Bluetooth HFP can take 2-4s to deliver PCM after engine start.
         transition(to: .validatingRoute, reason: "validating: \(reason)")
+        let timeoutMs = Int(sessionManager.validationTimeoutSeconds * 1000)
+        let maxIterations = timeoutMs / 100  // 100ms per iteration
+        AppLog.audio.info("restartCapture: validation timeout=\(timeoutMs)ms iterations=\(maxIterations)")
         let bufferCheckStart = lastBufferReceivedAt
-        for _ in 0..<20 where lastBufferReceivedAt <= bufferCheckStart {
+        for _ in 0..<maxIterations where lastBufferReceivedAt <= bufferCheckStart {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
 
@@ -793,7 +800,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         engine.stop()
         logCrashDiagnostics("forceBuiltInMic-after-stop")
         try? sessionManager.deactivate()
-        try? await Task.sleep(nanoseconds: 200_000_000) // 200ms settle
+        let settleNs = sessionManager.settleDelayNs
+        try? await Task.sleep(nanoseconds: settleNs) // adaptive: 500ms built-in, 750ms Bluetooth
 
         // Fresh engine on clean session
         engine = AVAudioEngine()
@@ -844,10 +852,12 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return
         }
 
-        // Validate
+        // Validate — use same adaptive timeout as restartCaptureForNewRoute
         transition(to: .validatingRoute, reason: "validating built-in mic")
+        let timeoutMs = Int(sessionManager.validationTimeoutSeconds * 1000)
+        let maxIterations = timeoutMs / 100
         let bufStart = lastBufferReceivedAt
-        for _ in 0..<20 where lastBufferReceivedAt <= bufStart {
+        for _ in 0..<maxIterations where lastBufferReceivedAt <= bufStart {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
 
@@ -948,8 +958,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                recordingIntent == .userWantsRecording {
                 AppLog.audio.info("System interruption ended — rebuilding")
                 let gen = routeRecoveryGeneration
-                Task { @MainActor in
-                    _ = await restartCaptureForNewRoute(reason: "interruptionEnded", resumeRecording: true, generation: gen)
+                physicalRestartTask = Task { @MainActor in
+                    _ = await self.restartCaptureForNewRoute(reason: "interruptionEnded", resumeRecording: true, generation: gen)
                 }
             } else if state == .interruptedBySystem {
                 transition(to: .pausedByUser, reason: "interruption ended without shouldResume")
@@ -1045,8 +1055,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         if recordingIntent == .userWantsRecording || recordingIntent == .userPaused {
             let resume = recordingIntent == .userWantsRecording
             let gen = routeRecoveryGeneration
-            Task { @MainActor in
-                _ = await restartCaptureForNewRoute(reason: "mediaServicesReset", resumeRecording: resume, generation: gen)
+            physicalRestartTask = Task { @MainActor in
+                _ = await self.restartCaptureForNewRoute(reason: "mediaServicesReset", resumeRecording: resume, generation: gen)
             }
         }
     }

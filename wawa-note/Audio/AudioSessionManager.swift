@@ -52,6 +52,35 @@ final class AudioSessionManager {
         return isBT && !hasChannels
     }
 
+    /// Whether any available input (or current route) is a Bluetooth device.
+    /// Used to adapt timing — Bluetooth HFP negotiation can take 1-3 seconds.
+    var isBluetoothInvolved: Bool {
+        let all = (session.availableInputs ?? []) + session.currentRoute.inputs
+        return all.contains { input in
+            input.portType == .bluetoothHFP
+                || input.portType == .bluetoothA2DP
+                || input.portType == .bluetoothLE
+        }
+    }
+
+    /// Whether the best available input is a Bluetooth HFP device.
+    /// HFP (Hands-Free Profile) negotiation is the flakiest — needs extended delays.
+    var isBluetoothHFPPreferred: Bool {
+        bestAvailableInput?.portType == .bluetoothHFP
+    }
+
+    /// Post-deactivation settle delay. Bluetooth routes need more time to fully
+    /// release hardware resources before reconfiguration.
+    var settleDelayNs: UInt64 {
+        isBluetoothInvolved ? 750_000_000 : 500_000_000
+    }
+
+    /// Maximum time to wait for first audio buffer during route validation.
+    /// Bluetooth HFP can take 2-4 seconds to start delivering PCM after engine start.
+    var validationTimeoutSeconds: TimeInterval {
+        isBluetoothInvolved ? 4.0 : 2.0
+    }
+
     /// Best audio mode for the current route. Different devices need different modes:
     /// - CarPlay / USB → .default (most compatible)
     /// - Bluetooth HFP → .default (voice processing can cause issues)

@@ -1,5 +1,5 @@
 import XCTest
-@testable import wawa_note
+@testable import Wawa_Note
 
 final class AnarlogDocumentTests: XCTestCase {
 
