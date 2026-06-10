@@ -423,24 +423,30 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         }
     }
 
-    /// Clean stop + fresh start for a new audio route. Does NOT attempt to
-    /// hot-swap the engine — closes the old segment, stops capture, and
-    /// starts a completely new capture on the new route.
+    /// Clean stop + fresh start for a new audio route. Mirrors startRecording's
+    /// proven pattern: new engine, no prior deactivate, configure directly.
     @discardableResult
     private func restartCaptureForNewRoute(reason: String, resumeRecording: Bool, generation: UUID) async -> AudioRebuildResult {
         transition(to: .reconfiguringRoute, reason: "restart capture: \(reason)")
         timerTask?.cancel()
 
         // 1. Checkpoint the current segment BEFORE touching anything else.
-        //    The audio recorded up to this point must survive.
         _ = checkpointCurrentSegment(reason: reason)
 
-        // 2. Clean stop: remove tap, stop engine, deactivate session
+        // 2. Clean stop: remove tap, stop engine.
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        try? sessionManager.deactivate()
 
-        // 3. Fresh configure for the new route
+        guard let meetingId = currentMeetingId else {
+            audioInterruptionReason = "Internal error."
+            return .noUsableInput(takeRouteSnapshot(reason: reason))
+        }
+
+        // 3. Create a fresh engine — same as init(). Don't reuse the old one.
+        engine = AVAudioEngine()
+
+        // 4. Configure session directly (no prior deactivate).
+        //    Mirror startRecording's proven pattern exactly.
         do {
             try sessionManager.configureForRecording()
         } catch {
@@ -455,32 +461,28 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return .noUsableInput(takeRouteSnapshot(reason: reason))
         }
 
-        guard let meetingId = currentMeetingId else {
-            audioInterruptionReason = "Internal error."
-            return .noUsableInput(takeRouteSnapshot(reason: reason))
-        }
-
-        // 4. Open new segment with format matching the new route
+        // 5. Open new segment with format matching the new route.
         let sessionRate = sessionManager.sampleRate
         let hwFmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sessionRate > 0 ? sessionRate : 44100, channels: 1, interleaved: false)!
-        engine.reset()
 
         let closedInfo: ClosedSegmentInfo?
         do {
+            // The old segment was already closed by checkpointCurrentSegment.
+            // rotateToNewSegment will close (nil), increment index, and open new.
             closedInfo = try fileWriter.rotateToNewSegment(meetingId: meetingId, format: hwFmt)
         } catch {
             AppLog.error("audio", "restartCapture: rotateToNewSegment failed: \(error)")
             audioInterruptionReason = "Could not create audio segment."
-            try? sessionManager.deactivate()
             return .noUsableInput(takeRouteSnapshot(reason: reason))
         }
 
         let segIndex = fileWriter.segmentIndex
         let segFileName = fileWriter.currentFileURL?.lastPathComponent ?? String(format: "segment-%03d.m4a", segIndex)
 
-        // 5. Start engine — same retry logic as startRecording (3 attempts, 300ms)
+        // 6. Install tap, prepare, start — identical to startRecording.
         installTap()
         engine.prepare()
+
         var engineStartSucceeded = false
         for attempt in 0...2 {
             do {
@@ -497,10 +499,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             }
         }
 
-        // Check generation token
         guard generation == routeRecoveryGeneration else {
             fileWriter.closeCurrentSegment()
-            try? sessionManager.deactivate()
             return .noUsableInput(takeRouteSnapshot(reason: reason))
         }
 
@@ -509,12 +509,11 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             fileWriter.closeCurrentSegment()
             if let closed = closedInfo { onSegmentClosed?(closed) }
             transition(to: .waitingForUsableInput, reason: "engine start failed")
-            try? sessionManager.deactivate()
             return .engineFailed(NSError(domain: "Audio", code: -1), takeRouteSnapshot(reason: reason))
         }
 
-        // 6. Quick validation — wait for first buffer (up to 2s)
-        transition(to: .validatingRoute, reason: "validating new capture: \(reason)")
+        // 7. Quick validation — wait for first buffer
+        transition(to: .validatingRoute, reason: "validating: \(reason)")
         let bufferCheckStart = lastBufferReceivedAt
         for _ in 0..<20 where lastBufferReceivedAt <= bufferCheckStart {
             try? await Task.sleep(nanoseconds: 100_000_000)
@@ -522,12 +521,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         guard generation == routeRecoveryGeneration else {
             fileWriter.closeCurrentSegment()
-            try? sessionManager.deactivate()
             return .noUsableInput(takeRouteSnapshot(reason: reason))
         }
 
         if lastBufferReceivedAt > bufferCheckStart {
-            // Validation passed — commit the new segment
             let segment = RecordingSegment(
                 id: UUID(), index: segIndex, fileName: segFileName, startedAt: Date(),
                 inputPortName: sessionManager.currentInputPortName,
@@ -548,12 +545,11 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             }
         }
 
-        // Validation failed — no buffers. Discard empty segment, wait.
+        // No buffers — discard empty segment, wait.
         fileWriter.closeCurrentSegment()
         if let closed = closedInfo { onSegmentClosed?(closed) }
         audioInterruptionReason = "Microphone not delivering audio. Waiting…"
         transition(to: .waitingForUsableInput, reason: "validation failed")
-        try? sessionManager.deactivate()
         return .noUsableInput(takeRouteSnapshot(reason: reason))
     }
 
