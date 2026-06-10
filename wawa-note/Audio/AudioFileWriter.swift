@@ -7,54 +7,130 @@ enum AudioFileWriterError: Error {
     case diskFull
 }
 
+/// Metadata about a closed segment, returned when closing.
+struct ClosedSegmentInfo: Sendable {
+    let index: Int
+    let fileName: String
+    let endedAt: Date
+    let fileSize: Int64
+}
+
+/// Thread-safe audio file writer. All operations (write, close, open, finish)
+/// are serialized through a single internal queue. This prevents races between
+/// the audio tap's write callbacks and lifecycle operations (route change, stop).
 final class AudioFileWriter: @unchecked Sendable {
     private let fileManager: FileManager
     private let fileStore: FileArtifactStore
-    private var audioFile: AVAudioFile?
-    private(set) var currentFileURL: URL?
-    private var currentMeetingId: UUID?
-    private(set) var writeErrorCount: Int = 0
-    private(set) var lastWriteError: Error?
-    var activeFile: AVAudioFile? { audioFile }
+    private let queue = DispatchQueue(label: "com.wawa-note.audio.filewriter", qos: .userInitiated)
 
-    /// Current segment index (incremented on route changes).
-    private(set) var segmentIndex: Int = 0
+    // All access must go through `queue.sync` or `queue.async`
+    private var _audioFile: AVAudioFile?
+    private var _currentFileURL: URL?
+    private var _currentMeetingId: UUID?
+    private var _segmentIndex: Int = 0
+    private var _writeErrorCount: Int = 0
+    private var _lastWriteError: Error?
+
+    var currentFileURL: URL? { queue.sync { _currentFileURL } }
+    var segmentIndex: Int { queue.sync { _segmentIndex } }
+    var hasWriteErrors: Bool { queue.sync { _writeErrorCount > 0 } }
+    var fileSize: Int64 { queue.sync { _fileSize } }
+    var activeFile: AVAudioFile? { queue.sync { _audioFile } }
+    private var _fileSize: Int64 {
+        guard let url = _currentFileURL else { return 0 }
+        return (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
+    }
 
     init(fileManager: FileManager = .default, fileStore: FileArtifactStore = FileArtifactStore()) {
         self.fileManager = fileManager
         self.fileStore = fileStore
     }
 
-    var isWriting: Bool { audioFile != nil }
-    var hasWriteErrors: Bool { writeErrorCount > 0 }
+    // MARK: - Public API (all serialized through queue)
 
-    var fileSize: Int64 {
-        guard let url = currentFileURL else { return 0 }
-        return (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
-    }
-
-    // MARK: - Segment lifecycle
-
-    /// Start the first segment.
     func startRecording(format: AVAudioFormat, meetingId: UUID) throws {
-        segmentIndex = 0
-        try fileStore.createMeetingDirectory(for: meetingId)
-        currentMeetingId = meetingId
-        try openSegment(meetingId: meetingId, format: format)
+        try queue.sync {
+            _segmentIndex = 0
+            try fileStore.createMeetingDirectory(for: meetingId)
+            _currentMeetingId = meetingId
+            try _openSegment(meetingId: meetingId, format: format)
+        }
     }
 
-    /// Close current segment and open a new one with the given format.
+    @discardableResult
+    func closeCurrentSegment() -> ClosedSegmentInfo? {
+        queue.sync { _closeCurrentSegment() }
+    }
+
     func startNewSegment(meetingId: UUID, format: AVAudioFormat) throws {
-        closeCurrentSegment()
-        segmentIndex += 1
-        try openSegment(meetingId: meetingId, format: format)
+        try queue.sync {
+            _closeCurrentSegment()
+            _segmentIndex += 1
+            try _openSegment(meetingId: meetingId, format: format)
+        }
     }
 
-    private func openSegment(meetingId: UUID, format: AVAudioFormat) throws {
+    func write(buffer: AVAudioPCMBuffer) {
+        queue.async { [weak self] in
+            guard let self, let file = self._audioFile else { return }
+            for attempt in 0...3 {
+                do {
+                    try file.write(from: buffer)
+                    return
+                } catch {
+                    if attempt == 3 {
+                        self._writeErrorCount += 1
+                        self._lastWriteError = error
+                        AppLog.error("audio", "Write failed #\(self._writeErrorCount): \(error.localizedDescription)")
+                        return
+                    }
+                    Thread.sleep(forTimeInterval: [0.1, 0.2, 0.4][attempt])
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    func finishRecording() -> ClosedSegmentInfo? {
+        queue.sync {
+            let info = _closeCurrentSegment()
+            _currentMeetingId = nil
+            let total = _segmentIndex + 1
+            if _writeErrorCount > 0 {
+                AppLog.warn("audio", "Writer finished with \(_writeErrorCount) errors — \(total) segments")
+            } else {
+                AppLog.event("audio", "Writer finished cleanly — \(total) segments")
+            }
+            return info
+        }
+    }
+
+    func cleanupAbandonedRecording(for meetingId: UUID) {
+        queue.sync {
+            guard _currentMeetingId == nil else { return }
+            try? fileStore.deleteMeetingDirectory(for: meetingId)
+        }
+    }
+
+    // MARK: - Private (must be called on `queue`)
+
+    private func _closeCurrentSegment() -> ClosedSegmentInfo? {
+        guard _audioFile != nil, let meetingId = _currentMeetingId else { return nil }
+        let idx = _segmentIndex
+        let fileName = String(format: "segment-%03d.m4a", idx)
+        let size = _fileSize
+        let endedAt = Date()
+        _audioFile = nil
+        _currentFileURL = nil
+        AppLog.audio.info("Segment \(idx) closed — \(size) bytes")
+        return ClosedSegmentInfo(index: idx, fileName: fileName, endedAt: endedAt, fileSize: size)
+    }
+
+    private func _openSegment(meetingId: UUID, format: AVAudioFormat) throws {
         let segmentsDir = fileStore.segmentsDirectoryURL(for: meetingId)
         try fileManager.createDirectory(at: segmentsDir, withIntermediateDirectories: true)
 
-        let fileName = String(format: "segment-%03d.m4a", segmentIndex)
+        let fileName = String(format: "segment-%03d.m4a", _segmentIndex)
         let fileURL = segmentsDir.appendingPathComponent(fileName)
 
         let sampleRate = format.sampleRate
@@ -63,66 +139,18 @@ final class AudioFileWriter: @unchecked Sendable {
             : sampleRate >= 16000 ? 32000
             : 24000
 
-        let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: sampleRate,
-            AVNumberOfChannelsKey: 1,
-            AVEncoderBitRateKey: bitRate
-        ]
-
-        audioFile = try AVAudioFile(
+        _audioFile = try AVAudioFile(
             forWriting: fileURL,
-            settings: settings,
+            settings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: sampleRate,
+                AVNumberOfChannelsKey: 1,
+                AVEncoderBitRateKey: bitRate
+            ],
             commonFormat: format.commonFormat,
             interleaved: format.isInterleaved
         )
-        currentFileURL = fileURL
-        AppLog.audio.info("Segment \(self.segmentIndex): \(fileName) \(sampleRate)Hz AAC")
-    }
-
-    func closeCurrentSegment() {
-        guard audioFile != nil else { return }
-        let size = fileSize
-        audioFile = nil
-        AppLog.audio.info("Segment \(self.segmentIndex) closed — \(size) bytes")
-    }
-
-    // MARK: - Write
-
-    func write(buffer: AVAudioPCMBuffer) {
-        guard let file = audioFile else { return }
-        for attempt in 0...3 {
-            do {
-                try file.write(from: buffer)
-                return
-            } catch {
-                if attempt == 3 {
-                    writeErrorCount += 1
-                    lastWriteError = error
-                    AppLog.error("audio", "Write failed #\(writeErrorCount): \(error.localizedDescription)")
-                    return
-                }
-                Thread.sleep(forTimeInterval: [0.1, 0.2, 0.4][attempt])
-            }
-        }
-    }
-
-    // MARK: - Finish
-
-    func finishRecording() {
-        let hadErrors = hasWriteErrors
-        let totalSegments = segmentIndex + 1
-        closeCurrentSegment()
-        currentMeetingId = nil
-        if hadErrors {
-            AppLog.warn("audio", "Writer finished with \(writeErrorCount) errors — \(totalSegments) segments")
-        } else {
-            AppLog.event("audio", "Writer finished cleanly — \(totalSegments) segments")
-        }
-    }
-
-    func cleanupAbandonedRecording(for meetingId: UUID) {
-        guard currentMeetingId == nil else { return }
-        try? fileStore.deleteMeetingDirectory(for: meetingId)
+        _currentFileURL = fileURL
+        AppLog.audio.info("Segment \(self._segmentIndex): \(fileName) \(sampleRate)Hz AAC")
     }
 }

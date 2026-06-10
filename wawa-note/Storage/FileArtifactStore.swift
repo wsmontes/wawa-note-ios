@@ -231,7 +231,7 @@ final class FileArtifactStore: @unchecked Sendable {
 struct RecordingSegment: Codable, Identifiable, Sendable {
     let id: UUID
     let index: Int
-    let fileName: String      // e.g. "segments/segment-000.m4a"
+    let fileName: String      // e.g. "segment-000.m4a" (no directory prefix)
     let startedAt: Date
     var endedAt: Date?
     let inputPortName: String

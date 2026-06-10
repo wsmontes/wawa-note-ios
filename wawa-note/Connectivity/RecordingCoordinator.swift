@@ -56,14 +56,14 @@ final class RecordingCoordinator: ObservableObject {
         self.annotationService = AnnotationService(context: context)
 
         // Route change → new segment created by AudioCaptureService
-        captureService.onSegmentCreated = { [weak self] segment in
+        captureService.onSegmentCreated = { [weak self] closedInfo, newSegment in
             guard let self, var m = self.manifest else { return }
-            // Finalize the previous segment
-            if let lastIdx = m.segments.indices.last {
-                m.segments[lastIdx].endedAt = Date()
-                m.segments[lastIdx].fileSize = self.captureService.fileWriter.fileSize
+            // Finalize previous segment with accurate metadata from the writer
+            if let info = closedInfo, let lastIdx = m.segments.indices.last {
+                m.segments[lastIdx].endedAt = info.endedAt
+                m.segments[lastIdx].fileSize = info.fileSize
             }
-            m.segments.append(segment)
+            m.segments.append(newSegment)
             self.manifest = m
             if let itemId = self.savedItemId {
                 self.saveManifest(m, meetingId: itemId)

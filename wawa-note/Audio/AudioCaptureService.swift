@@ -27,9 +27,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     @Published private(set) var audioInterruptionReason: String?
     @Published private(set) var currentInputPortName: String = ""
 
-    /// Called AFTER a new file segment is created. Passes segment metadata
-    /// so RecordingCoordinator can update the manifest.
-    var onSegmentCreated: ((RecordingSegment) -> Void)?
+    /// Called when segments transition. closedInfo has the PREVIOUS segment's metadata
+    /// (nil for the first segment). newSegment is the segment just created.
+    var onSegmentCreated: ((_ closedInfo: ClosedSegmentInfo?, _ newSegment: RecordingSegment) -> Void)?
 
     private var timerTask: Task<Void, Never>?
     private var levelMonitorTask: Task<Void, Never>?
@@ -219,7 +219,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // 1. Remove tap, stop engine, close current segment
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        fileWriter.closeCurrentSegment()
+        let closedInfo = fileWriter.closeCurrentSegment()  // Thread-safe: sync on writer's queue
 
         // 2. Reconfigure session
         try? sessionManager.deactivate()
@@ -231,20 +231,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return
         }
 
-        // 3. Rebuild engine
+        // 3. Configure session and get input format BEFORE engine runs
         engine.reset()
-        installTap()
-        engine.prepare()
-
-        do {
-            try engine.start()
-        } catch {
-            AppLog.error("audio", "rebuildForNewRoute: engine start failed: \(error)")
-            audioInterruptionReason = "Could not start audio."
-            return
-        }
-
-        // 4. Open new file segment
         let hwFmt = engine.inputNode.outputFormat(forBus: 0)
         let segIndex = fileWriter.segmentIndex + 1
         let segFileName = String(format: "segment-%03d.m4a", segIndex)
@@ -254,11 +242,26 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return
         }
 
+        // 4. Open new file segment BEFORE engine starts (no gap)
         do {
             try fileWriter.startNewSegment(meetingId: meetingId, format: hwFmt)
         } catch {
             AppLog.error("audio", "rebuildForNewRoute: startNewSegment failed: \(error)")
             audioInterruptionReason = "Could not create audio segment."
+            try? sessionManager.deactivate()
+            return  // Engine is not running, clean stop
+        }
+
+        // 5. Start engine — file is already open
+        installTap()
+        engine.prepare()
+        do {
+            try engine.start()
+        } catch {
+            AppLog.error("audio", "rebuildForNewRoute: engine start failed: \(error)")
+            audioInterruptionReason = "Could not start audio."
+            fileWriter.closeCurrentSegment()  // Clean up unused segment
+            try? sessionManager.deactivate()
             return
         }
 
@@ -272,7 +275,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             routeChangeReason: reason,
             sampleRate: hwFmt.sampleRate
         )
-        onSegmentCreated?(segment)
+        onSegmentCreated?(closedInfo, segment)
 
         state = resumeRecording ? .recording : .paused
         if resumeRecording { startTimer() }
