@@ -747,6 +747,13 @@
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
 		</dict>
+		<key>27772721B065471EB81E8195</key>
+		<dict>
+			<key>fileRef</key>
+			<string>DF96C54BC6F54AB5A6D2C46F</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
 		<key>27832F4BB0FF9903CAA6BC10</key>
 		<dict>
 			<key>isa</key>
@@ -2849,6 +2856,7 @@
 				<string>D74F488CBA694AA18D834B2C</string>
 				<string>8C070AB6622F41E5BA0C4D9E</string>
 				<string>E0BA9664841446A5B7EC42D6</string>
+				<string>27772721B065471EB81E8195</string>
 			</array>
 			<key>isa</key>
 			<string>PBXSourcesBuildPhase</string>
@@ -2977,6 +2985,7 @@
 				<string>BE604CBDF113F1871E5782FE</string>
 				<string>CB31A75F01DA8426BA4378EA</string>
 				<string>97B78CEE2A1640D7B80B92C9</string>
+				<string>DF96C54BC6F54AB5A6D2C46F</string>
 			</array>
 			<key>isa</key>
 			<string>PBXGroup</string>
@@ -4717,6 +4726,17 @@
 			<string>Embed Foundation Extensions</string>
 			<key>runOnlyForDeploymentPostprocessing</key>
 			<string>0</string>
+		</dict>
+		<key>DF96C54BC6F54AB5A6D2C46F</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>AudioSegmentConcatenator.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
 		</dict>
 		<key>E07C07884BE4E7E3E6382710</key>
 		<dict>
