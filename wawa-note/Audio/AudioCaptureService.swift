@@ -38,8 +38,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private let audioWriteQueue = DispatchQueue(label: "com.wawa-note.audio.write", qos: .userInitiated)
 
     /// 1024 frames = ~23ms at 44.1kHz (was 8192 = 186ms).
-    /// 8x finer granularity for VAD and audio level monitoring.
     private static let captureBufferSize: AVAudioFrameCount = 1024
+    /// Standard output sample rate — always 44.1kHz for AAC compatibility.
+    private static let outputSampleRate: Double = 44100
     private static let levelDecayFactor: Float = 0.85
     private static let levelUpdateIntervalNS: UInt64 = 30_000_000
     private static let timerUpdateInterval: TimeInterval = 0.1
@@ -171,11 +172,12 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     // MARK: - Engine rebuild
 
-    /// Install the audio tap on the engine's input node.
-    /// Samples + hardware format dispatched as Sendable data to the write queue.
-    /// AVAudioFile.write() converts from hardware rate to file rate (44.1kHz).
+    /// Install the audio tap. Upsamples from hardware rate to 44.1kHz via
+    /// linear interpolation, then dispatches to the write queue as [Float].
     private func installTap() {
         let inputNode = engine.inputNode
+        let outputRate = Self.outputSampleRate
+
         inputNode.installTap(onBus: 0, bufferSize: Self.captureBufferSize, format: nil) { [weak self] buffer, _ in
             guard let self else { return }
             self.updateAudioLevel(from: buffer)
@@ -183,18 +185,29 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
             guard let channelData = buffer.floatChannelData else { return }
             let frameLength = Int(buffer.frameLength)
-            let samples = Array(UnsafeBufferPointer(start: channelData[0], count: frameLength))
-            let hwSampleRate = buffer.format.sampleRate
+            let inputRate = buffer.format.sampleRate
+
+            // Upsample to 44.1kHz via linear interpolation
+            let ratio = outputRate / inputRate
+            let outCount = Int(Double(frameLength) * ratio)
+            var output = [Float](repeating: 0, count: outCount)
+            let src = UnsafeBufferPointer(start: channelData[0], count: frameLength)
+
+            for i in 0..<outCount {
+                let srcIdx = Double(i) / ratio
+                let lo = Int(srcIdx)
+                let hi = min(lo + 1, frameLength - 1)
+                let frac = Float(srcIdx - Double(lo))
+                output[i] = src[lo] * (1 - frac) + src[hi] * frac
+            }
 
             self.audioWriteQueue.async { [weak self] in
                 guard let self, let file = self.fileWriter.activeFile else { return }
-                // Reconstruct buffer in hardware format. AVAudioFile.write()
-                // converts from hwSampleRate to file's processingFormat (44.1kHz).
-                let hwFmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: hwSampleRate, channels: 1, interleaved: false)!
-                guard let wb = AVAudioPCMBuffer(pcmFormat: hwFmt, frameCapacity: AVAudioFrameCount(frameLength)) else { return }
-                wb.frameLength = AVAudioFrameCount(frameLength)
+                let fmt = file.processingFormat  // 44.1kHz PCM
+                guard let wb = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(outCount)) else { return }
+                wb.frameLength = AVAudioFrameCount(outCount)
                 if let dest = wb.floatChannelData {
-                    dest[0].initialize(from: samples, count: frameLength)
+                    dest[0].initialize(from: output, count: outCount)
                 }
                 self.fileWriter.write(buffer: wb)
             }
