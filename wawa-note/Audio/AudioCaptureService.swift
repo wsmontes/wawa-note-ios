@@ -108,6 +108,21 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// when route change notifications don't fire or fire incompletely.
     private var waitingInputProbeTask: Task<Void, Never>?
 
+    /// Guards against overlapping physical capture restarts. Only one restart
+    /// (route change, forceBuiltInMic, or manual resume) at a time.
+    /// Prevents concurrent engine.stop/removeTap/installTap from corrupting
+    /// the audio engine state and crashing.
+    private var isPhysicalRestartInProgress = false
+
+    /// Task wrapping the current physical restart. Cancel to abort mid-restart
+    /// when the user presses Stop/Finish.
+    private var physicalRestartTask: Task<Void, Never>?
+
+    /// Tracks whether the audio tap is currently installed on engine.inputNode.
+    /// Must be kept in sync with every installTap/removeTap call so we never
+    /// call removeTap when no tap is installed (crashes on some iOS versions).
+    private var isTapInstalled = false
+
     private let audioLevelLock = NSLock()
     private nonisolated(unsafe) var rawAudioLevel: Float = 0.0
 
@@ -233,6 +248,12 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                       self.recordingIntent == .userWantsRecording,
                       self.currentMeetingId != nil else { break }
 
+                // Don't race with an in-progress physical restart
+                guard !self.isPhysicalRestartInProgress else {
+                    AppLog.audio.info("Waiting probe: restart in progress — skipping cycle")
+                    continue
+                }
+
                 // Re-read session state — things may have changed.
                 // isInputAvailable may be false even when builtInMic is in
                 // availableInputs (e.g., stale route after Bluetooth disconnect).
@@ -337,7 +358,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         currentMeetingId = meetingId
         try fileWriter.startRecording(format: recordFormat, meetingId: meetingId)
 
-        installTap()
+        safelyInstallTap(reason: "startRecording")
         engine.prepare()
 
         // Retry engine start for Bluetooth devices that need time to stabilize
@@ -360,7 +381,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         if let engineError {
             AppLog.error("audio", "All engine start attempts failed: \(engineError.localizedDescription)")
-            engine.inputNode.removeTap(onBus: 0)
+            safelyRemoveTap(reason: "engineStartFailed")
             fileWriter.finishRecording()
             try? sessionManager.deactivate()
             throw AudioCaptureError.engineStartFailed
@@ -427,7 +448,12 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// recovery tasks, or microphone state. Always works on first call.
     /// Preserves already-committed valid segments via the coordinator.
     func forceFinish() {
-        // 1. Kill all async recovery tasks immediately
+        logCrashDiagnostics("forceFinish-begin")
+
+        // 1. Kill all async recovery tasks immediately — Stop has absolute priority
+        isPhysicalRestartInProgress = false
+        physicalRestartTask?.cancel()
+        physicalRestartTask = nil
         routeChangeTask?.cancel()
         routeChangeTask = nil
         stopWaitingInputProbe()
@@ -445,7 +471,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         levelMonitorTask?.cancel()
 
         // 5. Try to stop engine/tap safely — don't crash if already broken
-        engine.inputNode.removeTap(onBus: 0)
+        safelyRemoveTap(reason: "forceFinish")
         engine.stop()
         try? sessionManager.deactivate()
 
@@ -460,6 +486,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         currentInputPortName = ""
         currentMeetingId = nil
         stateBeforeSystemInterruption = nil
+        logCrashDiagnostics("forceFinish-end")
         AppLog.audio.info("Recording force-finished")
     }
 
@@ -474,6 +501,44 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     }
 
     // MARK: - Engine rebuild
+
+    /// Log detailed audio engine state for crash diagnostics.
+    /// Called before and after every risky operation (removeTap, installTap,
+    /// engine stop/start, session configure/deactivate).
+    private func logCrashDiagnostics(_ marker: String) {
+        let route = self.sessionManager.session.currentRoute
+        let inputs = route.inputs.map { "\($0.portName)(\($0.portType.rawValue))" }
+        let outputs = route.outputs.map { "\($0.portName)(\($0.portType.rawValue))" }
+        let available = self.sessionManager.session.availableInputs?.map { "\($0.portName)(\($0.portType.rawValue))" } ?? []
+        let msg = "CrashDiag [\(marker)]: state=\(String(describing: self.state)) gen=\(self.routeRecoveryGeneration.uuidString.prefix(8)) tap=\(self.isTapInstalled) engRunning=\(self.engine.isRunning) restarting=\(self.isPhysicalRestartInProgress) inputs=[\(inputs.joined(separator: ", "))] outputs=[\(outputs.joined(separator: ", "))] avail=[\(available.joined(separator: ", "))] rate=\(self.sessionManager.sampleRate) mid=\(self.currentMeetingId?.uuidString.prefix(8) ?? "nil") file=\(self.fileWriter.currentFileURL?.lastPathComponent ?? "nil")"
+        AppLog.audio.info("\(msg)")
+    }
+
+    /// Remove the audio tap only if one is installed. Calling removeTap when
+    /// no tap exists crashes on some iOS versions (AVAudioNode internal assert).
+    private func safelyRemoveTap(reason: String) {
+        guard isTapInstalled else {
+            AppLog.audio.info("safelyRemoveTap: skipped — no tap installed (\(reason))")
+            return
+        }
+        logCrashDiagnostics("before-removeTap[\(reason)]")
+        engine.inputNode.removeTap(onBus: 0)
+        isTapInstalled = false
+        logCrashDiagnostics("after-removeTap[\(reason)]")
+    }
+
+    /// Install the audio tap, removing any existing tap first.
+    /// Safe to call even if a tap is already installed.
+    private func safelyInstallTap(reason: String) {
+        if isTapInstalled {
+            AppLog.audio.info("safelyInstallTap: removing existing tap first (\(reason))")
+            engine.inputNode.removeTap(onBus: 0)
+        }
+        logCrashDiagnostics("before-installTap[\(reason)]")
+        installTap()
+        isTapInstalled = true
+        logCrashDiagnostics("after-installTap[\(reason)]")
+    }
 
     /// Install the audio tap. Copies raw PCM samples and dispatches to the
     /// AudioFileWriter's internal serial queue. The writer is the single
@@ -502,6 +567,15 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// proven pattern: new engine, no prior deactivate, configure directly.
     @discardableResult
     private func restartCaptureForNewRoute(reason: String, resumeRecording: Bool, generation: UUID) async -> AudioRebuildResult {
+        // Guard against concurrent restarts — corrupting the engine kills the app.
+        guard !isPhysicalRestartInProgress else {
+            AppLog.audio.info("restartCapture: physical restart already in progress — skipping")
+            return .noUsableInput(takeRouteSnapshot(reason: "skipped: restart in progress"))
+        }
+        isPhysicalRestartInProgress = true
+        defer { isPhysicalRestartInProgress = false }
+
+        logCrashDiagnostics("restartCapture-begin[\(reason)]")
         transition(to: .reconfiguringRoute, reason: "restart capture: \(reason)")
         timerTask?.cancel()
 
@@ -509,8 +583,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         _ = checkpointCurrentSegment(reason: reason)
 
         // 2. Clean stop: remove tap, stop engine, release engine.
-        engine.inputNode.removeTap(onBus: 0)
+        safelyRemoveTap(reason: "restartCapture teardown: \(reason)")
+        logCrashDiagnostics("restartCapture-before-stop[\(reason)]")
         engine.stop()
+        logCrashDiagnostics("restartCapture-after-stop[\(reason)]")
 
         guard let meetingId = currentMeetingId else {
             audioInterruptionReason = "Internal error."
@@ -525,6 +601,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         // 4. Now create a fresh engine on a clean session.
         engine = AVAudioEngine()
+        logCrashDiagnostics("restartCapture-newEngine[\(reason)]")
 
         do {
             try sessionManager.configureForRecording()
@@ -548,7 +625,12 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         // 5. Open new segment with format matching the new route.
         let sessionRate = sessionManager.sampleRate
-        let hwFmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sessionRate > 0 ? sessionRate : 44100, channels: 1, interleaved: false)!
+        guard let hwFmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sessionRate > 0 ? sessionRate : 44100, channels: 1, interleaved: false) else {
+            AppLog.error("audio", "restartCapture: invalid audio format — rate=\(sessionRate)")
+            audioInterruptionReason = "Could not create audio format."
+            transition(to: .waitingForUsableInput, reason: "invalid audio format")
+            return .noUsableInput(takeRouteSnapshot(reason: reason))
+        }
 
         let closedInfo: ClosedSegmentInfo?
         do {
@@ -565,7 +647,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         let segFileName = fileWriter.currentFileURL?.lastPathComponent ?? String(format: "segment-%03d.m4a", segIndex)
 
         // 6. Install tap, prepare, start — identical to startRecording.
-        installTap()
+        safelyInstallTap(reason: "restartCapture new engine: \(reason)")
         engine.prepare()
 
         var engineStartSucceeded = false
@@ -647,10 +729,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     // Simple engine rebuild without segment creation (used for startRecording only).
     private func rebuildEngine() {
-        engine.inputNode.removeTap(onBus: 0)
+        safelyRemoveTap(reason: "rebuildEngine")
         engine.stop()
         engine.reset()
-        installTap()
+        safelyInstallTap(reason: "rebuildEngine")
         engine.prepare()
         for attempt in 0...2 {
             do {
@@ -681,6 +763,15 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         }
         guard let meetingId = currentMeetingId else { return }
 
+        // Guard against concurrent restarts
+        guard !isPhysicalRestartInProgress else {
+            AppLog.audio.info("forceBuiltInMic: restart already in progress — skipping")
+            return
+        }
+        isPhysicalRestartInProgress = true
+        defer { isPhysicalRestartInProgress = false }
+
+        logCrashDiagnostics("forceBuiltInMic-begin")
         AppLog.audio.info("Force built-in mic recovery — beginning")
 
         // Cancel any in-progress recovery
@@ -688,13 +779,16 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         let gen = routeRecoveryGeneration
 
         // Clean stop — release everything before creating new
-        engine.inputNode.removeTap(onBus: 0)
+        safelyRemoveTap(reason: "forceBuiltInMic teardown")
+        logCrashDiagnostics("forceBuiltInMic-before-stop")
         engine.stop()
+        logCrashDiagnostics("forceBuiltInMic-after-stop")
         try? sessionManager.deactivate()
         try? await Task.sleep(nanoseconds: 200_000_000) // 200ms settle
 
         // Fresh engine on clean session
         engine = AVAudioEngine()
+        logCrashDiagnostics("forceBuiltInMic-newEngine")
         try? sessionManager.configureForRecording()
 
         // Force select built-in mic
@@ -711,13 +805,18 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         // Open new segment
         let sessionRate = sessionManager.sampleRate
-        let hwFmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sessionRate > 0 ? sessionRate : 44100, channels: 1, interleaved: false)!
+        guard let hwFmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sessionRate > 0 ? sessionRate : 44100, channels: 1, interleaved: false) else {
+            AppLog.error("audio", "forceBuiltInMic: invalid audio format — rate=\(sessionRate)")
+            audioInterruptionReason = "Could not create audio format."
+            transition(to: .waitingForUsableInput, reason: "invalid audio format")
+            return
+        }
         let closedInfo = try? fileWriter.rotateToNewSegment(meetingId: meetingId, format: hwFmt)
         let segIndex = fileWriter.segmentIndex
         let segFileName = fileWriter.currentFileURL?.lastPathComponent ?? String(format: "segment-%03d.m4a", segIndex)
 
         // Start engine
-        installTap()
+        safelyInstallTap(reason: "forceBuiltInMic new engine")
         engine.prepare()
         var started = false
         for attempt in 0...2 {
@@ -876,6 +975,12 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     @MainActor
     private func processSettledRouteChange(_ reason: AVAudioSession.RouteChangeReason) async {
+        // Don't stack route changes on top of an in-progress restart.
+        guard !isPhysicalRestartInProgress else {
+            AppLog.audio.info("Route settled: restart already in progress — deferring route change")
+            return
+        }
+
         let portName = sessionManager.currentInputPortName
         let inputAvailable = sessionManager.isInputAvailable
         AppLog.audio.info("Route settled: reason=\(reason.rawValue) port=\(portName) inputAvailable=\(inputAvailable)")
