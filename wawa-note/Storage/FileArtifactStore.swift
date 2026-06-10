@@ -13,6 +13,8 @@ enum AppFileConstants {
     static let analysisFileName = "analysis.json"
     static let dynamicAnalysisFileName = "analysis.dynamic.json"
     static let partialTranscriptFileName = "transcript_partial.json"
+    static let manifestFileName = "recording.manifest.json"
+    static let segmentsDirectoryName = "segments"
     static let checkpointFileName = "checkpoint.json"
     static let embeddingFileName = "embedding.json"
     static let scanFileName = "scan"
@@ -92,6 +94,37 @@ final class FileArtifactStore: @unchecked Sendable {
         let url = audioFileURL(for: meetingId)
         guard fileManager.fileExists(atPath: url.path) else { return }
         try fileManager.removeItem(at: url)
+    }
+
+    // MARK: - Segmented recording
+
+    func segmentsDirectoryURL(for itemId: UUID) -> URL {
+        itemDirectoryURL(for: itemId).appendingPathComponent(AppFileConstants.segmentsDirectoryName)
+    }
+
+    func segmentURL(for itemId: UUID, fileName: String) -> URL {
+        segmentsDirectoryURL(for: itemId).appendingPathComponent(fileName)
+    }
+
+    func recordingManifestURL(for itemId: UUID) -> URL {
+        itemDirectoryURL(for: itemId).appendingPathComponent(AppFileConstants.manifestFileName)
+    }
+
+    func writeRecordingManifest(_ manifest: RecordingManifest, for itemId: UUID) throws {
+        try createMeetingDirectory(for: itemId)
+        let url = recordingManifestURL(for: itemId)
+        let data = try JSONEncoder().encode(manifest)
+        try data.write(to: url, options: .atomicWrite)
+    }
+
+    func readRecordingManifest(for itemId: UUID) throws -> RecordingManifest {
+        let url = recordingManifestURL(for: itemId)
+        let data = try Data(contentsOf: url)
+        return try JSONDecoder().decode(RecordingManifest.self, from: data)
+    }
+
+    func recordingManifestExists(for itemId: UUID) -> Bool {
+        fileManager.fileExists(atPath: recordingManifestURL(for: itemId).path)
     }
 
     // MARK: - Artifacts
@@ -189,5 +222,37 @@ final class FileArtifactStore: @unchecked Sendable {
     func createExportsDirectory(for meetingId: UUID) throws {
         let url = exportsDirectoryURL(for: meetingId)
         try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+}
+
+// MARK: - Recording Segment Model
+
+/// One physical audio segment within a logical recording session.
+struct RecordingSegment: Codable, Identifiable, Sendable {
+    let id: UUID
+    let index: Int
+    let fileName: String      // e.g. "segments/segment-000.m4a"
+    let startedAt: Date
+    var endedAt: Date?
+    let inputPortName: String
+    let inputPortType: String
+    let routeChangeReason: String
+    var sampleRate: Double?
+    var fileSize: Int64?
+}
+
+/// Tracks all segments of a recording session.
+struct RecordingManifest: Codable, Sendable {
+    let recordingId: UUID
+    let title: String
+    let startedAt: Date
+    var endedAt: Date?
+    var segments: [RecordingSegment]
+
+    var totalDuration: TimeInterval {
+        segments.compactMap { seg in
+            guard let end = seg.endedAt else { return nil }
+            return end.timeIntervalSince(seg.startedAt)
+        }.reduce(0, +)
     }
 }

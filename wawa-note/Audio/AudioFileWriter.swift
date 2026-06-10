@@ -19,7 +19,6 @@ final class AudioFileWriter: @unchecked Sendable {
 
     /// Current segment index (incremented on route changes).
     private(set) var segmentIndex: Int = 0
-    private var lastFormat: AVAudioFormat?
 
     init(fileManager: FileManager = .default, fileStore: FileArtifactStore = FileArtifactStore()) {
         self.fileManager = fileManager
@@ -36,28 +35,27 @@ final class AudioFileWriter: @unchecked Sendable {
 
     // MARK: - Segment lifecycle
 
+    /// Start the first segment.
     func startRecording(format: AVAudioFormat, meetingId: UUID) throws {
-        lastFormat = format
         segmentIndex = 0
         try fileStore.createMeetingDirectory(for: meetingId)
         currentMeetingId = meetingId
-        try openSegment(meetingId: meetingId)
+        try openSegment(meetingId: meetingId, format: format)
     }
 
-    /// Close current segment and open a new one (route change, interruption recovery).
-    func startNewSegment(meetingId: UUID) throws {
+    /// Close current segment and open a new one with the given format.
+    func startNewSegment(meetingId: UUID, format: AVAudioFormat) throws {
         closeCurrentSegment()
         segmentIndex += 1
-        try openSegment(meetingId: meetingId)
+        try openSegment(meetingId: meetingId, format: format)
     }
 
-    private func openSegment(meetingId: UUID) throws {
-        guard let format = lastFormat else { throw AudioFileWriterError.fileCreationFailed }
+    private func openSegment(meetingId: UUID, format: AVAudioFormat) throws {
+        let segmentsDir = fileStore.segmentsDirectoryURL(for: meetingId)
+        try fileManager.createDirectory(at: segmentsDir, withIntermediateDirectories: true)
 
         let fileName = String(format: "segment-%03d.m4a", segmentIndex)
-        let dir = fileStore.itemDirectoryURL(for: meetingId)
-        try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
-        let fileURL = dir.appendingPathComponent(fileName)
+        let fileURL = segmentsDir.appendingPathComponent(fileName)
 
         let sampleRate = format.sampleRate
         let bitRate: Int = sampleRate >= 44100 ? 96000
@@ -116,7 +114,6 @@ final class AudioFileWriter: @unchecked Sendable {
         let totalSegments = segmentIndex + 1
         closeCurrentSegment()
         currentMeetingId = nil
-        lastFormat = nil
         if hadErrors {
             AppLog.warn("audio", "Writer finished with \(writeErrorCount) errors — \(totalSegments) segments")
         } else {

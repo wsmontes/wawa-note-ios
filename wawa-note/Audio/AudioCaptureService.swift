@@ -27,13 +27,14 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     @Published private(set) var audioInterruptionReason: String?
     @Published private(set) var currentInputPortName: String = ""
 
-    /// Called BEFORE engine rebuild so a new file segment can be created.
-    /// Parameter: the new port name (from AVAudioSession, already updated).
-    var onRouteChangeNewSegment: ((String) -> Void)?
+    /// Called AFTER a new file segment is created. Passes segment metadata
+    /// so RecordingCoordinator can update the manifest.
+    var onSegmentCreated: ((RecordingSegment) -> Void)?
 
     private var timerTask: Task<Void, Never>?
     private var levelMonitorTask: Task<Void, Never>?
     private var recordingStartTime: Date?
+    private var currentMeetingId: UUID?
     private var stateBeforeInterruption: AudioCaptureState?
 
     private let audioLevelLock = NSLock()
@@ -90,6 +91,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         guard let recordFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sessionRate, channels: 1, interleaved: false) else {
             throw AudioCaptureError.engineStartFailed
         }
+        currentMeetingId = meetingId
         try fileWriter.startRecording(format: recordFormat, meetingId: meetingId)
 
         installTap()
@@ -167,6 +169,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         elapsedTime = 0.0
         recordingStartTime = nil
         currentInputPortName = ""
+        currentMeetingId = nil
         stateBeforeInterruption = nil
         AppLog.audio.info("Recording stopped")
     }
@@ -405,8 +408,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // Rebuild engine for the new input route
         timerTask?.cancel()
 
-        // Close current segment and open new one BEFORE rebuild
-        onRouteChangeNewSegment?(newPort)
+        // Close current file segment before reconfiguring
+        fileWriter.closeCurrentSegment()
 
         // Reconfigure session for the new device
         try? sessionManager.deactivate()
@@ -422,6 +425,25 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         rebuildEngine()
 
         if state != .interrupted {
+            // Open new file segment with the actual hardware format
+            let hwFmt = engine.inputNode.outputFormat(forBus: 0)
+            let segIndex = fileWriter.segmentIndex + 1
+            let segFileName = String(format: "segments/segment-%03d.m4a", segIndex)
+            if let meetingId = currentMeetingId {
+                try? fileWriter.startNewSegment(meetingId: meetingId, format: hwFmt)
+            }
+
+            let segment = RecordingSegment(
+                id: UUID(), index: segIndex,
+                fileName: segFileName,
+                startedAt: Date(),
+                inputPortName: newPort,
+                inputPortType: sessionManager.bestAvailableInput?.portType.rawValue ?? "unknown",
+                routeChangeReason: String(reason.rawValue),
+                sampleRate: hwFmt.sampleRate
+            )
+            onSegmentCreated?(segment)
+
             currentInputPortName = newPort
             state = .recording
             startTimer()

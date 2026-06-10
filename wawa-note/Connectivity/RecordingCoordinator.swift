@@ -3,30 +3,6 @@ import OSLog
 import AVFoundation
 @preconcurrency import ActivityKit
 
-// MARK: - Recording Segment Model
-
-/// One physical audio segment within a logical recording session.
-/// Created when recording starts and each time the audio route changes.
-struct RecordingSegment: Codable, Identifiable, Sendable {
-    let id: UUID
-    let index: Int
-    let fileName: String
-    let startedAt: Date
-    var endedAt: Date?
-    let inputPortName: String
-    let inputPortType: String
-    let routeChangeReason: String
-    var fileSize: Int64?
-}
-
-/// Tracks all segments of a recording session. Written to disk as manifest.json.
-struct RecordingManifest: Codable, Sendable {
-    let recordingId: UUID
-    let title: String
-    let startedAt: Date
-    var segments: [RecordingSegment]
-}
-
 @MainActor
 final class RecordingCoordinator: ObservableObject {
     @Published private(set) var state: RecordingUIState = .idle
@@ -53,9 +29,8 @@ final class RecordingCoordinator: ObservableObject {
     private var observationTimer: Timer?
     private var nowPlayingTimer: Timer?
 
-    // Segmented recording manifest
+    // Segmented recording manifest (segments managed by AudioCaptureService)
     private var manifest: RecordingManifest?
-    private var lastRouteChangeReason: String = "initial"
 
     var onStatusChange: ((RecordingStatus) -> Void)?
 
@@ -80,10 +55,13 @@ final class RecordingCoordinator: ObservableObject {
         self.modelContext = context
         self.annotationService = AnnotationService(context: context)
 
-        // Route change → new segment (fires BEFORE engine rebuild)
-        captureService.onRouteChangeNewSegment = { [weak self] newPort in
-            guard let self, let itemId = self.savedItemId else { return }
-            self.appendSegment(portName: newPort, reason: "routeChange", meetingId: itemId)
+        // Route change → new segment created by AudioCaptureService
+        captureService.onSegmentCreated = { [weak self] segment in
+            guard let self else { return }
+            self.manifest?.segments.append(segment)
+            if let itemId = self.savedItemId {
+                self.saveManifest(self.manifest!, meetingId: itemId)
+            }
         }
     }
 
@@ -283,47 +261,10 @@ final class RecordingCoordinator: ObservableObject {
 
     // MARK: - Segments
 
-    /// Close the current segment and open a new one for the given port.
-    func appendSegment(portName: String, reason: String, meetingId: UUID) {
-        guard var m = manifest else { return }
-
-        AppLog.event("audio", "New segment for: \(portName) (\(reason))")
-
-        // Close current segment in manifest
-        if let idx = m.segments.indices.last {
-            m.segments[idx].endedAt = Date()
-            m.segments[idx].fileSize = captureService.outputFileURL.flatMap {
-                try? FileManager.default.attributesOfItem(atPath: $0.path)[.size] as? Int64
-            }
-        }
-
-        // Close current audio file, start new one
-        do {
-            try captureService.fileWriter.startNewSegment(meetingId: meetingId)
-        } catch {
-            AppLog.error("audio", "Failed to start new segment: \(error.localizedDescription)")
-        }
-
-        // Append to manifest
-        let newSegment = RecordingSegment(
-            id: UUID(), index: m.segments.count,
-            fileName: String(format: "segment-%03d.m4a", m.segments.count),
-            startedAt: Date(),
-            inputPortName: portName,
-            inputPortType: AudioSessionManager().bestAvailableInput?.portType.rawValue ?? "unknown",
-            routeChangeReason: reason
-        )
-        m.segments.append(newSegment)
-        manifest = m
-        saveManifest(m, meetingId: meetingId)
-    }
-
+    /// Save the manifest to disk. Called after each segment and at stop.
     private func saveManifest(_ manifest: RecordingManifest, meetingId: UUID) {
-        guard let data = try? JSONEncoder().encode(manifest) else { return }
         let store = FileArtifactStore()
-        try? store.createMeetingDirectory(for: meetingId)
-        let url = store.itemDirectoryURL(for: meetingId).appendingPathComponent("manifest.json")
-        try? data.write(to: url, options: .atomicWrite)
+        try? store.writeRecordingManifest(manifest, for: meetingId)
     }
 
     func returnToIdle() {
