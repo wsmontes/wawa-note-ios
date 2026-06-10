@@ -376,7 +376,7 @@ final class RecordingCoordinator: ObservableObject {
         Task { @MainActor [weak self] in
             guard let self else { return }
             for attempt in 1...3 {
-                self.captureService.attemptResume(forceRecording: true)
+                await self.captureService.attemptResume(forceRecording: true)
 
                 if self.captureService.state == .recording {
                     self.state = .recording

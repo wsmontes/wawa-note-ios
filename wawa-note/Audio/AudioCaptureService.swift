@@ -23,7 +23,7 @@ enum AudioRebuildResult: Sendable {
 }
 
 final class AudioCaptureService: ObservableObject, @unchecked Sendable {
-    private let engine: AVAudioEngine
+    private var engine: AVAudioEngine
     let fileWriter: AudioFileWriter
     private let sessionManager: AudioSessionManager
 
@@ -190,7 +190,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     func resumeRecording() {
         guard state == .paused || state == .interrupted else { return }
         if state == .interrupted {
-            attemptResume()
+            Task { @MainActor in await attemptResume() }
             return
         }
         state = .recording
@@ -256,7 +256,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// - Returns: .resumed, .paused, or .failed(reason). On failure, state stays
     ///   .interrupted and audioInterruptionReason has the specific cause.
     @discardableResult
-    private func rebuildForNewRoute(reason: String, resumeRecording: Bool) -> AudioRebuildResult {
+    private func rebuildForNewRoute(reason: String, resumeRecording: Bool) async -> AudioRebuildResult {
         let prevState = state
         state = .interrupted  // Prevent tap from writing during transition
         timerTask?.cancel()
@@ -265,8 +265,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
 
-        // 2. Reconfigure session BEFORE rotating segments (session changes
-        //    sample rate, which determines file format)
+        // 2. Reconfigure session
         try? sessionManager.deactivate()
         do {
             try sessionManager.configureForRecording()
@@ -283,8 +282,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return .failed(audioInterruptionReason!)
         }
 
-        // 4. Get format BEFORE engine.reset() destroys it. Use session sampleRate
-        //    as source of truth — reflects the actual hardware route.
+        // 4. Get format from session (reflects actual hardware route).
         let sessionRate = sessionManager.sampleRate
         let hwFmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sessionRate > 0 ? sessionRate : 44100, channels: 1, interleaved: false)!
         engine.reset()
@@ -294,8 +292,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return .failed(audioInterruptionReason!)
         }
 
-        // 5. Atomically rotate to new segment — close old + open new.
-        //    The writer owns fileName, index, and extension decisions.
+        // 5. Rotate to new segment — close old + open new atomically.
         let closedInfo: ClosedSegmentInfo?
         do {
             closedInfo = try fileWriter.rotateToNewSegment(meetingId: meetingId, format: hwFmt)
@@ -309,15 +306,53 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         let segIndex = fileWriter.segmentIndex
         let segFileName = fileWriter.currentFileURL?.lastPathComponent ?? String(format: "segment-%03d.m4a", segIndex)
 
-        // 6. Start engine — file is already open
-        installTap()
-        engine.prepare()
-        do {
-            try engine.start()
-        } catch {
-            AppLog.error("audio", "rebuildForNewRoute: engine start failed: \(error)")
-            audioInterruptionReason = "Could not start audio engine."
-            fileWriter.closeCurrentSegment()  // Clean up unused segment
+        // 6. Start engine with retry — Bluetooth devices take time to stabilize.
+        //    Retry up to 5 attempts with progressive delays.
+        var lastEngineError: Error?
+        var engineStartSucceeded = false
+
+        for attempt in 1...5 {
+            // Recreate engine after 2 failures — Bluetooth can leave the old
+            // engine in a bad state even after stop/reset.
+            if attempt >= 3 {
+                engine.inputNode.removeTap(onBus: 0)
+                engine.stop()
+                let oldDesc = engine.description
+                engine = AVAudioEngine()
+                AppLog.audio.info("Recreated AVAudioEngine for attempt \(attempt) (was \(oldDesc.prefix(40)))")
+            }
+
+            installTap()
+            engine.prepare()
+
+            do {
+                try engine.start()
+                engineStartSucceeded = true
+                lastEngineError = nil
+                AppLog.audio.info("Engine started on attempt \(attempt)")
+                break
+            } catch {
+                lastEngineError = error
+                AppLog.error("audio", "rebuildForNewRoute: engine start attempt \(attempt)/5 failed: \(error.localizedDescription)")
+
+                if attempt < 5 {
+                    let delayNs = UInt64(attempt) * 500_000_000
+                    try? await Task.sleep(nanoseconds: delayNs)
+
+                    // Re-prepare session and engine for next attempt
+                    engine.inputNode.removeTap(onBus: 0)
+                    engine.stop()
+                    engine.reset()
+                    try? sessionManager.configureForRecording()
+                }
+            }
+        }
+
+        if !engineStartSucceeded {
+            let desc = lastEngineError?.localizedDescription ?? "unknown error"
+            audioInterruptionReason = "Bluetooth audio not ready. Try again or disconnect."
+            AppLog.error("audio", "rebuildForNewRoute: engine start failed after 5 attempts: \(desc)")
+            fileWriter.closeCurrentSegment()
             try? sessionManager.deactivate()
             return .failed(audioInterruptionReason!)
         }
@@ -372,12 +407,12 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// Attempt to recover from an interrupted state.
     /// - Parameter forceRecording: if true, always resume as .recording regardless
     ///   of stored previous state. Use this for manual "Resume" button presses.
-    func attemptResume(forceRecording: Bool = false) {
+    func attemptResume(forceRecording: Bool = false) async {
         guard state == .interrupted else { return }
         let shouldRecord = forceRecording
             || shouldResumeAfterRouteRecovery
             || stateBeforeInterruption == .recording
-        let result = rebuildForNewRoute(reason: forceRecording ? "manualResume" : "interruptionEnded", resumeRecording: shouldRecord)
+        let result = await rebuildForNewRoute(reason: forceRecording ? "manualResume" : "interruptionEnded", resumeRecording: shouldRecord)
         switch result {
         case .resumed, .paused:
             shouldResumeAfterRouteRecovery = false
@@ -462,8 +497,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                stateBeforeInterruption == .recording || stateBeforeInterruption == .paused {
                 AppLog.audio.info("Audio interruption ended — rebuilding with new segment")
                 let shouldRecord = stateBeforeInterruption == .recording
-                _ = rebuildForNewRoute(reason: "interruptionEnded", resumeRecording: shouldRecord)
-                // rebuildForNewRoute sets/clears audioInterruptionReason appropriately
+                Task { @MainActor in
+                    _ = await rebuildForNewRoute(reason: "interruptionEnded", resumeRecording: shouldRecord)
+                }
             } else if state == .interrupted {
                 AppLog.audio.info("Audio interruption ended without shouldResume — paused")
                 audioInterruptionReason = "Interruption ended. Recording paused."
@@ -493,12 +529,12 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         routeChangeTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 500_000_000)
             guard let self, !Task.isCancelled else { return }
-            self.processSettledRouteChange(reason)
+            await self.processSettledRouteChange(reason)
         }
     }
 
     @MainActor
-    private func processSettledRouteChange(_ reason: AVAudioSession.RouteChangeReason) {
+    private func processSettledRouteChange(_ reason: AVAudioSession.RouteChangeReason) async {
         let portName = sessionManager.currentInputPortName
         let inputAvailable = sessionManager.isInputAvailable
         AppLog.audio.info("Route settled: reason=\(reason.rawValue) port=\(portName) inputAvailable=\(inputAvailable)")
@@ -526,7 +562,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // Input returned while interrupted — auto-recover
         if state == .interrupted, currentMeetingId != nil {
             AppLog.audio.info("Input recovered — auto-rebuilding (shouldResume=\(self.shouldResumeAfterRouteRecovery))")
-            let result = rebuildForNewRoute(reason: "routeRecovered", resumeRecording: self.shouldResumeAfterRouteRecovery)
+            let result = await rebuildForNewRoute(reason: "routeRecovered", resumeRecording: self.shouldResumeAfterRouteRecovery)
             self.shouldResumeAfterRouteRecovery = false
             if case .failed(let reason) = result {
                 AppLog.audio.error("Auto-recovery failed: \(reason)")
@@ -541,7 +577,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return
         }
 
-        rebuildForNewRoute(reason: String(reason.rawValue), resumeRecording: wasRecording)
+        let result = await rebuildForNewRoute(reason: String(reason.rawValue), resumeRecording: wasRecording)
         currentInputPortName = portName
         AppLog.audio.info("Rebuilt for new route: \(portName)")
     }
@@ -549,7 +585,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private func handleMediaServicesReset(_ notification: Notification) {
         AppLog.error("audio", "Media services reset — rebuilding with new segment")
         if state == .recording || state == .paused {
-            rebuildForNewRoute(reason: "mediaServicesReset", resumeRecording: state == .recording)
+            let wasRecording = state == .recording
+            Task { @MainActor in
+                _ = await rebuildForNewRoute(reason: "mediaServicesReset", resumeRecording: wasRecording)
+            }
         }
     }
 
