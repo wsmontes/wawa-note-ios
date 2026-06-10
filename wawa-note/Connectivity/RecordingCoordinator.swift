@@ -201,7 +201,12 @@ final class RecordingCoordinator: ObservableObject {
         // Trigger pipeline processing. CaptureViewModel also calls this from
         // the UI, but remote commands (lock screen, CarPlay) come directly here.
         if let itemId {
-            contentPipeline?.process(itemId, using: modelContext)
+            if let pipeline = contentPipeline {
+                AppLog.event("audio", "Launching pipeline for item \(itemId.uuidString.prefix(8))")
+                pipeline.process(itemId, using: modelContext)
+            } else {
+                AppLog.error("audio", "Cannot launch pipeline: contentPipeline is nil")
+            }
         }
 
         if let pauseStart = pauseStartDate {
