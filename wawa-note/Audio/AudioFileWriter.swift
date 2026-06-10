@@ -17,13 +17,16 @@ final class AudioFileWriter: @unchecked Sendable {
     private(set) var lastWriteError: Error?
     var activeFile: AVAudioFile? { audioFile }
 
+    /// Current segment index (incremented on route changes).
+    private(set) var segmentIndex: Int = 0
+    private var lastFormat: AVAudioFormat?
+
     init(fileManager: FileManager = .default, fileStore: FileArtifactStore = FileArtifactStore()) {
         self.fileManager = fileManager
         self.fileStore = fileStore
     }
 
     var isWriting: Bool { audioFile != nil }
-
     var hasWriteErrors: Bool { writeErrorCount > 0 }
 
     var fileSize: Int64 {
@@ -31,14 +34,31 @@ final class AudioFileWriter: @unchecked Sendable {
         return (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
     }
 
+    // MARK: - Segment lifecycle
+
     func startRecording(format: AVAudioFormat, meetingId: UUID) throws {
+        lastFormat = format
+        segmentIndex = 0
         try fileStore.createMeetingDirectory(for: meetingId)
+        currentMeetingId = meetingId
+        try openSegment(meetingId: meetingId)
+    }
 
-        let fileURL = fileStore.audioFileURL(for: meetingId)
+    /// Close current segment and open a new one (route change, interruption recovery).
+    func startNewSegment(meetingId: UUID) throws {
+        closeCurrentSegment()
+        segmentIndex += 1
+        try openSegment(meetingId: meetingId)
+    }
 
-        // Use the hardware format directly. AAC encoder needs a matching bitrate
-        // for the sample rate. Built-in mic: 44.1kHz/96kbps. AirPods HFP: 8kHz/24kbps.
-        // This avoids any manual upsampling that could introduce artifacts.
+    private func openSegment(meetingId: UUID) throws {
+        guard let format = lastFormat else { throw AudioFileWriterError.fileCreationFailed }
+
+        let fileName = String(format: "segment-%03d.m4a", segmentIndex)
+        let dir = fileStore.itemDirectoryURL(for: meetingId)
+        try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fileURL = dir.appendingPathComponent(fileName)
+
         let sampleRate = format.sampleRate
         let bitRate: Int = sampleRate >= 44100 ? 96000
             : sampleRate >= 22050 ? 64000
@@ -52,21 +72,24 @@ final class AudioFileWriter: @unchecked Sendable {
             AVEncoderBitRateKey: bitRate
         ]
 
-        do {
-            audioFile = try AVAudioFile(
-                forWriting: fileURL,
-                settings: settings,
-                commonFormat: format.commonFormat,
-                interleaved: format.isInterleaved
-            )
-            currentFileURL = fileURL
-            currentMeetingId = meetingId
-            AppLog.audio.info("Audio file created: \(fileURL.lastPathComponent) \(sampleRate)Hz AAC \(bitRate)bps meeting=\(meetingId.uuidString.prefix(8))")
-        } catch {
-            AppLog.error("audio", "Failed to create audio file: \(error.localizedDescription)")
-            throw AudioFileWriterError.fileCreationFailed
-        }
+        audioFile = try AVAudioFile(
+            forWriting: fileURL,
+            settings: settings,
+            commonFormat: format.commonFormat,
+            interleaved: format.isInterleaved
+        )
+        currentFileURL = fileURL
+        AppLog.audio.info("Segment \(self.segmentIndex): \(fileName) \(sampleRate)Hz AAC")
     }
+
+    func closeCurrentSegment() {
+        guard audioFile != nil else { return }
+        let size = fileSize
+        audioFile = nil
+        AppLog.audio.info("Segment \(self.segmentIndex) closed — \(size) bytes")
+    }
+
+    // MARK: - Write
 
     func write(buffer: AVAudioPCMBuffer) {
         guard let file = audioFile else { return }
@@ -78,8 +101,7 @@ final class AudioFileWriter: @unchecked Sendable {
                 if attempt == 3 {
                     writeErrorCount += 1
                     lastWriteError = error
-                    let nsError = error as NSError
-                    AppLog.error("audio", "Failed to write audio buffer after 3 retries (#\(writeErrorCount)): \(error.localizedDescription)")
+                    AppLog.error("audio", "Write failed #\(writeErrorCount): \(error.localizedDescription)")
                     return
                 }
                 Thread.sleep(forTimeInterval: [0.1, 0.2, 0.4][attempt])
@@ -87,24 +109,23 @@ final class AudioFileWriter: @unchecked Sendable {
         }
     }
 
+    // MARK: - Finish
+
     func finishRecording() {
         let hadErrors = hasWriteErrors
-        let errorCount = writeErrorCount
-        let finalSize = fileSize
-        // Explicitly nil out the file reference to flush and close.
-        // AVAudioFile deinit triggers final AAC frame flush and closes the fd.
-        audioFile = nil
+        let totalSegments = segmentIndex + 1
+        closeCurrentSegment()
         currentMeetingId = nil
+        lastFormat = nil
         if hadErrors {
-            AppLog.warn("audio", "Audio file writer finished with \(errorCount) write error(s) — file may be incomplete. size=\(finalSize) bytes")
+            AppLog.warn("audio", "Writer finished with \(writeErrorCount) errors — \(totalSegments) segments")
         } else {
-            AppLog.event("audio", "Audio file writer finished cleanly — size=\(finalSize) bytes")
+            AppLog.event("audio", "Writer finished cleanly — \(totalSegments) segments")
         }
     }
 
     func cleanupAbandonedRecording(for meetingId: UUID) {
         guard currentMeetingId == nil else { return }
-        // Remove any partially-written file for this meeting
         try? fileStore.deleteMeetingDirectory(for: meetingId)
     }
 }

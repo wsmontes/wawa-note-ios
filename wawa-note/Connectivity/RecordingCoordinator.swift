@@ -1,6 +1,31 @@
 import SwiftData
 import OSLog
+import AVFoundation
 @preconcurrency import ActivityKit
+
+// MARK: - Recording Segment Model
+
+/// One physical audio segment within a logical recording session.
+/// Created when recording starts and each time the audio route changes.
+struct RecordingSegment: Codable, Identifiable, Sendable {
+    let id: UUID
+    let index: Int
+    let fileName: String
+    let startedAt: Date
+    var endedAt: Date?
+    let inputPortName: String
+    let inputPortType: String
+    let routeChangeReason: String
+    var fileSize: Int64?
+}
+
+/// Tracks all segments of a recording session. Written to disk as manifest.json.
+struct RecordingManifest: Codable, Sendable {
+    let recordingId: UUID
+    let title: String
+    let startedAt: Date
+    var segments: [RecordingSegment]
+}
 
 @MainActor
 final class RecordingCoordinator: ObservableObject {
@@ -27,6 +52,10 @@ final class RecordingCoordinator: ObservableObject {
     private var recordingTitle: String = ""
     private var observationTimer: Timer?
     private var nowPlayingTimer: Timer?
+
+    // Segmented recording manifest
+    private var manifest: RecordingManifest?
+    private var lastRouteChangeReason: String = "initial"
 
     var onStatusChange: ((RecordingStatus) -> Void)?
 
@@ -111,7 +140,21 @@ final class RecordingCoordinator: ObservableObject {
                 activateLockScreenControls()
                 notifyStatusChange()
                 captureContextSafely(for: itemId)
-                AppLog.event("audio", "Recording started — itemID=\(itemId.uuidString.prefix(8)) input=\(captureService.currentInputPortName)")
+                // First segment
+        let firstSegment = RecordingSegment(
+            id: UUID(), index: 0,
+            fileName: "segment-000.m4a",
+            startedAt: Date(),
+            inputPortName: captureService.currentInputPortName,
+            inputPortType: AudioSessionManager().bestAvailableInput?.portType.rawValue ?? "unknown",
+            routeChangeReason: "initial"
+        )
+        manifest = RecordingManifest(
+            recordingId: itemId, title: recordingTitle,
+            startedAt: Date(), segments: [firstSegment]
+        )
+
+        AppLog.event("audio", "Recording started — itemID=\(itemId.uuidString.prefix(8)) input=\(captureService.currentInputPortName)")
             } catch AudioCaptureError.permissionDenied {
                 AppLog.warn("audio", "Recording blocked: microphone permission denied")
                 errorMessage = "Microphone access is off. Turn it on in Settings to record audio."
@@ -204,6 +247,12 @@ final class RecordingCoordinator: ObservableObject {
         nowPlayingTimer?.invalidate()
         nowPlayingTimer = nil
 
+        // Finalize manifest
+        if var m = manifest, let meetingId = savedItemId {
+            if let idx = m.segments.indices.last { m.segments[idx].endedAt = Date() }
+            saveManifest(m, meetingId: meetingId)
+        }
+
         // Trigger pipeline processing. CaptureViewModel also calls this from
         // the UI, but remote commands (lock screen, CarPlay) come directly here.
         if let itemId {
@@ -224,6 +273,54 @@ final class RecordingCoordinator: ObservableObject {
 
         // Pipeline is launched by CaptureViewModel.stopRecording() which owns
         // the recording lifecycle. RecordingCoordinator just manages audio state.
+    }
+
+    // MARK: - Segments
+
+    /// Called when the audio input changes during recording. Closes the current
+    /// segment and opens a new one, so a recording = N physical audio files.
+    private func segmentForRouteChange(from oldPort: String, to newPort: String) {
+        guard var m = manifest, let itemId = savedItemId else { return }
+        guard !newPort.isEmpty, newPort != oldPort else { return }
+
+        AppLog.event("audio", "Route change: \(oldPort) → \(newPort) — new segment")
+
+        // Close current segment
+        if let idx = m.segments.indices.last {
+            m.segments[idx].endedAt = Date()
+            m.segments[idx].fileSize = captureService.outputFileURL.flatMap { try? FileManager.default.attributesOfItem(atPath: $0.path)[.size] as? Int64 }
+        }
+
+        // Close current audio file, start new one
+        do {
+            try captureService.fileWriter.startNewSegment(meetingId: itemId)
+        } catch {
+            AppLog.error("audio", "Failed to start new segment: \(error.localizedDescription)")
+        }
+
+        // Create new segment entry
+        let newSegment = RecordingSegment(
+            id: UUID(),
+            index: m.segments.count,
+            fileName: String(format: "segment-%03d.m4a", m.segments.count),
+            startedAt: Date(),
+            inputPortName: newPort,
+            inputPortType: AudioSessionManager().bestAvailableInput?.portType.rawValue ?? "unknown",
+            routeChangeReason: lastRouteChangeReason
+        )
+        m.segments.append(newSegment)
+        manifest = m
+
+        // Save manifest after each segment so we don't lose data on crash
+        saveManifest(m, meetingId: itemId)
+    }
+
+    private func saveManifest(_ manifest: RecordingManifest, meetingId: UUID) {
+        guard let data = try? JSONEncoder().encode(manifest) else { return }
+        let store = FileArtifactStore()
+        try? store.createMeetingDirectory(for: meetingId)
+        let url = store.itemDirectoryURL(for: meetingId).appendingPathComponent("manifest.json")
+        try? data.write(to: url, options: .atomicWrite)
     }
 
     func returnToIdle() {
@@ -349,9 +446,12 @@ final class RecordingCoordinator: ObservableObject {
             self.audioLevel = self.captureService.audioLevel
             // Sync input port info (may change on route switch)
             let portName = self.captureService.currentInputPortName
-            if self.currentInputPortName != portName {
+            if self.currentInputPortName != portName, self.state == .recording {
+                let oldPort = self.currentInputPortName
                 self.currentInputPortName = portName
                 self.currentInputIcon = AudioSessionManager().currentInputIcon
+                // Route changed while recording → create new segment
+                self.segmentForRouteChange(from: oldPort, to: portName)
             }
             if self.captureService.state == .stopped {
                 self.state = .stopped

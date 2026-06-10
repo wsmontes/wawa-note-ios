@@ -18,7 +18,7 @@ enum AudioCaptureError: Error {
 
 final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private let engine: AVAudioEngine
-    private let fileWriter: AudioFileWriter
+    let fileWriter: AudioFileWriter
     private let sessionManager: AudioSessionManager
 
     @Published private(set) var state: AudioCaptureState = .idle
