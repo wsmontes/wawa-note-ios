@@ -28,6 +28,11 @@ struct KnowledgeDetailView: View {
     @State private var backlinks: [(edge: GraphEdge, sourceItem: KnowledgeItem)] = []
     @State private var isPipelineProcessing = false
     @State private var pipelineStage: String = ""
+    @State private var audioPlaybackURL: URL?
+    @State private var isPreparingAudio = false
+    @State private var audioAssetState: AudioAssetState = .unavailable
+
+    private let assetResolver = AudioAssetResolver()
     @State private var isReprocessing = false
     @State private var showReprocessWarning = false
     @State private var agentEvents: [PipelineAgentEvent] = []
@@ -105,11 +110,32 @@ struct KnowledgeDetailView: View {
 
                 Divider().padding(.top, 16)
 
-                // Audio player — shown when item has an audio file
-                if item.audioFileRelativePath != nil {
-                    audioPlayerSection
-                        .padding(.horizontal, 16)
-                        .padding(.top, 12)
+                // Audio player — shown when item has playable audio (single file or segments)
+                if hasPlayableAudio {
+                    if isPreparingAudio {
+                        HStack {
+                            ProgressView()
+                            Text("Preparing audio…").font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 16).padding(.top, 12)
+                    } else if let url = audioPlaybackURL {
+                        AudioPlayerView(audioURL: url, title: item.title)
+                            .padding(.horizontal, 16).padding(.top, 12)
+                    } else if case .segmentsAvailable(let count) = audioAssetState {
+                        Button {
+                            Task { await prepareAudioForPlayback() }
+                        } label: {
+                            Label("Prepare Audio (\(count) segments)", systemImage: "waveform.circle")
+                        }
+                        .buttonStyle(.bordered)
+                        .padding(.horizontal, 16).padding(.top, 12)
+                    }
+                } else if case .failed(let reason) = audioAssetState {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                        Text(reason).font(.caption).foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 16).padding(.top, 8)
                 }
 
                 // Analysis always at the top — like every other item type
@@ -181,12 +207,15 @@ struct KnowledgeDetailView: View {
                         .disabled(isReprocessing || isPipelineProcessing)
                     }
 
-                    if transcript != nil || (item.type == .image && item.bodyText != nil) || item.type == .note || item.type == .journalEntry || item.type == .webBookmark {
+                    if hasExportableContent {
                         Menu {
-                            ShareLink("Markdown", item: MarkdownExporter().export(item: item, transcript: transcript, analysis: analysis))
-                            if let jsonData = try? JSONExporter().export(item: item, transcript: transcript, analysis: analysis),
-                               let jsonString = String(data: jsonData, encoding: .utf8) {
-                                ShareLink("JSON Export", item: jsonString)
+                            // Textual exports (when transcript/analysis available)
+                            if transcript != nil || analysis != nil {
+                                ShareLink("Markdown", item: MarkdownExporter().export(item: item, transcript: transcript, analysis: analysis))
+                                if let jsonData = try? JSONExporter().export(item: item, transcript: transcript, analysis: analysis),
+                                   let jsonString = String(data: jsonData, encoding: .utf8) {
+                                    ShareLink("JSON Export", item: jsonString)
+                                }
                             }
                             if let anarlogMD = try? AnarlogExporter().exportMarkdown(item: item) {
                                 ShareLink("Anarlog .md", item: anarlogMD)
@@ -194,6 +223,15 @@ struct KnowledgeDetailView: View {
                             if let meetilyData = try? MeetilyExporter().exportJSON(item: item),
                                let meetilyString = String(data: meetilyData, encoding: .utf8) {
                                 ShareLink("Meetily .json", item: meetilyString)
+                            }
+                            // Audio export — available even without transcript
+                            if hasPlayableAudio, let url = audioPlaybackURL {
+                                ShareLink("Audio", item: url)
+                            } else if case .segmentsAvailable = audioAssetState {
+                                Button("Export Audio") {
+                                    Task { await prepareAudioForExport() }
+                                }
+                                .disabled(isPreparingAudio)
                             }
                         } label: {
                             Label("Export", systemImage: "square.and.arrow.up")
@@ -225,6 +263,7 @@ struct KnowledgeDetailView: View {
             }
             Task { @MainActor in
                 await Task.yield()
+                await resolveAudioAsset()
                 loadRawAnalysisJSON()
                 loadData()
             }
@@ -435,11 +474,68 @@ struct KnowledgeDetailView: View {
         )
     }
 
+    // MARK: - Audio asset resolution
+
+    /// Whether any playable audio exists (single file or segments ready to render).
+    private var hasPlayableAudio: Bool {
+        switch audioAssetState {
+        case .singleFileReady, .segmentsAvailable:
+            return true
+        case .unavailable, .rendering, .failed:
+            return false
+        }
+    }
+
+    /// Whether the export menu has anything to offer.
+    private var hasExportableContent: Bool {
+        transcript != nil || analysis != nil
+        || item.type == .image || item.type == .note
+        || item.type == .journalEntry || item.type == .webBookmark
+        || hasPlayableAudio
+    }
+
+    private func resolveAudioAsset() async {
+        audioAssetState = assetResolver.state(for: item.id)
+        switch audioAssetState {
+        case .singleFileReady(let url):
+            audioPlaybackURL = url
+        case .segmentsAvailable:
+            // Don't auto-render — wait for user to tap Play or Export.
+            audioPlaybackURL = nil
+        case .unavailable, .failed, .rendering:
+            audioPlaybackURL = nil
+        }
+    }
+
+    private func prepareAudioForPlayback() async {
+        isPreparingAudio = true
+        audioAssetState = .rendering
+        audioPlaybackURL = await assetResolver.resolvePlayableURL(for: item.id)
+        if audioPlaybackURL != nil {
+            audioAssetState = .singleFileReady(audioPlaybackURL!)
+        } else {
+            audioAssetState = .failed("Could not prepare audio for playback.")
+        }
+        isPreparingAudio = false
+    }
+
+    private func prepareAudioForExport() async {
+        isPreparingAudio = true
+        audioAssetState = .rendering
+        if let url = await assetResolver.resolvePlayableURL(for: item.id) {
+            audioPlaybackURL = url
+            audioAssetState = .singleFileReady(url)
+        } else {
+            audioAssetState = .failed("Could not prepare audio for export.")
+        }
+        isPreparingAudio = false
+    }
+
     private var badges: [(title: String, icon: String?, tone: BadgeTone)] {
         var b: [(String, String?, BadgeTone)] = []
-        if item.audioFileRelativePath != nil { b.append(("Audio", "mic", .success)) }
+        if hasPlayableAudio { b.append(("Audio", "mic", .success)) }
         if item.transcriptionEngineId != nil { b.append(("Transcribed", "text.alignleft", .success)) }
-        else if item.audioFileRelativePath != nil { b.append(("Not transcribed", "text.alignleft", .warning)) }
+        else if hasPlayableAudio { b.append(("Not transcribed", "text.alignleft", .warning)) }
         if item.analysisProviderId != nil {
             let modelName = item.analysisProviderId ?? ""
             b.append(("Analyzed · \(modelName)", "sparkles", .success))
@@ -580,7 +676,7 @@ struct KnowledgeDetailView: View {
                 .padding(12)
                 .frame(maxWidth: .infinity)
             }
-        } else if item.audioFileRelativePath != nil && !isTranscribing && !isPipelineProcessing {
+        } else if hasPlayableAudio && !isTranscribing && !isPipelineProcessing {
             VStack(spacing: 12) {
                 Image(systemName: "text.alignleft")
                     .font(.largeTitle)
