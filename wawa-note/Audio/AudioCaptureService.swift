@@ -103,6 +103,11 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// evaluation after 500ms.
     private var routeChangeTask: Task<Void, Never>?
 
+    /// Active probe that periodically checks for usable input when in
+    /// .waitingForUsableInput. Prevents the state from becoming a black hole
+    /// when route change notifications don't fire or fire incompletely.
+    private var waitingInputProbeTask: Task<Void, Never>?
+
     private let audioLevelLock = NSLock()
     private nonisolated(unsafe) var rawAudioLevel: Float = 0.0
 
@@ -202,6 +207,54 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         let oldState = state
         state = newState
         AppLog.audio.info("State: \(String(describing: oldState)) → \(String(describing: newState)) — \(reason)")
+
+        // Start/stop the waiting-input probe based on state
+        if newState == .waitingForUsableInput {
+            startWaitingInputProbe()
+        } else if oldState == .waitingForUsableInput {
+            stopWaitingInputProbe()
+        }
+    }
+
+    /// Probes for usable input every 1-2s while in .waitingForUsableInput.
+    /// If builtInMic is available, automatically triggers recovery.
+    /// Route change notifications are NOT sufficient — Bluetooth transitions
+    /// may not fire new notifications when already in a waiting state.
+    private func startWaitingInputProbe() {
+        stopWaitingInputProbe()
+        waitingInputProbeTask = Task { [weak self] in
+            var backoff = 0
+            while !Task.isCancelled, let self {
+                let delay = backoff < 2 ? 1_000_000_000 : 2_000_000_000
+                try? await Task.sleep(nanoseconds: UInt64(delay))
+
+                guard !Task.isCancelled,
+                      self.state == .waitingForUsableInput,
+                      self.recordingIntent == .userWantsRecording,
+                      self.currentMeetingId != nil else { break }
+
+                // Re-read session state — things may have changed
+                let hasInput = self.sessionManager.isInputAvailable
+                let hasBuiltInMic = self.sessionManager.session.availableInputs?.contains { $0.portType == .builtInMic } ?? false
+
+                AppLog.audio.info("Waiting probe: input=\(hasInput) builtInMic=\(hasBuiltInMic) backoff=\(backoff)")
+
+                if hasInput && hasBuiltInMic {
+                    // Built-in mic is available — attempt recovery
+                    await self.forceBuiltInMicRecovery()
+                    // If recovery succeeded, we're out of waiting → probe stops naturally
+                    if self.state != .waitingForUsableInput { break }
+                    backoff += 1
+                } else {
+                    backoff = 0  // Reset backoff — still waiting for any input
+                }
+            }
+        }
+    }
+
+    private func stopWaitingInputProbe() {
+        waitingInputProbeTask?.cancel()
+        waitingInputProbeTask = nil
     }
 
     /// Atomically commit a recovered route to `.recording`. Validates all
@@ -339,6 +392,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         case .waitingForUsableInput:
             // User paused while waiting for mic.
+            stopWaitingInputProbe()
             transition(to: .pausedByUser, reason: "user paused while waiting for mic")
             recordingIntent = .userPaused
             routeRecoveryGeneration = UUID()
@@ -375,6 +429,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // 1. Kill all async recovery tasks immediately
         routeChangeTask?.cancel()
         routeChangeTask = nil
+        stopWaitingInputProbe()
         routeRecoveryGeneration = UUID()
 
         // 2. Mark intent as stopped — no recovery can resurrect
