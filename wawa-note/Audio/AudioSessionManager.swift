@@ -37,9 +37,17 @@ final class AudioSessionManager {
         set { UserDefaults.standard.set(newValue, forKey: "audio_speakerphone_mode") }
     }
 
+    /// Whether the current audio route is CarPlay.
+    var isCarPlayActive: Bool {
+        session.currentRoute.outputs.contains { $0.portType == .carAudio }
+    }
+
     func configureForRecording() throws {
         let mode: AVAudioSession.Mode
-        if Self.speakerphoneMode {
+        if isCarPlayActive {
+            // CarPlay doesn't support .spokenAudio — use .default
+            mode = .default
+        } else if Self.speakerphoneMode {
             mode = .videoChat  // Front mic array + beamforming for far-field
         } else {
             mode = Self.useVoiceProcessing ? .spokenAudio : .default

@@ -404,12 +404,25 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 return
             }
 
-            // If we were recording, rebuild engine to switch to the new device
-            if state == .recording || state == .paused {
-                let wasRecording = state == .recording
+            // If we were recording (or interrupted while recording), rebuild engine
+            let wasRecording = state == .recording || stateBeforeInterruption == .recording
+            if state == .recording || state == .paused || state == .interrupted {
                 audioInterruptionReason = "Switching to \(newPort)..."
+                let prevState = state
                 state = .interrupted
                 timerTask?.cancel()
+
+                // Reconfigure session for the new route (CarPlay needs .default mode)
+                try? sessionManager.deactivate()
+                do {
+                    try sessionManager.configureForRecording()
+                } catch {
+                    AppLog.error("audio", "Failed to reconfigure for \(newPort): \(error.localizedDescription)")
+                    audioInterruptionReason = "Could not configure audio for \(newPort)"
+                    state = prevState
+                    return
+                }
+
                 rebuildEngine()
                 if state != .interrupted {
                     currentInputPortName = newPort
