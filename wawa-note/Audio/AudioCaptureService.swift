@@ -81,7 +81,12 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // Configure audio session with appropriate mode for current route
         try sessionManager.configureForRecording()
 
-        // Install tap before engine starts — the tap adapts automatically (format: nil)
+        // Create file at 44.1kHz BEFORE engine start — the tap upsamples from
+        // any hardware rate, so the file format is always known. If we create
+        // the file after engine.start(), initial buffers are dropped (no file).
+        let recordFormat = AVAudioFormat(standardFormatWithSampleRate: Self.outputSampleRate, channels: 1)!
+        try fileWriter.startRecording(format: recordFormat, meetingId: meetingId)
+
         installTap()
         engine.prepare()
 
@@ -106,21 +111,17 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         if let engineError {
             AppLog.error("audio", "All engine start attempts failed: \(engineError.localizedDescription)")
             engine.inputNode.removeTap(onBus: 0)
+            fileWriter.finishRecording()
             try? sessionManager.deactivate()
             throw AudioCaptureError.engineStartFailed
         }
-
-        // File created AFTER engine start: the real hardware format is available now.
-        // Matches what the tap delivers — no sample rate mismatch (no chipmunk audio).
-        let hardwareFormat = engine.inputNode.outputFormat(forBus: 0)
-        try fileWriter.startRecording(format: hardwareFormat, meetingId: meetingId)
 
         state = .recording
         currentInputPortName = sessionManager.currentInputPortName
         startTimer()
         startLevelSmoothing()
         observeAudioNotifications()
-        AppLog.event("audio", "Audio engine started — input=\(self.currentInputPortName) rate=\(hardwareFormat.sampleRate)Hz")
+        AppLog.event("audio", "Audio engine started — input=\(self.currentInputPortName)")
     }
 
     func pauseRecording() {
