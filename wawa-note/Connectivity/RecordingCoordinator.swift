@@ -57,10 +57,16 @@ final class RecordingCoordinator: ObservableObject {
 
         // Route change → new segment created by AudioCaptureService
         captureService.onSegmentCreated = { [weak self] segment in
-            guard let self else { return }
-            self.manifest?.segments.append(segment)
+            guard let self, var m = self.manifest else { return }
+            // Finalize the previous segment
+            if let lastIdx = m.segments.indices.last {
+                m.segments[lastIdx].endedAt = Date()
+                m.segments[lastIdx].fileSize = self.captureService.fileWriter.fileSize
+            }
+            m.segments.append(segment)
+            self.manifest = m
             if let itemId = self.savedItemId {
-                self.saveManifest(self.manifest!, meetingId: itemId)
+                self.saveManifest(m, meetingId: itemId)
             }
         }
     }
@@ -137,6 +143,8 @@ final class RecordingCoordinator: ObservableObject {
             recordingId: itemId, title: recordingTitle,
             startedAt: Date(), segments: [firstSegment]
         )
+        // Persist immediately — survives crash during recording
+        saveManifest(manifest!, meetingId: itemId)
 
         AppLog.event("audio", "Recording started — itemID=\(itemId.uuidString.prefix(8)) input=\(captureService.currentInputPortName)")
             } catch AudioCaptureError.permissionDenied {

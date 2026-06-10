@@ -73,10 +73,11 @@ final class ContentExtractionService {
 
             do {
                 let result = try await engine.transcribeFile(inputURL)
-                // Offset segment timestamps
+                // Offset segment timestamps — accumulate across segments
                 let shifted = result.segments.map { seg -> TranscriptSegment in
                     var s = seg
                     s.startTime += timeOffset
+                    if let end = s.endTime { s.endTime = end + timeOffset }
                     s.meetingId = item.id
                     return s
                 }
@@ -84,7 +85,7 @@ final class ContentExtractionService {
 
                 // Accumulate time offset for next segment
                 if let lastSeg = result.segments.last, let end = lastSeg.endTime {
-                    timeOffset = max(timeOffset, end)
+                    timeOffset += end
                 }
                 AppLog.provider.info("ContentExtraction: segment \(segment.index) transcribed — \(result.segments.count) segments, offset=\(timeOffset)s")
             } catch {
@@ -98,15 +99,18 @@ final class ContentExtractionService {
         // Save unified transcript
         let unified = Transcript(
             meetingId: item.id,
-            languageCode: manifest.segments.first.flatMap { _ in nil },
+            languageCode: nil,
             segments: allSegments,
-            sourceEngineId: "segmented-apple-speech"
+            sourceEngineId: "segmented-\(engine.id)"
         )
 
         do {
             try fileStore.createMeetingDirectory(for: item.id)
             try fileStore.writeArtifact(unified, fileName: "transcript.json", meetingId: item.id)
+            item.status = .transcribed
+            item.transcriptionEngineId = engine.id
             try modelContext.save()
+            NotificationCenter.default.post(name: .transcriptReady, object: item.id.uuidString)
             AppLog.provider.info("ContentExtraction: unified transcript saved — \(allSegments.count) segments total")
         } catch {
             AppLog.provider.error("ContentExtraction: failed to save unified transcript: \(error)")

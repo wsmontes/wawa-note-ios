@@ -1372,100 +1372,33 @@ struct KnowledgeDetailView: View {
     // MARK: - Transcription
 
     private func transcribe() async {
-        let audioURL = fileStore.audioFileURL(for: item.id)
-        guard FileManager.default.fileExists(atPath: audioURL.path) else {
+        // Check for audio via manifest (segmented) or legacy audio.m4a
+        let hasAudio = fileStore.recordingManifestExists(for: item.id)
+            || fileStore.audioFileExists(for: item.id)
+        guard hasAudio else {
             transcriptionError = "Audio file not found."
             return
         }
 
-        isTranscribing = true
-        transcriptionError = nil
-        transcriptionProgress = nil
-
-        // Resolve engine based on user preference
-        let engine: TranscriptionEngine
-        let settings = TranscriptionSettings.shared
-        let activeConfig = ActiveProviderManager.shared.getActiveProvider(context: modelContext)
-
-        let hasWhisperAPI: Bool = {
-            guard let config = activeConfig,
-                  let baseURL = config.baseURL,
-                  let keyId = config.apiKeyKeychainIdentifier,
-                  let apiKey = try? SecureKeyStore().loadAPIKey(for: keyId),
-                  !apiKey.isEmpty else { return false }
-            return config.type == .openAI || config.type == .openAICompatible
-        }()
-
-        if settings.useRemoteWhisper, hasWhisperAPI {
-           let config = activeConfig!
-           let baseURL = config.baseURL!
-            var apiKey = ""
-            if let keyId = config.apiKeyKeychainIdentifier {
-                apiKey = (try? SecureKeyStore().loadAPIKey(for: keyId)) ?? ""
-            }
-            let remote = RemoteTranscriptionEngine(baseURL: baseURL, apiKey: apiKey)
-            remote.onProgress = { progress in
-                Task { @MainActor in
-                    switch progress {
-                    case .chunking(let c, let t): self.transcriptionProgress = "Splitting... (\(c)/\(t))"
-                    case .transcribing(let c, let t): self.transcriptionProgress = "Part \(c) of \(t)..."
-                    case .downloadingModel(let name): self.transcriptionProgress = "Downloading \(name)..."
-                    }
-                }
-            }
-            engine = remote
-        } else {
-            var local = AppleSpeechTranscriptionEngine(preferredLocale: selectedLocale)
-            local.onProgress = { progress in
-                Task { @MainActor in
-                    switch progress {
-                    case .chunking(let c, let t): self.transcriptionProgress = "Splitting... (\(c)/\(t))"
-                    case .transcribing(let c, let t): self.transcriptionProgress = "Part \(c) of \(t)..."
-                    case .downloadingModel(let name): self.transcriptionProgress = "Downloading \(name)..."
-                    }
-                }
-            }
-            engine = local
-        }
-
-        do {
-            var result = try await engine.transcribeFile(audioURL)
-            result.meetingId = item.id
-            result.segments = result.segments.map { var f = $0; f.meetingId = item.id; return f }
-            transcript = result
-
-            try fileStore.createMeetingDirectory(for: item.id)
-            try fileStore.writeArtifact(result, fileName: "transcript.json", meetingId: item.id)
-
+        // Delegate to canonical transcription service (handles manifest + legacy)
+        let extractionSvc = ContentExtractionService(modelContext: modelContext, fileStore: fileStore)
+        if let text = await extractionSvc.extractTextFromAudio(item) {
+            transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id)
+            isTranscribing = false
+            transcriptionProgress = nil
             item.status = .transcribed
-            item.transcriptionEngineId = engine.id
-
-            // Auto-generate embedding after transcription
-            if let provider = try? ProviderRouter.resolveActive(context: modelContext) {
-                let pipeline = EmbeddingPipelineService()
-                await pipeline.ensureEmbedding(for: item, using: provider)
-            }
+            try? modelContext.save()
 
             // Auto-run pipeline (agent-based) after transcription
             if (try? ProviderRouter.resolveActive(context: modelContext)) != nil {
                 isPipelineProcessing = true
                 processingQueue.enqueue(itemID: item.id, trigger: .directUserAction)
             }
-        } catch let error as TranscriptionError {
-            switch error {
-            case .notAuthorized: transcriptionError = "Speech recognition off. Enable in Settings."
-            case .cancelled: transcriptionProgress = "Paused."
-            case .noSupportedLocale: transcriptionError = "Language not supported."
-            case .fileTooLarge: transcriptionError = "File too large for remote API."
-            case .recognitionFailed: transcriptionError = "No speech detected or recognition failed. Record at least 5s of clear speech."
-            case .fileTooLongForLocal(let d): transcriptionError = "Audio too long for local (max \(Int(d))s)."
-            case .modelNotInstalled(let loc): transcriptionError = "On-device model for \(loc) not installed. Connect to Wi-Fi."
-            case .onDeviceUnavailable: transcriptionError = "On-device recognition not available. Try remote engine."
-            }
-        } catch {
-            transcriptionError = "\(error.localizedDescription) [\(type(of: error))]"
+            return
         }
 
+        // extractionSvc.extractTextFromAudio returned nil — transcription failed
+        transcriptionError = "No speech detected or recognition failed."
         isTranscribing = false
         transcriptionProgress = nil
     }

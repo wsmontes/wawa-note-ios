@@ -407,50 +407,72 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         // Rebuild engine for the new input route
         timerTask?.cancel()
+        state = .interrupted  // Prevent tap from writing during transition
 
-        // Close current file segment before reconfiguring
+        // 1. Remove tap, stop engine
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+
+        // 2. Close current file segment
         fileWriter.closeCurrentSegment()
 
-        // Reconfigure session for the new device
+        // 3. Reconfigure session for the new device
         try? sessionManager.deactivate()
         do {
             try sessionManager.configureForRecording()
         } catch {
             AppLog.error("audio", "Route change: failed to reconfigure session: \(error)")
-            state = .interrupted
             audioInterruptionReason = "Could not switch to \(newPort)"
+            return  // state stays .interrupted
+        }
+
+        // 4. Rebuild engine for new route
+        engine.reset()
+        installTap()
+        engine.prepare()
+
+        do {
+            try engine.start()
+        } catch {
+            AppLog.error("audio", "Route change: engine start failed: \(error)")
+            audioInterruptionReason = "Could not start audio on \(newPort)"
             return
         }
 
-        rebuildEngine()
+        // 5. Open new file segment — MUST succeed before we consider recording
+        let hwFmt = engine.inputNode.outputFormat(forBus: 0)
+        let segIndex = fileWriter.segmentIndex + 1
+        let segFileName = String(format: "segment-%03d.m4a", segIndex)
 
-        if state != .interrupted {
-            // Open new file segment with the actual hardware format
-            let hwFmt = engine.inputNode.outputFormat(forBus: 0)
-            let segIndex = fileWriter.segmentIndex + 1
-            let segFileName = String(format: "segments/segment-%03d.m4a", segIndex)
-            if let meetingId = currentMeetingId {
-                try? fileWriter.startNewSegment(meetingId: meetingId, format: hwFmt)
-            }
-
-            let segment = RecordingSegment(
-                id: UUID(), index: segIndex,
-                fileName: segFileName,
-                startedAt: Date(),
-                inputPortName: newPort,
-                inputPortType: sessionManager.bestAvailableInput?.portType.rawValue ?? "unknown",
-                routeChangeReason: String(reason.rawValue),
-                sampleRate: hwFmt.sampleRate
-            )
-            onSegmentCreated?(segment)
-
-            currentInputPortName = newPort
-            state = .recording
-            startTimer()
-            AppLog.audio.info("Rebuilt engine for new route: \(newPort)")
-        } else {
-            audioInterruptionReason = "Could not switch to \(newPort)"
+        guard let meetingId = currentMeetingId else {
+            audioInterruptionReason = "Internal error: no meeting ID"
+            return
         }
+
+        do {
+            try fileWriter.startNewSegment(meetingId: meetingId, format: hwFmt)
+        } catch {
+            AppLog.error("audio", "Route change: startNewSegment failed: \(error)")
+            audioInterruptionReason = "Could not create new audio segment."
+            return  // state stays .interrupted
+        }
+
+        // 6. Success — notify and resume
+        let segment = RecordingSegment(
+            id: UUID(), index: segIndex,
+            fileName: segFileName,
+            startedAt: Date(),
+            inputPortName: newPort,
+            inputPortType: sessionManager.bestAvailableInput?.portType.rawValue ?? "unknown",
+            routeChangeReason: String(reason.rawValue),
+            sampleRate: hwFmt.sampleRate
+        )
+        onSegmentCreated?(segment)
+
+        currentInputPortName = newPort
+        state = .recording
+        startTimer()
+        AppLog.audio.info("Rebuilt engine for new route: \(newPort)")
     }
 
     private func handleMediaServicesReset(_ notification: Notification) {
