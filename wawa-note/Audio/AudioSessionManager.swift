@@ -92,6 +92,22 @@ final class AudioSessionManager {
         }
     }
 
+    /// Update the audio mode for a new route without deactivating the session.
+    /// The engine keeps running — only the category/mode/options change.
+    func adaptToRouteChange() {
+        let mode = bestModeForCurrentRoute()
+        do {
+            try session.setCategory(.playAndRecord, mode: mode, options: [
+                .allowBluetoothHFP,
+                .allowBluetooth,
+                .defaultToSpeaker
+            ])
+            AppLog.audio.info("Session adapted to route: mode=\(mode.rawValue)")
+        } catch {
+            AppLog.error("audio", "Failed to adapt session to route change: \(error.localizedDescription)")
+        }
+    }
+
     func reconfigureForRecording() throws {
         try? session.setActive(false, options: .notifyOthersOnDeactivation)
         try configureForRecording()

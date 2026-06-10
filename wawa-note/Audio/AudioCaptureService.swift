@@ -370,7 +370,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     /// Route changes (Bluetooth connect/disconnect, AirPods in/out, etc.) are handled
     /// automatically by AVAudioEngine when the tap uses format: nil. The engine keeps
-    /// running and adapts to the new input format. We only update the port name for UI.
+    /// running and adapts to the new input format.
+    ///
+    /// We update the audio session mode for the new route (built-in mic gets .spokenAudio,
+    /// Bluetooth gets .default) WITHOUT deactivating the session.
     private func handleRouteChange(_ notification: Notification) {
         guard let userInfo = notification.userInfo,
               let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
@@ -378,6 +381,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         let newPort = sessionManager.currentInputPortName
         AppLog.audio.info("Audio route changed: reason=\(reason.rawValue) port=\(newPort)")
+
+        // Adapt audio mode to new route without stopping the engine
+        sessionManager.adaptToRouteChange()
 
         // Update UI
         currentInputPortName = newPort
