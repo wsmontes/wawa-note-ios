@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import OSLog
 import Speech
 
 struct SettingsView: View {
@@ -202,6 +203,15 @@ struct DebugLogView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 16) {
                     Button {
+                        isLoading = true
+                        logs = FileLogService.shared.retrieveLogs()
+                            + "\n\n=== OSLOG (audio) ===\n"
+                            + (DebugLogView.retrieveOSLogs() ?? "OSLog not available")
+                        isLoading = false
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    Button {
                         FileLogService.shared.clearLogs()
                         logs = ""
                     } label: {
@@ -215,8 +225,33 @@ struct DebugLogView: View {
                 }
             }
         }
-        .onAppear { logs = FileLogService.shared.retrieveLogs(); isLoading = false }
-        .refreshable { logs = FileLogService.shared.retrieveLogs() }
+        .onAppear {
+            logs = FileLogService.shared.retrieveLogs()
+                + "\n\n=== OSLOG (audio) ===\n"
+                + (DebugLogView.retrieveOSLogs() ?? "OSLog not available")
+            isLoading = false
+        }
+        .refreshable {
+            logs = FileLogService.shared.retrieveLogs()
+                + "\n\n=== OSLOG (audio) ===\n"
+                + (DebugLogView.retrieveOSLogs() ?? "OSLog not available")
+        }
+    }
+
+    static func retrieveOSLogs() -> String? {
+        guard let store = try? OSLogStore(scope: .currentProcessIdentifier) else { return nil }
+        let position = store.position(date: Date().addingTimeInterval(-3600))
+        var lines: [String] = []
+        for entry in (try? store.getEntries(at: position)) ?? AnySequence([]) {
+            guard let logEntry = entry as? OSLogEntryLog else { continue }
+            let msg = logEntry.composedMessage
+            guard msg.contains("audio") || msg.contains("Audio") || msg.contains("recording") || msg.contains("Recording") || msg.contains("route") || msg.contains("Route")
+                || msg.contains("engine") || msg.contains("Engine") || msg.contains("session") || msg.contains("Session")
+                || msg.contains("segment") || msg.contains("Segment")
+                else { continue }
+            lines.append("[\(logEntry.date.formatted(.iso8601))] [\(logEntry.level)] \(msg)")
+        }
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 }
 
