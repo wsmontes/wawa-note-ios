@@ -507,7 +507,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // 1. Checkpoint the current segment BEFORE touching anything else.
         _ = checkpointCurrentSegment(reason: reason)
 
-        // 2. Clean stop: remove tap, stop engine.
+        // 2. Clean stop: remove tap, stop engine, release engine.
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
 
@@ -516,13 +516,14 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return .noUsableInput(takeRouteSnapshot(reason: reason))
         }
 
-        // 3. Create a fresh engine — same as init(). Don't reuse the old one.
-        engine = AVAudioEngine()
-
-        // 4. Deactivate before reconfiguring. Unlike startRecording (fresh session),
-        //    the session is already active from the previous capture. setCategory
-        //    may not take full effect on an active session.
+        // 3. Return audio resources to the system BEFORE creating anything new.
+        //    Deactivate the session, let the system settle, then reconfigure
+        //    from a completely clean state — exactly like startRecording.
         try? sessionManager.deactivate()
+        try? await Task.sleep(nanoseconds: 200_000_000) // 200ms for system to settle
+
+        // 4. Now create a fresh engine on a clean session.
+        engine = AVAudioEngine()
 
         do {
             try sessionManager.configureForRecording()
@@ -674,13 +675,14 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         routeRecoveryGeneration = UUID()
         let gen = routeRecoveryGeneration
 
-        // Clean stop
+        // Clean stop — release everything before creating new
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-
-        // Fresh engine + deactivate old session + configure for built-in mic
-        engine = AVAudioEngine()
         try? sessionManager.deactivate()
+        try? await Task.sleep(nanoseconds: 200_000_000) // 200ms settle
+
+        // Fresh engine on clean session
+        engine = AVAudioEngine()
         try? sessionManager.configureForRecording()
 
         // Force select built-in mic
