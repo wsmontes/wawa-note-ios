@@ -820,6 +820,18 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return
         }
 
+        // Bluetooth disconnected → force fallback to built-in mic.
+        // The iPhone mic is always available and reliable. Don't wait
+        // for bestAvailableInput — it may still prefer the stale Bluetooth route.
+        if reason == .oldDeviceUnavailable {
+            if recordingIntent == .userWantsRecording {
+                AppLog.audio.info("Bluetooth disconnected — forcing built-in mic fallback")
+                await forceBuiltInMicRecovery()
+            }
+            currentInputPortName = sessionManager.currentInputPortName
+            return
+        }
+
         // Input returned or route changed — restart capture cleanly
         let resume = recordingIntent == .userWantsRecording
         let gen = routeRecoveryGeneration
