@@ -604,11 +604,20 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     /// Force recovery using the built-in iPhone microphone.
     /// Explicitly selects builtInMic and restarts capture from scratch.
+    /// Accepts any non-terminal state — the user wants to recover NOW.
     func forceBuiltInMicRecovery() async {
-        guard state == .waitingForUsableInput || state == .interruptedBySystem else { return }
+        let isFailed: Bool = if case .failedFatal = state { true } else { false }
+        guard state != .idle, state != .stopped, !isFailed else {
+            AppLog.audio.info("forceBuiltInMicRecovery skipped")
+            return
+        }
         guard let meetingId = currentMeetingId else { return }
 
-        AppLog.audio.info("Force built-in mic recovery")
+        AppLog.audio.info("Force built-in mic recovery — beginning")
+
+        // Cancel any in-progress recovery
+        routeRecoveryGeneration = UUID()
+        let gen = routeRecoveryGeneration
 
         // Clean stop
         engine.inputNode.removeTap(onBus: 0)
@@ -657,7 +666,6 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         }
 
         // Validate
-        let gen = routeRecoveryGeneration
         transition(to: .validatingRoute, reason: "validating built-in mic")
         let bufStart = lastBufferReceivedAt
         for _ in 0..<20 where lastBufferReceivedAt <= bufStart {
