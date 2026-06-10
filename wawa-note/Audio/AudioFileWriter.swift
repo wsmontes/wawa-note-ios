@@ -130,27 +130,44 @@ final class AudioFileWriter: @unchecked Sendable {
         let segmentsDir = fileStore.segmentsDirectoryURL(for: meetingId)
         try fileManager.createDirectory(at: segmentsDir, withIntermediateDirectories: true)
 
-        let fileName = String(format: "segment-%03d.m4a", _segmentIndex)
+        let sampleRate = format.sampleRate
+        // AAC encoder rejects sample rates below ~16kHz on iOS (kAudioFormatUnsupportedDataFormatError).
+        // Use Linear PCM WAV for low rates (Bluetooth HFP at 8kHz), AAC for standard rates.
+        let usePCM = sampleRate < 16000
+        let ext = usePCM ? "wav" : "m4a"
+        let fileName = String(format: "segment-%03d.\(ext)", _segmentIndex)
         let fileURL = segmentsDir.appendingPathComponent(fileName)
 
-        let sampleRate = format.sampleRate
-        let bitRate: Int = sampleRate >= 44100 ? 96000
-            : sampleRate >= 22050 ? 64000
-            : sampleRate >= 16000 ? 32000
-            : 24000
-
-        _audioFile = try AVAudioFile(
-            forWriting: fileURL,
-            settings: [
+        let settings: [String: Any]
+        if usePCM {
+            settings = [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVSampleRateKey: sampleRate,
+                AVNumberOfChannelsKey: 1,
+                AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsFloatKey: false,
+                AVLinearPCMIsBigEndianKey: false
+            ]
+        } else {
+            let bitRate: Int = sampleRate >= 44100 ? 96000
+                : sampleRate >= 32000 ? 64000
+                : sampleRate >= 22050 ? 48000
+                : 24000
+            settings = [
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
                 AVSampleRateKey: sampleRate,
                 AVNumberOfChannelsKey: 1,
                 AVEncoderBitRateKey: bitRate
-            ],
+            ]
+        }
+
+        _audioFile = try AVAudioFile(
+            forWriting: fileURL,
+            settings: settings,
             commonFormat: format.commonFormat,
             interleaved: format.isInterleaved
         )
         _currentFileURL = fileURL
-        AppLog.audio.info("Segment \(self._segmentIndex): \(fileName) \(sampleRate)Hz AAC")
+        AppLog.audio.info("Segment \(self._segmentIndex): \(fileName) \(sampleRate)Hz \(usePCM ? "PCM" : "AAC")")
     }
 }
