@@ -7,6 +7,7 @@ enum RecordingUIState: Equatable {
     case recording
     case pausedByUser
     case reconfiguringRoute
+    case validatingRoute
     case waitingForUsableInput
     case interruptedBySystem
     case failedFatal(String)

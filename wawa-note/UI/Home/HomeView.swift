@@ -264,7 +264,7 @@ struct HomeView: View {
     var body: some View {
         ZStack {
             switch captureVM.recordingState {
-            case .recording, .pausedByUser, .interruptedBySystem, .waitingForUsableInput, .reconfiguringRoute:
+            case .recording, .pausedByUser, .interruptedBySystem, .waitingForUsableInput, .reconfiguringRoute, .validatingRoute:
                 recordingPanel
             case .stopped:
                 defaultSurface

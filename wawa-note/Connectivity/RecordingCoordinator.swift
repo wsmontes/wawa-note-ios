@@ -348,13 +348,13 @@ final class RecordingCoordinator: ObservableObject {
                 nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: true)
                 notifyStatusChange()
             }
-        case .reconfiguringRoute:
-            if state == .recording || state == .pausedByUser {
+        case .reconfiguringRoute, .validatingRoute:
+            if state == .recording || state == .pausedByUser || state == .reconfiguringRoute {
                 // Stop timer but keep logical recording alive
                 if pauseStartDate == nil { pauseStartDate = Date() }
                 observationTimer?.invalidate()
                 nowPlayingTimer?.invalidate()
-                state = .reconfiguringRoute
+                state = captureState == .validatingRoute ? .validatingRoute : .reconfiguringRoute
                 nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: false)
                 notifyStatusChange()
             }
@@ -517,6 +517,7 @@ final class RecordingCoordinator: ObservableObject {
         case .recording: return "recording"
         case .pausedByUser: return "paused"
         case .reconfiguringRoute: return "reconfiguring"
+        case .validatingRoute: return "validating"
         case .waitingForUsableInput: return "waitingForInput"
         case .interruptedBySystem: return "interrupted"
         case .failedFatal: return "failed"

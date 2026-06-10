@@ -11,6 +11,7 @@ enum AudioCaptureState: Equatable {
     case recording
     case pausedByUser
     case reconfiguringRoute
+    case validatingRoute           // engine started, waiting for first audio buffer
     case waitingForUsableInput
     case interruptedBySystem
     case failedFatal(String)
@@ -104,6 +105,23 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     private let audioLevelLock = NSLock()
     private nonisolated(unsafe) var rawAudioLevel: Float = 0.0
+
+    /// Timestamp of the last audio buffer received from the tap.
+    /// Set in the tap callback (real-time thread). Used to validate
+    /// that a new route is actually delivering audio.
+    private nonisolated(unsafe) var lastBufferReceivedAt: Date = .distantPast
+
+    /// Routes that failed validation recently. Keyed by portName+portType.
+    /// Quarantined for 10 seconds to avoid retry loops on broken Bluetooth.
+    private var quarantinedInputs: [String: Date] = [:]
+
+    /// Non-nil while a route recovery is in progress. Guards against
+    /// overlapping recoveries when multiple route changes fire rapidly.
+    private var activeRecoveryTask: Task<Void, Never>?
+
+    /// If a route change arrives while recovery is active, store it here
+    /// and process it after the current recovery finishes.
+    private var pendingRouteChangeReason: AVAudioSession.RouteChangeReason?
 
     // AudioFileWriter serializes all writes internally — no external write queue needed.
 
@@ -314,6 +332,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         inputNode.installTap(onBus: 0, bufferSize: Self.captureBufferSize, format: nil) { [weak self] buffer, _ in
             guard let self else { return }
             self.updateAudioLevel(from: buffer)
+            self.lastBufferReceivedAt = Date()  // Track for route validation
             guard self.state == .recording else { return }
 
             guard let channelData = buffer.floatChannelData else { return }
@@ -431,29 +450,125 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return .engineFailed(lastEngineError!, takeRouteSnapshot(reason: reason))
         }
 
-        // 7. Success — emit new segment
+        // 7. Engine started — validate that the new route actually delivers audio.
+        //    Enter .validatingRoute, wait for first buffer, then commit or fall back.
+        transition(to: .validatingRoute, reason: "engine started, validating: \(reason)")
         let snap = takeRouteSnapshot(reason: reason)
-        let segment = RecordingSegment(
-            id: UUID(), index: segIndex,
-            fileName: segFileName,
-            startedAt: Date(),
-            inputPortName: sessionManager.currentInputPortName,
-            inputPortType: sessionManager.bestAvailableInput?.portType.rawValue ?? "unknown",
-            routeChangeReason: reason,
-            sampleRate: hwFmt.sampleRate
-        )
-        onSegmentCreated?(closedInfo, segment)
-        currentInputPortName = sessionManager.currentInputPortName
-        audioInterruptionReason = nil
+        let bufferCheckStart = lastBufferReceivedAt
 
-        if resumeRecording {
-            transition(to: .recording, reason: "rebuild succeeded: \(reason)")
-            startTimer()
-            return .resumed(snap)
-        } else {
-            transition(to: .pausedByUser, reason: "rebuild succeeded (paused): \(reason)")
-            return .paused(snap)
+        // Wait up to 2 seconds for the first audio buffer
+        var bufferReceived = false
+        for _ in 0..<20 where !bufferReceived {
+            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+            bufferReceived = lastBufferReceivedAt > bufferCheckStart
         }
+
+        // Check generation token again after async wait
+        guard generation == routeRecoveryGeneration else {
+            fileWriter.closeCurrentSegment()
+            try? sessionManager.deactivate()
+            AppLog.audio.info("Rebuild cancelled during validation")
+            return .noUsableInput(snap)
+        }
+
+        if bufferReceived {
+            // Validation passed — commit the new segment and resume
+            let segment = RecordingSegment(
+                id: UUID(), index: segIndex,
+                fileName: segFileName,
+                startedAt: Date(),
+                inputPortName: sessionManager.currentInputPortName,
+                inputPortType: sessionManager.bestAvailableInput?.portType.rawValue ?? "unknown",
+                routeChangeReason: reason,
+                sampleRate: hwFmt.sampleRate
+            )
+            onSegmentCreated?(closedInfo, segment)
+            currentInputPortName = sessionManager.currentInputPortName
+            audioInterruptionReason = nil
+
+            if resumeRecording {
+                transition(to: .recording, reason: "validated: \(reason)")
+                startTimer()
+                return .resumed(snap)
+            } else {
+                transition(to: .pausedByUser, reason: "validated (paused): \(reason)")
+                return .paused(snap)
+            }
+        }
+
+        // Validation failed — no audio buffers arriving on this route.
+        // Quarantine the failed input so we don't retry it immediately.
+        if let input = sessionManager.bestAvailableInput {
+            let key = "\(input.portName):\(input.portType.rawValue)"
+            quarantinedInputs[key] = Date()
+            AppLog.audio.info("Quarantined input \(key) — no buffers received after engine start")
+        }
+
+        // Discard the empty segment
+        fileWriter.closeCurrentSegment()
+        if let closed = closedInfo { onSegmentClosed?(closed) }
+
+        // Fallback: if we were trying Bluetooth, try built-in mic instead
+        let selectedType = sessionManager.bestAvailableInput?.portType
+        if selectedType == .bluetoothHFP || selectedType == .bluetoothA2DP || selectedType == .bluetoothLE {
+            let builtInAvailable = sessionManager.session.availableInputs?.contains { $0.portType == .builtInMic } ?? false
+            if builtInAvailable {
+                AppLog.audio.info("Bluetooth validation failed — falling back to built-in mic")
+                // Reconfigure for built-in mic
+                try? sessionManager.deactivate()
+                do {
+                    try sessionManager.configureForRecording()
+                    // Force select built-in mic
+                    if let builtIn = sessionManager.session.availableInputs?.first(where: { $0.portType == .builtInMic }) {
+                        try? sessionManager.session.setPreferredInput(builtIn)
+                    }
+                    engine.stop()
+                    engine.reset()
+                    installTap()
+                    engine.prepare()
+                    try engine.start()
+                    // Quick validation of built-in mic
+                    let bfStart = lastBufferReceivedAt
+                    for _ in 0..<15 where lastBufferReceivedAt <= bfStart {
+                        try? await Task.sleep(nanoseconds: 100_000_000)
+                    }
+                    if lastBufferReceivedAt > bfStart {
+                        // Built-in mic works — commit
+                        let fallbackFmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sessionManager.sampleRate > 0 ? sessionManager.sampleRate : 44100, channels: 1, interleaved: false)!
+                        let fallbackClosed = try? fileWriter.rotateToNewSegment(meetingId: meetingId, format: fallbackFmt)
+                        let fbIdx = fileWriter.segmentIndex
+                        let fbName = fileWriter.currentFileURL?.lastPathComponent ?? String(format: "segment-%03d.m4a", fbIdx)
+                        let fbSegment = RecordingSegment(
+                            id: UUID(), index: fbIdx, fileName: fbName, startedAt: Date(),
+                            inputPortName: sessionManager.currentInputPortName,
+                            inputPortType: "builtInMic",
+                            routeChangeReason: "fallbackFromBluetooth",
+                            sampleRate: fallbackFmt.sampleRate
+                        )
+                        onSegmentCreated?(fallbackClosed, fbSegment)
+                        currentInputPortName = sessionManager.currentInputPortName
+                        audioInterruptionReason = nil
+                        let fbSnap = takeRouteSnapshot(reason: "fallbackFromBluetooth")
+                        if resumeRecording {
+                            transition(to: .recording, reason: "fallback to built-in mic")
+                            startTimer()
+                            return .resumed(fbSnap)
+                        } else {
+                            transition(to: .pausedByUser, reason: "fallback (paused)")
+                            return .paused(fbSnap)
+                        }
+                    }
+                } catch {
+                    AppLog.audio.error("Built-in mic fallback failed: \(error)")
+                }
+            }
+        }
+
+        // No fallback available — wait for usable input
+        audioInterruptionReason = "Bluetooth audio not ready. Try again or disconnect."
+        transition(to: .waitingForUsableInput, reason: "validation failed, no fallback")
+        try? sessionManager.deactivate()
+        return .engineFailed(lastEngineError ?? NSError(domain: "Audio", code: -1), snap)
     }
 
     // Simple engine rebuild without segment creation (used for startRecording only).
@@ -614,9 +729,27 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     @MainActor
     private func processSettledRouteChange(_ reason: AVAudioSession.RouteChangeReason) async {
+        // Single-flight: if a recovery is already running, store this as pending
+        guard activeRecoveryTask == nil else {
+            pendingRouteChangeReason = reason
+            AppLog.audio.info("Route change queued — recovery already in progress")
+            return
+        }
+
         let portName = sessionManager.currentInputPortName
         let inputAvailable = sessionManager.isInputAvailable
         AppLog.audio.info("Route settled: reason=\(reason.rawValue) port=\(portName) inputAvailable=\(inputAvailable)")
+
+        // Check quarantine — don't retry a recently-failed input
+        if let input = sessionManager.bestAvailableInput {
+            let key = "\(input.portName):\(input.portType.rawValue)"
+            if let quarantinedAt = quarantinedInputs[key], Date().timeIntervalSince(quarantinedAt) < 10 {
+                AppLog.audio.info("Input \(key) is quarantined — skipping")
+                return
+            }
+            // Clean up expired quarantine entries
+            quarantinedInputs = quarantinedInputs.filter { Date().timeIntervalSince($0.value) < 10 }
+        }
 
         // Input lost while recording or user-paused
         guard inputAvailable else {
@@ -634,14 +767,18 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         // Input returned while waiting — auto-recover if user wants recording
         if state == .waitingForUsableInput, currentMeetingId != nil {
-            if recordingIntent == .userWantsRecording {
-                AppLog.audio.info("Input recovered — auto-rebuilding")
-                let gen = routeRecoveryGeneration
-                _ = await rebuildForNewRoute(reason: "routeRecovered", resumeRecording: true, generation: gen)
-            } else if recordingIntent == .userPaused {
-                // Reconfigure route but stay paused
-                let gen = routeRecoveryGeneration
-                _ = await rebuildForNewRoute(reason: "routeRecovered", resumeRecording: false, generation: gen)
+            let resume = recordingIntent == .userWantsRecording
+            AppLog.audio.info("Input recovered — auto-rebuilding (resume=\(resume))")
+            let gen = routeRecoveryGeneration
+            activeRecoveryTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                _ = await self.rebuildForNewRoute(reason: "routeRecovered", resumeRecording: resume, generation: gen)
+                self.activeRecoveryTask = nil
+                // Process any pending route change that arrived during recovery
+                if let pending = self.pendingRouteChangeReason {
+                    self.pendingRouteChangeReason = nil
+                    await self.processSettledRouteChange(pending)
+                }
             }
             return
         }
@@ -654,14 +791,23 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         let resume = recordingIntent == .userWantsRecording
         let gen = routeRecoveryGeneration
-        let result = await rebuildForNewRoute(reason: String(reason.rawValue), resumeRecording: resume, generation: gen)
-        currentInputPortName = portName
-        if case .noUsableInput = result, resume {
-            transition(to: .waitingForUsableInput, reason: "route change rebuild failed")
-        } else if case .engineFailed = result, resume {
-            transition(to: .waitingForUsableInput, reason: "route change engine failed")
+        activeRecoveryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let result = await self.rebuildForNewRoute(reason: String(reason.rawValue), resumeRecording: resume, generation: gen)
+            self.currentInputPortName = portName
+            if case .noUsableInput = result, resume {
+                self.transition(to: .waitingForUsableInput, reason: "route change rebuild failed")
+            } else if case .engineFailed = result, resume {
+                self.transition(to: .waitingForUsableInput, reason: "route change engine failed")
+            }
+            AppLog.audio.info("Route change handled: \(portName)")
+            self.activeRecoveryTask = nil
+            // Process any pending route change that arrived during recovery
+            if let pending = self.pendingRouteChangeReason {
+                self.pendingRouteChangeReason = nil
+                await self.processSettledRouteChange(pending)
+            }
         }
-        AppLog.audio.info("Route change handled: \(portName)")
     }
 
     private func handleMediaServicesReset(_ notification: Notification) {
