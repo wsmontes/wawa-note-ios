@@ -121,8 +121,9 @@ final class RecordingCoordinator: ObservableObject {
                 errorMessage = "Not enough storage. Free up space and try again."
                 rollbackItem(item, context: context)
             } catch {
-                AppLog.error("audio", "Recording start failed: \(error.localizedDescription)")
-                errorMessage = "Could not start recording."
+                let detail = error.localizedDescription
+                AppLog.error("audio", "Recording start failed: \(detail)")
+                errorMessage = "Could not start recording. Reason: \(detail)"
                 rollbackItem(item, context: context)
             }
         }

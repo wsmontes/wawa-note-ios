@@ -80,17 +80,11 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // Configure audio session with appropriate mode for current route
         try sessionManager.configureForRecording()
 
-        // Use the audio session's sample rate, not the input node's format.
-        // With Bluetooth devices (AirPods, CarPlay), the input node format
-        // isn't known until the engine is running — reading it before start
-        // returns a placeholder that can cause the engine start to fail.
-        let sessionRate = sessionManager.sampleRate
-        let recordFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: sessionRate > 0 ? sessionRate : 44100,
-            channels: 1,
-            interleaved: false
-        ) ?? AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1)!
+        // Always use 44.1kHz PCM for the file format — the tap handles any
+        // sample rate conversion automatically (format: nil adapts to input).
+        // Bluetooth devices (AirPods HFP) can have 8kHz or 16kHz sample rates
+        // which AAC encoder rejects, causing fileCreationFailed.
+        let recordFormat = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1)!
         try fileWriter.startRecording(format: recordFormat, meetingId: meetingId)
 
         installTap()
