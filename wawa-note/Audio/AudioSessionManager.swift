@@ -42,16 +42,34 @@ final class AudioSessionManager {
         session.currentRoute.outputs.contains { $0.portType == .carAudio }
     }
 
+    /// Whether the current input is a Bluetooth device without a microphone
+    /// (A2DP profile only — music headphones, not headsets).
+    var isBluetoothWithoutMic: Bool {
+        let input = session.currentRoute.inputs.first
+        guard let port = input else { return false }
+        let isBT = port.portType == .bluetoothA2DP || port.portType == .bluetoothLE
+        let hasChannels = (port.channels?.count ?? 0) > 0
+        return isBT && !hasChannels
+    }
+
+    /// Best audio mode for the current route. Different devices need different modes:
+    /// - CarPlay / USB → .default (most compatible)
+    /// - Bluetooth HFP → .default (voice processing can cause issues)
+    /// - Built-in mic → .spokenAudio (voice enhancement) or .videoChat (far-field)
+    func bestModeForCurrentRoute() -> AVAudioSession.Mode {
+        if isCarPlayActive { return .default }
+        if isBluetoothWithoutMic { return .default }
+        let input = session.currentRoute.inputs.first
+        if input?.portType == .usbAudio { return .default }
+        if input?.portType == .bluetoothHFP { return .default }
+        if input?.portType == .headsetMic { return .default }
+        // Built-in mic or AirPods with HFP
+        if Self.speakerphoneMode { return .videoChat }
+        return Self.useVoiceProcessing ? .spokenAudio : .default
+    }
+
     func configureForRecording() throws {
-        let mode: AVAudioSession.Mode
-        if isCarPlayActive {
-            // CarPlay doesn't support .spokenAudio — use .default
-            mode = .default
-        } else if Self.speakerphoneMode {
-            mode = .videoChat  // Front mic array + beamforming for far-field
-        } else {
-            mode = Self.useVoiceProcessing ? .spokenAudio : .default
-        }
+        let mode = bestModeForCurrentRoute()
         do {
             try session.setCategory(.playAndRecord, mode: mode, options: [
                 .allowBluetoothHFP,
@@ -109,6 +127,25 @@ final class AudioSessionManager {
         session.currentRoute.inputs.contains(where: { (port: AVAudioSessionPortDescription) -> Bool in
             (port.channels?.count ?? 0) > 0
         })
+    }
+
+    /// Best available input port — prefers built-in mic over A2DP-only Bluetooth devices.
+    var bestAvailableInput: AVAudioSessionPortDescription? {
+        let inputs = session.currentRoute.inputs
+        // Filter to only inputs with actual channels
+        let viable = inputs.filter { ($0.channels?.count ?? 0) > 0 }
+        // Prefer non-A2DP inputs (A2DP is music-only, no mic)
+        if let hfp = viable.first(where: { $0.portType != .bluetoothA2DP && $0.portType != .bluetoothLE }) {
+            return hfp
+        }
+        return viable.first
+    }
+
+    /// Human-readable description of current route for logging.
+    var routeDescription: String {
+        let inputs = session.currentRoute.inputs.map { "\($0.portName)(\($0.portType.rawValue))" }.joined(separator: ",")
+        let outputs = session.currentRoute.outputs.map { "\($0.portName)(\($0.portType.rawValue))" }.joined(separator: ",")
+        return "inputs=[\(inputs.isEmpty ? "none" : inputs)] outputs=[\(outputs.isEmpty ? "none" : outputs)]"
     }
 
     var sampleRate: Double {

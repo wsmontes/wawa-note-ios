@@ -83,39 +83,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         let hardwareFormat = inputNode.outputFormat(forBus: 0)
         try fileWriter.startRecording(format: hardwareFormat, meetingId: meetingId)
 
-        // The engine must keep running (iOS forbids engine.start() in the
-        // background), so the tap stays installed for the lifetime of the
-        // recording.
-        inputNode.installTap(onBus: 0, bufferSize: Self.captureBufferSize, format: nil) { [weak self] buffer, _ in
-            guard let self else { return }
-            self.updateAudioLevel(from: buffer)
-            guard self.state == .recording else { return }
-
-            // Copy buffer data before dispatch — PCM is reused after callback return
-            guard let channelData = buffer.floatChannelData else { return }
-            let frameLength = Int(buffer.frameLength)
-            let copiedFrames = UnsafeMutablePointer<Float>.allocate(capacity: frameLength)
-            copiedFrames.initialize(from: channelData[0], count: frameLength)
-
-            self.audioWriteQueue.async { [weak self] in
-                guard let self, let file = self.fileWriter.activeFile else {
-                    copiedFrames.deallocate()
-                    return
-                }
-                let fmt = file.processingFormat
-                guard let wb = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(frameLength)) else {
-                    copiedFrames.deallocate()
-                    return
-                }
-                wb.frameLength = AVAudioFrameCount(frameLength)
-                if let dest = wb.floatChannelData {
-                    dest[0].initialize(from: copiedFrames, count: frameLength)
-                }
-                copiedFrames.deallocate()
-                self.fileWriter.write(buffer: wb)
-            }
-        }
-
+        installTap()
         engine.prepare()
 
         do {
@@ -185,11 +153,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     // MARK: - Engine rebuild
 
-    private func rebuildEngine() {
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-        engine.reset()
-
+    /// Install the audio tap on the engine's input node. Extracted to avoid
+    /// duplication between startRecording and rebuildEngine.
+    private func installTap() {
         let inputNode = engine.inputNode
         inputNode.installTap(onBus: 0, bufferSize: Self.captureBufferSize, format: nil) { [weak self] buffer, _ in
             guard let self else { return }
@@ -219,16 +185,35 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 self.fileWriter.write(buffer: wb)
             }
         }
+    }
 
+    private func rebuildEngine() {
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        engine.reset()
+
+        installTap()
         engine.prepare()
-        do {
-            try engine.start()
-            AppLog.audio.info("Engine rebuilt successfully")
-        } catch {
-            AppLog.audio.error("Engine rebuild failed: \(error.localizedDescription)")
-            state = .interrupted
-            audioInterruptionReason = "Audio system reset. Recording may be affected."
+
+        // Retry up to 2 times if engine start fails (can happen during rapid route changes)
+        for attempt in 0...2 {
+            do {
+                try engine.start()
+                AppLog.audio.info("Engine rebuilt successfully\(attempt > 0 ? " (attempt \(attempt + 1))" : "")")
+                return
+            } catch {
+                AppLog.audio.error("Engine rebuild attempt \(attempt + 1) failed: \(error.localizedDescription)")
+                if attempt < 2 {
+                    // Brief pause then retry — route may still be stabilizing
+                    Thread.sleep(forTimeInterval: 0.25)
+                    engine.reset()
+                    engine.prepare()
+                }
+            }
         }
+        // All attempts failed
+        state = .interrupted
+        audioInterruptionReason = "Audio system unavailable. Check connected devices."
     }
 
     // MARK: - Interruption recovery
@@ -441,10 +426,29 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 // Not recording — just update the port name for UI
                 currentInputPortName = newPort
             }
+        case .noSuitableRouteForCategory:
+            AppLog.audio.error("Audio route: no suitable route for category — current route: \(self.sessionManager.routeDescription)")
+            if state == .recording || state == .paused {
+                state = .interrupted
+                audioInterruptionReason = "No audio input available. Check microphone connection."
+                timerTask?.cancel()
+            }
         case .override, .categoryChange:
             break
         default:
-            AppLog.audio.info("Audio route changed: \(reason.rawValue)")
+            AppLog.audio.info("Audio route changed: reason=\(reason.rawValue) route=\(self.sessionManager.routeDescription)")
+            // For unknown reasons during recording, attempt engine rebuild as safety
+            if state == .recording {
+                let wasRecording = true
+                state = .interrupted
+                timerTask?.cancel()
+                rebuildEngine()
+                currentInputPortName = sessionManager.currentInputPortName
+                if state != .interrupted, wasRecording {
+                    state = .recording
+                    startTimer()
+                }
+            }
         }
     }
 
