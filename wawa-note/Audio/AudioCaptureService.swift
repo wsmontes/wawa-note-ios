@@ -65,13 +65,30 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         self.fileWriter = fileWriter
         self.sessionManager = sessionManager
         // Propagate write failures (e.g., disk full) to recording state
-        fileWriter.onWriteFailure = { [weak self] in
+        fileWriter.onWriteFailure = { [weak self] error in
             DispatchQueue.main.async {
                 guard let self, self.state == .recording || self.state == .paused else { return }
+
                 self.state = .interrupted
-                self.audioInterruptionReason = "Recording stopped — storage is full."
                 self.timerTask?.cancel()
-                AppLog.error("audio", "Recording interrupted by write failure")
+
+                // Close the current segment immediately so the manifest has
+                // accurate endedAt / fileSize — don't leave it dangling.
+                if let closed = self.fileWriter.closeCurrentSegment() {
+                    self.onSegmentClosed?(closed)
+                }
+
+                let reason: String
+                let nsError = error as NSError
+                if nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileWriteOutOfSpaceError {
+                    reason = "Recording stopped — storage is full."
+                } else if nsError.domain == NSPOSIXErrorDomain && nsError.code == 28 {
+                    reason = "Recording stopped — storage is full."
+                } else {
+                    reason = "Recording stopped — write failed (\(error.localizedDescription))."
+                }
+                self.audioInterruptionReason = reason
+                AppLog.error("audio", "Recording interrupted by write failure: \(error.localizedDescription)")
             }
         }
     }

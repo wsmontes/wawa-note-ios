@@ -32,8 +32,8 @@ final class AudioFileWriter: @unchecked Sendable {
     private var _lastWriteError: Error?
 
     /// Called on the writer's queue when a write fails after all retries.
-    /// The capture service should listen and propagate to the UI (e.g., disk full).
-    var onWriteFailure: (() -> Void)?
+    /// The capture service should close the current segment and alert the user.
+    var onWriteFailure: ((_ error: Error) -> Void)?
 
     var currentFileURL: URL? { queue.sync { _currentFileURL } }
     var segmentIndex: Int { queue.sync { _segmentIndex } }
@@ -110,7 +110,7 @@ final class AudioFileWriter: @unchecked Sendable {
                         self._writeErrorCount += 1
                         self._lastWriteError = error
                         AppLog.error("audio", "Write failed #\(self._writeErrorCount): \(error.localizedDescription)")
-                        self.onWriteFailure?()
+                        self.onWriteFailure?(error)
                         return
                     }
                     Thread.sleep(forTimeInterval: [0.1, 0.2, 0.4][attempt])
@@ -133,7 +133,7 @@ final class AudioFileWriter: @unchecked Sendable {
                         self._writeErrorCount += 1
                         self._lastWriteError = error
                         AppLog.error("audio", "Write failed #\(self._writeErrorCount): \(error.localizedDescription)")
-                        self.onWriteFailure?()
+                        self.onWriteFailure?(error)
                         return
                     }
                     Thread.sleep(forTimeInterval: [0.1, 0.2, 0.4][attempt])
