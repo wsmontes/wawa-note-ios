@@ -27,6 +27,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     @Published private(set) var audioInterruptionReason: String?
     @Published private(set) var currentInputPortName: String = ""
 
+    /// Called BEFORE engine rebuild so a new file segment can be created.
+    /// Parameter: the new port name (from AVAudioSession, already updated).
+    var onRouteChangeNewSegment: ((String) -> Void)?
+
     private var timerTask: Task<Void, Never>?
     private var levelMonitorTask: Task<Void, Never>?
     private var recordingStartTime: Date?
@@ -368,12 +372,12 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         }
     }
 
-    /// Route changes (Bluetooth connect/disconnect, AirPods in/out, etc.) are handled
-    /// automatically by AVAudioEngine when the tap uses format: nil. The engine keeps
-    /// running and adapts to the new input format.
+    /// Route changes require an engine rebuild to switch to the new input.
+    /// The tap(format: nil) auto-adapts to format, but the engine MUST be
+    /// restarted to capture from the new device.
     ///
-    /// We update the audio session mode for the new route (built-in mic gets .spokenAudio,
-    /// Bluetooth gets .default) WITHOUT deactivating the session.
+    /// With segmented recording, this is safe: the segment closes before rebuild
+    /// and a new segment opens after. The logical recording is uninterrupted.
     private func handleRouteChange(_ notification: Notification) {
         guard let userInfo = notification.userInfo,
               let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
@@ -382,17 +386,48 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         let newPort = sessionManager.currentInputPortName
         AppLog.audio.info("Audio route changed: reason=\(reason.rawValue) port=\(newPort)")
 
-        // Adapt audio mode to new route without stopping the engine
-        sessionManager.adaptToRouteChange()
+        // No input available → pause
+        guard sessionManager.isInputAvailable else {
+            if state == .recording || state == .paused {
+                state = .interrupted
+                audioInterruptionReason = "No microphone available."
+                timerTask?.cancel()
+            }
+            return
+        }
 
-        // Update UI
-        currentInputPortName = newPort
+        // Only rebuild if actively recording
+        guard state == .recording else {
+            currentInputPortName = newPort
+            return
+        }
 
-        // If no input is available at all, pause recording
-        if !sessionManager.isInputAvailable && (state == .recording || state == .paused) {
+        // Rebuild engine for the new input route
+        timerTask?.cancel()
+
+        // Close current segment and open new one BEFORE rebuild
+        onRouteChangeNewSegment?(newPort)
+
+        // Reconfigure session for the new device
+        try? sessionManager.deactivate()
+        do {
+            try sessionManager.configureForRecording()
+        } catch {
+            AppLog.error("audio", "Route change: failed to reconfigure session: \(error)")
             state = .interrupted
-            audioInterruptionReason = "No microphone available."
-            timerTask?.cancel()
+            audioInterruptionReason = "Could not switch to \(newPort)"
+            return
+        }
+
+        rebuildEngine()
+
+        if state != .interrupted {
+            currentInputPortName = newPort
+            state = .recording
+            startTimer()
+            AppLog.audio.info("Rebuilt engine for new route: \(newPort)")
+        } else {
+            audioInterruptionReason = "Could not switch to \(newPort)"
         }
     }
 

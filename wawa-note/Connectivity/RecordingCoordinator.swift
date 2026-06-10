@@ -79,6 +79,12 @@ final class RecordingCoordinator: ObservableObject {
         let context = ModelContext(modelContainer)
         self.modelContext = context
         self.annotationService = AnnotationService(context: context)
+
+        // Route change → new segment (fires BEFORE engine rebuild)
+        captureService.onRouteChangeNewSegment = { [weak self] newPort in
+            guard let self, let itemId = self.savedItemId else { return }
+            self.appendSegment(portName: newPort, reason: "routeChange", meetingId: itemId)
+        }
     }
 
     // MARK: - Recording lifecycle
@@ -277,42 +283,39 @@ final class RecordingCoordinator: ObservableObject {
 
     // MARK: - Segments
 
-    /// Called when the audio input changes during recording. Closes the current
-    /// segment and opens a new one, so a recording = N physical audio files.
-    private func segmentForRouteChange(from oldPort: String, to newPort: String) {
-        guard var m = manifest, let itemId = savedItemId else { return }
-        guard !newPort.isEmpty, newPort != oldPort else { return }
+    /// Close the current segment and open a new one for the given port.
+    func appendSegment(portName: String, reason: String, meetingId: UUID) {
+        guard var m = manifest else { return }
 
-        AppLog.event("audio", "Route change: \(oldPort) → \(newPort) — new segment")
+        AppLog.event("audio", "New segment for: \(portName) (\(reason))")
 
-        // Close current segment
+        // Close current segment in manifest
         if let idx = m.segments.indices.last {
             m.segments[idx].endedAt = Date()
-            m.segments[idx].fileSize = captureService.outputFileURL.flatMap { try? FileManager.default.attributesOfItem(atPath: $0.path)[.size] as? Int64 }
+            m.segments[idx].fileSize = captureService.outputFileURL.flatMap {
+                try? FileManager.default.attributesOfItem(atPath: $0.path)[.size] as? Int64
+            }
         }
 
         // Close current audio file, start new one
         do {
-            try captureService.fileWriter.startNewSegment(meetingId: itemId)
+            try captureService.fileWriter.startNewSegment(meetingId: meetingId)
         } catch {
             AppLog.error("audio", "Failed to start new segment: \(error.localizedDescription)")
         }
 
-        // Create new segment entry
+        // Append to manifest
         let newSegment = RecordingSegment(
-            id: UUID(),
-            index: m.segments.count,
+            id: UUID(), index: m.segments.count,
             fileName: String(format: "segment-%03d.m4a", m.segments.count),
             startedAt: Date(),
-            inputPortName: newPort,
+            inputPortName: portName,
             inputPortType: AudioSessionManager().bestAvailableInput?.portType.rawValue ?? "unknown",
-            routeChangeReason: lastRouteChangeReason
+            routeChangeReason: reason
         )
         m.segments.append(newSegment)
         manifest = m
-
-        // Save manifest after each segment so we don't lose data on crash
-        saveManifest(m, meetingId: itemId)
+        saveManifest(m, meetingId: meetingId)
     }
 
     private func saveManifest(_ manifest: RecordingManifest, meetingId: UUID) {
@@ -445,13 +448,11 @@ final class RecordingCoordinator: ObservableObject {
             }
             self.audioLevel = self.captureService.audioLevel
             // Sync input port info (may change on route switch)
+            // Segments are handled by onRouteChangeNewSegment callback
             let portName = self.captureService.currentInputPortName
-            if self.currentInputPortName != portName, self.state == .recording {
-                let oldPort = self.currentInputPortName
+            if self.currentInputPortName != portName, !portName.isEmpty {
                 self.currentInputPortName = portName
                 self.currentInputIcon = AudioSessionManager().currentInputIcon
-                // Route changed while recording → create new segment
-                self.segmentForRouteChange(from: oldPort, to: portName)
             }
             if self.captureService.state == .stopped {
                 self.state = .stopped
