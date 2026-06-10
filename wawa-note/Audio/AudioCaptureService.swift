@@ -159,9 +159,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 }
 
                 self.timerTask?.cancel()
-                if let closed = self.fileWriter.closeCurrentSegment() {
-                    self.onSegmentClosed?(closed)
-                }
+                _ = self.checkpointCurrentSegment(reason: "writeFailure")
                 self.transition(to: .failedFatal(reason), reason: "writeFailure")
                 self.audioInterruptionReason = reason
                 AppLog.error("audio", "Recording terminated by write failure: \(error.localizedDescription)")
@@ -171,6 +169,42 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     deinit {
         removeAudioNotificationObservers()
+    }
+
+    // MARK: - Segment checkpoint (data safety)
+
+    /// Checkpoint the current segment BEFORE attempting any route change.
+    /// The segment recorded up to this point belongs to the user — it must
+    /// survive regardless of whether Bluetooth/route recovery succeeds.
+    ///
+    /// 1. Closes the current audio file.
+    /// 2. Notifies the coordinator to update the manifest immediately.
+    /// 3. Verifies the file exists on disk with size > 0.
+    ///
+    /// - Returns: ClosedSegmentInfo if checkpoint succeeded, nil if no segment was open.
+    @discardableResult
+    private func checkpointCurrentSegment(reason: String) -> ClosedSegmentInfo? {
+        guard let closed = fileWriter.closeCurrentSegment() else {
+            AppLog.audio.info("checkpoint: no open segment to close — \(reason)")
+            return nil
+        }
+
+        // Verify the file exists and has data, if we have a meeting ID
+        if let mid = currentMeetingId {
+            let store = FileArtifactStore()
+            let fileURL = store.segmentURL(for: mid, fileName: closed.fileName)
+            let exists = FileManager.default.fileExists(atPath: fileURL.path)
+            let size = exists ? (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0 : 0
+            AppLog.audio.info("checkpoint: segment \(closed.index) \(closed.fileName) size=\(size) exists=\(exists) — \(reason)")
+        } else {
+            AppLog.audio.info("checkpoint: segment \(closed.index) \(closed.fileName) — \(reason)")
+        }
+
+        // Notify coordinator immediately so the manifest is persisted NOW,
+        // before any route change attempt can interfere.
+        onSegmentClosed?(closed)
+
+        return closed
     }
 
     // MARK: - State machine
@@ -735,9 +769,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 transition(to: .interruptedBySystem, reason: "system interruption began")
                 audioInterruptionReason = "Recording paused due to interruption (phone call, alarm, etc.)."
                 timerTask?.cancel()
-                if let closed = fileWriter.closeCurrentSegment() {
-                    onSegmentClosed?(closed)
-                }
+                _ = checkpointCurrentSegment(reason: "systemInterruptionBegan")
             }
         case .ended:
             let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt
@@ -812,10 +844,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 transition(to: .waitingForUsableInput, reason: "input lost")
                 audioInterruptionReason = "Microphone disconnected. Waiting for input…"
                 timerTask?.cancel()
-                if let closed = fileWriter.closeCurrentSegment() {
-                    onSegmentClosed?(closed)
-                }
-                AppLog.audio.info("Input lost")
+                _ = checkpointCurrentSegment(reason: "inputLost")
+                AppLog.audio.info("Input lost — segment checkpointed")
             }
             return
         }

@@ -677,6 +677,25 @@ final class RecordingCoordinator: ObservableObject {
 
     // MARK: - Save
 
+    /// Validate that at least one segment in the manifest has a real file with audio data.
+    private func hasValidAudioData(meetingId: UUID) -> Bool {
+        let store = FileArtifactStore()
+        guard store.recordingManifestExists(for: meetingId),
+              let manifest = try? store.readRecordingManifest(for: meetingId) else {
+            // Legacy: check audio.m4a directly
+            return store.audioFileExists(for: meetingId)
+        }
+        for seg in manifest.segments {
+            let url = store.segmentURL(for: meetingId, fileName: seg.fileName)
+            if FileManager.default.fileExists(atPath: url.path),
+               let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64,
+               size > 0 {
+                return true
+            }
+        }
+        return false
+    }
+
     private func updateItemOnStop() {
         let context = modelContext
         guard let itemId = savedItemId else { return }
@@ -685,12 +704,21 @@ final class RecordingCoordinator: ObservableObject {
         guard let item = try? context.fetch(descriptor).first else { return }
 
         let effectiveDuration = elapsedTime - pausedDuration
-        item.status = .recorded
-        item.durationSeconds = effectiveDuration
-        // Use manifest for new segmented recordings, audio.m4a for legacy
-        item.audioFileRelativePath = FileArtifactStore().recordingManifestExists(for: itemId)
-            ? AppFileConstants.manifestFileName
-            : AppFileConstants.audioFileName
+        let hasAudio = hasValidAudioData(meetingId: itemId)
+
+        if hasAudio {
+            item.status = .recorded
+            item.durationSeconds = effectiveDuration
+            // Prefer manifest for segmented recordings, audio.m4a for legacy
+            item.audioFileRelativePath = FileArtifactStore().recordingManifestExists(for: itemId)
+                ? AppFileConstants.manifestFileName
+                : AppFileConstants.audioFileName
+            AppLog.audio.info("Item finalized: \(item.id) hasAudio=true duration=\(effectiveDuration)s")
+        } else {
+            // No valid audio data found — mark as failed, don't pretend it was recorded
+            item.status = .failed
+            AppLog.audio.warning("Item finalized: \(item.id) hasAudio=false — marking as failed")
+        }
 
         do {
             try context.save()
