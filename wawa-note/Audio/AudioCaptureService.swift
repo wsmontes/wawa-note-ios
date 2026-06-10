@@ -172,8 +172,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     // MARK: - Engine rebuild
 
     /// Install the audio tap on the engine's input node.
-    /// Copies PCM samples and dispatches to the write queue as a [Float] array
-    /// (Sendable) to avoid non-Sendable AVAudioPCMBuffer across actor boundaries.
+    /// Samples + hardware format dispatched as Sendable data to the write queue.
+    /// AVAudioFile.write() converts from hardware rate to file rate (44.1kHz).
     private func installTap() {
         let inputNode = engine.inputNode
         inputNode.installTap(onBus: 0, bufferSize: Self.captureBufferSize, format: nil) { [weak self] buffer, _ in
@@ -184,11 +184,14 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             guard let channelData = buffer.floatChannelData else { return }
             let frameLength = Int(buffer.frameLength)
             let samples = Array(UnsafeBufferPointer(start: channelData[0], count: frameLength))
+            let hwSampleRate = buffer.format.sampleRate
 
             self.audioWriteQueue.async { [weak self] in
                 guard let self, let file = self.fileWriter.activeFile else { return }
-                let fmt = file.processingFormat
-                guard let wb = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(frameLength)) else { return }
+                // Reconstruct buffer in hardware format. AVAudioFile.write()
+                // converts from hwSampleRate to file's processingFormat (44.1kHz).
+                let hwFmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: hwSampleRate, channels: 1, interleaved: false)!
+                guard let wb = AVAudioPCMBuffer(pcmFormat: hwFmt, frameCapacity: AVAudioFrameCount(frameLength)) else { return }
                 wb.frameLength = AVAudioFrameCount(frameLength)
                 if let dest = wb.floatChannelData {
                     dest[0].initialize(from: samples, count: frameLength)

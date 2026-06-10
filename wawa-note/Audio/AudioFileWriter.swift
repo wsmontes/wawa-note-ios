@@ -36,24 +36,29 @@ final class AudioFileWriter: @unchecked Sendable {
 
         let fileURL = fileStore.audioFileURL(for: meetingId)
 
+        // Always use 44.1kHz for AAC encoding — the encoder rejects sample rates
+        // below ~16kHz when combined with 128kbps bitrate (AirPods HFP = 8kHz).
+        // AVAudioFile.write() converts automatically from the hardware format,
+        // so the tap can deliver any sample rate and the file gets it right.
+        let outputRate: Double = 44100
+
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: format.sampleRate,
-            AVNumberOfChannelsKey: format.channelCount,
-            AVEncoderBitRateKey: 128000,
-            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+            AVSampleRateKey: outputRate,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderBitRateKey: 96000
         ]
 
         do {
             audioFile = try AVAudioFile(
                 forWriting: fileURL,
                 settings: settings,
-                commonFormat: format.commonFormat,
-                interleaved: format.isInterleaved
+                commonFormat: .pcmFormatFloat32,
+                interleaved: false
             )
             currentFileURL = fileURL
             currentMeetingId = meetingId
-            AppLog.audio.info("Audio file created: \(fileURL.lastPathComponent) at \(format.sampleRate)Hz for meeting \(meetingId.uuidString.prefix(8))")
+            AppLog.audio.info("Audio file created: \(fileURL.lastPathComponent) output=\(outputRate)Hz hardware=\(format.sampleRate)Hz meeting=\(meetingId.uuidString.prefix(8))")
         } catch {
             AppLog.error("audio", "Failed to create audio file: \(error.localizedDescription)")
             throw AudioFileWriterError.fileCreationFailed
