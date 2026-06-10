@@ -369,7 +369,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     }
 
     func stopRecording() {
-        guard state == .recording || state == .pausedByUser || state == .waitingForUsableInput || state == .interruptedBySystem || state == .reconfiguringRoute else { return }
+        // Accept ANY active state. Only refuse .idle and .stopped.
+        let isFailed: Bool = if case .failedFatal = state { true } else { false }
+        guard state != .idle, state != .stopped else { return }
 
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()

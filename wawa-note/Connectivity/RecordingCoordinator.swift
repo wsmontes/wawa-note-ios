@@ -250,7 +250,7 @@ final class RecordingCoordinator: ObservableObject {
     }
 
     func resumeRecording() {
-        guard state == .pausedByUser || state == .interruptedBySystem || state == .waitingForUsableInput else { return }
+        guard state == .pausedByUser || state == .interruptedBySystem || state == .waitingForUsableInput || state == .reconfiguringRoute || state == .validatingRoute else { return }
         if state == .interruptedBySystem || state == .waitingForUsableInput {
             // Route-loss / interruption recovery — force recording intent
             retryRecordingRecovery()
@@ -267,8 +267,8 @@ final class RecordingCoordinator: ObservableObject {
     }
 
     func stopRecording() {
-        let isFailed: Bool = if case .failedFatal = state { true } else { false }
-        guard state == .recording || state == .pausedByUser || state == .interruptedBySystem || state == .waitingForUsableInput || state == .reconfiguringRoute || isFailed else { return }
+        // Accept ANY active state. Only refuse idle and stopped.
+        guard state != .idle, state != .stopped else { return }
         let itemId = savedItemId
         AppLog.event("audio", "Stopping recording — elapsed=\(elapsedTimeFormatted) pausedDur=\(Int(pausedDuration))s itemID=\(itemId?.uuidString.prefix(8) ?? "nil")")
         captureService.stopRecording()
