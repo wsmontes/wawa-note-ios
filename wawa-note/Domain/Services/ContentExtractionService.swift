@@ -208,6 +208,23 @@ final class ContentExtractionService {
 
     // MARK: - Image → text
 
+    /// Shared OCR utility — replaces duplicated recognizeText() across UI views.
+    /// Extracts text from a UIImage using Vision's accurate text recognition.
+    static func recognizeText(from image: UIImage) async -> String? {
+        guard let cgImage = image.cgImage else { return nil }
+        return await withCheckedContinuation { continuation in
+            let request = VNRecognizeTextRequest { request, _ in
+                let text = (request.results as? [VNRecognizedTextObservation] ?? [])
+                    .compactMap { $0.topCandidates(1).first?.string }
+                    .joined(separator: "\n")
+                continuation.resume(returning: text.isEmpty ? nil : text)
+            }
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = true
+            try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
+        }
+    }
+
     func extractTextFromImage(_ item: KnowledgeItem) async -> String? {
         if let body = item.bodyText, !body.isEmpty {
             return body

@@ -772,18 +772,7 @@ struct HomeView: View {
     }
 
     private func recognizeText(from image: UIImage) async -> String? {
-        guard let cgImage = image.cgImage else { return nil }
-        return await withCheckedContinuation { continuation in
-            let request = VNRecognizeTextRequest { request, _ in
-                let text = (request.results as? [VNRecognizedTextObservation] ?? [])
-                    .compactMap { $0.topCandidates(1).first?.string }
-                    .joined(separator: "\n")
-                continuation.resume(returning: text.isEmpty ? nil : text)
-            }
-            request.recognitionLevel = .accurate
-            request.usesLanguageCorrection = true
-            try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
-        }
+        await ContentExtractionService.recognizeText(from: image)
     }
 }
 
@@ -946,18 +935,7 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private func recognizeText(from image: UIImage) async -> String? {
-        guard let cgImage = image.cgImage else { return nil }
-        return await withCheckedContinuation { continuation in
-            let request = VNRecognizeTextRequest { request, _ in
-                let text = (request.results as? [VNRecognizedTextObservation] ?? [])
-                    .compactMap { $0.topCandidates(1).first?.string }
-                    .joined(separator: "\n")
-                continuation.resume(returning: text.isEmpty ? nil : text)
-            }
-            request.recognitionLevel = .accurate
-            request.usesLanguageCorrection = true
-            try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
-        }
+        await ContentExtractionService.recognizeText(from: image)
     }
 }
 
