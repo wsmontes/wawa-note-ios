@@ -137,8 +137,21 @@ struct JSONFormView: View {
     }
 
     private func updateNestedValue(at path: String, with newValue: JSONValue) {
-        // For simplicity, propagate the change to editedRoot
-        // A full implementation would walk the path to update the specific nested value
+        let keys = path.components(separatedBy: ".")
+        guard !keys.isEmpty, case .object(var fields) = editedRoot else { return }
+        updateFields(&fields, keys: keys, newValue: newValue)
+        editedRoot = .object(fields)
+    }
+
+    private func updateFields(_ fields: inout [JSONField], keys: [String], newValue: JSONValue) {
+        guard let first = keys.first else { return }
+        guard let idx = fields.firstIndex(where: { $0.key == first }) else { return }
+        if keys.count == 1 {
+            fields[idx].value = newValue
+        } else if case .object(var nested) = fields[idx].value {
+            updateFields(&nested, keys: Array(keys.dropFirst()), newValue: newValue)
+            fields[idx].value = .object(nested)
+        }
     }
 
     // MARK: - Add Buttons
