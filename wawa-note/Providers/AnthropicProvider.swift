@@ -75,6 +75,70 @@ private struct AnthropicRequest: Encodable {
         struct ContentBlock: Encodable {
             let type: String
             let text: String?
+            let id: String?
+            let name: String?
+            let inputJSON: String?       // arguments as JSON string (tool_use)
+            let toolUseId: String?       // tool_result blocks
+            let content: String?         // tool_result text
+
+            private enum CodingKeys: String, CodingKey {
+                case type, text, id, name, input
+                case toolUseId = "tool_use_id"
+                case content
+            }
+
+            func encode(to encoder: any Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(type, forKey: .type)
+                switch type {
+                case "text":
+                    try container.encodeIfPresent(text, forKey: .text)
+                case "tool_use":
+                    try container.encodeIfPresent(id, forKey: .id)
+                    try container.encodeIfPresent(name, forKey: .name)
+                    if let jsonStr = inputJSON, !jsonStr.isEmpty,
+                       let data = jsonStr.data(using: .utf8),
+                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        try container.encode(obj.mapValues { AnyEncodableValue.from($0) }, forKey: .input)
+                    }
+                case "tool_result":
+                    try container.encodeIfPresent(toolUseId, forKey: .toolUseId)
+                    try container.encodeIfPresent(content, forKey: .content)
+                default:
+                    break
+                }
+            }
+        }
+
+        /// Type-erased encodable wrapper for JSON values in tool_use input.
+        enum AnyEncodableValue: Encodable {
+            case string(String), int(Int), double(Double), bool(Bool)
+            case object([String: AnyEncodableValue]), array([AnyEncodableValue]), null
+
+            func encode(to encoder: any Encoder) throws {
+                var c = encoder.singleValueContainer()
+                switch self {
+                case .string(let v): try c.encode(v)
+                case .int(let v): try c.encode(v)
+                case .double(let v): try c.encode(v)
+                case .bool(let v): try c.encode(v)
+                case .object(let v): try c.encode(v)
+                case .array(let v): try c.encode(v)
+                case .null: try c.encodeNil()
+                }
+            }
+
+            static func from(_ value: Any) -> AnyEncodableValue {
+                switch value {
+                case let s as String: return .string(s)
+                case let i as Int: return .int(i)
+                case let d as Double: return .double(d)
+                case let b as Bool: return .bool(b)
+                case let dict as [String: Any]: return .object(dict.mapValues { from($0) })
+                case let arr as [Any]: return .array(arr.map { from($0) })
+                default: return .null
+                }
+            }
         }
 
         enum CodingKeys: String, CodingKey {
@@ -211,26 +275,31 @@ final class AnthropicProvider: AIProvider, @unchecked Sendable {
                 if msg.role == .assistant, let tcs = msg.toolCalls, !tcs.isEmpty {
                     var blocks: [AnthropicRequest.Message.ContentBlock] = []
                     if !textContent.isEmpty {
-                        blocks.append(AnthropicRequest.Message.ContentBlock(type: "text", text: textContent))
+                        blocks.append(AnthropicRequest.Message.ContentBlock(
+                            type: "text", text: textContent,
+                            id: nil, name: nil, inputJSON: nil, toolUseId: nil, content: nil))
                     }
                     for tc in tcs {
-                        var inputObj: [String: Any]?
-                        if let data = tc.arguments.data(using: .utf8) {
-                            inputObj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-                        }
-                        // We need to encode the tool_use block — use string for simplicity
-                        blocks.append(AnthropicRequest.Message.ContentBlock(type: "tool_use", text: "id:\(tc.id) name:\(tc.name) args:\(tc.arguments)"))
+                        blocks.append(AnthropicRequest.Message.ContentBlock(
+                            type: "tool_use", text: nil,
+                            id: tc.id, name: tc.name, inputJSON: tc.arguments,
+                            toolUseId: nil, content: nil))
                     }
                     return [AnthropicRequest.Message(role: "assistant", content: .blocks(blocks))]
                 }
 
-                // Handle tool result messages
+                // Handle tool result messages — proper tool_result content block
                 if msg.role == .tool {
                     let toolResultText = msg.content.compactMap { block -> String? in
                         if case .text(let t) = block { return t }
                         return nil
                     }.joined(separator: "\n")
-                    return [AnthropicRequest.Message(role: "user", content: .string("[Tool result]: \(toolResultText)"))]
+                    let toolCallId = msg.toolCallId ?? ""
+                    let resultBlock = AnthropicRequest.Message.ContentBlock(
+                        type: "tool_result", text: nil,
+                        id: nil, name: nil, inputJSON: nil,
+                        toolUseId: toolCallId, content: toolResultText)
+                    return [AnthropicRequest.Message(role: "user", content: .blocks([resultBlock]))]
                 }
 
                 let roleString = msg.role == .assistant ? "assistant" : "user"

@@ -8,6 +8,12 @@ final class LocationContextSensor: ContextSensor, @unchecked Sendable {
     private let manager = CLLocationManager()
     private static let timeoutSeconds: TimeInterval = 10
 
+    /// Retains the delegate across the async continuation boundary.
+    /// CLLocationManager holds its delegate via a weak reference,
+    /// so the only strong reference must live at least until the
+    /// location callback fires or the timeout expires.
+    private var activeDelegate: LocationDelegate?
+
     func requestPermission() {
         manager.requestWhenInUseAuthorization()
     }
@@ -33,21 +39,27 @@ final class LocationContextSensor: ContextSensor, @unchecked Sendable {
 
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[CapturedAnnotation], Error>) in
             let delegate = LocationDelegate()
+            self.activeDelegate = delegate  // keep strong reference
             manager.delegate = delegate
 
+            let lock = OSAllocatedUnfairLock()
             var resumed = false
 
             // Timeout
             let timeoutWork = DispatchWorkItem {
-                guard !resumed else { return }
+                lock.lock()
+                guard !resumed else { lock.unlock(); return }
                 resumed = true
+                lock.unlock()
                 continuation.resume(returning: [])
             }
             DispatchQueue.global().asyncAfter(deadline: .now() + Self.timeoutSeconds, execute: timeoutWork)
 
             delegate.onResult = { location, placemark, error in
-                guard !resumed else { return }
+                lock.lock()
+                guard !resumed else { lock.unlock(); return }
                 resumed = true
+                lock.unlock()
                 timeoutWork.cancel()
 
                 if let error {

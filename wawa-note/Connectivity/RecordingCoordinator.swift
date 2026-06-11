@@ -73,12 +73,34 @@ final class RecordingCoordinator: ObservableObject {
         }
 
         // Interruption began → segment closed without opening a new one.
-        // Finalize the last segment's end time so the manifest doesn't
-        // include interruption silence as audio duration.
+        // Finalize the CLOSED segment's metadata by its index, not blindly
+        // the last segment. Recovery attempts open/close segments that were
+        // never added to the manifest via onSegmentCreated — updating
+        // segments[lastIdx] would overwrite an unrelated segment's data.
         captureService.onSegmentClosed = { [weak self] closedInfo in
-            guard let self, var m = self.manifest, let lastIdx = m.segments.indices.last else { return }
-            m.segments[lastIdx].endedAt = closedInfo.endedAt
-            m.segments[lastIdx].fileSize = closedInfo.fileSize
+            guard let self, var m = self.manifest else { return }
+            if let idx = m.segments.firstIndex(where: { $0.index == closedInfo.index }) {
+                m.segments[idx].endedAt = closedInfo.endedAt
+                m.segments[idx].fileSize = closedInfo.fileSize
+            } else {
+                // Orphan segment from a failed recovery attempt — never
+                // registered via onSegmentCreated. Add it now so its audio
+                // (even if partial/silent) is tracked and transcribable.
+                let orphan = RecordingSegment(
+                    id: UUID(), index: closedInfo.index,
+                    fileName: closedInfo.fileName,
+                    startedAt: Date(),
+                    inputPortName: "",
+                    inputPortType: "unknown",
+                    routeChangeReason: "recovery-orphan",
+                    sampleRate: nil
+                )
+                m.segments.append(orphan)
+                if let lastIdx = m.segments.indices.last {
+                    m.segments[lastIdx].endedAt = closedInfo.endedAt
+                    m.segments[lastIdx].fileSize = closedInfo.fileSize
+                }
+            }
             self.manifest = m
             if let itemId = self.savedItemId {
                 self.saveManifest(m, meetingId: itemId)

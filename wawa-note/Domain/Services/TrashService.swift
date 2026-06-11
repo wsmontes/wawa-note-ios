@@ -16,7 +16,7 @@ final class TrashService {
     /// Returns the Trash folder, creating it if needed.
     /// Always sorts last with a high sortOrder.
     func trashFolder() throws -> Folder {
-        var descriptor = FetchDescriptor<Folder>(predicate: #Predicate { $0.name == "Trash" && $0.iconName == "trash" })
+        var descriptor = FetchDescriptor<Folder>(predicate: #Predicate { $0.isTrashFolder == true })
         descriptor.fetchLimit = 1
         if let existing = try context.fetch(descriptor).first {
             return existing
@@ -26,14 +26,14 @@ final class TrashService {
         let allFolders = try context.fetch(FetchDescriptor<Folder>())
         let maxOrder = allFolders.map(\.sortOrder).max() ?? 0
 
-        let trash = Folder(name: "Trash", parentFolderID: nil, sortOrder: maxOrder + 1000, iconName: "trash")
+        let trash = Folder(name: "Trash", parentFolderID: nil, sortOrder: maxOrder + 1000, iconName: "trash", isTrashFolder: true)
         context.insert(trash)
         try context.save()
         return trash
     }
 
     func isTrash(_ folder: Folder) -> Bool {
-        folder.name == "Trash" && folder.iconName == "trash"
+        folder.isTrashFolder
     }
 
     func isItemInTrash(_ item: KnowledgeItem) -> Bool {

@@ -496,10 +496,16 @@ final class ContentExtractionService {
 
     // MARK: - Audio conversion for transcription
 
-    /// Converts any audio to 16kHz mono WAV using AVAssetExportSession.
-    /// Handles all sample rates and codecs (AAC 8kHz—48kHz) natively.
+    /// Best-effort audio conversion for transcription engines. Uses passthrough
+    /// to avoid re-encoding — when it fails (AAC can't go into WAV), callers fall
+    /// back to the original file which engines handle natively.
+    ///
+    /// Uses AVURLAsset.load(.duration) — the async replacement for the deprecated
+    /// synchronous AVAsset.duration. Freshly-written segment files may not have
+    /// fully indexed metadata when the sync API is called, returning .invalid or
+    /// .zero, which produces silent transcription output.
     func convertToTranscriptionFormat(_ sourceURL: URL) async throws -> URL {
-        let asset = AVAsset(url: sourceURL)
+        let asset = AVURLAsset(url: sourceURL)
         let tempURL = fileStore.itemDirectoryURL(for: UUID())
             .appendingPathComponent("transcription_input.wav")
         try? FileManager.default.createDirectory(at: tempURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -511,7 +517,14 @@ final class ContentExtractionService {
         export.outputURL = tempURL
         export.outputFileType = .wav
         export.audioMix = nil
-        export.timeRange = CMTimeRange(start: .zero, duration: asset.duration)
+
+        // Only set timeRange if async duration loading succeeds. If it fails,
+        // leave it at the default (entire asset) — safer than a zero-length range
+        // that silently produces empty transcription.
+        if let rawDuration = try? await asset.load(.duration),
+           rawDuration.isValid, rawDuration > .zero {
+            export.timeRange = CMTimeRange(start: .zero, duration: rawDuration)
+        }
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             export.exportAsynchronously {
@@ -520,7 +533,7 @@ final class ContentExtractionService {
         }
 
         if export.status == .completed {
-            AppLog.provider.info("ContentExtraction: converted \(sourceURL.lastPathComponent) → 16kHz WAV")
+            AppLog.provider.info("ContentExtraction: converted \(sourceURL.lastPathComponent) → WAV for transcription")
             return tempURL
         }
 

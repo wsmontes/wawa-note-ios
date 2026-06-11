@@ -124,6 +124,11 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// when the user presses Stop/Finish.
     private var physicalRestartTask: Task<Void, Never>?
 
+    /// Deferred route-change reason. When a second settled route change arrives
+    /// while a physical restart is already in progress, we store it here instead
+    /// of silently dropping it. Drained at the end of restartCaptureForNewRoute.
+    private var pendingRouteChangeAfterRestart: AVAudioSession.RouteChangeReason?
+
     /// Tracks whether the audio tap is currently installed on engine.inputNode.
     /// Must be kept in sync with every installTap/removeTap call so we never
     /// call removeTap when no tap is installed (crashes on some iOS versions).
@@ -136,6 +141,16 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// Set in the tap callback (real-time thread). Used to validate
     /// that a new route is actually delivering audio.
     private nonisolated(unsafe) var lastBufferReceivedAt: Date = .distantPast
+
+    /// Dedicated flag for the real-time audio tap callback.
+    /// Reading @Published `state` from the audio thread is a data race
+    /// (Swift memory model violation). This flag is set atomically from
+    /// the main thread alongside every state transition. On ARM64, aligned
+    /// word reads are physically atomic — safe for the tap callback.
+    /// Set to true in .recording and .validatingRoute; false otherwise.
+    /// Also pre-armed true before engine.start() so the first audio buffers
+    /// aren't discarded (rolled back on start failure).
+    private nonisolated(unsafe) var _isCapturingAudio: Bool = false
 
     // AudioFileWriter serializes all writes internally — no external write queue needed.
 
@@ -229,6 +244,12 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         state = newState
         AppLog.audio.info("State: \(String(describing: oldState)) → \(String(describing: newState)) — \(reason)")
 
+        // Keep _isCapturingAudio in sync for the real-time tap callback.
+        // The tap reads this flag instead of @Published state (data-race fix).
+        // Include .validatingRoute — the engine is running and delivering audio
+        // during route validation; discarding it loses up to 4s of audio.
+        _isCapturingAudio = (newState == .recording || newState == .validatingRoute)
+
         // Start/stop the waiting-input probe based on state
         if newState == .waitingForUsableInput {
             startWaitingInputProbe()
@@ -241,10 +262,16 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// If builtInMic is available, automatically triggers recovery.
     /// Route change notifications are NOT sufficient — Bluetooth transitions
     /// may not fire new notifications when already in a waiting state.
+    ///
+    /// Caps recovery attempts at 3 to prevent infinite loops that create
+    /// empty segment files on disk. After 3 failures, the probe stops and
+    /// the user must manually resume or stop.
     private func startWaitingInputProbe() {
         stopWaitingInputProbe()
         waitingInputProbeTask = Task { @MainActor [weak self] in
             var backoff = 0
+            var recoveryAttempts = 0
+            let maxRecoveryAttempts = 3
             while !Task.isCancelled, let self {
                 let delay = backoff < 2 ? 1_000_000_000 : 2_000_000_000
                 try? await Task.sleep(nanoseconds: UInt64(delay))
@@ -260,16 +287,21 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                     continue
                 }
 
+                // Cap recovery attempts — after N failures, further attempts
+                // just create empty segment files.
+                guard recoveryAttempts < maxRecoveryAttempts else {
+                    AppLog.audio.info("Waiting probe: max recovery attempts (\(maxRecoveryAttempts)) reached — stopping probe")
+                    break
+                }
+
                 // Re-read session state — things may have changed.
-                // isInputAvailable may be false even when builtInMic is in
-                // availableInputs (e.g., stale route after Bluetooth disconnect).
-                // If builtInMic exists, always try it — don't wait passively.
                 let hasBuiltInMic = self.sessionManager.session.availableInputs?.contains { $0.portType == .builtInMic } ?? false
 
-                AppLog.audio.info("Waiting probe: builtInMic=\(hasBuiltInMic) backoff=\(backoff)")
+                AppLog.audio.info("Waiting probe: builtInMic=\(hasBuiltInMic) backoff=\(backoff) attempt=\(recoveryAttempts+1)/\(maxRecoveryAttempts)")
 
                 if hasBuiltInMic {
                     await self.forceBuiltInMicRecovery()
+                    recoveryAttempts += 1
                     // If recovery succeeded, we're out of waiting → probe stops naturally
                     if self.state != .waitingForUsableInput { break }
                     backoff += 1
@@ -367,6 +399,12 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         safelyInstallTap(reason: "startRecording")
         engine.prepare()
 
+        // Pre-arm the capture flag BEFORE engine.start(). Once the engine is
+        // running, audio buffers arrive on the real-time thread immediately.
+        // If _isCapturingAudio is false when the first buffer hits the tap,
+        // that audio is discarded. Rolled back on start failure.
+        _isCapturingAudio = true
+
         // Retry engine start for Bluetooth devices that need time to stabilize
         var engineError: Error?
         for attempt in 0...2 {
@@ -386,6 +424,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         }
 
         if let engineError {
+            _isCapturingAudio = false  // rollback pre-arm — engine never started
             AppLog.error("audio", "All engine start attempts failed: \(engineError.localizedDescription)")
             safelyRemoveTap(reason: "engineStartFailed")
             fileWriter.finishRecording()
@@ -527,9 +566,15 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             AppLog.audio.info("safelyRemoveTap: skipped — no tap installed (\(reason))")
             return
         }
+        // Mark false BEFORE the ObjC call. If iOS internally cleared the tap
+        // (e.g., AVAudioEngineConfigurationChange), removeTap(onBus:) on a
+        // bus with no tap raises NSException — uncatchable in Swift.
+        // Setting false first guarantees we never double-remove. If the call
+        // succeeds, the flag was already correct. If it crashes, at least we
+        // didn't corrupt state before the crash.
+        isTapInstalled = false
         logCrashDiagnostics("before-removeTap[\(reason)]")
         engine.inputNode.removeTap(onBus: 0)
-        isTapInstalled = false
         logCrashDiagnostics("after-removeTap[\(reason)]")
     }
 
@@ -555,7 +600,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             guard let self else { return }
             self.updateAudioLevel(from: buffer)
             self.lastBufferReceivedAt = Date()  // Track for route validation
-            guard self.state == .recording else { return }
+            guard self._isCapturingAudio else { return }
 
             guard let channelData = buffer.floatChannelData else { return }
             let frameLength = Int(buffer.frameLength)
@@ -579,7 +624,18 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return .noUsableInput(takeRouteSnapshot(reason: "skipped: restart in progress"))
         }
         isPhysicalRestartInProgress = true
-        defer { isPhysicalRestartInProgress = false }
+        defer {
+            isPhysicalRestartInProgress = false
+            // Drain any route change that arrived while we were restarting.
+            // Schedule as a task so the current restart's cleanup fully
+            // completes before the next one begins.
+            if let pending = pendingRouteChangeAfterRestart {
+                pendingRouteChangeAfterRestart = nil
+                Task { @MainActor [weak self] in
+                    await self?.processSettledRouteChange(pending)
+                }
+            }
+        }
 
         logCrashDiagnostics("restartCapture-begin[\(reason)]")
         transition(to: .reconfiguringRoute, reason: "restart capture: \(reason)")
@@ -610,6 +666,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         // 4. Now create a fresh engine on a clean session.
         engine = AVAudioEngine()
+        reRegisterEngineObserver()  // pin observer to the new engine instance
         logCrashDiagnostics("restartCapture-newEngine[\(reason)]")
 
         do {
@@ -658,9 +715,16 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         let segIndex = fileWriter.segmentIndex
         let segFileName = fileWriter.currentFileURL?.lastPathComponent ?? String(format: "segment-%03d.m4a", segIndex)
 
-        // 6. Install tap, prepare, start — identical to startRecording.
+        // 6. Install tap, prepare, pre-arm, start — identical to startRecording.
         safelyInstallTap(reason: "restartCapture new engine: \(reason)")
         engine.prepare()
+
+        // Pre-arm so the tap writes audio immediately. During the validation
+        // window below, _isCapturingAudio must be true — otherwise up to 4s
+        // of Bluetooth audio is discarded. transition(to: .validatingRoute)
+        // will also set it true, but there's a gap between engine.start() and
+        // that transition. Rolled back on start failure.
+        _isCapturingAudio = true
 
         var engineStartSucceeded = false
         for attempt in 0...2 {
@@ -684,9 +748,17 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         }
 
         if !engineStartSucceeded {
-            audioInterruptionReason = "Could not start audio with this microphone."
+            _isCapturingAudio = false  // rollback pre-arm — engine never started
             _ = checkpointCurrentSegment(reason: "engineStartFailed")
             try? sessionManager.deactivate()
+            // Don't just give up — try builtInMic before waiting. The iPhone mic
+            // is always available and is the reliable fallback when Bluetooth fails.
+            if sessionManager.session.availableInputs?.contains(where: { $0.portType == .builtInMic }) ?? false {
+                AppLog.audio.info("restartCapture: engine start failed — falling back to built-in mic")
+                await forceBuiltInMicRecovery()
+                return .resumed(takeRouteSnapshot(reason: reason))
+            }
+            audioInterruptionReason = "Could not start audio with this microphone."
             transition(to: .waitingForUsableInput, reason: "engine start failed")
             return .engineFailed(NSError(domain: "Audio", code: -1), takeRouteSnapshot(reason: reason))
         }
@@ -785,7 +857,15 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return
         }
         isPhysicalRestartInProgress = true
-        defer { isPhysicalRestartInProgress = false }
+        defer {
+            isPhysicalRestartInProgress = false
+            if let pending = pendingRouteChangeAfterRestart {
+                pendingRouteChangeAfterRestart = nil
+                Task { @MainActor [weak self] in
+                    await self?.processSettledRouteChange(pending)
+                }
+            }
+        }
 
         logCrashDiagnostics("forceBuiltInMic-begin")
         AppLog.audio.info("Force built-in mic recovery — beginning")
@@ -805,6 +885,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         // Fresh engine on clean session
         engine = AVAudioEngine()
+        reRegisterEngineObserver()  // pin observer to the new engine instance
         logCrashDiagnostics("forceBuiltInMic-newEngine")
         try? sessionManager.configureForRecording()
 
@@ -834,9 +915,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         let segIndex = fileWriter.segmentIndex
         let segFileName = fileWriter.currentFileURL?.lastPathComponent ?? String(format: "segment-%03d.m4a", segIndex)
 
-        // Start engine
+        // Start engine — pre-arm so audio during validation is captured
         safelyInstallTap(reason: "forceBuiltInMic new engine")
         engine.prepare()
+        _isCapturingAudio = true
         var started = false
         for attempt in 0...2 {
             do { try engine.start(); started = true; break }
@@ -846,6 +928,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         }
 
         guard started else {
+            _isCapturingAudio = false  // rollback pre-arm
             fileWriter.closeCurrentSegment()
             audioInterruptionReason = "Could not start iPhone microphone."
             transition(to: .waitingForUsableInput, reason: "built-in mic engine failed")
@@ -902,6 +985,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private var interruptionObserver: NSObjectProtocol?
     private var routeChangeObserver: NSObjectProtocol?
     private var mediaServicesResetObserver: NSObjectProtocol?
+    private var engineConfigChangeObserver: NSObjectProtocol?
 
     private func observeAudioNotifications() {
         interruptionObserver = NotificationCenter.default.addObserver(
@@ -925,15 +1009,22 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         ) { [weak self] notification in
             self?.handleMediaServicesReset(notification)
         }
+        // CRITICAL: AVAudioEngineConfigurationChange fires BEFORE routeChangeNotification
+        // when Bluetooth connects. iOS internally clears all taps and stops the engine.
+        // Without this observer, isTapInstalled stays true → removeTap(onBus:) crashes.
+        // Scoped to this engine instance — must be re-registered when engine is replaced.
+        reRegisterEngineObserver()
     }
 
     private func removeAudioNotificationObservers() {
         if let obs = interruptionObserver { NotificationCenter.default.removeObserver(obs) }
         if let obs = routeChangeObserver { NotificationCenter.default.removeObserver(obs) }
         if let obs = mediaServicesResetObserver { NotificationCenter.default.removeObserver(obs) }
+        if let obs = engineConfigChangeObserver { NotificationCenter.default.removeObserver(obs) }
         interruptionObserver = nil
         routeChangeObserver = nil
         mediaServicesResetObserver = nil
+        engineConfigChangeObserver = nil
     }
 
     private func handleInterruption(_ notification: Notification) {
@@ -997,8 +1088,11 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     @MainActor
     private func processSettledRouteChange(_ reason: AVAudioSession.RouteChangeReason) async {
         // Don't stack route changes on top of an in-progress restart.
+        // Instead of silently dropping the change, store it so the running
+        // restart can drain it when it completes (prevents lost route changes).
         guard !isPhysicalRestartInProgress else {
-            AppLog.audio.info("Route settled: restart already in progress — deferring route change")
+            AppLog.audio.info("Route settled: restart already in progress — deferring route change (reason=\(reason.rawValue))")
+            pendingRouteChangeAfterRestart = reason
             return
         }
 
@@ -1058,6 +1152,222 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             physicalRestartTask = Task { @MainActor in
                 _ = await self.restartCaptureForNewRoute(reason: "mediaServicesReset", resumeRecording: resume, generation: gen)
             }
+        }
+    }
+
+    // MARK: - Engine configuration change (Bug 1 fix)
+
+    /// Handles AVAudioEngineConfigurationChange — the primary crash cause when
+    /// Bluetooth connects mid-recording.
+    ///
+    /// iOS fires this notification BEFORE routeChangeNotification and immediately
+    /// clears the engine's audio graph (including all taps). The engine is left
+    /// in an invalidated state. We must:
+    /// 1. Mark the tap as NOT installed (iOS already cleared it).
+    /// 2. Cancel any pending route-change debounce (configuration change supersedes it).
+    /// 3. If the user still wants to record, rebuild the engine WITHOUT touching
+    ///    the audio session — iOS has already routed audio to the new device.
+    ///    Deactivating/reactivating the session would tear down the Bluetooth
+    ///    SCO link and cause engine.start() to fail.
+    private func handleEngineConfigurationChange() {
+        AppLog.audio.info("Engine configuration change — audio graph has been reset")
+
+        // CRITICAL: iOS has already cleared the tap. Mark it false immediately
+        // to prevent any subsequent safelyRemoveTap from crashing on a stale tap.
+        isTapInstalled = false
+
+        // Cancel the route-change debounce — the configuration change provides
+        // a fresher signal about what just happened to the audio hardware.
+        routeChangeTask?.cancel()
+        routeChangeTask = nil
+
+        // If the user wants recording, rebuild now. Don't wait for the
+        // routeChangeNotification debounce — the engine is already dead.
+        guard recordingIntent == .userWantsRecording || recordingIntent == .userPaused else {
+            AppLog.audio.info("Engine config change: no recording intent — skipping rebuild")
+            return
+        }
+
+        guard !isPhysicalRestartInProgress else {
+            AppLog.audio.info("Engine config change: restart already in progress — deferring")
+            return
+        }
+
+        let resume = recordingIntent == .userWantsRecording
+        routeRecoveryGeneration = UUID()
+        let gen = routeRecoveryGeneration
+        AppLog.audio.info("Engine config change: triggering lightweight rebuild (resume=\(resume))")
+        physicalRestartTask = Task { @MainActor [weak self] in
+            _ = await self?.rebuildForNewAudioRoute(
+                reason: "engineConfigChange", resumeRecording: resume, generation: gen)
+        }
+    }
+
+    /// Lightweight engine rebuild for route-driven configuration changes
+    /// (Bluetooth connect/disconnect). iOS has already switched the audio
+    /// session to the new device — we must NOT deactivate or reconfigure
+    /// the session, as that would tear down the Bluetooth SCO link and
+    /// cause engine.start() to fail.
+    ///
+    /// Only replaces the engine and reinstalls the tap. The audio session
+    /// remains active with the new route throughout.
+    @discardableResult
+    private func rebuildForNewAudioRoute(reason: String, resumeRecording: Bool, generation: UUID) async -> AudioRebuildResult {
+        guard !isPhysicalRestartInProgress else {
+            AppLog.audio.info("rebuildForNewRoute: physical restart already in progress — skipping")
+            return .noUsableInput(takeRouteSnapshot(reason: "skipped: restart in progress"))
+        }
+        isPhysicalRestartInProgress = true
+        defer {
+            isPhysicalRestartInProgress = false
+            if let pending = pendingRouteChangeAfterRestart {
+                pendingRouteChangeAfterRestart = nil
+                Task { @MainActor [weak self] in
+                    await self?.processSettledRouteChange(pending)
+                }
+            }
+        }
+
+        logCrashDiagnostics("rebuildForNewRoute-begin[\(reason)]")
+        transition(to: .reconfiguringRoute, reason: "rebuild for new route: \(reason)")
+        timerTask?.cancel()
+
+        // 1. Checkpoint current segment — preserve pre-switch audio.
+        _ = checkpointCurrentSegment(reason: reason)
+
+        // 2. Stop old engine. Tap was already cleared by iOS
+        //    (isTapInstalled was set false in handleEngineConfigurationChange).
+        engine.stop()
+        logCrashDiagnostics("rebuildForNewRoute-after-stop[\(reason)]")
+
+        guard let meetingId = currentMeetingId else {
+            audioInterruptionReason = "Internal error."
+            return .noUsableInput(takeRouteSnapshot(reason: reason))
+        }
+
+        // 3. Fresh engine on the ALREADY-ACTIVE session. Do NOT deactivate
+        //    or reconfigure — iOS has already routed to the new device.
+        engine = AVAudioEngine()
+        reRegisterEngineObserver()
+        logCrashDiagnostics("rebuildForNewRoute-newEngine[\(reason)]")
+
+        // 4. Read current route format directly from the active session.
+        let sessionRate = sessionManager.sampleRate
+        guard let hwFmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sessionRate > 0 ? sessionRate : 44100, channels: 1, interleaved: false) else {
+            AppLog.error("audio", "rebuildForNewRoute: invalid audio format — rate=\(sessionRate)")
+            audioInterruptionReason = "Could not create audio format."
+            transition(to: .waitingForUsableInput, reason: "invalid audio format")
+            return .noUsableInput(takeRouteSnapshot(reason: reason))
+        }
+
+        // 5. Open new segment with format matching the new route.
+        let nextIndex = nextSegmentIndexProvider?() ?? (fileWriter.segmentIndex + 1)
+        do {
+            try fileWriter.startNextSegmentForExistingRecording(
+                meetingId: meetingId, format: hwFmt, manifestNextIndex: nextIndex)
+        } catch {
+            AppLog.error("audio", "rebuildForNewRoute: startNextSegment failed: \(error)")
+            audioInterruptionReason = "Could not create audio segment."
+            return .noUsableInput(takeRouteSnapshot(reason: reason))
+        }
+
+        let segIndex = fileWriter.segmentIndex
+        let segFileName = fileWriter.currentFileURL?.lastPathComponent ?? String(format: "segment-%03d.m4a", segIndex)
+        let inputPortName = sessionManager.currentInputPortName
+        let inputPortType = sessionManager.bestAvailableInput?.portType.rawValue ?? "unknown"
+        AppLog.audio.info("rebuildForNewRoute: new segment \(segIndex) \(segFileName) rate=\(sessionRate)Hz input=\(inputPortName)(\(inputPortType))")
+
+        // 6. Install tap, pre-arm, start engine.
+        safelyInstallTap(reason: "rebuildForNewRoute: \(reason)")
+        engine.prepare()
+        _isCapturingAudio = true
+
+        var engineStartSucceeded = false
+        for attempt in 0...2 {
+            do {
+                try engine.start()
+                engineStartSucceeded = true
+                break
+            } catch {
+                AppLog.error("audio", "rebuildForNewRoute: engine start attempt \(attempt+1) failed: \(error.localizedDescription)")
+                if attempt < 2 {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    engine.reset()
+                    engine.prepare()
+                }
+            }
+        }
+
+        guard generation == routeRecoveryGeneration else {
+            fileWriter.closeCurrentSegment()
+            return .noUsableInput(takeRouteSnapshot(reason: reason))
+        }
+
+        if !engineStartSucceeded {
+            _isCapturingAudio = false
+            _ = checkpointCurrentSegment(reason: "engineStartFailed")
+            // Release the mutex so forceBuiltInMicRecovery can acquire it.
+            isPhysicalRestartInProgress = false
+            await forceBuiltInMicRecovery()
+            return .resumed(takeRouteSnapshot(reason: reason))
+        }
+
+        // 7. Validation — wait for first buffer.
+        transition(to: .validatingRoute, reason: "validating new route: \(reason)")
+        let timeoutMs = Int(sessionManager.validationTimeoutSeconds * 1000)
+        let maxIterations = timeoutMs / 100
+        let bufferCheckStart = lastBufferReceivedAt
+        for _ in 0..<maxIterations where lastBufferReceivedAt <= bufferCheckStart {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+
+        guard generation == routeRecoveryGeneration else {
+            fileWriter.closeCurrentSegment()
+            return .noUsableInput(takeRouteSnapshot(reason: reason))
+        }
+
+        if lastBufferReceivedAt > bufferCheckStart {
+            let segment = RecordingSegment(
+                id: UUID(), index: segIndex, fileName: segFileName, startedAt: Date(),
+                inputPortName: inputPortName, inputPortType: inputPortType,
+                routeChangeReason: reason, sampleRate: hwFmt.sampleRate
+            )
+            onSegmentCreated?(nil, segment)
+            currentInputPortName = inputPortName
+            audioInterruptionReason = nil
+            let snap = takeRouteSnapshot(reason: reason)
+
+            if resumeRecording, recordingIntent == .userWantsRecording {
+                _ = commitRecoveredRouteToRecording(generation: generation, reason: "route rebuild: \(reason)")
+                return .resumed(snap)
+            } else {
+                transition(to: .pausedByUser, reason: "route rebuild (paused)")
+                return .paused(snap)
+            }
+        }
+
+        // No buffers — lightweight rebuild didn't produce audio.
+        // Release the mutex and fall back to a full session reset.
+        _ = checkpointCurrentSegment(reason: "validationFailed")
+        isPhysicalRestartInProgress = false
+        await forceBuiltInMicRecovery()
+        return .resumed(takeRouteSnapshot(reason: reason))
+    }
+
+    /// Re-register the engine-scoped configuration-change observer.
+    /// MUST be called every time `engine = AVAudioEngine()` is executed,
+    /// because the observer is pinned to a specific engine instance via
+    /// `object: engine`. The old observer stops firing for the new engine.
+    private func reRegisterEngineObserver() {
+        if let obs = engineConfigChangeObserver {
+            NotificationCenter.default.removeObserver(obs)
+        }
+        engineConfigChangeObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,        // scoped to THIS engine instance
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleEngineConfigurationChange()
         }
     }
 

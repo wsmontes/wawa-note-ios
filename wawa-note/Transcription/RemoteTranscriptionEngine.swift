@@ -28,10 +28,7 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
     init(baseURL: URL, apiKey: String = "", session: URLSession = .shared) {
         self.baseURL = baseURL
         self.apiKey = apiKey
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 180
-        config.timeoutIntervalForResource = 300
-        self.session = URLSession(configuration: config)
+        self.session = session
     }
 
     func cancel() {

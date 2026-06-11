@@ -123,13 +123,13 @@ final class ChatService {
 
     private func saveAllConversations(_ conversations: [ChatConversation]) throws {
         let data = try JSONEncoder().encode(conversations)
-        try data.write(to: baseURL.appendingPathComponent("index.json"))
+        try data.write(to: baseURL.appendingPathComponent("index.json"), options: .atomic)
     }
 
     private func saveMessages(_ messages: [ChatMessage], conversationId: UUID) throws {
         try ensureDirectory()
         let data = try JSONEncoder().encode(messages)
-        try data.write(to: messagesURL(for: conversationId))
+        try data.write(to: messagesURL(for: conversationId), options: .atomic)
     }
 
     private func ensureDirectory() throws {

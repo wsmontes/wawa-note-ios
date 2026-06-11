@@ -151,7 +151,9 @@ final class AgentLoop: @unchecked Sendable {
 
             var adjusted = contextMessages
             if wasTruncated {
-                adjusted.insert(ChatMessage(conversationId: UUID(), role: .system,
+                // Use .user role instead of .system — some providers (Gemini)
+                // only accept a single systemInstruction at the top level.
+                adjusted.insert(ChatMessage(conversationId: UUID(), role: .user,
                     content: "[SYSTEM NOTE: \(truncatedCount) older messages were truncated due to token limits.]"
                 ), at: 0)
             }
@@ -223,9 +225,12 @@ final class AgentLoop: @unchecked Sendable {
 
                 // If the LLM responded with text but no tool calls, and we still have
                 // iterations left, push back — the agent MUST use tools to complete tasks.
+                // Use a request-local message (not persisted to chat history) to avoid
+                // polluting the user's conversation with synthetic instructions.
                 if iteration + 1 < iterations {
-                    messages.append(ChatMessage(conversationId: UUID(), role: .user,
-                        content: "You must use the run_command tool to execute actions. Do not just describe what you would do — actually run the commands. Start with extract to read the item content."))
+                    let pushBack = ChatMessage(conversationId: UUID(), role: .user,
+                        content: "You must use the available tools to execute actions. Do not just describe what you would do — actually run the commands.")
+                    adjusted.append(pushBack)
                     continue
                 }
 

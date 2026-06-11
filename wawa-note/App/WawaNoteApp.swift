@@ -18,6 +18,7 @@ struct WawaNoteApp: App {
     private let processingQueue: ProcessingQueueService
 
     @StateObject private var biometricGate = BiometricGateService()
+    private let notificationTokens = NotificationTokens()
 
     init() {
         do {
@@ -84,41 +85,49 @@ struct WawaNoteApp: App {
         }
 
         // Attempt recovery from audio interruptions when app returns to foreground
-        NotificationCenter.default.addObserver(
-            forName: UIApplication.willEnterForegroundNotification,
-            object: nil,
-            queue: .main
-        ) { _ in
-            AppLog.event("general", "App will enter foreground")
-            coordinator.onAppForeground()
-        }
+        notificationTokens.tokens.append(
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.willEnterForegroundNotification,
+                object: nil,
+                queue: .main
+            ) { _ in
+                AppLog.event("general", "App will enter foreground")
+                coordinator.onAppForeground()
+            }
+        )
 
         // Mark clean exit on normal termination
-        NotificationCenter.default.addObserver(
-            forName: UIApplication.willTerminateNotification,
-            object: nil,
-            queue: .main
-        ) { _ in
-            AppLog.event("general", "App will terminate — marking clean exit")
-            fileLog.markCleanExit()
-        }
+        notificationTokens.tokens.append(
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.willTerminateNotification,
+                object: nil,
+                queue: .main
+            ) { _ in
+                AppLog.event("general", "App will terminate — marking clean exit")
+                fileLog.markCleanExit()
+            }
+        )
 
         // Periodic heartbeat — clears crash sentinel every 30s while app is running
-        NotificationCenter.default.addObserver(
-            forName: UIApplication.didBecomeActiveNotification,
-            object: nil,
-            queue: .main
-        ) { _ in
-            fileLog.heartbeat()
-        }
+        notificationTokens.tokens.append(
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.didBecomeActiveNotification,
+                object: nil,
+                queue: .main
+            ) { _ in
+                fileLog.heartbeat()
+            }
+        )
 
-        NotificationCenter.default.addObserver(
-            forName: UIApplication.didEnterBackgroundNotification,
-            object: nil,
-            queue: .main
-        ) { _ in
-            AppLog.event("general", "App did enter background")
-        }
+        notificationTokens.tokens.append(
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.didEnterBackgroundNotification,
+                object: nil,
+                queue: .main
+            ) { _ in
+                AppLog.event("general", "App did enter background")
+            }
+        )
     }
 
     // MARK: - Notifications & Badge
@@ -218,4 +227,12 @@ final class BiometricGateService: ObservableObject {
             return false
         }
     }
+}
+
+/// Reference-type container for NotificationCenter observer tokens.
+/// Because WawaNoteApp is a struct (SwiftUI App), captured closures
+/// cannot mutate a stored array property — they capture a copy.
+/// Wrapping in a class allows the closure callbacks to append tokens.
+private final class NotificationTokens {
+    var tokens: [NSObjectProtocol] = []
 }

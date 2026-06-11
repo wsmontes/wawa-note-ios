@@ -3,79 +3,6 @@ import OSLog
 
 // MARK: - Chat Completions API
 
-private struct ChatCompletionRequest: Encodable {
-    let model: String
-    let messages: [Message]
-    let temperature: Double?
-    let maxTokens: Int?
-    let responseFormat: ResponseFormat?
-
-    struct Message: Encodable {
-        let role: String
-        let content: Content
-
-        enum Content: Encodable {
-            case string(String)
-            case parts([ContentPart])
-
-            func encode(to encoder: any Encoder) throws {
-                var container = encoder.singleValueContainer()
-                switch self {
-                case .string(let s): try container.encode(s)
-                case .parts(let p): try container.encode(p)
-                }
-            }
-        }
-
-        struct ContentPart: Encodable {
-            let type: String
-            let text: String?
-            let imageUrl: ImageURL?
-
-            enum CodingKeys: String, CodingKey {
-                case type, text
-                case imageUrl = "image_url"
-            }
-
-            struct ImageURL: Encodable {
-                let url: String
-            }
-        }
-
-        enum CodingKeys: String, CodingKey {
-            case role, content
-        }
-    }
-
-    struct ResponseFormat: Encodable {
-        let type: String
-        var jsonSchema: JSONSchema? = nil
-
-        struct JSONSchema: Encodable {
-            let name: String
-            let strict: Bool
-            let schema: String
-        }
-
-        enum CodingKeys: String, CodingKey {
-            case type
-            case jsonSchema = "json_schema"
-        }
-
-        func encode(to encoder: any Encoder) throws {
-            var container = encoder.container(keyedBy: CodingKeys.self)
-            try container.encode(type, forKey: .type)
-            try container.encodeIfPresent(jsonSchema, forKey: .jsonSchema)
-        }
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case model, messages, temperature
-        case maxTokens = "max_tokens"
-        case responseFormat = "response_format"
-    }
-}
-
 private struct ChatCompletionResponse: Decodable {
     let id: String?
     let model: String?
@@ -366,35 +293,6 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
 
         AppLog.provider.info("Response: \(text.prefix(100))...")
         return AIResponse(id: decoded.id, model: decoded.model, content: text, usage: usage, toolCalls: toolCalls, finishReason: finishReason)
-    }
-
-    private func buildContent(from blocks: [AIContentBlock]) -> ChatCompletionRequest.Message.Content {
-        let textBlocks = blocks.compactMap { block -> String? in
-            if case .text(let t) = block { return t }
-            return nil
-        }
-        let imageBlocks = blocks.compactMap { block -> URL? in
-            if case .imageFile(let url) = block { return url }
-            return nil
-        }
-
-        if imageBlocks.isEmpty {
-            return .string(textBlocks.joined(separator: "\n"))
-        }
-
-        var parts: [ChatCompletionRequest.Message.ContentPart] = []
-        for text in textBlocks {
-            parts.append(ChatCompletionRequest.Message.ContentPart(type: "text", text: text, imageUrl: nil))
-        }
-        for imageURL in imageBlocks {
-            let urlString = Self.base64DataURL(from: imageURL) ?? imageURL.absoluteString
-            parts.append(ChatCompletionRequest.Message.ContentPart(
-                type: "image_url",
-                text: nil,
-                imageUrl: ChatCompletionRequest.Message.ContentPart.ImageURL(url: urlString)
-            ))
-        }
-        return .parts(parts)
     }
 
     // MARK: - Embeddings

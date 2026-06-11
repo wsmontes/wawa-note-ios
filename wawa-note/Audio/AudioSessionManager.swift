@@ -128,9 +128,14 @@ final class AudioSessionManager {
     }
 
     func configureForRecording() throws {
-        let mode = bestModeForCurrentRoute()
         do {
-            try session.setCategory(.playAndRecord, mode: mode, options: [
+            // Category first with neutral mode (.default). The correct mode
+            // (spokenAudio, videoChat, etc.) depends on the settled route,
+            // which isn't known until setActive(true) completes. Reading
+            // currentRoute.inputs before activation can return stale data
+            // during Bluetooth transitions, causing the wrong mode to be set
+            // and Bluetooth HFP to enter headset profile instead of HFP.
+            try session.setCategory(.playAndRecord, mode: .default, options: [
                 .allowBluetooth,
                 .defaultToSpeaker
             ])
@@ -140,8 +145,8 @@ final class AudioSessionManager {
             try session.setAllowHapticsAndSystemSoundsDuringRecording(true)
             try session.setActive(true)
 
-            // Select best input AFTER activation — some inputs only appear
-            // in availableInputs once the session is active.
+            // Route is now settled — adapt mode and select best input.
+            adaptToRouteChange()
             selectBestInputForRecording()
 
             // Audit session state after activation

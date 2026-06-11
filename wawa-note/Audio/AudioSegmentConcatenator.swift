@@ -27,11 +27,21 @@ enum AudioSegmentConcatenator {
         let composition = AVMutableComposition()
         var cursor = CMTime.zero
         for url in urls {
-            let asset = AVAsset(url: url)
-            guard let track = asset.tracks(withMediaType: .audio).first else { continue }
+            // AVURLAsset.load(.tracks) and load(.duration) are the async
+            // replacements for the deprecated synchronous AVAsset.tracks and
+            // AVAsset.duration. Freshly-written WAV segments (especially from
+            // Bluetooth HFP 8 kHz) may not have fully indexed metadata when
+            // the synchronous APIs are called — they return nil/zero, silently
+            // dropping segments from the concatenated output.
+            let asset = AVURLAsset(url: url)
+            guard let track = (try? await asset.load(.tracks))?.first(where: { $0.mediaType == .audio }) else { continue }
+            let rawDuration = (try? await asset.load(.duration)) ?? .invalid
+            // If async loading returned invalid/zero, use the full asset rather
+            // than silently dropping the segment via a zero-length insert.
+            let duration: CMTime = rawDuration.isValid && rawDuration > .zero ? rawDuration : .positiveInfinity
             if let compTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
-                try? compTrack.insertTimeRange(CMTimeRange(start: .zero, duration: asset.duration), of: track, at: cursor)
-                cursor = CMTimeAdd(cursor, asset.duration)
+                try? compTrack.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: track, at: cursor)
+                cursor = CMTimeAdd(cursor, duration)
             }
         }
 

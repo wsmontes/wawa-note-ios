@@ -27,10 +27,16 @@ final class FileArtifactStore: @unchecked Sendable {
 
     init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
-        self.baseURL = fileManager
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first!
-            .appendingPathComponent("Meetings", isDirectory: true)
+        // applicationSupportDirectory can theoretically be empty in sandboxed
+        // environments or during very early boot. Guard against crash and fall
+        // back to caches rather than force-unwrapping .first.
+        if let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            self.baseURL = appSupport.appendingPathComponent("Meetings", isDirectory: true)
+        } else {
+            AppLog.storage.error("FileArtifactStore: applicationSupportDirectory unavailable, using caches fallback")
+            self.baseURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
+                .appendingPathComponent("Meetings", isDirectory: true)
+        }
     }
 
     // MARK: - Directory management

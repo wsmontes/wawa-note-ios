@@ -9,6 +9,9 @@ final class Folder {
     var createdAt: Date
     var sortOrder: Int
     var iconName: String?
+    /// Stable identity for the Trash folder — resilient to renaming,
+    /// localization, and icon changes. Set by TrashService on creation.
+    var isTrashFolder: Bool = false
 
     init(
         id: UUID = UUID(),
@@ -16,7 +19,8 @@ final class Folder {
         parentFolderID: UUID? = nil,
         createdAt: Date = Date(),
         sortOrder: Int = 0,
-        iconName: String? = nil
+        iconName: String? = nil,
+        isTrashFolder: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -24,5 +28,6 @@ final class Folder {
         self.createdAt = createdAt
         self.sortOrder = sortOrder
         self.iconName = iconName
+        self.isTrashFolder = isTrashFolder
     }
 }

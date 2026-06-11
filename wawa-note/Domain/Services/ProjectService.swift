@@ -149,17 +149,22 @@ final class ProjectService {
         let tasks = try context.fetch(FetchDescriptor<TaskItem>(predicate: #Predicate { $0.projectID == projectId }))
         for task in tasks { context.delete(task) }
         let pid = project.id
+
+        // Track deleted edge IDs to avoid double-deleting edges that connect
+        // items to the project itself (both loops would match those edges).
+        var deletedEdgeIDs = Set<UUID>()
         let edgesOut = try context.fetch(FetchDescriptor<GraphEdge>(predicate: #Predicate { $0.fromID == pid }))
-        for edge in edgesOut { context.delete(edge) }
+        for edge in edgesOut { context.delete(edge); deletedEdgeIDs.insert(edge.id) }
         let edgesIn = try context.fetch(FetchDescriptor<GraphEdge>(predicate: #Predicate { $0.toID == pid }))
-        for edge in edgesIn { context.delete(edge) }
-        // Clean up inter-item edges from this project's items
+        for edge in edgesIn { context.delete(edge); deletedEdgeIDs.insert(edge.id) }
+
+        // Clean up inter-item edges, skipping any already deleted in the project-level pass
         let itemIDs = items.map(\.id)
         for iid in itemIDs {
             let out = try context.fetch(FetchDescriptor<GraphEdge>(predicate: #Predicate { $0.fromID == iid }))
-            for e in out { context.delete(e) }
+            for e in out where !deletedEdgeIDs.contains(e.id) { context.delete(e) }
             let incoming = try context.fetch(FetchDescriptor<GraphEdge>(predicate: #Predicate { $0.toID == iid }))
-            for e in incoming { context.delete(e) }
+            for e in incoming where !deletedEdgeIDs.contains(e.id) { context.delete(e) }
         }
         context.delete(project)
         try context.save()
