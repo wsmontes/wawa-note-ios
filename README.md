@@ -15,14 +15,6 @@
 </p>
 
 ---
-
-# Wawa Note
-
-**Your Knowledge, Your Process.**
-An open-source, provider-agnostic AI workspace for project memory. Free. No SaaS. Your data, your rules.
-
-[![Release](https://img.shields.io/github/v/release/wsmontes/wawa-note-ios)](https://github.com/wsmontes/wawa-note-ios/releases) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![Platform: iOS 17+](https://img.shields.io/badge/platform-iOS%2017%2B-blue) ![Swift 6.0 | SwiftUI](https://img.shields.io/badge/Swift%206.0-SwiftUI-orange) [![CI](https://github.com/wsmontes/wawa-note-ios/actions/workflows/ci.yml/badge.svg)](https://github.com/wsmontes/wawa-note-ios/actions)
-
 > ⚠️ **Status: Early development.** The app builds and core features work, but it has not been validated through sustained daily use. Expect rough edges.
 ---
 
