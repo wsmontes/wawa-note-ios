@@ -50,11 +50,6 @@ final class AudioAssetResolver: Sendable {
         return .unavailable
     }
 
-    /// Whether any playable audio exists (single file or segments).
-    var hasPlayableAudio: Bool {
-        fatalError("Use state(for:) instead — this resolver is stateless per item.")
-    }
-
     /// Resolve a playable URL, concatenating on demand if necessary.
     /// - Parameter itemId: The knowledge item ID.
     /// - Returns: URL to a playable audio file, or nil if no audio exists.

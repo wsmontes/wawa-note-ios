@@ -638,79 +638,6 @@ struct ChatView: View {
         } catch { return nil }
     }
 
-    /// Start recording freely — returns audio URL when user taps stop.
-    private func captureAudioChunk() async -> URL? {
-        // This is now only used internally; finishDictation handles the real flow.
-        await withCheckedContinuation { continuation in
-            let audioURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent("dictation_\(UUID().uuidString).wav")
-            let settings: [String: Any] = [
-                AVFormatIDKey: Int(kAudioFormatLinearPCM),
-                AVSampleRateKey: 16000,
-                AVNumberOfChannelsKey: 1,
-                AVLinearPCMBitDepthKey: 16,
-                AVLinearPCMIsFloatKey: false,
-                AVLinearPCMIsBigEndianKey: false
-            ]
-            var hasResumed = false
-            do {
-                let recorder = try AVAudioRecorder(url: audioURL, settings: settings)
-                recorder.isMeteringEnabled = true
-                self.dictation.audioRecorder = recorder
-                recorder.record(forDuration: 60) // max safety
-                // The recorder stops itself at 60s
-                // But finishDictation() is called by the UI button before then
-                Task {
-                    try? await Task.sleep(nanoseconds: 60_000_000_000)
-                    if !hasResumed {
-                        hasResumed = true
-                        recorder.stop()
-                        self.dictation.audioRecorder = nil
-                        continuation.resume(returning: audioURL)
-                    }
-                }
-            } catch {
-                if !hasResumed { hasResumed = true; continuation.resume(returning: nil) }
-            }
-        }
-    }
-
-
-
-    private func captureAppleAudioURL() async -> URL? {
-        // SFSpeechRecognizer can work with audio files.
-        // Re-record a short clip in a format it handles well.
-        await withCheckedContinuation { continuation in
-            let audioURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent("apple_dictation_\(UUID().uuidString).wav")
-            let settings: [String: Any] = [
-                AVFormatIDKey: Int(kAudioFormatLinearPCM),
-                AVSampleRateKey: 16000,
-                AVNumberOfChannelsKey: 1,
-                AVLinearPCMBitDepthKey: 16,
-                AVLinearPCMIsFloatKey: false
-            ]
-            var hasResumed = false
-            do {
-                let recorder = try AVAudioRecorder(url: audioURL, settings: settings)
-                recorder.isMeteringEnabled = true
-                self.dictation.audioRecorder = recorder
-                recorder.record()
-                Task {
-                    try? await Task.sleep(nanoseconds: 8_000_000_000)
-                    if !hasResumed {
-                        hasResumed = true
-                        recorder.stop()
-                        self.dictation.audioRecorder = nil
-                        continuation.resume(returning: audioURL)
-                    }
-                }
-            } catch {
-                if !hasResumed { hasResumed = true; continuation.resume(returning: nil) }
-            }
-        }
-    }
-
     private func recognizeFile(_ url: URL) async -> String? {
         guard let recognizer = SFSpeechRecognizer(), recognizer.isAvailable else { return nil }
         let request = SFSpeechURLRecognitionRequest(url: url)
@@ -1098,31 +1025,6 @@ struct AgentStatusBar: View {
     }
 }
 
-// MARK: - Tool call card (deprecated — kept for reference)
-
-struct ToolCallCardView: View {
-    let progress: ToolCallProgress
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: progress.status == .running ? "hourglass" : (progress.status == .completed ? "checkmark.circle.fill" : "xmark.circle.fill"))
-                .font(.caption)
-                .foregroundColor(progress.status == .running ? .orange : (progress.status == .completed ? .green : .red))
-
-            Text(progress.toolName)
-                .font(.caption).fontWeight(.medium)
-
-            if let summary = progress.displaySummary {
-                Text("·").font(.caption).foregroundStyle(.secondary)
-                Text(summary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
-            Spacer()
-        }
-        .padding(10)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .padding(.horizontal, 16)
-    }
 }
 
 // MARK: - Streaming message

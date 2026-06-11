@@ -1198,7 +1198,7 @@ struct KnowledgeDetailView: View {
 
     private func loadFavicon(url: URL) {
         guard let host = url.host else { return }
-        let faviconURL = URL(string: "https://www.google.com/s2/favicons?domain=\(host)&sz=64")!
+        guard let faviconURL = URL(string: "https://www.google.com/s2/favicons?domain=\(host)&sz=64") else { return }
         let task = URLSession.shared.dataTask(with: faviconURL) { data, _, _ in
             if let data, let img = UIImage(data: data) {
                 Task { @MainActor in bookmarkFavicon = img }
