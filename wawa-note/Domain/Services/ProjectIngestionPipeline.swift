@@ -619,8 +619,9 @@ final class ProjectIngestionPipeline: ObservableObject {
         let lower = trimmed.lowercased()
         return items.first { item in
             let itemLower = item.title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-            // Require at least 4 chars to avoid false positives on short tokens like "ai", "a", "it"
-            guard lower.count >= 4 else { return false }
+            // Require at least 2 chars to avoid single-char false positives
+            // while still matching short acronyms like "AI", "UI", "iOS"
+            guard lower.count >= 2 else { return false }
             return itemLower.contains(lower)
         }
     }

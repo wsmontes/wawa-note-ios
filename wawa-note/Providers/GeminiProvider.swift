@@ -377,8 +377,8 @@ final class GeminiProvider: AIProvider, @unchecked Sendable {
             return fcParts.map { fc in
                 let argsStr: String
                 if let args = fc.args {
-                    let stringArgs = args.mapValues { "\($0.value)" }
-                    if let data = try? JSONSerialization.data(withJSONObject: stringArgs),
+                    let raw: [String: Any] = args.mapValues { $0.value }
+                    if let data = try? JSONSerialization.data(withJSONObject: raw),
                        let jsonStr = String(data: data, encoding: .utf8) {
                         argsStr = jsonStr
                     } else {

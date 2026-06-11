@@ -376,8 +376,12 @@ final class AnthropicProvider: AIProvider, @unchecked Sendable {
                 guard let id = block.id, let name = block.name else { return nil }
                 let args: String
                 if let input = block.input {
-                    let stringInput = input.mapValues { "\($0.value)" }
-                    if let data = try? JSONSerialization.data(withJSONObject: stringInput),
+                    // AnyDecodable.values come from JSONSerialization, so they are
+                    // already JSON-compatible (String, Int, Double, Bool, NSArray, NSDictionary).
+                    // Using "\($0.value)" would produce Swift debug descriptions for nested
+                    // objects/arrays instead of valid JSON.
+                    let raw: [String: Any] = input.mapValues { $0.value }
+                    if let data = try? JSONSerialization.data(withJSONObject: raw),
                        let jsonStr = String(data: data, encoding: .utf8) {
                         args = jsonStr
                     } else {
