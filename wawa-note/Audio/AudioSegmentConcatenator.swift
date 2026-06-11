@@ -36,12 +36,13 @@ enum AudioSegmentConcatenator {
             let asset = AVURLAsset(url: url)
             guard let track = (try? await asset.load(.tracks))?.first(where: { $0.mediaType == .audio }) else { continue }
             let rawDuration = (try? await asset.load(.duration)) ?? .invalid
-            // If async loading returned invalid/zero, use the full asset rather
-            // than silently dropping the segment via a zero-length insert.
-            let duration: CMTime = rawDuration.isValid && rawDuration > .zero ? rawDuration : .positiveInfinity
+            guard rawDuration.isValid, rawDuration > .zero else {
+                AppLog.audio.warning("SegmentConcatenator: skipping \(url.lastPathComponent) — invalid duration")
+                continue
+            }
             if let compTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
-                try? compTrack.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: track, at: cursor)
-                cursor = CMTimeAdd(cursor, duration)
+                try? compTrack.insertTimeRange(CMTimeRange(start: .zero, duration: rawDuration), of: track, at: cursor)
+                cursor = CMTimeAdd(cursor, rawDuration)
             }
         }
 

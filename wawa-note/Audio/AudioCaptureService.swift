@@ -418,7 +418,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 if attempt < 2 {
                     try? await Task.sleep(nanoseconds: 300_000_000)
                     engine.reset()
+                    // engine.reset() destroys any installed tap — reinstall before retry.
+                    isTapInstalled = false
                     engine.prepare()
+                    safelyInstallTap(reason: "engineStart retry \(attempt + 1)")
                 }
             }
         }
@@ -737,7 +740,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 if attempt < 2 {
                     try? await Task.sleep(nanoseconds: 300_000_000)
                     engine.reset()
+                    // engine.reset() destroys any installed tap — reinstall before retry.
+                    isTapInstalled = false
                     engine.prepare()
+                    safelyInstallTap(reason: "engineStart retry \(attempt + 1)")
                 }
             }
         }
@@ -1293,7 +1299,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 if attempt < 2 {
                     try? await Task.sleep(nanoseconds: 300_000_000)
                     engine.reset()
+                    // engine.reset() destroys any installed tap — reinstall before retry.
+                    isTapInstalled = false
                     engine.prepare()
+                    safelyInstallTap(reason: "engineStart retry \(attempt + 1)")
                 }
             }
         }
