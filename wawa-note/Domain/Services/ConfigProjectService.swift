@@ -38,11 +38,14 @@ final class ConfigProjectService {
 
     private static func createConfigProject(context: ModelContext) -> Project {
         let svc = ProjectService(context: context)
-        guard let project = try? svc.create(
-            name: configProjectName,
-            summary: "App configuration: providers, prompts, settings, and agent memories. Edit files directly to customize Wawa Note."
-        ) else {
-            fatalError("ConfigProjectService: failed to create config project")
+        do {
+            return try svc.create(
+                name: configProjectName,
+                summary: "App configuration: providers, prompts, settings, and agent memories. Edit files directly to customize Wawa Note."
+            )
+        } catch {
+            AppLog.general.error("ConfigProjectService: failed to create config project — \(error.localizedDescription)")
+            fatalError("ConfigProjectService: failed to create config project: \(error.localizedDescription)")
         }
         // Override the auto-generated slug to ensure it's always wawa-note-config
         project.slug = configProjectSlug
