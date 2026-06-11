@@ -11,6 +11,7 @@ enum AppLog {
     static let provider = Logger(subsystem: subsystem, category: "provider")
     static let storage = Logger(subsystem: subsystem, category: "storage")
     static let general = Logger(subsystem: subsystem, category: "general")
+    static let agent = Logger(subsystem: subsystem, category: "agent")
 }
 
 // MARK: - FileLogService (persistent, crash-safe)
@@ -188,6 +189,7 @@ extension AppLog {
         case "transcription": transcription.info("\(message)")
         case "provider": provider.info("\(message)")
         case "storage": storage.info("\(message)")
+        case "agent": agent.info("\(message)")
         case "general": general.info("\(message)")
         default: general.info("[\(category)] \(message)")
         }
@@ -202,6 +204,7 @@ extension AppLog {
         case "transcription": transcription.warning("\(message)")
         case "provider": provider.warning("\(message)")
         case "storage": storage.warning("\(message)")
+        case "agent": agent.warning("\(message)")
         case "general": general.warning("\(message)")
         default: general.warning("[\(category)] \(message)")
         }
@@ -216,6 +219,7 @@ extension AppLog {
         case "transcription": transcription.error("\(message)")
         case "provider": provider.error("\(message)")
         case "storage": storage.error("\(message)")
+        case "agent": agent.error("\(message)")
         case "general": general.error("\(message)")
         default: general.error("[\(category)] \(message)")
         }

@@ -151,7 +151,7 @@ struct WawaNoteApp: App {
                 let inboxCount = allItems.filter { item in
                     item.inboxDate != nil && (trashFolderID == nil || item.folderID != trashFolderID)
                 }.count
-                UIApplication.shared.applicationIconBadgeNumber = inboxCount
+                try? await UNUserNotificationCenter.current().setBadgeCount(inboxCount)
             } catch {
                 AppLog.warn("general", "Failed to update app badge: \(error.localizedDescription)")
             }
@@ -166,7 +166,8 @@ struct WawaNoteApp: App {
             content.title = title
             content.body = body
             content.sound = .default
-            content.badge = NSNumber(value: UIApplication.shared.applicationIconBadgeNumber + 1)
+            let currentBadge = (try? await UNUserNotificationCenter.current().badgeCount()) ?? 0
+            content.badge = NSNumber(value: currentBadge + 1)
             let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
             center.add(request)
         }

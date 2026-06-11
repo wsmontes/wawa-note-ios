@@ -39,7 +39,7 @@ struct EvalSystem {
     }
 
     struct EvalCheck: Codable, Identifiable {
-        var id: String { name }
+        let id = UUID()
         let name: String
         let passed: Bool
         let score: Int       // 0-100 for this check

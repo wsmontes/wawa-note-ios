@@ -3,13 +3,16 @@ import Foundation
 final class ContextWindowManager {
     let modelContextLimit: Int
     private let charsPerToken = 4
+    private let cjkCharsPerToken = 2
 
     init(modelContextLimit: Int) {
         self.modelContextLimit = modelContextLimit
     }
 
     func estimateTokens(_ text: String) -> Int {
-        max(1, text.count / charsPerToken)
+        let hasCJK = text.unicodeScalars.contains { $0.properties.isIdeographic }
+        let ratio = hasCJK ? cjkCharsPerToken : charsPerToken
+        return max(1, text.count / ratio)
     }
 
     func estimateTokens(_ messages: [ChatMessage]) -> Int {

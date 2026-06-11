@@ -32,7 +32,7 @@ struct PDFImporter: FormatImporter {
             bodyText: fullText.trimmingCharacters(in: .whitespacesAndNewlines)
         )
         item.isImported = true
-        item.importSourceURL = url.absoluteString
+        item.importSourceURL = url.lastPathComponent
 
         let pages = pdf.pageCount
         let warnings: [String] = pages == 0 ? ["No text extracted from PDF"] : []

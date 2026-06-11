@@ -44,7 +44,7 @@ final class AnarlogSyncService: ObservableObject {
     /// Save a security-scoped bookmark for the given folder URL.
     func saveBookmark(for url: URL) throws {
         let bookmark = try url.bookmarkData(
-            options: .minimalBookmark,
+            options: [],
             includingResourceValuesForKeys: nil,
             relativeTo: nil
         )

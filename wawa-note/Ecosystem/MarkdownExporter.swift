@@ -96,8 +96,15 @@ struct MarkdownExporter: Sendable {
     }
 
     private func formatDuration(_ seconds: Double) -> String {
-        let m = Int(seconds) / 60
-        if m >= 60 { return "\(m / 60)h \(m % 60)m" }
+        let totalSeconds = Int(seconds)
+        let m = totalSeconds / 60
+        let s = totalSeconds % 60
+        if m >= 60 {
+            let h = m / 60
+            let remainingM = m % 60
+            return "\(h)h \(remainingM)m \(s)s"
+        }
+        if s > 0 { return "\(m)m \(s)s" }
         return "\(m)m"
     }
 }

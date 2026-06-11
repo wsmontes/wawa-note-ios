@@ -71,13 +71,14 @@ final class ProviderAdapter: @unchecked Sendable {
 
         // Multi-model routing based on provider type
         let model: String = {
+            let configFallback = AIConfigService.shared.modelFor(feature: "analysis")
             switch provider.providerType {
             case .anthropic:
-                return template.model ?? "claude-sonnet-4-6"
+                return template.model ?? configFallback ?? "claude-sonnet-4-6"
             case .gemini:
-                return template.model ?? "gemini-2.5-flash"
+                return template.model ?? configFallback ?? "gemini-2.5-flash"
             case .openAI, .openAICompatible, .localNetwork, .appleLocal:
-                return template.model ?? "gpt-5.5"
+                return template.model ?? configFallback ?? "gpt-5.5"
             }
         }()
 
@@ -135,14 +136,10 @@ final class ProviderAdapter: @unchecked Sendable {
             return extracted
         }
 
-        // Fallback: wrap raw text with proper escaping
-        let escaped = cleaned
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
-            .replacingOccurrences(of: "\r", with: "\\r")
-            .replacingOccurrences(of: "\t", with: "\\t")
-        return "{\"raw_text\": \"\(escaped)\"}"
+        // No valid JSON found — return empty object instead of false-success raw_text wrapper.
+        // Callers that try JSONDecoder.decode on this will get nil/default fields, not a
+        // misleading raw_text key that silently masks extraction failures.
+        return "{}"
     }
 
     static func normalizeResponse(_ text: String, tactic: ProviderTactic) -> NormalizedResponse {
