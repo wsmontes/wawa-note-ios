@@ -58,8 +58,9 @@ struct MarkdownEditorView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 if hasChanges {
                     Button("Save") {
-                        _ = viewModel.writeFileContent(node.path, content: content)
-                        hasChanges = false
+                        if viewModel.writeFileContent(node.path, content: content) {
+                            hasChanges = false
+                        }
                     }
                     .fontWeight(.semibold)
                 }

@@ -150,8 +150,9 @@ struct JSONEditorView: View {
 
     private func save() {
         guard validateJSON() else { return }
-        _ = viewModel.writeFileContent(node.path, content: content)
-        hasChanges = false
+        if viewModel.writeFileContent(node.path, content: content) {
+            hasChanges = false
+        }
     }
 
     private func prettyPrint() {
