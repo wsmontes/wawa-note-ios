@@ -756,4 +756,32 @@ final class InstanceExportService {
             autoTranscribe: auto.autoTranscribe, autoAnalyze: auto.autoAnalyze,
             autoAnalysisModel: auto.autoAnalysisModel, autoAnalysisProvider: auto.autoAnalysisProvider)
     }
+
+    // MARK: - SRT Export
+
+    /// Export transcript segments as SubRip (.srt) subtitle format.
+    /// Each segment becomes a numbered subtitle block with HH:MM:SS,mmm timestamps.
+    func exportSRT(for itemId: UUID) -> String? {
+        guard let transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: itemId),
+              !transcript.segments.isEmpty else { return nil }
+
+        var srt = ""
+        for (index, segment) in transcript.segments.enumerated() {
+            let seq = index + 1
+            let start = formatSRTTimestamp(segment.startTime)
+            let end = formatSRTTimestamp(segment.endTime ?? segment.startTime + 5)
+            let text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+            srt += "\(seq)\n\(start) --> \(end)\n\(text)\n\n"
+        }
+        return srt.isEmpty ? nil : srt
+    }
+
+    private func formatSRTTimestamp(_ seconds: Double) -> String {
+        let h = Int(seconds) / 3600
+        let m = (Int(seconds) % 3600) / 60
+        let s = Int(seconds) % 60
+        let ms = Int((seconds - Double(Int(seconds))) * 1000)
+        return String(format: "%02d:%02d:%02d,%03d", h, m, s, ms)
+    }
 }
