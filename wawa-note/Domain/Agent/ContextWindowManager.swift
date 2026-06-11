@@ -122,7 +122,11 @@ final class ContextWindowManager {
 
     // MARK: - Layer 4: Auto-summary
 
-    private let summaryAfterTokens = 6000
+    /// Trigger auto-summary when history exceeds half the model's context window.
+    /// Avoids aggressive pruning on large-context models (up to 1M tokens).
+    private lazy var summaryAfterTokens: Int = {
+        modelContextLimit / 2
+    }()
 
     private func autoSummarize(_ messages: [ChatMessage], availableTokens: Int) -> [ChatMessage] {
         let totalTokens = estimateTokens(messages)

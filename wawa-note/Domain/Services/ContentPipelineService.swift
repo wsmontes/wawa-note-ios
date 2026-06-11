@@ -105,6 +105,7 @@ final class ContentPipelineService: ObservableObject {
                 endBackgroundTask()
                 NotificationCenter.default.post(name: .pipelineCompleted, object: itemID.uuidString)
             }
+            guard !Task.isCancelled else { return }
             beginBackgroundTask()
 
             guard let item = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) else {
@@ -148,7 +149,9 @@ final class ContentPipelineService: ObservableObject {
                 AppLog.provider.error("ContentPipeline: no active provider configured — transcription-only mode")
                 if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
                     fresh.status = fresh.transcriptionEngineId != nil ? .transcribed : .recorded
-                    try? modelContext.save()
+                    do { try modelContext.save() } catch {
+                        AppLog.provider.error("ContentPipeline: critical save failed (transcription-only): \(error.localizedDescription)")
+                    }
                 }
                 return
             }
@@ -361,7 +364,9 @@ final class ContentPipelineService: ObservableObject {
             if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
                 fresh.analysisProviderId = provider.id
                 fresh.status = lastError == nil ? .analyzed : .failed
-                try? modelContext.save()
+                do { try modelContext.save() } catch {
+                    AppLog.provider.error("ContentPipeline: critical save failed (analysis status): \(error.localizedDescription)")
+                }
             }
             // Update project health after agent completes
             if let pid = item.projectID { ProjectHealthEngine.updateProject(pid, context: modelContext) }

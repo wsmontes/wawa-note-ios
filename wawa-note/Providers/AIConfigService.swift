@@ -73,18 +73,28 @@ final class AIConfigService: @unchecked Sendable {
     let config: AIConfig
 
     private init() {
-        guard let url = Bundle.main.url(forResource: "ai_config", withExtension: "json") else {
-            AppLog.provider.error("ai_config.json not found in bundle")
-            fatalError("ai_config.json is required")
+        if let url = Bundle.main.url(forResource: "ai_config", withExtension: "json") {
+            do {
+                let data = try Data(contentsOf: url)
+                config = try JSONDecoder().decode(AIConfig.self, from: data)
+                AppLog.provider.info("Loaded AI config v\(self.config.version): \(self.config.providers.count) providers, \(self.config.features?.count ?? 0) features")
+                return
+            } catch {
+                AppLog.provider.error("Failed to decode ai_config.json: \(error) — using default config")
+            }
+        } else {
+            AppLog.provider.error("ai_config.json not found in bundle — using default config")
         }
-        do {
-            let data = try Data(contentsOf: url)
-            config = try JSONDecoder().decode(AIConfig.self, from: data)
-            AppLog.provider.info("Loaded AI config v\(self.config.version): \(self.config.providers.count) providers, \(self.config.features?.count ?? 0) features")
-        } catch {
-            AppLog.provider.error("Failed to decode ai_config.json: \(error)")
-            fatalError("ai_config.json is invalid: \(error)")
-        }
+        // Fallback: empty config with sensible defaults — app launches without ai_config.json
+        config = AIConfig(
+            version: "1.0",
+            description: "Default config (failed to load)",
+            providers: [:],
+            defaultModels: nil,
+            modelPresets: [:],
+            features: [:],
+            lenses: nil
+        )
     }
 
     // MARK: - Providers

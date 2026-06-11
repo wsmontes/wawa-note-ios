@@ -1,6 +1,8 @@
 import UIKit
 import UniformTypeIdentifiers
+import OSLog
 
+private let logger = Logger(subsystem: "com.wawa-note.share", category: "share-extension")
 private let appGroupIdentifier = "group.com.wawa-note"
 private let sharedDirectoryName = "shared"
 private let pendingImportFilesKey = "pendingImportFiles"
@@ -29,7 +31,7 @@ final class ShareViewController: UIViewController {
     private func processAttachments() {
         guard let containerURL = FileManager.default
             .containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) else {
-            NSLog("[WawaShare] App Group container not available — cannot import")
+            logger.info(" App Group container not available — cannot import")
             processingDone = true
             hasErrors = true
             return
@@ -82,19 +84,19 @@ final class ShareViewController: UIViewController {
                 }
             }
             if !matched {
-                NSLog("[WawaShare] No supported type for: \(provider.registeredTypeIdentifiers)")
+                logger.info(" No supported type for: \(provider.registeredTypeIdentifiers)")
             }
         }
 
         group.notify(queue: .main) { [weak self] in
             self?.savedFiles = saved
             if saved.isEmpty {
-                NSLog("[WawaShare] No files saved (errors: \(errorCount))")
+                logger.info(" No files saved (errors: \(errorCount))")
                 self?.hasErrors = true
             } else {
                 let shared = UserDefaults(suiteName: appGroupIdentifier)
                 shared?.set(saved, forKey: pendingImportFilesKey)
-                NSLog("[WawaShare] Saved \(saved.count) files (errors: \(errorCount)): \(saved)")
+                logger.info(" Saved \(saved.count) files (errors: \(errorCount)): \(saved)")
                 // Open the main app to trigger import
                 if let url = URL(string: "wawanote://import") {
                     self?.extensionContext?.open(url)
@@ -109,7 +111,7 @@ final class ShareViewController: UIViewController {
         // Safety timeout: complete anyway after deadline
         DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
             guard let self, !self.processingDone else { return }
-            NSLog("[WawaShare] Timed out waiting for attachments — completing with \(saved.count) files saved")
+            logger.info(" Timed out waiting for attachments — completing with \(saved.count) files saved")
             self.savedFiles = saved
             if !saved.isEmpty {
                 let shared = UserDefaults(suiteName: appGroupIdentifier)
@@ -131,7 +133,7 @@ final class ShareViewController: UIViewController {
     private func loadFile(from provider: NSItemProvider, typeIdentifier: String, containerURL: URL, completion: @escaping (String?) -> Void) {
         provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, error in
             if let error {
-                NSLog("[WawaShare] loadFileRepresentation error: \(error.localizedDescription)")
+                logger.info(" loadFileRepresentation error: \(error.localizedDescription)")
                 completion(nil)
                 return
             }
@@ -148,7 +150,7 @@ final class ShareViewController: UIViewController {
 
             let originalName = provider.suggestedName ?? url.lastPathComponent
             let safeName = Self.safeImportFilename(original: originalName)
-            NSLog("[WawaShare] Received: \(originalName) -> \(safeName)")
+            logger.info(" Received: \(originalName) -> \(safeName)")
 
             let sharedDir = containerURL.appendingPathComponent(sharedDirectoryName, isDirectory: true)
             do {
@@ -156,10 +158,10 @@ final class ShareViewController: UIViewController {
                 let destURL = sharedDir.appendingPathComponent(safeName)
                 try? FileManager.default.removeItem(at: destURL)
                 try FileManager.default.copyItem(at: url, to: destURL)
-                NSLog("[WawaShare] Copied to: \(destURL.path)")
+                logger.info(" Copied to: \(destURL.path)")
                 completion(safeName)
             } catch {
-                NSLog("[WawaShare] Copy error: \(error.localizedDescription)")
+                logger.info(" Copy error: \(error.localizedDescription)")
                 completion(nil)
             }
         }

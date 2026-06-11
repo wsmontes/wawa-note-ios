@@ -11,7 +11,8 @@ struct MarkdownExporter: Sendable {
 
         // YAML frontmatter
         md += "---\n"
-        md += "title: \"\(item.title)\"\n"
+        let escapedTitle = item.title.replacingOccurrences(of: "\"", with: "\\\"")
+        md += "title: \"\(escapedTitle)\"\n"
         md += "date: \(ISO8601DateFormatter().string(from: item.createdAt))\n"
         md += "type: \(item.type.rawValue)\n"
         if let duration = item.durationSeconds { md += "duration: \(Int(duration))\n" }

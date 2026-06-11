@@ -65,9 +65,10 @@ struct WawaNoteApp: App {
         }
 
         // Run one-time data migrations
-        KnowledgeItemService.migrateMeetingToAudio(context: ModelContext(modelContainer))
-        ProjectService.migrateProjectColors(context: ModelContext(modelContainer))
-        ProjectService.migrateFieldProvenance(context: ModelContext(modelContainer))
+        let migrationContext = ModelContext(modelContainer)
+        KnowledgeItemService.migrateMeetingToAudio(context: migrationContext)
+        ProjectService.migrateProjectColors(context: migrationContext)
+        ProjectService.migrateFieldProvenance(context: migrationContext)
 
         // Setup notifications
         setupNotifications()

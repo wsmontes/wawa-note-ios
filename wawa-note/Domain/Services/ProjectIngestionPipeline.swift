@@ -64,12 +64,22 @@ final class ProjectIngestionPipeline: ObservableObject {
     private let ingestionState: ProjectIngestionState
     private let fileStore: FileArtifactStore
 
+    /// Caps concurrent AI ingestion calls to avoid API rate limiting (HTTP 429).
+    private var activeIngestionCount = 0
+    private let maxConcurrentIngestions = 2
+
     init(ingestionState: ProjectIngestionState, fileStore: FileArtifactStore = FileArtifactStore()) {
         self.ingestionState = ingestionState
         self.fileStore = fileStore
     }
 
     func ingest(itemID: UUID, projectID: UUID, using modelContext: ModelContext) async {
+        guard self.activeIngestionCount < self.maxConcurrentIngestions else {
+            AppLog.provider.warning("ProjectIngestion: rate limited (\(self.activeIngestionCount) active)")
+            return
+        }
+        self.activeIngestionCount += 1
+        defer { self.activeIngestionCount -= 1 }
         await runIngestion(itemID: itemID, projectID: projectID, context: modelContext)
     }
 
