@@ -12,7 +12,6 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/platform-iOS%2017%2B-orange" alt="Platform: iOS 17+">
   <img src="https://img.shields.io/badge/Swift-6.0%20%7C%20SwiftUI-purple" alt="Swift 6.0 | SwiftUI">
-  <a href="https://github.com/wsmontes/wawa-note-ios/actions"><img src="https://img.shields.io/badge/CI-GitHub%20Actions-blue" alt="CI"></a>
 </p>
 
 ---
