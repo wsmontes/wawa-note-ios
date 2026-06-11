@@ -10,7 +10,6 @@ struct WawaNoteApp: App {
     private let recordingCoordinator: RecordingCoordinator
     private let calendarSyncService: CalendarSyncService
     private let sharedEventStore: EKEventStore
-    private let anarlogSyncService = AnarlogSyncService()
 
     private let ingestionState: ProjectIngestionState
     private let contentPipeline: ContentPipelineService
@@ -56,7 +55,7 @@ struct WawaNoteApp: App {
         calendarSyncService = CalendarSyncService(eventStore: sharedEventStore)
 
         // Restore anarlog sync bookmark and trigger initial scan
-        let syncSvc = anarlogSyncService
+        let syncSvc = AnarlogSyncService()
         syncSvc.modelContainer = modelContainer
         if syncSvc.hasWatchedFolder {
             Task { @MainActor in
@@ -158,20 +157,6 @@ struct WawaNoteApp: App {
         }
     }
 
-    static func sendLocalNotification(title: String, body: String) {
-        let center = UNUserNotificationCenter.current()
-        center.getNotificationSettings { settings in
-            guard settings.authorizationStatus == .authorized else { return }
-            let content = UNMutableNotificationContent()
-            content.title = title
-            content.body = body
-            content.sound = .default
-            let currentBadge = (try? await UNUserNotificationCenter.current().badgeCount()) ?? 0
-            content.badge = NSNumber(value: currentBadge + 1)
-            let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-            center.add(request)
-        }
-    }
 
     // MARK: - Body
 
