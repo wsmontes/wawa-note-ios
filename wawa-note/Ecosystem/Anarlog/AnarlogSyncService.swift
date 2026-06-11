@@ -30,6 +30,9 @@ final class AnarlogSyncService: ObservableObject {
     private let bookmarkKey = "anarlog_sync_bookmark"
     private let syncStateFilename = ".wawa-sync.json"
 
+    /// Set externally (from WawaNoteApp) so scanAndImport() can persist discovered files.
+    var modelContainer: ModelContainer?
+
     init(fileStore: FileArtifactStore = FileArtifactStore()) {
         self.fileStore = fileStore
         self.importer = AnarlogImporter()
@@ -133,10 +136,20 @@ final class AnarlogSyncService: ObservableObject {
                     continue
                 }
 
-                // Queue import — the caller provides ModelContext
-                // For now, we just track what should be imported
-                newImports += 1
-                logger.info("Discovered new anarlog file: \(filename)")
+                // Import the file into SwiftData
+                if let container = modelContainer {
+                    let ctx = ModelContext(container)
+                    do {
+                        _ = try await importFile(fileURL, into: ctx)
+                        newImports += 1
+                        logger.info("Imported anarlog file: \(filename)")
+                    } catch {
+                        logger.error("Failed to import \(filename): \(error.localizedDescription)")
+                    }
+                } else {
+                    newImports += 1
+                    logger.warning("Discovered new anarlog file but no ModelContainer set: \(filename)")
+                }
             }
 
             importedCount += newImports

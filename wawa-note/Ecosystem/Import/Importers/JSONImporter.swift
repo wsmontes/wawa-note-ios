@@ -74,10 +74,6 @@ final class JSONImporter: FormatImporter, @unchecked Sendable {
         )
         item.bodyText = bodyText
 
-        if let idStr = imported.item?.id, let uuid = UUID(uuidString: idStr) {
-            item.id = uuid
-        }
-
         item.isImported = true
         item.importSourceURL = url.absoluteString
 

@@ -23,6 +23,10 @@ final class EmbeddingService: @unchecked Sendable {
         self.embeddingModel = embeddingModel
     }
 
+    /// Public accessor for SemanticSearchService and other consumers
+    /// that need to embed queries with the same model used for storage.
+    var configuredModel: String { embeddingModel }
+
     func embeddingURL(for itemId: UUID) -> URL {
         fileStore.itemDirectoryURL(for: itemId).appendingPathComponent("embedding.json")
     }
@@ -56,10 +60,20 @@ final class EmbeddingService: @unchecked Sendable {
             }
             return container.vector
         }
-        // Legacy format: plain [Float] — invalidate on model change
+        // Legacy format: plain [Float] — migrate to current format
         if let vector = try? JSONDecoder().decode([Float].self, from: data) {
-            AppLog.general.info("Legacy embedding for \(itemId) — will be regenerated")
-            return nil
+            AppLog.general.info("Legacy embedding for \(itemId): \(vector.count) dims — migrating to container format")
+            let container = EmbeddingContainer(
+                version: currentVersion,
+                model: embeddingModel,
+                dimensions: vector.count,
+                createdAt: Date(),
+                vector: vector
+            )
+            if let containerData = try? JSONEncoder().encode(container) {
+                try? containerData.write(to: url, options: .atomic)
+            }
+            return vector
         }
         return nil
     }

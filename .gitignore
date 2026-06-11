@@ -71,3 +71,4 @@ playground.xcworkspace
 *.log
 wawa-debug.log
 *.logarchive
+.claude/scheduled_tasks.lock

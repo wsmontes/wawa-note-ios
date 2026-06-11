@@ -18,8 +18,9 @@ final class SemanticSearchService: @unchecked Sendable {
     ) async throws -> [(itemId: UUID, score: Float)] {
         guard !itemIDs.isEmpty else { return [] }
 
-        // Embed the query
-        let queryVector = try await provider.embed(query, model: "text-embedding-3-small")
+        // Embed the query using the same model configured in EmbeddingService.
+        // Avoids model drift between stored vectors and query vectors.
+        let queryVector = try await provider.embed(query, model: embeddingService.configuredModel)
 
         // Score all items with cached embeddings
         var scored: [(UUID, Float)] = []

@@ -255,10 +255,10 @@ Criar `wawa-note/Domain/Models/ProjectModels.swift`:
 
 ### 2.5 — Atualizar Templates
 
-- [ ] Adicionar template `extract_entities` em `Resources/templates/`
-- [ ] Adicionar template `promote_to_project` em `Resources/templates/`
-- [ ] Adicionar template `find_connections` em `Resources/templates/`
-- [ ] Atualizar `TemplateService` para carregar novos templates
+- [x] Adicionar template `extract_entities` — superseded by `Skills/meeting_analysis.json` + `MeetilyTemplateService`
+- [x] Adicionar template `promote_to_project` — superseded by `ProjectConversionService.swift`
+- [x] Adicionar template `find_connections` — superseded by `CrossReferenceService.query()`
+- [x] Atualizar `TemplateService` — renamed to `MeetilyTemplateService.swift`, uses JSON templates in `MeetilyTemplates/`
 
 **Critério de saída:** Ask responde com citações precisas a itens fonte, entities são extraídas automaticamente, embeddings cobrem 100% dos items.
 

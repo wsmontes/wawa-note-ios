@@ -57,6 +57,7 @@ struct WawaNoteApp: App {
 
         // Restore anarlog sync bookmark and trigger initial scan
         let syncSvc = anarlogSyncService
+        syncSvc.modelContainer = modelContainer
         if syncSvc.hasWatchedFolder {
             Task { @MainActor in
                 await syncSvc.scanAndImport()
@@ -191,13 +192,21 @@ struct WawaNoteApp: App {
 
 @MainActor
 final class BiometricGateService: ObservableObject {
+    private static let keychainIdentifier = "com.wawa-note.biometric-gate"
+
     @Published var isAuthenticated = false
     @Published var isEnabled: Bool {
-        didSet { UserDefaults.standard.set(isEnabled, forKey: "face_id_enabled") }
+        didSet {
+            if isEnabled {
+                try? SecureKeyStore().saveAPIKey("1", for: Self.keychainIdentifier)
+            } else {
+                try? SecureKeyStore().deleteAPIKey(for: Self.keychainIdentifier)
+            }
+        }
     }
 
     init() {
-        self.isEnabled = UserDefaults.standard.bool(forKey: "face_id_enabled")
+        self.isEnabled = (try? SecureKeyStore().loadAPIKey(for: Self.keychainIdentifier)) == "1"
     }
 
     var biometryType: LABiometryType {

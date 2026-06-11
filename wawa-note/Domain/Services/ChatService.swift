@@ -1,9 +1,14 @@
 import Foundation
+import os
 
 @MainActor
 final class ChatService {
     private let fileStore: FileArtifactStore
     private let baseURL: URL
+
+    /// Serializes read-modify-write in appendMessage/appendMessages.
+    /// Prevents TOCTOU races when rapid-fire calls interleave via reentrancy.
+    private let appendLock = OSAllocatedUnfairLock()
 
     init(fileStore: FileArtifactStore = FileArtifactStore()) {
         self.fileStore = fileStore
@@ -81,6 +86,8 @@ final class ChatService {
     }
 
     func appendMessage(_ message: ChatMessage) throws {
+        appendLock.lock()
+        defer { appendLock.unlock() }
         var messages = try messages(for: message.conversationId)
         messages.append(message)
         try saveMessages(messages, conversationId: message.conversationId)
@@ -98,6 +105,8 @@ final class ChatService {
     }
 
     func appendMessages(_ newMessages: [ChatMessage]) throws {
+        appendLock.lock()
+        defer { appendLock.unlock() }
         guard let conversationId = newMessages.first?.conversationId else { return }
         var messages = try messages(for: conversationId)
         messages.append(contentsOf: newMessages)

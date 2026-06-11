@@ -107,16 +107,15 @@ final class ContextWindowManager {
     // MARK: - Layer 3: Tool result dedup
 
     private func deduplicateToolResults(_ messages: [ChatMessage]) -> [ChatMessage] {
-        var seen: [String: String] = [:]  // contentHash -> first occurrence content
+        var seen: Set<String> = []
         return messages.map { msg in
             guard msg.role == .tool else { return msg }
-            let hash = String(msg.content.hashValue)
-            if let first = seen[hash] {
+            if seen.contains(msg.content) {
                 var deduped = msg
                 deduped.content = "[Same as previous]"
                 return deduped
             }
-            seen[hash] = msg.content
+            seen.insert(msg.content)
             return msg
         }
     }

@@ -193,7 +193,7 @@ final class ProjectIngestionPipeline: ObservableObject {
                     AIMessage(role: .system, content: [.text("You are a JSON repair assistant. Output ONLY valid JSON matching the requested schema.")]),
                     AIMessage(role: .user, content: [.text(fixPrompt)])
                 ],
-                responseFormat: .jsonObject
+                responseFormat: AIConfigService.shared.supportsJSONFormat(for: model) ? .jsonObject : nil
             )
 
             do {
