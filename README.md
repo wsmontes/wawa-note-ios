@@ -17,25 +17,64 @@
 
 ---
 
+# Wawa Note
+
+**Your Knowledge, Your Process.**
+An open-source, provider-agnostic AI workspace for project memory. Free. No SaaS. Your data, your rules.
+
+[![Release](https://img.shields.io/github/v/release/wsmontes/wawa-note-ios)](https://github.com/wsmontes/wawa-note-ios/releases) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![Platform: iOS 17+](https://img.shields.io/badge/platform-iOS%2017%2B-blue) ![Swift 6.0 | SwiftUI](https://img.shields.io/badge/Swift%206.0-SwiftUI-orange) [![CI](https://github.com/wsmontes/wawa-note-ios/actions/workflows/ci.yml/badge.svg)](https://github.com/wsmontes/wawa-note-ios/actions)
+
+> ⚠️ **Status: Early development.** The app builds and core features work, but it has not been validated through sustained daily use. Expect rough edges. See [Known Limitations](#known-limitations) below.
+
+---
+
 ## What is Wawa Note?
 
-Wawa Note is a **free, open-source AI workspace** that captures meeting evidence — audio, scans, links, notes — and transforms it into a **canonical project knowledge store** with typed graphs, tasks, decisions, and provenance trails. An agentic AI chat navigates your knowledge like a filesystem.
+Wawa Note captures meeting evidence — audio, scans, links, notes — and transforms it into a **project knowledge store** with typed graphs, tasks, decisions, and provenance trails. An agentic AI chat navigates your knowledge like a filesystem.
 
 **You own your data. You choose your AI provider. You control the process.**
 
 - **No SaaS.** There are no Wawa Note servers. The app never sees your data.
 - **No vendor lock-in.** Export everything. Import everything. Your knowledge is portable.
-- **Pay for what you use.** Wawa Note is free. You bring your own API keys. You decide how much AI costs you.
+- **Pay for what you use.** Wawa Note is free. You bring your own API keys.
 - **Go fully local if you want.** On-device transcription. Local LLMs via LM Studio, Ollama, or your internal network.
 
-### Core Capabilities
+---
 
-- **Capture Anything**: Record meetings (audio + transcription), scan documents (VisionKit OCR), save web bookmarks, write notes
-- **Intelligent Pipeline**: Extract → Analyze → Detect signals → Ingest — fully automated per item
-- **Agentic Chat**: AI agent with shell-based tool calling navigates your knowledge like a filesystem
-- **Project Graph**: Typed relationships between items, tasks, people, and decisions — all with evidence provenance
-- **Provider Agnostic**: Works with OpenAI, Anthropic, Gemini, DeepSeek, OpenAI-compatible APIs, and local models (LM Studio, Ollama, vLLM)
-- **Data Ownership**: Import/export freely. Use your data anywhere — ChatGPT, Claude, Notion, Obsidian. It's yours.
+## Core Features
+
+### Capture
+- **Audio recording** with on-device (Apple Speech) or remote (Whisper API) transcription
+- **Document scanning** via VisionKit (multi-page OCR)
+- **Note creation** with markdown support
+- **Web bookmarks** and **file import** (JSON, Markdown, ICS, SRT, PDF, HTML, RTF)
+- **Share Extension** — send content directly from any app
+
+### Intelligent Pipeline
+- Extract → Analyze → Detect signals → Ingest — fully automated per item
+- Agent-driven processing with retry logic and background task support
+- Framework-based analysis (Meeting, Research, Blank — adapts output schema to project type)
+
+### Agentic Chat
+- **Shell VFS for tool calling** — the AI navigates your knowledge using Unix-like commands (`ls`, `cd`, `cat`, `find`, `grep`, `touch`, `echo`, `mv`, `rm`)
+- Context-aware conversations scoped to projects, items, or global
+- Auto/Deep/Fast modes — control how much the agent iterates
+- Voice input via on-device speech recognition or Whisper
+- Swipe actions on task/item cards for quick status changes
+- Choice prompts — numbered options become tappable buttons
+
+### Project Intelligence
+- Task boards with status, priority, owner tracking
+- Graph view — typed relationships with evidence provenance
+- Timeline — calendar integration with day summaries
+- Project health metrics and signals
+
+### iOS Integrations
+- Calendar read/write
+- Reminders export
+- Core Spotlight indexing
+- Face ID biometric gate
+- Live Activities during recording
 
 ---
 
@@ -43,28 +82,29 @@ Wawa Note is a **free, open-source AI workspace** that captures meeting evidence
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                    iOS App (SwiftUI)                      │
-│  Capture │ Inbox │ Explore │ Chat │ Settings              │
+│  iOS App (SwiftUI)                                       │
+│  Capture │ Inbox │ Explore │ Chat                        │
 ├──────────────────────────────────────────────────────────┤
-│                    Domain Layer                           │
-│  Agent (Shell VFS + Tool Calling) │ Content Pipeline      │
-│  Project Models │ Graph │ Calendar │ Search               │
+│  Domain Layer                                            │
+│  Agent (Shell VFS + Tool Calling) │ Content Pipeline     │
+│  Project Models │ Graph │ Calendar │ Search              │
 ├──────────────────────────────────────────────────────────┤
-│                    Provider Abstraction                   │
-│  OpenAI │ Anthropic │ Gemini │ DeepSeek │ Local LLM       │
+│  Provider Abstraction                                    │
+│  OpenAI │ Anthropic │ Gemini │ DeepSeek │ Local LLM     │
 ├──────────────────────────────────────────────────────────┤
-│                    Storage                                │
-│  SwiftData (metadata) │ FileManager (artifacts)            │
-│  Keychain (API keys)  │ Spotlight (indexing)              │
+│  Storage                                                 │
+│  SwiftData (metadata) │ FileManager (artifacts)          │
+│  Keychain (API keys)  │ Spotlight (indexing)             │
 └──────────────────────────────────────────────────────────┘
 ```
 
 ### Key Design Decisions
 
-- **Shell VFS for tool calling**: Instead of dozens of individual AI tools, the agent uses a single `run_command` with Unix-like shell commands (`ls`, `cd`, `cat`, `touch`, `echo`, `find`, `grep`, etc.). This makes the agent more flexible and reduces tool maintenance overhead.
+- **Shell VFS for tool calling**: Instead of dozens of individual AI tools, the agent uses a single `run_command` with Unix-like shell commands. This replaced 47 individual tool files, making the agent more flexible and reducing maintenance.
 - **Protocol-first boundaries**: Every external dependency (AI providers, transcription engines, import/export formats) is behind a Swift protocol.
-- **No backend**: The app is fully local. No servers, no cloud sync, no accounts.
+- **No backend**: Fully local. No servers, no cloud sync, no accounts.
 - **Provenance on every edge**: Graph relationships are traceable to a transcript segment, note block, or external event.
+- **Centralized AI config**: All AI calls go through `AIConfigService.shared.requestParams(for:model:)` — handles reasoning model detection, temperature capping, and context window limits.
 
 ---
 
@@ -75,7 +115,7 @@ Wawa Note is a **free, open-source AI workspace** that captures meeting evidence
 - Xcode 16+
 - iOS 17.0+
 - iPhone (or iPad / Mac with Catalyst)
-- An API key for at least one AI provider
+- An API key for at least one AI provider (OpenAI, Anthropic, Gemini, DeepSeek, or any OpenAI-compatible endpoint)
 
 ### Setup
 
@@ -85,14 +125,12 @@ cd wawa-note-ios
 open wawa-note.xcodeproj
 ```
 
-1. Open the project in Xcode
-2. Select your development team in Signing & Capabilities
-3. Build and run (Cmd+R) on a device or simulator
-4. Go to Settings → Provider → Add your API key
+1. Select your development team in Signing & Capabilities
+2. Build and run (Cmd+R) on a device or simulator
+3. Go to Settings → Provider → Add your API key
+4. Start capturing: record audio, scan a document, or create a note
 
 ### Provider Configuration
-
-Wawa Note works with **any** AI provider. Configure in Settings:
 
 | Provider | What You Need |
 |----------|---------------|
@@ -103,43 +141,23 @@ Wawa Note works with **any** AI provider. Configure in Settings:
 | **OpenAI-compatible** | API key + your own endpoint (Ollama, vLLM, Groq, etc.) |
 | **Local LLM** | Endpoint URL only (e.g., `http://localhost:8080/v1`) |
 
-All providers are configured via `wawa-note/Providers/ai_config.json` — add new models, adjust context windows, or mark reasoning models.
+All providers configured via `wawa-note/Providers/ai_config.json`.
 
 ---
 
-## Features
+## Known Limitations
 
-### Capture
-- **Audio recording** with on-device (Apple Speech) or remote (Whisper API) transcription
-- **Document scanning** via VisionKit (multi-page OCR)
-- **Note creation** with markdown support
-- **Web bookmarks** and **file import** (JSON, Markdown, ICS, SRT, PDF, HTML, RTF)
-- **Share Extension** — send content directly from any app
+These are honest current gaps — not future roadmap items, but things that don't fully work yet:
 
-### Agentic Chat
-- **Shell-based tool calling** — the AI navigates your knowledge like a filesystem
-- **Context-aware conversations** — chats are scoped to projects, items, or global
-- **Auto/Deep/Fast modes** — control how much the agent iterates
-- **Voice input** via on-device speech recognition or Whisper
-- **Swipe actions** on task/item cards for quick status changes
-- **Choice prompts** — numbered options become tappable buttons
-- **Markdown rendering** in messages
-- **Suggestion bar** on scroll-up with context-aware prompts
-
-### Project Intelligence
-- **Task boards** with status, priority, owner tracking
-- **Graph view** — typed relationships with evidence provenance
-- **Timeline** — calendar integration with day summaries
-- **Project health** metrics and signals
-- **Flexible frameworks** — LLM-defined schemas for project structure
-
-### iOS Integrations
-- Calendar read/write + context sensor
-- Reminders export
-- Core Spotlight indexing
-- Face ID biometric gate
-- Live Activities during recording
-- Watch Connectivity (companion app)
+| Area | Status | Detail |
+|------|--------|--------|
+| **Device testing** | ⚠️ Not validated | Never tested on target hardware (iPhone 14 Plus). Runs in simulator. |
+| **Semantic search** | ⚠️ Stub | EmbeddingService exists but results are not queryable in real-time. `grep` works; `semantic` does not return useful results yet. |
+| **Test coverage** | ⚠️ Minimal | 27 unit tests covering model roundtrips and basic math. No integration tests for the pipeline, agent loop, or shell interpreter. |
+| **Error recovery UX** | ⚠️ Incomplete | Pipeline failures set item status to `.failed` but the UI path for retry/skip/override is not polished. |
+| **Live Activities** | ⚠️ Untested | Implemented but never tested on a real device during recording. |
+| **Graph quality** | ❓ Unknown | AI-generated edges haven't been validated through sustained use. May produce noise. |
+| **Agent memory** | ❌ Not wired | `AgentMemoryStore` exists but the pipeline doesn't use learned strategies. |
 
 ---
 
@@ -149,8 +167,8 @@ All providers are configured via `wawa-note/Providers/ai_config.json` — add ne
 wawa-note/
 ├── App/                    # App entry point
 ├── Audio/                  # Recording, playback, session management
-├── Connectivity/           # Watch, recording coordinator
-├── ContextCapture/         # Calendar, location, focus, motion sensors
+├── Connectivity/           # Recording coordinator
+├── ContextCapture/         # Calendar, location, focus sensors
 ├── Domain/
 │   ├── Agent/              # AgentLoop, ShellInterpreter, ShellTool, ToolContext
 │   ├── Calendar/           # Calendar sync, timeline, day summaries
@@ -160,7 +178,7 @@ wawa-note/
 │   ├── Export/             # Markdown, JSON, SRT, CSV, Graph exporters
 │   ├── Import/             # 10 format importers + import router
 │   └── Spotlight/          # Core Spotlight indexing
-├── LocalIntelligence/      # Embeddings, semantic search
+├── LocalIntelligence/      # Embeddings, semantic search (partially wired)
 ├── Providers/              # AIProvider protocol + OpenAI, Anthropic, Gemini adapters
 ├── Security/               # Biometric gate, secure keychain
 ├── Storage/                # File artifact store, keychain wrapper
@@ -181,9 +199,7 @@ wawa-note/
 
 ## Configuration
 
-### AI Providers (`Providers/ai_config.json`)
-
-The AI config file defines available providers, models, presets, and feature configurations:
+### AI Config (`Providers/ai_config.json`)
 
 ```json
 {
@@ -206,34 +222,59 @@ The AI config file defines available providers, models, presets, and feature con
 
 ### Permissions
 
-Wawa Note requests these permissions on first use:
-- **Microphone** — for audio recording
-- **Speech Recognition** — for on-device transcription
-- **Camera** — for document scanning
-- **Calendar** — for calendar integration
-- **Location** — for context sensing (optional)
-- **Notifications** — for Live Activities (optional)
+All optional — the app works without them with reduced functionality:
 
-All permissions are optional. The app works without them with reduced functionality.
+- **Microphone** — audio recording
+- **Speech Recognition** — on-device transcription
+- **Camera** — document scanning
+- **Calendar** — calendar integration
+- **Location** — context sensing (optional)
+- **Notifications** — Live Activities (optional)
 
 ---
 
-## Contributing
+## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to contribute.
+### Building
 
-- **Architecture decisions**: [docs/DECISIONS.md](docs/DECISIONS.md)
-- **Coding standards**: [docs/CODING_STANDARDS.md](docs/CODING_STANDARDS.md)
-- **Security policy**: [SECURITY.md](SECURITY.md)
+```bash
+git clone https://github.com/wsmontes/wawa-note-ios.git
+cd wawa-note-ios
+open wawa-note.xcodeproj
+# Select team in Signing & Capabilities, then Cmd+R
+```
 
-### Development Principles
+### Key Principles
 
 1. Protocol-first boundaries — every integration is behind a protocol
 2. No hardcoded API keys, provider URLs, or secrets
-3. Use Keychain for API keys, FileManager for artifacts, SwiftData for metadata
-4. Keep SwiftUI views thin — services should be testable without UI
-5. Use `AIConfigService.shared.requestParams(for:model:)` for ALL AI requests
-6. Do not put provider-specific JSON across the app
+3. Keychain for API keys, FileManager for artifacts, SwiftData for metadata
+4. Keep SwiftUI views thin — services testable without UI
+5. `AIConfigService.shared.requestParams(for:model:)` for ALL AI requests
+6. Provider-specific JSON stays inside provider implementations
+
+### Running Tests
+
+```bash
+xcodebuild test -project wawa-note.xcodeproj -scheme wawa-note -destination 'platform=iOS Simulator,name=iPhone 16'
+```
+
+### Architecture Docs
+
+- [docs/DECISIONS.md](docs/DECISIONS.md) — Architecture decision records
+- [docs/CODING_STANDARDS.md](docs/CODING_STANDARDS.md) — Conventions and rules
+
+---
+
+## What's Next
+
+Priority order based on current gaps:
+
+1. **Dogfooding** — daily use with real data to validate the pipeline and graph quality
+2. **Device testing** — validate on iPhone 14 Plus hardware
+3. **Integration tests** — cover the agent loop, shell interpreter, and pipeline
+4. **Error recovery UX** — clear retry/skip paths for pipeline failures
+5. **Wire semantic search** — make embeddings queryable in the chat
 
 ---
 
@@ -246,5 +287,5 @@ Wawa Note is **provider-agnostic** and does not bundle any AI provider SDKs. Pro
 ---
 
 <p align="center">
-  <sub>Built with ❤️ by <a href="https://github.com/wsmontes">@wsmontes</a> and contributors</sub>
+  <sub>Built with ❤️ by <a href="https://github.com/wsmontes">@wsmontes</a></sub>
 </p>
