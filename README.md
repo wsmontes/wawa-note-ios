@@ -145,22 +145,6 @@ All providers configured via `wawa-note/Providers/ai_config.json`.
 
 ---
 
-## Known Limitations
-
-These are honest current gaps — not future roadmap items, but things that don't fully work yet:
-
-| Area | Status | Detail |
-|------|--------|--------|
-| **Device testing** | ⚠️ Not validated | Never tested on target hardware (iPhone 14 Plus). Runs in simulator. |
-| **Semantic search** | ⚠️ Stub | EmbeddingService exists but results are not queryable in real-time. `grep` works; `semantic` does not return useful results yet. |
-| **Test coverage** | ⚠️ Minimal | 27 unit tests covering model roundtrips and basic math. No integration tests for the pipeline, agent loop, or shell interpreter. |
-| **Error recovery UX** | ⚠️ Incomplete | Pipeline failures set item status to `.failed` but the UI path for retry/skip/override is not polished. |
-| **Live Activities** | ⚠️ Untested | Implemented but never tested on a real device during recording. |
-| **Graph quality** | ❓ Unknown | AI-generated edges haven't been validated through sustained use. May produce noise. |
-| **Agent memory** | ❌ Not wired | `AgentMemoryStore` exists but the pipeline doesn't use learned strategies. |
-
----
-
 ## Project Structure
 
 ```
