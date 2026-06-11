@@ -337,7 +337,7 @@ final class ContentPipelineService: ObservableObject {
                                 results: AnalysisResults(storage: json.mapValues { AnyCodable($0) })
                             ))
                             if let dd = dynamicData {
-                                try? dd.write(to: store.itemDirectoryURL(for: itemID).appendingPathComponent("analysis.dynamic.json"))
+                                try? dd.write(to: store.itemDirectoryURL(for: itemID).appendingPathComponent(AppFileConstants.dynamicAnalysisFileName))
                             }
                         }
                         if !failed { break } // Success — analysis exists and DynamicAnalysis created

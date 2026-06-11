@@ -28,7 +28,7 @@ final class EmbeddingService: @unchecked Sendable {
     var configuredModel: String { embeddingModel }
 
     func embeddingURL(for itemId: UUID) -> URL {
-        fileStore.itemDirectoryURL(for: itemId).appendingPathComponent("embedding.json")
+        fileStore.itemDirectoryURL(for: itemId).appendingPathComponent(AppFileConstants.embeddingFileName)
     }
 
     func generateAndStore(for itemId: UUID, text: String, using provider: any AIProvider) async throws -> [Float] {
