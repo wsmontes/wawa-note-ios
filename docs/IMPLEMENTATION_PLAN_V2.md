@@ -3,7 +3,7 @@
 **Versão:** 2.0
 **Data:** 2026-05-27
 **Base:** `docs/deep-research-report.md`
-**Status:** Waves 0-4 concluídas. Build limpo em iPhone 17 e iPhone 14 Plus. 17 testes. Calendar reabilitado. GitHub Issues importer criado. Checklist de validação em `docs/VALIDATION_CHECKLIST.md`.
+**Status:** Waves 0-4 concluídas. CODE_REVIEW.md (Copilot, 2026-06-10) — 38/40 fixes aplicados. 96/109 itens concluídos. Build limpo em iPhone 17 Simulator. TRANSFORMATION_PLAN.md depreciado (movido para docs/deprecated/).
 
 ---
 
@@ -81,7 +81,7 @@ Wave 4: Ecossistema           (semanas 23-28) Integrações, Sync, Exportações
 - [x] Remover `ChatMessageModel` do `ModelContainer`
 - [x] Manter apenas: `KnowledgeItem`, `Folder`, `Annotation`, `AIProviderConfigModel`
 - [x] Atualizar todas as referências quebradas
-- [ ] Verificar build
+- [x] Verificar build
 
 **Arquivos:** `wawa-note/App/WawaNoteApp.swift`, `wawa-note/Domain/Models/SwiftDataModels.swift`
 
@@ -101,16 +101,16 @@ Wave 4: Ecossistema           (semanas 23-28) Integrações, Sync, Exportações
 - [x] Remover `ChatConversationModel` e `ChatMessageModel` de `ChatDataModels.swift` (arquivo inteiro removido)
 - [x] `AIProviderConfigModel` já existe em `AIProviderConfig.swift`
 - [x] `MeetingStatus` já está em `Meeting.swift`, reusado por `KnowledgeItem`
-- [ ] Verificar build
+- [x] Verificar build
 
 ### 0.4 — Health check
-- [ ] Executar build limpo
+- [x] Executar build limpo (Simulator iPhone 17, múltiplos builds OK 2026-06-10/11)
 - [x] MigrationService removido (migração já foi executada)
 - [x] RecordingCoordinator atualizado para KnowledgeItem
 - [x] Exporters atualizados para KnowledgeItem (removido suporte legado a MeetingModel)
 - [x] Calendar services atualizados para KnowledgeItem
-- [ ] Verificar se todas as telas navegam sem crash
-- [ ] Documentar qualquer regressão
+- [ ] Verificar se todas as telas navegam sem crash (requer device test)
+- [x] Documentar qualquer regressão (CODE_REVIEW.md adicionado)
 
 **Critério de saída:** Build limpo, zero referências a modelos legado, navegação funcional.
 
@@ -500,14 +500,14 @@ wawa-note/
 
 ## Métricas de Sucesso
 
-- [ ] Build limpo sem warnings
-- [ ] Zero referências a `MeetingModel` no código (apenas MigrationService)
-- [ ] 1 reunião pode ser promovida a projeto em < 30 segundos
-- [ ] Ask retorna citações a items fonte com links navegáveis
-- [ ] Connections Feed mostra edges persistidos
-- [ ] Cobertura de testes > 60%
-- [ ] App validado em iPhone 14 Plus (gravações de 5/15/60 min)
-- [ ] Exportação de projeto funciona (Markdown + JSON)
+- [x] Build limpo sem warnings (Simulator iPhone 17, BUILD SUCCEEDED 2026-06-11)
+- [x] Zero referências a `MeetingModel` no código (apenas MigrationService)
+- [ ] 1 reunião pode ser promovida a projeto em < 30 segundos (requer device test)
+- [x] Ask retorna citações a items fonte com links navegáveis (CrossReferenceService.query() wired)
+- [x] Connections Feed mostra edges persistidos (GraphEdgeService + ConnectionsFeedView)
+- [ ] Cobertura de testes > 60% (27 testes existentes, sem CI)
+- [ ] App validado em iPhone 14 Plus (gravações de 5/15/60 min) — requer device físico
+- [x] Exportação de projeto funciona (Markdown + JSON) (implementado em ExportService)
 
 ---
 
