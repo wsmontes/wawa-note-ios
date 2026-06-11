@@ -57,7 +57,7 @@ struct AnalysisSkillService {
             modelName: model
         ) {
             logger.info("Cache hit for '\(skill.displayName)' — returning cached")
-            return try parseAnalysisJSON(cached.markdown, template: template)
+            return try parseAnalysisJSON(cached.markdown, template: template, meetingId: item.id)
         }
 
         // 5. Run agent loop with retry
@@ -90,7 +90,7 @@ struct AnalysisSkillService {
                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                     let evalResult = eval.validateAnalysis(json)
                     if evalResult.isPassing {
-                        let analysis = try parseAnalysisJSON(content, template: template)
+                        let analysis = try parseAnalysisJSON(content, template: template, meetingId: item.id)
                         cache.set(markdown: content, transcript: userPrompt, templateID: template.id,
                                   systemPrompt: systemPrompt, modelProvider: provider.id, modelName: model)
                         logger.info("Analysis passed (score: \(evalResult.score)) on attempt \(attempt)")
@@ -110,7 +110,7 @@ struct AnalysisSkillService {
 
         // Best-effort parse
         if let response = lastResponse {
-            return try parseAnalysisJSON(response, template: template)
+            return try parseAnalysisJSON(response, template: template, meetingId: item.id)
         }
         throw ServiceError.allAttemptsFailed
     }
@@ -168,14 +168,14 @@ struct AnalysisSkillService {
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func parseAnalysisJSON(_ jsonString: String, template: MeetilyTemplateService.MeetilyTemplate) throws -> MeetingAnalysis {
+    private func parseAnalysisJSON(_ jsonString: String, template: MeetilyTemplateService.MeetilyTemplate, meetingId: UUID) throws -> MeetingAnalysis {
         guard let data = jsonString.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw ServiceError.invalidJSON
         }
 
         return MeetingAnalysis(
-            meetingId: UUID(),
+            meetingId: meetingId,
             providerId: "meetily-skill",
             shortSummary: (json["short_summary"] ?? json["shortSummary"] ?? json["summary"] ?? json["Summary"]) as? String ?? "",
             detailedSummary: (json["detailed_summary"] ?? json["detailedSummary"] ?? "") as? String ?? "",
