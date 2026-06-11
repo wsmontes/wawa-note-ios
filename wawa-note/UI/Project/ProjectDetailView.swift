@@ -165,7 +165,7 @@ struct ProjectHomeView: View {
         VStack(spacing: 8) {
             if editingIntention {
                 HStack {
-                    TextField("Qual é a intenção deste projeto?", text: $intentionDraft, axis: .vertical)
+                    TextField("What is the intention of this project?", text: $intentionDraft, axis: .vertical)
                         .font(.subheadline)
                         .lineLimit(3...6)
                     Button("Save") {

@@ -417,7 +417,7 @@ struct InboxView: View {
                     }
                 }
             }
-            .navigationTitle("Move to...")
+            .navigationTitle("Assign to Project")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Cancel") { showFolderPicker = nil }

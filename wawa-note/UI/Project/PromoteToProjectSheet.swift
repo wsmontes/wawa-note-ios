@@ -20,6 +20,11 @@ struct PromoteToProjectSheet: View {
     @State private var selectedEdgeIDs: Set<String> = []
     @State private var generationStep: String = ""
 
+    private var allSelected: Bool {
+        guard let preview else { return false }
+        return selectedTaskIDs.count == preview.tasks.count
+    }
+
     init(item: KnowledgeItem, onComplete: @escaping (Project) -> Void) {
         self.item = item
         self.onComplete = onComplete
@@ -46,7 +51,7 @@ struct PromoteToProjectSheet: View {
                 }
                 if preview != nil {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button("Select All") { selectAll() }
+                        Button(allSelected ? "Deselect All" : "Select All") { selectAll() }
                     }
                 }
             }

@@ -19,6 +19,8 @@ struct ProjectListView: View {
     @State private var itemCounts: [UUID: Int] = [:]
     @State private var taskCounts: [UUID: Int] = [:]
     @State private var openTaskCounts: [UUID: Int] = [:]
+    @State private var showDeleteConfirmation = false
+    @State private var projectToDelete: Project?
 
     private var sortedProjects: [Project] {
         let filtered = searchText.isEmpty ? projects : projects.filter {
@@ -129,6 +131,18 @@ struct ProjectListView: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .id(listRefreshID)
+        .alert("Delete Project", isPresented: $showDeleteConfirmation) {
+            Button("Cancel", role: .cancel) { projectToDelete = nil }
+            Button("Delete", role: .destructive) {
+                if let p = projectToDelete {
+                    let svc = ProjectService(context: modelContext)
+                    try? svc.deleteProject(p)
+                    projectToDelete = nil
+                }
+            }
+        } message: {
+            Text("Are you sure you want to delete \"\(projectToDelete?.name ?? "")\"? This cannot be undone.")
+        }
         .navigationDestination(for: UUID.self) { projectID in
             ProjectDetailLink(projectID: projectID)
         }
