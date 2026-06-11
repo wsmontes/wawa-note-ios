@@ -47,6 +47,7 @@ import UIKit
 ///
 /// Guideline: "Use haptics do sistema pelo significado.
 /// Haptic para confirmação, impacto ou erro."
+@MainActor
 enum Haptics {
     /// Recording started, item created, operation completed.
     static func success() {
