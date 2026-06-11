@@ -80,7 +80,7 @@ Wawa Note captures meeting evidence — audio, scans, links, notes — and trans
 │  Project Models │ Graph │ Calendar │ Search              │
 ├──────────────────────────────────────────────────────────┤
 │  Provider Abstraction                                    │
-│  OpenAI │ Anthropic │ Gemini │ DeepSeek │ Local LLM     │
+│  OpenAI │ Anthropic │ Gemini │ DeepSeek │ Local LLM      │
 ├──────────────────────────────────────────────────────────┤
 │  Storage                                                 │
 │  SwiftData (metadata) │ FileManager (artifacts)          │
