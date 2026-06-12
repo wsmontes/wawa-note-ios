@@ -313,7 +313,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
     /// Guideline: "No fallback com SFSpeechRecognizer, sempre setar requiresOnDeviceRecognition = true."
     private func transcribeDirect(url: URL, recognizer: SFSpeechRecognizer) async throws -> Transcript {
         // Decode AAC/M4A → PCM WAV. AAC bitstream causes recognizer to skip first seconds.
-        let recognitionURL = try await prepareForRecognition(url)
+        let recognitionURL = try prepareForRecognition(url)
         let request = SFSpeechURLRecognitionRequest(url: recognitionURL)
         request.shouldReportPartialResults = false
         request.addsPunctuation = true
@@ -416,75 +416,72 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
     }
 
     /// Decodes compressed audio (AAC/M4A) to 16kHz 16-bit mono PCM WAV.
-    /// Uses AVAssetReader to decode → AVAudioFile to write PCM.
+    /// Uses AVAudioFile (read) → AVAudioConverter → AVAudioFile (write).
     /// WAV and other uncompressed formats pass through unchanged.
-    private func prepareForRecognition(_ url: URL) async throws -> URL {
+    private func prepareForRecognition(_ url: URL) throws -> URL {
         let ext = url.pathExtension.lowercased()
         guard ext == "m4a" || ext == "mp4" else { return url }
 
         AppLog.transcription.info("Decoding to PCM: \(url.lastPathComponent)")
 
-        let asset = AVAsset(url: url)
-        guard let track = try await asset.loadTracks(withMediaType: .audio).first else {
-            throw TranscriptionError.recognitionFailed("No audio track in source file")
+        let inputFile = try AVAudioFile(forReading: url)
+        let inputFormat = inputFile.processingFormat
+
+        // Target: 16kHz 16-bit mono PCM
+        guard let outputFormat = AVAudioFormat(commonFormat: .pcmFormatInt16,
+                                                sampleRate: 16_000,
+                                                channels: 1,
+                                                interleaved: false) else {
+            throw TranscriptionError.recognitionFailed("Cannot create output format")
         }
 
-        guard let reader = try? AVAssetReader(asset: asset) else {
-            throw TranscriptionError.recognitionFailed("Cannot create AVAssetReader")
-        }
-
-        let outputSettings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: 16_000,
-            AVNumberOfChannelsKey: 1,
-            AVLinearPCMBitDepthKey: 16,
-            AVLinearPCMIsFloatKey: false,
-            AVLinearPCMIsBigEndianKey: false
-        ]
-
-        let readerOutput = AVAssetReaderTrackOutput(track: track, outputSettings: outputSettings)
-        guard reader.canAdd(readerOutput) else {
-            throw TranscriptionError.recognitionFailed("Cannot add reader output")
-        }
-        reader.add(readerOutput)
-        guard reader.startReading() else {
-            throw reader.error ?? TranscriptionError.recognitionFailed("Reader failed to start")
-        }
-
-        // Write decoded PCM to WAV via AVAudioFile (AVAssetWriter doesn't support .wav)
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("pcm_\(UUID().uuidString).wav")
+        let outputFile = try AVAudioFile(forWriting: tempURL,
+                                           settings: outputFormat.settings,
+                                           commonFormat: .pcmFormatInt16,
+                                           interleaved: false)
 
-        guard let fmt = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 1, interleaved: false),
-              let outputFile = try? AVAudioFile(forWriting: tempURL, settings: fmt.settings, commonFormat: .pcmFormatInt16, interleaved: false) else {
-            throw TranscriptionError.recognitionFailed("Cannot create output WAV")
+        guard let converter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
+            throw TranscriptionError.recognitionFailed("Cannot create converter")
         }
 
-        var frameCount: AVAudioFrameCount = 0
-        while let sample = readerOutput.copyNextSampleBuffer() {
-            guard let blockBuf = CMSampleBufferGetDataBuffer(sample) else { continue }
-            var length = 0
-            var dataPtr: UnsafeMutablePointer<Int8>?
-            CMBlockBufferGetDataPointer(blockBuf, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &length, dataPointerOut: &dataPtr)
+        // Read the entire input file into a single buffer.
+        // AVAudioFile handles AAC decoding internally.
+        inputFile.framePosition = 0
+        let inputLength = AVAudioFrameCount(inputFile.length)
+        guard let inputBuf = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: inputLength) else {
+            throw TranscriptionError.recognitionFailed("Cannot allocate input buffer")
+        }
+        try inputFile.read(into: inputBuf)
 
-            let frameLength = AVAudioFrameCount(length / MemoryLayout<Int16>.stride)
-            if let pcmBuf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: frameLength) {
-                pcmBuf.frameLength = frameLength
-                if let dest = pcmBuf.int16ChannelData?.pointee {
-                    dest.withMemoryRebound(to: Int8.self, capacity: length) { ptr in
-                        if let src = dataPtr { memcpy(ptr, src, length) }
-                    }
-                }
-                try? outputFile.write(from: pcmBuf)
-                frameCount += frameLength
+        // Allocate output buffer. Sample rate ratio determines frame count.
+        let ratio = outputFormat.sampleRate / inputFormat.sampleRate
+        let outputCapacity = AVAudioFrameCount(Double(inputBuf.frameLength) * ratio)
+        guard let outputBuf = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputCapacity) else {
+            throw TranscriptionError.recognitionFailed("Cannot allocate output buffer")
+        }
+
+        // Convert. The callback provides the input buffer once, then nil.
+        var provided = false
+        var convertError: NSError?
+        converter.convert(to: outputBuf, error: &convertError) { _, outStatus in
+            if !provided {
+                provided = true
+                outStatus.pointee = .haveData
+                return inputBuf
             }
+            outStatus.pointee = .noDataNow
+            return nil
         }
 
-        guard frameCount > 0 else {
+        if let convertError { throw convertError }
+        guard outputBuf.frameLength > 0 else {
             throw TranscriptionError.recognitionFailed("Decode produced empty output")
         }
 
-        AppLog.transcription.info("PCM decode complete: \(frameCount) frames → \(tempURL.lastPathComponent)")
+        try outputFile.write(from: outputBuf)
+        AppLog.transcription.info("PCM decode complete: \(outputBuf.frameLength) frames @ \(Int(outputFormat.sampleRate))Hz → \(tempURL.lastPathComponent)")
         return tempURL
     }
 
