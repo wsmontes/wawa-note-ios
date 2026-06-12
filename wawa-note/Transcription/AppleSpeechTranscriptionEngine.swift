@@ -152,30 +152,42 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
     /// Check the availability state for on-device transcription.
     /// Guideline: "Antes de usar requiresOnDeviceRecognition, valide supportsOnDeviceRecognition."
     func checkAvailability() -> LocalTranscriptionAvailability {
+        // Iterate ALL candidate locales and return the BEST availability state.
+        // The previous code returned on the FIRST match — if locale #1 was
+        // .modelMissing but locale #2 was .available, the user would see
+        // "model not installed" when a working locale was available.
+        var best: LocalTranscriptionAvailability = .localeUnsupported(locale: candidateLocales.first ?? Locale(identifier: "en-US"))
+
         for locale in candidateLocales {
-            guard let recognizer = SFSpeechRecognizer(locale: locale) else {
-                return .localeUnsupported(locale: locale)
-            }
+            guard let recognizer = SFSpeechRecognizer(locale: locale) else { continue }
 
-            guard recognizer.isAvailable else {
-                // Check if it's a model download issue or hardware
-                if recognizer.supportsOnDeviceRecognition {
-                    return .modelMissing(locale: locale)
-                }
-                return .hardwareUnsupported
-            }
-
-            // Verify on-device recognition is actually supported
+            let isAvailable = recognizer.isAvailable
+            let supportsOnDevice = recognizer.supportsOnDeviceRecognition
             let cloudAllowed = UserDefaults.standard.bool(forKey: "transcription_allow_cloud")
-            if !cloudAllowed {
-                guard recognizer.supportsOnDeviceRecognition else {
-                    return .hardwareUnsupported
+
+            if isAvailable {
+                if !cloudAllowed && !supportsOnDevice {
+                    // On-device required but not supported — try next locale
+                    if case .localeUnsupported = best {
+                        best = .hardwareUnsupported
+                    }
+                    continue
                 }
+                // Found a fully working locale!
+                return .available(localeIdentifier: recognizer.locale.identifier)
             }
 
-            return .available(localeIdentifier: recognizer.locale.identifier)
+            // Not available — track best fallback state
+            if supportsOnDevice {
+                if case .available = best { continue }  // already found better
+                best = .modelMissing(locale: locale)
+            } else {
+                if case .available = best { continue }
+                if case .modelMissing = best { continue }
+                best = .hardwareUnsupported
+            }
         }
-        return .localeUnsupported(locale: candidateLocales.first ?? Locale(identifier: "en-US"))
+        return best
     }
 
     /// Check if on-device transcription is ready to use.
