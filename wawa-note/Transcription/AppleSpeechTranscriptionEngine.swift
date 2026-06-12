@@ -422,16 +422,16 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         let ext = url.pathExtension.lowercased()
         guard ext == "m4a" || ext == "mp4" else { return url }
 
-        AppLog.transcription.info("Decoding AAC to PCM: \(url.lastPathComponent)")
+        AppLog.transcription.info("Decoding AAC to PCM WAV: \(url.lastPathComponent)")
 
         let inputFile = try AVAudioFile(forReading: url)
         let inputFormat = inputFile.processingFormat
 
-        // If it's already PCM (e.g. WAV) — nothing to do. Guard is here
-        // because AVAudioConverter from PCM to PCM is a no-op but wasteful.
-        if inputFormat.commonFormat == .pcmFormatInt16 || inputFormat.commonFormat == .pcmFormatFloat32 {
-            return url
-        }
+        // NOTE: AVAudioFile.processingFormat reports PCM for compressed formats
+        // (it decodes internally). We still must write a real PCM WAV to disk
+        // because SFSpeechRecognizer reads the file directly — it does NOT go
+        // through AVAudioFile. Passing AAC to SFSpeechRecognizer causes it to
+        // skip the first seconds and produce sparse recognition.
 
         guard let outputFormat = AVAudioFormat(standardFormatWithSampleRate: inputFormat.sampleRate, channels: 1) else {
             throw TranscriptionError.recognitionFailed("Cannot create PCM output format")
