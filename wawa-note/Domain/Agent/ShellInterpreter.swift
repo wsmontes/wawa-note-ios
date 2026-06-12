@@ -881,6 +881,10 @@ enum ShellInterpreter {
             guard let t = effectiveTitle else { return err("touch: --title is required. Or use: touch tasks/my-task-name.json") }
             guard let pid = ctx.activeProjectID else { return err("touch: no active project. cd /projects/{slug} first") }
             let prio = TaskPriority(rawValue: priority) ?? .medium
+            if priority != prio.rawValue {
+                let valid = TaskPriority.allCases.map { $0.rawValue }.joined(separator: ", ")
+                AppLog.agent.warning("touch: invalid priority '\(priority)' — valid: \(valid). Using medium.")
+            }
             let due = dueStr.flatMap { ISO8601DateFormatter().date(from: $0) }
             guard let task = try? TaskService(context: ctx.modelContext).create(
                 title: t, projectID: pid, priority: prio,

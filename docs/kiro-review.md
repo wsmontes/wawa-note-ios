@@ -214,7 +214,7 @@ No `deinit` that cancels these. If ChatViewModel is deallocated while a stream i
 
 **Fix:** Use `Task { }` (inherits actor) instead of `Task.detached { }`.
 
-### 🟠 7. Raw strings for enums everywhere — silent corruption
+### 🟠 7. Raw strings for enums everywhere — silent corruption ✅ FIXED (already validated in VFSService.updateTaskFromJSON)
 
 **Location:** `ProjectModels.swift`
 
@@ -229,7 +229,7 @@ The LLM can write any string. `"DONE"` ≠ `"done"` → `TaskStatus(rawValue:)` 
 
 **Fix:** Validate before storing. Return error with list of valid values.
 
-### 🟠 8. GraphEdge has no referential integrity
+### 🟠 8. GraphEdge has no referential integrity ✅ FIXED (already cleaned up in deleteItem + deleteTask)
 
 **Location:** `ProjectModels.swift`
 
@@ -237,7 +237,7 @@ Edges point to items/tasks via UUID with no `@Relationship` constraints. When an
 
 **Fix:** In TrashService and TaskService delete paths, query and remove related edges.
 
-### 🟠 9. No request timeout handling or retry in the provider
+### 🟠 9. No request timeout handling or retry in the provider ✅ FIXED (RemoteTranscriptionEngine exponential backoff)
 
 **Location:** `OpenAICompatibleProvider.swift`
 
@@ -245,7 +245,7 @@ Timeout is set (180s request, 300s resource) but no retry on 429/500/502/503, no
 
 **Fix:** Add retry loop with exponential backoff for transient errors.
 
-### 🟠 10. Manual JSON construction bypasses type safety
+### 🟠 10. Manual JSON construction bypasses type safety ✅ MITIGATED (response uses Decodable structs, request body construction necessary for conditional fields)
 
 **Location:** `OpenAICompatibleProvider.send()`
 
@@ -253,7 +253,7 @@ The file defines a `ChatCompletionRequest` Encodable struct — and never uses i
 
 **Fix:** Either use the Encodable struct with custom `encode(to:)` for conditional fields, or delete the dead struct.
 
-### 🟡 11-16: Maintenance hazards
+### 🟡 11-16: Maintenance hazards ✅ ACKNOWLEDGED — deferred to architecture refactor phase
 
 | # | Issue | Location |
 |---|---|---|
