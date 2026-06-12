@@ -2,6 +2,7 @@ import SwiftData
 import OSLog
 import AVFoundation
 import Combine
+import UIKit
 
 @MainActor
 final class RecordingCoordinator: ObservableObject {
@@ -176,36 +177,63 @@ final class RecordingCoordinator: ObservableObject {
             return
         }
 
-        let context = modelContext
         errorMessage = nil
         savedItemId = nil
 
         let recordingTitle = title ?? "Recording \(Date().formatted(date: .abbreviated, time: .shortened))"
         self.recordingTitle = recordingTitle
 
-        let item = KnowledgeItem(type: .audio, title: recordingTitle, status: .recording)
-        item.scheduledDate = scheduledDate
-        item.calendarEventIdentifier = calendarEventIdentifier
-        if let projectID { item.projectID = projectID; item.inboxDate = nil }
-        context.insert(item)
+        // Defer item creation + save + engine start into a Task so we can
+        // request mic permission first if needed (.undetermined). This
+        // prevents creating an item that would flash in the UI and need
+        // rollback if the user denies.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
 
-        do {
-            try context.save()
-        } catch {
-            AppLog.error("audio", "Failed to save knowledge item for recording: \(error.localizedDescription)")
-            errorMessage = "Could not save recording. Try again."
-            notifyStatusChange()
-            return
-        }
+            // Request permission if not yet determined — shows native dialog.
+            if micPermission == .undetermined {
+                let granted: Bool = await withCheckedContinuation { continuation in
+                    AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                        continuation.resume(returning: granted)
+                    }
+                }
+                guard granted else {
+                    AppLog.warn("audio", "Recording blocked: user denied microphone permission")
+                    self.errorMessage = "Microphone access is required to record audio."
+                    self.notifyStatusChange()
+                    return
+                }
+                AppLog.audio.info("Microphone permission granted — proceeding")
+            }
 
-        let itemId = item.id
-        savedItemId = itemId
+            let context = self.modelContext
 
-        Task { @MainActor in
+            let item = KnowledgeItem(type: .audio, title: recordingTitle, status: .recording)
+            item.scheduledDate = scheduledDate
+            item.calendarEventIdentifier = calendarEventIdentifier
+            if let projectID { item.projectID = projectID; item.inboxDate = nil }
+            context.insert(item)
+
             do {
-                try await captureService.startRecording(meetingId: itemId)
+                try context.save()
+            } catch {
+                AppLog.error("audio", "Failed to save knowledge item for recording: \(error.localizedDescription)")
+                self.errorMessage = "Could not save recording. Try again."
+                self.notifyStatusChange()
+                return
+            }
+
+            let itemId = item.id
+            self.savedItemId = itemId
+
+            do {
+                try await self.captureService.startRecording(meetingId: itemId)
                 recordingStartDate = Date()
                 state = .recording
+                // Prevent auto-lock during recording. Even though AVAudioSession
+                // .playAndRecord keeps audio alive in background, the system may
+                // suspend the app on screen lock which kills the recording.
+                UIApplication.shared.isIdleTimerDisabled = true
                 startObservation()
                 activateLockScreenControls()
                 notifyStatusChange()
@@ -320,6 +348,8 @@ final class RecordingCoordinator: ObservableObject {
         AppLog.event("audio", "Stopping recording — elapsed=\(elapsedTimeFormatted) pausedDur=\(Int(pausedDuration))s itemID=\(itemId?.uuidString.prefix(8) ?? "nil")")
         captureService.stopRecording()
         state = .stopped
+        // Restore auto-lock — no longer recording.
+        UIApplication.shared.isIdleTimerDisabled = false
         nowPlayingController.deactivate()
         observationTimer?.invalidate()
         observationTimer = nil
