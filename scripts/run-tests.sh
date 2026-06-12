@@ -1,78 +1,43 @@
 #!/bin/bash
-# Wawa Note — Test Runner
-# Runs unit tests, captures results, and generates a summary.
-# Usage: bash scripts/run-tests.sh [--quick] [--full] [--device]
-
+# Wawa Note — Critical Test Runner
+# Single build, single xcresult, single DerivedData — no disk bloat.
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-PROJECT="$PROJECT_DIR/wawa-note.xcodeproj"
+PROJECT="$(cd "$(dirname "$0")/.." && pwd)/wawa-note.xcodeproj"
 SCHEME="wawa-note"
-SIM_DEVICE="iPhone 14 Plus"
-DEVICE_ID="${DEVICE_ID:-BBA4F656-A5EA-5D81-934E-E484ED71B8E2}"
-RESULT_DIR="$PROJECT_DIR/build/test-results"
-mkdir -p "$RESULT_DIR"
+SIM="iPhone 14 Plus"
+LOG="/tmp/wawa-test-$(date +%H%M%S).log"
 
-MODE="quick"
-while [ $# -gt 0 ]; do
-    case "$1" in
-        --quick) MODE="quick" ;;
-        --full)  MODE="full" ;;
-        --device) MODE="device" ;;
-    esac
-    shift
-done
+# ── critical: 14 test classes, ~50 tests, < 60s total ─────
+CRITICAL="ShellInterpreterTokenizerTests,ImportExportRoundtripTests,SemanticSearchServiceTests,FieldProvenanceTests,FieldAuthorityServiceTests,KnowledgeItemTests,ItemStatusTests,TaskItemTests,IngestionResponseTests,AudioCaptureStateTests,AudioRouteSnapshotTests,AudioRebuildResultTests,RecordingSegmentTests,RecordingManifestIndexProviderTests"
 
-TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-RESULT_BUNDLE="$RESULT_DIR/Test-$TIMESTAMP.xcresult"
-SUMMARY_FILE="$RESULT_DIR/summary-$TIMESTAMP.txt"
-
-echo "=== Wawa Note Test Runner ==="
-echo "Mode: $MODE"
-echo "Results: $RESULT_BUNDLE"
-
+MODE="${1:-critical}"
 case "$MODE" in
-    quick)
-        echo "Running quick tests (core services)..."
-        xcodebuild test \
-            -project "$PROJECT" \
-            -scheme "$SCHEME" \
-            -destination "platform=iOS Simulator,name=$SIM_DEVICE" \
-            -resultBundlePath "$RESULT_BUNDLE" \
-            -only-testing:wawa-noteTests/CoreServicesTests \
-            2>&1 | tee "$SUMMARY_FILE"
+    critical)
+        echo "=== Wawa Note — Critical Tests ($(date +%H:%M:%S)) ==="
+        xcrun xcodebuild test \
+            -project "$PROJECT" -scheme "$SCHEME" \
+            -destination "platform=iOS Simulator,name=$SIM" \
+            -only-testing:wawa-noteTests/$CRITICAL \
+            2>&1 | tee "$LOG" | grep -E "Test Suite|passed|failed|executed|TEST|error:" | tail -30
+        rc=$?
+        echo ""
+        if [ $rc -eq 0 ]; then
+            echo "✅ ALL CRITICAL TESTS PASSED"
+        else
+            echo "❌ TESTS FAILED — see: $LOG"
+            grep -E "Test Case.*failed" "$LOG" | head -20
+        fi
         ;;
-    full)
-        echo "Running all tests..."
-        xcodebuild test \
-            -project "$PROJECT" \
-            -scheme "$SCHEME" \
-            -destination "platform=iOS Simulator,name=$SIM_DEVICE" \
-            -resultBundlePath "$RESULT_BUNDLE" \
-            2>&1 | tee "$SUMMARY_FILE"
-        ;;
-    device)
-        echo "Running tests on device..."
-        xcodebuild test \
-            -project "$PROJECT" \
-            -scheme "$SCHEME" \
-            -destination "platform=iOS,id=$DEVICE_ID" \
-            -resultBundlePath "$RESULT_BUNDLE" \
+    all)
+        echo "=== Wawa Note — Full Suite ($(date +%H:%M:%S)) ==="
+        xcrun xcodebuild test \
+            -project "$PROJECT" -scheme "$SCHEME" \
+            -destination "platform=iOS Simulator,name=$SIM" \
             -only-testing:wawa-noteTests \
-            2>&1 | tee "$SUMMARY_FILE"
+            2>&1 | tee "$LOG" | grep -E "Test Suite|passed|failed|executed|TEST|error:" | tail -30
+        ;;
+    *)
+        echo "Usage: bash scripts/run-tests.sh [critical|all]"
         ;;
 esac
-
-# Parse results
-if grep -q "TEST SUCCEEDED" "$SUMMARY_FILE" 2>/dev/null; then
-    echo ""
-    echo "✅ ALL TESTS PASSED"
-elif grep -q "TEST FAILED" "$SUMMARY_FILE" 2>/dev/null; then
-    FAILURES=$(grep -c "failed" "$SUMMARY_FILE" 2>/dev/null || echo "?")
-    echo ""
-    echo "❌ TESTS FAILED — $FAILURES failure(s)"
-    echo "See: $RESULT_BUNDLE"
-else
-    echo ""
-    echo "⚠️  TEST RESULT UNKNOWN — check: $SUMMARY_FILE"
-fi

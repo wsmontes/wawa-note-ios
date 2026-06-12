@@ -78,17 +78,13 @@ do_stream() {
     echo "═══════════════════════════════════════════════════"
     echo ""
 
-    # Pre-auth sudo so the loop doesn't prompt
-    sudo -v 2>/dev/null || true
-    if ! sudo -n true 2>/dev/null; then
-        echo "  🔐 sudo required for device log access."
-        echo "     Please authenticate. Credential caches for 5 min."
-        echo ""
-        sudo -v || {
-            echo "  ❌ sudo auth failed. Cannot access device logs."
-            return 1
-        }
+    # Verify passwordless sudo for device log collection
+    if ! sudo -n /usr/bin/log collect --device-udid "$DEVICE_UDID" --last 1s --output /tmp/wawa-auth-check.logarchive 2>/dev/null; then
+        echo "  🔐 sudo NOPASSWD required for device log access."
+        echo "     Run once: echo 'wagnermontes ALL=(ALL) NOPASSWD: /usr/bin/log collect --device-udid *' | sudo tee /etc/sudoers.d/wawa-log && sudo chmod 440 /etc/sudoers.d/wawa-log"
+        return 1
     fi
+    rm -rf /tmp/wawa-auth-check.logarchive 2>/dev/null || true
 
     if $save; then
         logfile=$(output_path "$device_alias" "stream.log")
@@ -108,11 +104,12 @@ do_stream() {
     while true; do
         batch=$((batch + 1))
 
-        # Refresh sudo if needed (non-interactive check)
-        sudo -n true 2>/dev/null || {
-            echo "  ⚠️  sudo expired. Re-run with: sudo -v && bash scripts/log-capture.sh stream $device_alias"
+        # Check sudo still works (non-interactive)
+        if ! sudo -n /usr/bin/log collect --device-udid "$DEVICE_UDID" --last 1s --output /tmp/wawa-loop-check.logarchive 2>/dev/null; then
+            echo "  ⚠️  sudo lost. Re-run the stream."
             break
-        }
+        fi
+        rm -rf /tmp/wawa-loop-check.logarchive 2>/dev/null || true
 
         sudo log collect --device-udid "$DEVICE_UDID" \
             --last 5s \
