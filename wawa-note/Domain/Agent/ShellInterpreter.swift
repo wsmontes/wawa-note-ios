@@ -1740,7 +1740,7 @@ enum ShellInterpreter {
         ToolResult(content: content, blocks: blocks, citations: [], isError: false, displaySummary: String(content.prefix(80)))
     }
 
-    /// Known command names for did-you-mean suggestions.
+    /// Known command names for did-you-mean suggestions (used by dispatch default).
     private static let knownCommands: Set<String> = ["ls", "cd", "cat", "echo", "touch", "rm", "mv", "find",
         "grep", "wc", "man", "history", "help", "pwd", "mkdir", "ask_user", "plan", "assign", "progress", "cleanup"]
 }
