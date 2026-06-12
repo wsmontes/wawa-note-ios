@@ -1146,7 +1146,14 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         case .began:
             AppLog.event("audio", "System interruption began — state=\(state)")
             stateBeforeSystemInterruption = state
-            if state == .recording {
+            // Cancel any in-progress route rebuild. If a phone call arrives
+            // while we're validating a Bluetooth route, the rebuild would
+            // otherwise complete after the call takes the audio path and
+            // incorrectly transition back to .recording.
+            invalidateRouteRecovery(caller: "interruptionBegan")
+            physicalRestartTask?.cancel()
+            physicalRestartTask = nil
+            if state == .recording || state == .validatingRoute || state == .reconfiguringRoute {
                 transition(to: .interruptedBySystem, reason: "system interruption began")
                 audioInterruptionReason = "Recording paused due to interruption (phone call, alarm, etc.)."
                 stopTimer()
@@ -1388,8 +1395,13 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         // 3. Fresh engine on the ALREADY-ACTIVE session. Do NOT deactivate
         //    or reconfigure — iOS has already routed to the new device.
+        //    However, the new device may need a different audio mode than the
+        //    previous one (e.g. AirPods HFP → .default, built-in mic →
+        //    .spokenAudio). adaptToRouteChange() only updates the mode without
+        //    deactivating the session, so it's safe here.
         engine = AVAudioEngine()
         reRegisterEngineObserver()
+        sessionManager.adaptToRouteChange()
         logCrashDiagnostics("rebuildForNewRoute-newEngine[\(reason)]")
 
         // 4. Read current route format directly from the active session.

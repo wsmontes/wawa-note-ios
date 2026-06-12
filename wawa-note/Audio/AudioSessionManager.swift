@@ -37,6 +37,15 @@ final class AudioSessionManager {
         set { UserDefaults.standard.set(newValue, forKey: "audio_speakerphone_mode") }
     }
 
+    /// When true, the built-in iPhone mic (48kHz with beamforming) is preferred
+    /// over Bluetooth HFP (8kHz mono, call-quality codec). Bluetooth A2DP is
+    /// unaffected since it's output-only. Defaults to false (HFP takes priority
+    /// for convenience).
+    static var preferBuiltInMicOverBluetooth: Bool {
+        get { UserDefaults.standard.bool(forKey: "audio_prefer_builtin_mic") }
+        set { UserDefaults.standard.set(newValue, forKey: "audio_prefer_builtin_mic") }
+    }
+
     /// Whether the current audio route is CarPlay.
     var isCarPlayActive: Bool {
         session.currentRoute.outputs.contains { $0.portType == .carAudio }
@@ -271,7 +280,16 @@ final class AudioSessionManager {
 
     /// Rank inputs by priority: AirPlay > HFP > wired > USB > built-in.
     private func rankedInputs(from inputs: [AVAudioSessionPortDescription]) -> [AVAudioSessionPortDescription] {
-        let priority: [AVAudioSession.Port] = [.airPlay, .bluetoothHFP, .headsetMic, .usbAudio, .builtInMic]
+        // Default priority: AirPlay > Bluetooth HFP > headset > USB > built-in mic.
+        // When the user prefers quality, built-in mic jumps ahead of Bluetooth HFP
+        // (but stays behind AirPlay and wired headset mics, which can be high quality).
+        let basePriority: [AVAudioSession.Port]
+        if Self.preferBuiltInMicOverBluetooth {
+            basePriority = [.airPlay, .headsetMic, .usbAudio, .builtInMic, .bluetoothHFP]
+        } else {
+            basePriority = [.airPlay, .bluetoothHFP, .headsetMic, .usbAudio, .builtInMic]
+        }
+        let priority = basePriority
         return inputs.sorted { a, b in
             let pa = priority.firstIndex(of: a.portType) ?? priority.count
             let pb = priority.firstIndex(of: b.portType) ?? priority.count

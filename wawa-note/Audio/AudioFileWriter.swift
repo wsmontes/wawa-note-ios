@@ -31,6 +31,12 @@ final class AudioFileWriter: @unchecked Sendable {
     private var _writeErrorCount: Int = 0
     private var _lastWriteError: Error?
 
+    /// Diagnostic counter: number of queued writes waiting to be processed.
+    /// Incremented before dispatch, decremented after completion. A value >5
+    /// indicates the write queue is saturated (disk may be slow or full).
+    /// Approximate — accessed without synchronization for hot-path performance.
+    private(set) nonisolated(unsafe) var queueDepth: Int32 = 0
+
     /// Called on the writer's queue when a write fails after all retries.
     /// The capture service should close the current segment and alert the user.
     var onWriteFailure: ((_ error: Error) -> Void)?
@@ -122,7 +128,9 @@ final class AudioFileWriter: @unchecked Sendable {
     /// and appends to the current file. This is the single serialization point
     /// for all audio data — callers do NOT need their own write queue.
     func write(samples: [Float], frameLength: Int, format: AVAudioFormat) {
+        queueDepth &+= 1
         queue.async { [weak self] in
+            defer { self?.queueDepth &-= 1 }
             guard let self, let file = self._audioFile else { return }
             guard let wb = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameLength)) else { return }
             wb.frameLength = AVAudioFrameCount(frameLength)
@@ -150,7 +158,9 @@ final class AudioFileWriter: @unchecked Sendable {
     /// Write an already-constructed PCM buffer. Used when the caller already
     /// has a buffer (e.g., concatenation, testing).
     func write(buffer: AVAudioPCMBuffer) {
+        queueDepth &+= 1
         queue.async { [weak self] in
+            defer { self?.queueDepth &-= 1 }
             guard let self, let file = self._audioFile else { return }
             for attempt in 0...3 {
                 do {
