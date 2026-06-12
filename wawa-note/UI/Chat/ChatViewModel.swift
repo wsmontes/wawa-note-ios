@@ -588,7 +588,7 @@ final class ChatViewModel: ObservableObject {
             guard !arg.isEmpty else { response = "Usage: /search <query>"; break }
             guard let ctx = modelContext else { response = "Model context not available."; break }
             let items = (try? KnowledgeItemService(context: ctx).allItems()) ?? []
-            let results = SearchService().searchNow(query: arg, in: items).prefix(5)
+            let results = SearchService(fileStore: FileArtifactStore()).searchNow(query: arg, in: items).prefix(5)
             guard !results.isEmpty else { response = "No results for \"\(arg)\"."; break }
             response = results.map { r in
                 guard let item = items.first(where: { $0.id == r.itemID }) else { return "- Unknown item" }
