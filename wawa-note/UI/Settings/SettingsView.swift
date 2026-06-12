@@ -255,6 +255,13 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .onAppear {
+                // Ensure auto-analysis model is valid (not deprecated or missing)
+                let valid = availableAutoAnalysisModels
+                if !valid.contains(autoAnalysisModel) {
+                    autoAnalysisModel = valid.first ?? "gpt-5-nano"
+                }
+            }
         }
     }
 
