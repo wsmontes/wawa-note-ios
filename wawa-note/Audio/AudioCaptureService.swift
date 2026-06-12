@@ -1466,13 +1466,19 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 }
             }
         }
-        // Silence detection: auto-pause after sustained silence
+        // Silence detection: auto-pause after sustained silence.
+        // Uses hysteresis: silence threshold triggers pause at 5s,
+        // audio must exceed threshold * 3 to resume (avoids noise flapping).
         silenceDetectionTask = Task { [weak self] in
             guard let self else { return }
             var silentStart: Date?
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 500_000_000) // check every 0.5s
+                try? await Task.sleep(nanoseconds: 500_000_000)
                 guard !Task.isCancelled else { return }
+                guard self.state == .recording || self.isAutoPaused else {
+                    silentStart = nil
+                    continue
+                }
                 let level = await MainActor.run { self.audioLevel }
                 if level < Self.silenceThreshold {
                     let now = Date()
@@ -1480,7 +1486,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                     let duration = now.timeIntervalSince(silentStart ?? now)
                     await MainActor.run {
                         self.silenceDetected = duration > 1.0
-                        if duration > Self.silenceDurationBeforePause && !self.isAutoPaused && self.state == .recording {
+                        if duration > Self.silenceDurationBeforePause && !self.isAutoPaused {
                             self.isAutoPaused = true
                             AppLog.audio.info("Auto-paused: silence for \(Int(duration))s")
                         }
@@ -1490,9 +1496,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                         let duration = Date().timeIntervalSince(start)
                         await MainActor.run {
                             self.silenceDetected = false
-                            if self.isAutoPaused && duration > Self.silenceDurationBeforePause {
+                            if self.isAutoPaused {
                                 self.isAutoPaused = false
-                                AppLog.audio.info("Auto-resumed: audio detected after \(Int(duration))s silence")
+                                AppLog.audio.info("Auto-resumed after \(Int(duration))s silence")
                             }
                         }
                     }
