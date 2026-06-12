@@ -363,6 +363,8 @@ final class RecordingCoordinator: ObservableObject {
         audioLevel = 0
         isClipping = false
         clipCount = 0
+        isAutoPaused = false
+        silenceDetected = false
         savedItemId = nil
         errorMessage = nil
         captureService.resetToIdle()
