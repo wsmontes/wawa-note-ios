@@ -204,6 +204,7 @@ enum ShellInterpreter {
         case "vision", "describe": result = handleVision(cmd, ctx)
         case "progress": result = handleProgress(cmd, ctx)
         case "cleanup": result = handleCleanup(cmd, ctx)
+        case "recipe": result = handleRecipe(cmd, ctx)
         case "help":  result = handleHelp(cmd, ctx)
         case "ask_user": result = handleAskUser(cmd, ctx)
         default:
@@ -1630,6 +1631,35 @@ enum ShellInterpreter {
     }
 
     // MARK: - export
+
+    private static func handleRecipe(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
+        let sub = cmd.args.first ?? "list"
+        switch sub {
+        case "list":
+            let skills = AnalysisSkillStore.shared.skills(in: nil)
+            let lines = skills.map { "  \($0.name) — \($0.description)" }.joined(separator: "\n")
+            return ok("Available recipes:\n\(lines.isEmpty ? "  (none)" : lines)")
+        case "show":
+            guard let name = cmd.args.count > 1 ? cmd.args[1] : nil else {
+                return shellErr("recipe show <name> — Show recipe details")
+            }
+            guard let skill = AnalysisSkillStore.shared.skill(named: name) else {
+                return shellErr("recipe: '\(name)' not found. Use 'recipe list' to see available recipes.")
+            }
+            let info = """
+            Recipe: \(skill.displayName)
+            Description: \(skill.description)
+            Category: \(skill.category)
+            Template: \(skill.templateID)
+            Model: \(skill.defaultModel)
+            Max Iterations: \(skill.maxIterations)
+            Steps: \(skill.procedure?.steps.map { "\($0.step). \($0.action) — \($0.description)" }.joined(separator: ", ") ?? "none")
+            """
+            return ok(info)
+        default:
+            return shellErr("recipe: unknown subcommand '\(sub)'. Use: recipe list, recipe show <name>")
+        }
+    }
 
     private static func handleExport(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
         guard let target = cmd.args.first else { return shellErr("export: usage: export <item-id | project-id> [--format md|json]") }
