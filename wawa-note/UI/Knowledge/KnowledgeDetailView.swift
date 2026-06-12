@@ -656,6 +656,42 @@ struct KnowledgeDetailView: View {
         }
 
         if let transcript {
+            // Analyze button ABOVE transcript — user should see the action before
+            // scrolling through the full text, especially for long transcripts.
+            if transcript != nil && analysis == nil && !isAnalyzing && !isPipelineProcessing {
+                VStack(spacing: 12) {
+                    Image(systemName: "sparkles")
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
+                    Text("Ready for analysis")
+                        .font(.headline)
+                    if let error = analysisError {
+                        Text(error).font(.caption).foregroundStyle(.red)
+                    }
+                    ActiveModelPicker(selectedModel: $selectedModel, label: "Model")
+                    Button("Analyze via Agent") {
+                        Task { await reprocessItem() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(24)
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+            }
+
+            if isAnalyzing {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Analyzing...")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity)
+            }
+
             let groups = transcript.groupedSegments()
             let transcriptText = groups.map { g in
                 "[\(formatTime(g.startTime))] \(g.text)"
@@ -709,41 +745,6 @@ struct KnowledgeDetailView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
-            }
-
-            // Analyze button — show when transcript exists but no analysis yet
-            if transcript != nil && analysis == nil && !isAnalyzing && !isPipelineProcessing {
-                VStack(spacing: 12) {
-                    Image(systemName: "sparkles")
-                        .font(.largeTitle)
-                        .foregroundStyle(.secondary)
-                    Text("Ready for analysis")
-                        .font(.headline)
-                    if let error = analysisError {
-                        Text(error).font(.caption).foregroundStyle(.red)
-                    }
-                    ActiveModelPicker(selectedModel: $selectedModel, label: "Model")
-                    Button("Analyze via Agent") {
-                        Task { await reprocessItem() }
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(24)
-                .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-            }
-
-            if isAnalyzing {
-                HStack(spacing: 10) {
-                    ProgressView()
-                    Text("Analyzing...")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity)
             }
         } else if hasPlayableAudio && !isTranscribing && !isPipelineProcessing {
             VStack(spacing: 12) {
