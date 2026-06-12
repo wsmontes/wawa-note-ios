@@ -4,11 +4,10 @@ import SwiftData
 /// Mutable context passed to every tool execution.
 /// Reference type so that `cd` mutations persist across iterations of the agent loop.
 ///
-/// Concurrency: all mutations happen on @MainActor (ShellInterpreter and ChatViewModel
-/// are @MainActor-isolated). AgentLoop is not @MainActor but accesses ToolContext only
-/// via read-only snapshotting. The @unchecked Sendable is pragmatically correct for
-/// this configuration. Any future non-MainActor caller of ShellInterpreter.execute()
-/// would need to add explicit actor isolation.
+/// All mutations are @MainActor-isolated. AgentLoop reads ToolContext via read-only
+/// snapshotting (it does not mutate). ShellInterpreter and ChatViewModel are both
+/// @MainActor-isolated and are the only mutators.
+@MainActor
 final class ToolContext: @unchecked Sendable {
     let modelContext: ModelContext
     let fileStore: FileArtifactStore
