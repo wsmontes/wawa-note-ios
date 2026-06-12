@@ -146,6 +146,13 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// Watchdog that force-resets isPhysicalRestartInProgress after a timeout
     /// to prevent permanent deadlock if engine.start() hangs.
     private var restartWatchdogTask: Task<Void, Never>?
+    /// Timer that stops the engine after a long pause to save battery.
+    /// ~3-5% battery per hour while engine is idling.
+    private var pauseEngineTimeoutTask: Task<Void, Never>?
+    /// True when the engine was stopped by the pause timeout (not by user stop).
+    private var engineStoppedForPauseTimeout: Bool = false
+    /// Duration before idling engine is stopped during pause.
+    private static let pauseEngineTimeoutSeconds: UInt64 = 300  // 5 minutes
     private static let silenceThreshold: Float = 0.015
     private static let silenceDurationBeforePause: TimeInterval = 5.0
     @Published private(set) var isAutoPaused: Bool = false
@@ -545,7 +552,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             transition(to: .pausedByUser, reason: "user paused")
             recordingIntent = .userPaused
             stopTimer()
-            AppLog.audio.info("Recording paused (engine kept alive)")
+            // After 5 minutes of pause, stop the engine to save battery.
+            // On resume, the engine will be rebuilt transparently.
+            schedulePauseEngineTimeout()
+            AppLog.audio.info("Recording paused (engine kept alive, timeout in \(Self.pauseEngineTimeoutSeconds)s)")
 
         case .reconfiguringRoute, .validatingRoute:
             // User paused during route switch — invalidate recovery, stay paused.
@@ -576,6 +586,20 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     func resumeRecording() {
         guard state == .pausedByUser || state == .interruptedBySystem || state == .waitingForUsableInput else { return }
+        // Cancel any pending engine timeout — user is back.
+        pauseEngineTimeoutTask?.cancel()
+        pauseEngineTimeoutTask = nil
+        if engineStoppedForPauseTimeout {
+            // Engine was stopped to save battery during a long pause.
+            // Rebuild it via the standard route recovery path.
+            engineStoppedForPauseTimeout = false
+            AppLog.audio.info("Resume after pause timeout — rebuilding engine")
+            let gen = routeRecoveryGeneration
+            Task { @MainActor in
+                _ = await self.restartCaptureForNewRoute(reason: "resumeAfterPauseTimeout", resumeRecording: true, generation: gen)
+            }
+            return
+        }
         if state == .waitingForUsableInput || state == .interruptedBySystem {
             Task { @MainActor in await attemptResume() }
             return
@@ -607,8 +631,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // 3. Remove all observers
         removeAudioNotificationObservers()
 
-        // 4. Stop timer
+        // 4. Stop timer + pause timeout
         stopTimer()
+        pauseEngineTimeoutTask?.cancel()
+        pauseEngineTimeoutTask = nil
         AudioFileWriter.clearCrashCheckpoint()
         levelMonitorTask?.cancel()
 
@@ -1246,6 +1272,24 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             try? await Task.sleep(nanoseconds: 500_000_000)
             guard let self, !Task.isCancelled else { return }
             await self.processSettledRouteChange(reason)
+        }
+    }
+
+    /// Schedules a task that stops the engine after a long pause to conserve
+    /// battery. The engine consumes ~3-5% battery per hour when idling.
+    /// On resume, the engine is rebuilt transparently via route recovery.
+    private func schedulePauseEngineTimeout() {
+        pauseEngineTimeoutTask?.cancel()
+        pauseEngineTimeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: Self.pauseEngineTimeoutSeconds * 1_000_000_000)
+            guard let self, !Task.isCancelled,
+                  self.state == .pausedByUser,
+                  self.recordingIntent == .userPaused else { return }
+            AppLog.audio.info("Pause timeout (\(Self.pauseEngineTimeoutSeconds)s) — stopping engine to save battery")
+            self.engineStoppedForPauseTimeout = true
+            self.safelyRemoveTap(reason: "pauseEngineTimeout")
+            self.engine.stop()
+            self.isTapInstalled = false
         }
     }
 
