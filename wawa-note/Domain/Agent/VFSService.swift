@@ -1098,9 +1098,10 @@ enum VFSService {
         switch (src, dst) {
         case (.inboxItem(let itemID), .projectItems(_, let pid)):
             try ProjectService(context: context.modelContext).addItem(itemID, to: pid)
-            try KnowledgeItemService(context: context.modelContext).removeFromInbox(
-                try! KnowledgeItemService(context: context.modelContext).fetchItem(id: itemID)!
-            )
+            guard let item = try? KnowledgeItemService(context: context.modelContext).fetchItem(id: itemID) else {
+                throw VFSError.fileNotFound(path: rawPath)
+            }
+            try KnowledgeItemService(context: context.modelContext).removeFromInbox(item)
 
         case (.projectItem(_, _, let itemID), .projectItems(_, let dpid)):
             try ProjectService(context: context.modelContext).addItem(itemID, to: dpid)
