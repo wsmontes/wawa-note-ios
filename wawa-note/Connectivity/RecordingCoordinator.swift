@@ -191,10 +191,18 @@ final class RecordingCoordinator: ObservableObject {
         let recordingTitle = title ?? "Recording \(Date().formatted(date: .abbreviated, time: .shortened))"
         self.recordingTitle = recordingTitle
 
-        // Defer item creation + save + engine start into a Task so we can
-        // request mic permission first if needed (.undetermined). This
-        // prevents creating an item that would flash in the UI and need
-        // rollback if the user denies.
+        // Transition state synchronously so stopRecording() works immediately
+        // (even during the async permission-check gap below). If the Task fails,
+        // state is rolled back in the catch blocks.
+        state = .recording
+        UIApplication.shared.isIdleTimerDisabled = true
+        startObservation()
+        activateLockScreenControls()
+        notifyStatusChange()
+
+        // Item creation + save + engine start are deferred into a Task so we
+        // can request mic permission first if needed (.undetermined). Creating
+        // the item first and rolling back on denial would flash in the UI.
         Task { @MainActor [weak self] in
             guard let self else { return }
 
@@ -208,7 +216,7 @@ final class RecordingCoordinator: ObservableObject {
                 guard granted else {
                     AppLog.warn("audio", "Recording blocked: user denied microphone permission")
                     self.errorMessage = "Microphone access is required to record audio."
-                    self.notifyStatusChange()
+                    self.rollbackRecordingStart()
                     return
                 }
                 AppLog.audio.info("Microphone permission granted — proceeding")
@@ -227,7 +235,7 @@ final class RecordingCoordinator: ObservableObject {
             } catch {
                 AppLog.error("audio", "Failed to save knowledge item for recording: \(error.localizedDescription)")
                 self.errorMessage = "Could not save recording. Try again."
-                self.notifyStatusChange()
+                self.rollbackRecordingStart()
                 return
             }
 
@@ -236,53 +244,59 @@ final class RecordingCoordinator: ObservableObject {
 
             do {
                 try await self.captureService.startRecording(meetingId: itemId)
-                recordingStartDate = Date()
-                state = .recording
-                // Prevent auto-lock during recording. Even though AVAudioSession
-                // .playAndRecord keeps audio alive in background, the system may
-                // suspend the app on screen lock which kills the recording.
-                UIApplication.shared.isIdleTimerDisabled = true
-                startObservation()
-                activateLockScreenControls()
-                notifyStatusChange()
-                captureContextSafely(for: itemId)
+                self.recordingStartDate = Date()
+                self.captureContextSafely(for: itemId)
                 // First segment — read actual file name from the writer (may be .wav for
                 // low sample rates like Bluetooth HFP 8kHz). The writer is the source of truth.
-        let writer = captureService.fileWriter
-        let segIndex = writer.segmentIndex
-        let segFileName = writer.currentFileURL?.lastPathComponent ?? String(format: "segment-%03d.m4a", segIndex)
-        let firstSegment = RecordingSegment(
-            id: UUID(), index: segIndex,
-            fileName: segFileName,
-            startedAt: Date(),
-            inputPortName: captureService.currentInputPortName,
-            inputPortType: AudioSessionManager().bestAvailableInput?.portType.rawValue ?? "unknown",
-            routeChangeReason: "initial",
-            sampleRate: nil
-        )
-        manifest = RecordingManifest(
-            recordingId: itemId, title: recordingTitle,
-            startedAt: Date(), segments: [firstSegment]
-        )
-        // Persist immediately — survives crash during recording
-        saveManifest(manifest!, meetingId: itemId)
+                let writer = self.captureService.fileWriter
+                let segIndex = writer.segmentIndex
+                let segFileName = writer.currentFileURL?.lastPathComponent ?? String(format: "segment-%03d.m4a", segIndex)
+                let firstSegment = RecordingSegment(
+                    id: UUID(), index: segIndex,
+                    fileName: segFileName,
+                    startedAt: Date(),
+                    inputPortName: self.captureService.currentInputPortName,
+                    inputPortType: AudioSessionManager().bestAvailableInput?.portType.rawValue ?? "unknown",
+                    routeChangeReason: "initial",
+                    sampleRate: nil
+                )
+                self.manifest = RecordingManifest(
+                    recordingId: itemId, title: recordingTitle,
+                    startedAt: Date(), segments: [firstSegment]
+                )
+                // Persist immediately — survives crash during recording
+                self.saveManifest(self.manifest!, meetingId: itemId)
 
-        AppLog.event("audio", "Recording started — itemID=\(itemId.uuidString.prefix(8)) input=\(captureService.currentInputPortName)")
+                AppLog.event("audio", "Recording started — itemID=\(itemId.uuidString.prefix(8)) input=\(self.captureService.currentInputPortName)")
             } catch AudioCaptureError.permissionDenied {
                 AppLog.warn("audio", "Recording blocked: microphone permission denied")
-                errorMessage = "Microphone access is off. Turn it on in Settings to record audio."
-                rollbackItem(item, context: context)
+                self.errorMessage = "Microphone access is off. Turn it on in Settings to record audio."
+                self.rollbackItem(item, context: context)
+                self.rollbackRecordingStart()
             } catch AudioCaptureError.diskFull {
                 AppLog.error("audio", "Recording failed: disk full")
-                errorMessage = "Not enough storage. Free up space and try again."
-                rollbackItem(item, context: context)
+                self.errorMessage = "Not enough storage. Free up space and try again."
+                self.rollbackItem(item, context: context)
+                self.rollbackRecordingStart()
             } catch {
                 let detail = error.localizedDescription
                 AppLog.error("audio", "Recording start failed: \(detail)")
-                errorMessage = "Could not start recording. Reason: \(detail)"
-                rollbackItem(item, context: context)
+                self.errorMessage = "Could not start recording. Reason: \(detail)"
+                self.rollbackItem(item, context: context)
+                self.rollbackRecordingStart()
             }
         }
+    }
+
+    /// Reverts the synchronous pre-conditions set at the start of
+    /// startRecording() when the async portion fails.
+    private func rollbackRecordingStart() {
+        state = .idle
+        UIApplication.shared.isIdleTimerDisabled = false
+        observationTimer?.invalidate()
+        observationTimer = nil
+        nowPlayingController.deactivate()
+        notifyStatusChange()
     }
 
     func deleteItem(_ itemId: UUID) {
