@@ -309,11 +309,9 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
     /// Transcribe a single audio URL with guaranteed on-device processing.
     /// Guideline: "No fallback com SFSpeechRecognizer, sempre setar requiresOnDeviceRecognition = true."
     private func transcribeDirect(url: URL, recognizer: SFSpeechRecognizer) async throws -> Transcript {
-        // Ensure audio is in a format the on-device recognizer can process.
-        // WAV files below 16kHz (Bluetooth HFP) are resampled to 16kHz.
-        let transcriptionURL = try await ensureTranscriptionFormat(url)
-
-        let request = SFSpeechURLRecognitionRequest(url: transcriptionURL)
+        // Decode AAC/M4A → PCM WAV. AAC bitstream causes recognizer to skip first seconds.
+        let recognitionURL = try prepareForRecognition(url)
+        let request = SFSpeechURLRecognitionRequest(url: recognitionURL)
         request.shouldReportPartialResults = false
         request.addsPunctuation = true
 
@@ -335,7 +333,9 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         AppLog.transcription.info("Transcribing on-device — locale=\(recognizer.locale.identifier) requiresOnDevice=\(forceOnDevice)")
 
         return try await withCheckedThrowingContinuation { continuation in
+            var hasResumed = false
             let task = recognizer.recognitionTask(with: request) { result, error in
+                guard !hasResumed else { return }
                 if let error {
                     let nsError = error as NSError
                     AppLog.transcription.error("On-device recognition failed: \(nsError.domain)/\(nsError.code) — \(error.localizedDescription)")
@@ -343,22 +343,27 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                     // kAFAssistantErrorDomain Code=1101 = local recognizer rejected audio format.
                     // Retry once with cloud recognition if it was forced on-device.
                     if nsError.domain.contains("AssistantError") && forceOnDevice {
+                        hasResumed = true
                         AppLog.transcription.warning("Local recognizer rejected audio, falling back to cloud recognition")
-                        let cloudRequest = SFSpeechURLRecognitionRequest(url: transcriptionURL)
+                        let cloudRequest = SFSpeechURLRecognitionRequest(url: recognitionURL)
                         cloudRequest.shouldReportPartialResults = false
                         cloudRequest.addsPunctuation = true
                         cloudRequest.requiresOnDeviceRecognition = false
                         if let ctx = self.buildContextualTerms() {
                             cloudRequest.contextualStrings = ctx
                         }
+                        var cloudHasResumed = false
                         let cloudTask = recognizer.recognitionTask(with: cloudRequest) { cloudResult, cloudError in
+                            guard !cloudHasResumed else { return }
                             if let cloudError {
+                                cloudHasResumed = true
                                 let cloudNSError = cloudError as NSError
                                 AppLog.transcription.error("Cloud fallback also failed: \(cloudNSError.domain)/\(cloudNSError.code)")
                                 continuation.resume(throwing: TranscriptionError.recognitionFailed("\(cloudNSError.domain)/\(cloudNSError.code): \(cloudError.localizedDescription)"))
                                 return
                             }
                             guard let cloudResult = cloudResult, cloudResult.isFinal else { return }
+                            cloudHasResumed = true
                             let transcript = self.buildTranscript(from: cloudResult, recognizer: recognizer)
                             AppLog.transcription.info("Cloud fallback succeeded: \(transcript.segments.count) segments")
                             continuation.resume(returning: transcript)
@@ -367,11 +372,13 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                         return
                     }
 
+                    hasResumed = true
                     continuation.resume(throwing: TranscriptionError.recognitionFailed("\(nsError.domain)/\(nsError.code): \(error.localizedDescription)"))
                     return
                 }
 
                 guard let result = result, result.isFinal else { return }
+                hasResumed = true
                 let transcript = self.buildTranscript(from: result, recognizer: recognizer)
                 AppLog.transcription.info("On-device complete: \(transcript.segments.count) segments, lang=\(transcript.languageCode ?? recognizer.locale.identifier), locale=\(recognizer.locale.identifier)")
                 continuation.resume(returning: transcript)
@@ -404,71 +411,64 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         )
     }
 
-    /// Resamples WAV files below 16kHz (Bluetooth HFP) to 16kHz 16-bit PCM
-    /// so the on-device recognizer can process them. M4A/CAF/MP3 pass through.
-    private func ensureTranscriptionFormat(_ url: URL) async throws -> URL {
+    /// Decodes AAC/M4A to 16-bit PCM WAV for reliable SFSpeechRecognizer processing.
+    /// AAC bitstream causes the on-device recognizer to skip the first seconds of audio.
+    /// WAV and other formats pass through unchanged.
+    private func prepareForRecognition(_ url: URL) throws -> URL {
         let ext = url.pathExtension.lowercased()
-        guard ext == "wav" else { return url }
+        guard ext == "m4a" || ext == "mp4" else { return url }
 
-        var fileID: AudioFileID?
-        guard AudioFileOpenURL(url as CFURL, .readPermission, 0, &fileID) == noErr, let fileID = fileID else {
-            return url
-        }
-        defer { AudioFileClose(fileID) }
+        guard let inputFile = try? AVAudioFile(forReading: url) else { return url }
+        let inputFormat = inputFile.processingFormat
 
-        var varFormat = AudioStreamBasicDescription()
-        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
-        guard AudioFileGetProperty(fileID, kAudioFilePropertyDataFormat, &size, &varFormat) == noErr else {
+        // Already PCM — nothing to decode
+        if inputFormat.commonFormat == .pcmFormatInt16 || inputFormat.commonFormat == .pcmFormatFloat32 {
             return url
         }
 
-        guard varFormat.mSampleRate < 16_000 else { return url }
+        AppLog.transcription.info("Decoding AAC to PCM for recognition: \(url.lastPathComponent)")
 
-        AppLog.transcription.info("Resampling WAV from \(Int(varFormat.mSampleRate))Hz to 16000Hz for on-device recognition")
-
-        guard let inputFormat = AVAudioFormat(standardFormatWithSampleRate: varFormat.mSampleRate, channels: 1),
-              let outputFormat = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1) else {
+        guard let outputFormat = AVAudioFormat(standardFormatWithSampleRate: inputFormat.sampleRate, channels: 1) else {
             return url
         }
 
-        guard let inputFile = try? AVAudioFile(forReading: url),
-              let converter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
-            return url
-        }
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("transc_decoded_\(UUID().uuidString).wav")
 
-        let tempDir = FileManager.default.temporaryDirectory
-        let outputURL = tempDir.appendingPathComponent("transc_resampled_\(UUID().uuidString).wav")
-        guard let outputFile = try? AVAudioFile(forWriting: outputURL,
+        guard let outputFile = try? AVAudioFile(forWriting: tempURL,
                                                   settings: outputFormat.settings,
                                                   commonFormat: .pcmFormatInt16,
                                                   interleaved: false) else {
             return url
         }
 
-        let inputLength = inputFile.length
-        guard let inputBuffer = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: AVAudioFrameCount(inputLength)) else {
-            return url
-        }
-        try? inputFile.read(into: inputBuffer)
-
-        let outputFrames = AVAudioFrameCount(Double(inputBuffer.frameLength) * 16_000.0 / varFormat.mSampleRate)
-        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputFrames) else {
+        guard let converter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
             return url
         }
 
-        var convertError: NSError?
-        let status = converter.convert(to: outputBuffer, error: &convertError) { _, outStatus in
+        inputFile.framePosition = 0
+        let length = inputFile.length
+        guard let inputBuf = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: AVAudioFrameCount(length)) else {
+            return url
+        }
+        try inputFile.read(into: inputBuf)
+
+        let outputFrames = AVAudioFrameCount(inputBuf.frameLength)
+        guard let outputBuf = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputFrames) else {
+            return url
+        }
+
+        var error: NSError?
+        converter.convert(to: outputBuf, error: &error) { _, outStatus in
             outStatus.pointee = .haveData
-            return inputBuffer
+            return inputBuf
         }
 
-        guard status != .error, outputBuffer.frameLength > 0 else {
-            AppLog.transcription.warning("Resample failed — trying original format")
-            return url
-        }
+        if let error { throw error }
+        guard outputBuf.frameLength > 0 else { return url }
 
-        try? outputFile.write(from: outputBuffer)
-        return outputURL
+        try outputFile.write(from: outputBuf)
+        return tempURL
     }
 
     // MARK: - Live Transcription

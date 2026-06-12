@@ -64,10 +64,10 @@ final class ContentExtractionService {
                 continue
             }
 
-            // Apple Speech natively supports M4A, WAV, CAF, MP3 — no conversion needed.
-            // convertToTranscriptionFormat was removed: AVAssetExportPresetPassthrough
-            // with .wav output produced corrupted files (AAC bitstream in WAV container)
-            // that caused the on-device recognizer to skip the first seconds of audio.
+            // Apple Speech natively supports M4A, WAV, CAF, MP3.
+            // AAC/M4A is decoded to PCM WAV by AppleSpeechTranscriptionEngine.prepareForRecognition()
+            // before recognition — AVAssetExportPresetPassthrough was removed (produced corrupt
+            // WAV with AAC bitstream, causing recognizer to skip first seconds of audio).
             do {
                 let result = try await engine.transcribeFile(segURL)
                 // Offset segment timestamps — accumulate across segments
