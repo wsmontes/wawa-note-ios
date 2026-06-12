@@ -259,7 +259,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// 1024 frames = ~23ms at 44.1kHz (was 8192 = 186ms).
     private static let captureBufferSize: AVAudioFrameCount = 1024
     private static let levelDecayFactor: Float = 0.85
-    private static let levelUpdateIntervalNS: UInt64 = 30_000_000
+    private static let levelUpdateIntervalNS: UInt64 = 66_000_000  // ~15Hz — visually smooth, low CPU
     private static let timerUpdateInterval: TimeInterval = 0.1
     private static let checkpointInterval: TimeInterval = 5.0
     private static let diskSpaceCheckInterval: TimeInterval = 10.0
@@ -1733,6 +1733,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                         self.silenceDetected = duration > 1.0
                         if duration > Self.silenceDurationBeforePause && !self.isAutoPaused {
                             self.isAutoPaused = true
+                            // Stop writing silence to the file — saves disk space
+                            // and prevents the transcriber from processing empty audio.
+                            self._isCapturingAudio = false
                             AppLog.audio.info("Auto-paused: silence for \(Int(duration))s")
                         }
                     }
@@ -1743,6 +1746,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                             self.silenceDetected = false
                             if self.isAutoPaused {
                                 self.isAutoPaused = false
+                                // Resume writing — audio is back.
+                                if self.state == .recording {
+                                    self._isCapturingAudio = true
+                                }
                                 AppLog.audio.info("Auto-resumed after \(Int(duration))s silence")
                             }
                         }
