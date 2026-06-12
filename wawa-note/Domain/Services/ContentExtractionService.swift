@@ -91,9 +91,17 @@ final class ContentExtractionService {
             }
         }
 
-        guard !allSegments.isEmpty else { return nil }
+        // All segments failed — mark item as failed so the UI can offer retry
+        guard !allSegments.isEmpty else {
+            AppLog.provider.error("ContentExtraction: all \(manifest.segments.count) segments failed transcription")
+            if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: item.id) {
+                fresh.status = .failed
+                try? modelContext.save()
+            }
+            return nil
+        }
 
-        // Save unified transcript
+        // Save unified transcript (partial if some segments failed)
         let unified = Transcript(
             meetingId: item.id,
             languageCode: nil,
@@ -108,7 +116,11 @@ final class ContentExtractionService {
             item.transcriptionEngineId = engine.id
             try modelContext.save()
             NotificationCenter.default.post(name: .transcriptReady, object: item.id.uuidString)
-            AppLog.provider.info("ContentExtraction: unified transcript saved — \(allSegments.count) segments total")
+            if hadError {
+                AppLog.provider.warning("ContentExtraction: partial transcript saved — \(allSegments.count)/\(manifest.segments.count) segments succeeded")
+            } else {
+                AppLog.provider.info("ContentExtraction: unified transcript saved — \(allSegments.count) segments total")
+            }
         } catch {
             AppLog.provider.error("ContentExtraction: failed to save unified transcript: \(error)")
         }

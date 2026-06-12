@@ -2,6 +2,7 @@ import Foundation
 import Speech
 import NaturalLanguage
 import OSLog
+import AVFoundation
 
 // MARK: - Transcription States
 
@@ -308,7 +309,11 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
     /// Transcribe a single audio URL with guaranteed on-device processing.
     /// Guideline: "No fallback com SFSpeechRecognizer, sempre setar requiresOnDeviceRecognition = true."
     private func transcribeDirect(url: URL, recognizer: SFSpeechRecognizer) async throws -> Transcript {
-        let request = SFSpeechURLRecognitionRequest(url: url)
+        // Ensure audio is in a format the on-device recognizer can process.
+        // WAV files below 16kHz (Bluetooth HFP) are resampled to 16kHz.
+        let transcriptionURL = try await ensureTranscriptionFormat(url)
+
+        let request = SFSpeechURLRecognitionRequest(url: transcriptionURL)
         request.shouldReportPartialResults = false
         request.addsPunctuation = true
 
@@ -327,46 +332,143 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             request.contextualStrings = contextTerms
         }
 
-        AppLog.transcription.info("Transcribing on-device — locale=\(recognizer.locale.identifier) requiresOnDevice=true")
+        AppLog.transcription.info("Transcribing on-device — locale=\(recognizer.locale.identifier) requiresOnDevice=\(forceOnDevice)")
 
         return try await withCheckedThrowingContinuation { continuation in
             let task = recognizer.recognitionTask(with: request) { result, error in
                 if let error {
                     let nsError = error as NSError
                     AppLog.transcription.error("On-device recognition failed: \(nsError.domain)/\(nsError.code) — \(error.localizedDescription)")
-                    continuation.resume(throwing: TranscriptionError.recognitionFailed(error.localizedDescription))
+
+                    // kAFAssistantErrorDomain Code=1101 = local recognizer rejected audio format.
+                    // Retry once with cloud recognition if it was forced on-device.
+                    if nsError.domain.contains("AssistantError") && forceOnDevice {
+                        AppLog.transcription.warning("Local recognizer rejected audio, falling back to cloud recognition")
+                        let cloudRequest = SFSpeechURLRecognitionRequest(url: transcriptionURL)
+                        cloudRequest.shouldReportPartialResults = false
+                        cloudRequest.addsPunctuation = true
+                        cloudRequest.requiresOnDeviceRecognition = false
+                        if let ctx = self.buildContextualTerms() {
+                            cloudRequest.contextualStrings = ctx
+                        }
+                        let cloudTask = recognizer.recognitionTask(with: cloudRequest) { cloudResult, cloudError in
+                            if let cloudError {
+                                let cloudNSError = cloudError as NSError
+                                AppLog.transcription.error("Cloud fallback also failed: \(cloudNSError.domain)/\(cloudNSError.code)")
+                                continuation.resume(throwing: TranscriptionError.recognitionFailed("\(cloudNSError.domain)/\(cloudNSError.code): \(cloudError.localizedDescription)"))
+                                return
+                            }
+                            guard let cloudResult = cloudResult, cloudResult.isFinal else { return }
+                            let transcript = self.buildTranscript(from: cloudResult, recognizer: recognizer)
+                            AppLog.transcription.info("Cloud fallback succeeded: \(transcript.segments.count) segments")
+                            continuation.resume(returning: transcript)
+                        }
+                        self.activeRecognitionTask = cloudTask
+                        return
+                    }
+
+                    continuation.resume(throwing: TranscriptionError.recognitionFailed("\(nsError.domain)/\(nsError.code): \(error.localizedDescription)"))
                     return
                 }
 
                 guard let result = result, result.isFinal else { return }
-
-                let fullText = result.bestTranscription.formattedString
-                let detectedLang = self.detectLanguage(fullText)
-
-                let segments = result.bestTranscription.segments.map { segment in
-                    TranscriptSegment(
-                        meetingId: UUID(),
-                        startTime: segment.timestamp,
-                        endTime: segment.timestamp + segment.duration,
-                        text: segment.substring,
-                        confidence: Double(segment.confidence),
-                        languageCode: detectedLang,
-                        sourceEngineId: "apple-speech"
-                    )
-                }
-
-                let transcript = Transcript(
-                    languageCode: detectedLang ?? recognizer.locale.identifier,
-                    segments: segments,
-                    sourceEngineId: "apple-speech"
-                )
-
-                let localeID = recognizer.locale.identifier
-                AppLog.transcription.info("On-device complete: \(segments.count) segments, lang=\(detectedLang ?? localeID), locale=\(localeID)")
+                let transcript = self.buildTranscript(from: result, recognizer: recognizer)
+                AppLog.transcription.info("On-device complete: \(transcript.segments.count) segments, lang=\(transcript.languageCode ?? recognizer.locale.identifier), locale=\(recognizer.locale.identifier)")
                 continuation.resume(returning: transcript)
             }
             self.activeRecognitionTask = task
         }
+    }
+
+    /// Build a Transcript from an SFSpeechRecognitionResult.
+    private func buildTranscript(from result: SFSpeechRecognitionResult, recognizer: SFSpeechRecognizer) -> Transcript {
+        let fullText = result.bestTranscription.formattedString
+        let detectedLang = detectLanguage(fullText)
+
+        let segments = result.bestTranscription.segments.map { segment in
+            TranscriptSegment(
+                meetingId: UUID(),
+                startTime: segment.timestamp,
+                endTime: segment.timestamp + segment.duration,
+                text: segment.substring,
+                confidence: Double(segment.confidence),
+                languageCode: detectedLang,
+                sourceEngineId: "apple-speech"
+            )
+        }
+
+        return Transcript(
+            languageCode: detectedLang ?? recognizer.locale.identifier,
+            segments: segments,
+            sourceEngineId: "apple-speech"
+        )
+    }
+
+    /// Resamples WAV files below 16kHz (Bluetooth HFP) to 16kHz 16-bit PCM
+    /// so the on-device recognizer can process them. M4A/CAF/MP3 pass through.
+    private func ensureTranscriptionFormat(_ url: URL) async throws -> URL {
+        let ext = url.pathExtension.lowercased()
+        guard ext == "wav" else { return url }
+
+        var fileID: AudioFileID?
+        guard AudioFileOpenURL(url as CFURL, .readPermission, 0, &fileID) == noErr, let fileID = fileID else {
+            return url
+        }
+        defer { AudioFileClose(fileID) }
+
+        var varFormat = AudioStreamBasicDescription()
+        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        guard AudioFileGetProperty(fileID, kAudioFilePropertyDataFormat, &size, &varFormat) == noErr else {
+            return url
+        }
+
+        guard varFormat.mSampleRate < 16_000 else { return url }
+
+        AppLog.transcription.info("Resampling WAV from \(Int(varFormat.mSampleRate))Hz to 16000Hz for on-device recognition")
+
+        guard let inputFormat = AVAudioFormat(standardFormatWithSampleRate: varFormat.mSampleRate, channels: 1),
+              let outputFormat = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1) else {
+            return url
+        }
+
+        guard let inputFile = try? AVAudioFile(forReading: url),
+              let converter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
+            return url
+        }
+
+        let tempDir = FileManager.default.temporaryDirectory
+        let outputURL = tempDir.appendingPathComponent("transc_resampled_\(UUID().uuidString).wav")
+        guard let outputFile = try? AVAudioFile(forWriting: outputURL,
+                                                  settings: outputFormat.settings,
+                                                  commonFormat: .pcmFormatInt16,
+                                                  interleaved: false) else {
+            return url
+        }
+
+        let inputLength = inputFile.length
+        guard let inputBuffer = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: AVAudioFrameCount(inputLength)) else {
+            return url
+        }
+        try? inputFile.read(into: inputBuffer)
+
+        let outputFrames = AVAudioFrameCount(Double(inputBuffer.frameLength) * 16_000.0 / varFormat.mSampleRate)
+        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputFrames) else {
+            return url
+        }
+
+        var convertError: NSError?
+        let status = converter.convert(to: outputBuffer, error: &convertError) { _, outStatus in
+            outStatus.pointee = .haveData
+            return inputBuffer
+        }
+
+        guard status != .error, outputBuffer.frameLength > 0 else {
+            AppLog.transcription.warning("Resample failed — trying original format")
+            return url
+        }
+
+        try? outputFile.write(from: outputBuffer)
+        return outputURL
     }
 
     // MARK: - Live Transcription

@@ -243,13 +243,10 @@ final class ContentPipelineService: ObservableObject {
             // Uses the extractionSvc already created in Phase 0 above.
             let availableText = await extractionSvc.bestAvailableText(for: item) ?? ""
             if availableText.trimmingCharacters(in: .whitespaces).isEmpty {
-                AppLog.provider.warning("ContentPipeline: no extractable text for item \(itemID) — deferring")
-                // Mark as .draft so the UI can show "Needs transcription" or "No content"
-                // rather than leaving it at .recorded which implies success.
-                if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
-                    fresh.status = .draft
-                    try? modelContext.save()
-                }
+                // Transcription or extraction failed — status was already set by the extraction
+                // phase (.failed if transcription failed, .recorded if not yet transcribed).
+                // Do NOT override to .draft — that makes items invisible to retry logic.
+                AppLog.provider.warning("ContentPipeline: no extractable text for item \(itemID) — pipeline cannot proceed")
                 return
             }
 
