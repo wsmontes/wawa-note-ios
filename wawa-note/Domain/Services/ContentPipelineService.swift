@@ -368,7 +368,15 @@ final class ContentPipelineService: ObservableObject {
                                 try? dd.write(to: store.itemDirectoryURL(for: itemID).appendingPathComponent(AppFileConstants.dynamicAnalysisFileName))
                             }
                         }
-                        if !failed { break } // Success — analysis exists and DynamicAnalysis created
+                        if !failed {
+                            // Mark item as analyzed now that we have valid analysis
+                            if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+                                fresh.status = .analyzed
+                                fresh.analysisProviderId = executorModel
+                                try? modelContext.save()
+                            }
+                            break // Success — analysis exists and DynamicAnalysis created
+                        }
                     } else {
                         // Agent finished but didn't create analysis
                         AppLog.provider.warning("Pipeline attempt \(attemptCount): agent finished but no analysis.json found")
