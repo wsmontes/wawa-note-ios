@@ -212,6 +212,7 @@ struct InboxView: View {
 
     private func transcriptionLabel(_ engineId: String) -> String {
         if engineId.contains("whisper") { return "Whisper" }
+        if engineId.contains("apple-cloud") { return "Apple Cloud" }
         if engineId.contains("apple-speech") { return "On-Device" }
         return "Transcribed"
     }

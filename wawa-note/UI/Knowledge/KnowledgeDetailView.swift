@@ -552,6 +552,7 @@ struct KnowledgeDetailView: View {
 
     private func transcriptionServiceLabel(_ engineId: String) -> String {
         if engineId.contains("whisper") { return "Transcribed · Whisper" }
+        if engineId.contains("apple-cloud") { return "Transcribed · Apple Cloud" }
         if engineId.contains("apple-speech") { return "Transcribed · On-Device" }
         return "Transcribed"
     }

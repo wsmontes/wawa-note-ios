@@ -113,7 +113,7 @@ final class ContentExtractionService {
             try fileStore.createMeetingDirectory(for: item.id)
             try fileStore.writeArtifact(unified, fileName: "transcript.json", meetingId: item.id)
             item.status = .transcribed
-            item.transcriptionEngineId = engine.id
+            item.transcriptionEngineId = resolvedEngineId(engine)
             try modelContext.save()
             NotificationCenter.default.post(name: .transcriptReady, object: item.id.uuidString)
             if hadError {
@@ -151,6 +151,15 @@ final class ContentExtractionService {
         return AppleSpeechTranscriptionEngine()
     }
 
+    /// Returns the effective engine ID, appending "-cloud" when the Apple engine
+    /// fell back to cloud recognition (on-device was rejected).
+    private func resolvedEngineId(_ engine: any TranscriptionEngine) -> String {
+        if let apple = engine as? AppleSpeechTranscriptionEngine, apple.usedCloudFallback {
+            return "apple-cloud"
+        }
+        return engine.id
+    }
+
     /// Transcribe a single audio.m4a file (legacy path).
     private func transcribeSingleFile(item: KnowledgeItem) async -> String? {
         let audioURL = fileStore.audioFileURL(for: item.id)
@@ -172,7 +181,7 @@ final class ContentExtractionService {
             try fileStore.writeArtifact(result, fileName: "transcript.json", meetingId: item.id)
 
             item.status = .transcribed
-            item.transcriptionEngineId = engine.id
+            item.transcriptionEngineId = resolvedEngineId(engine)
             try modelContext.save()
 
             NotificationCenter.default.post(name: .transcriptReady, object: item.id.uuidString)

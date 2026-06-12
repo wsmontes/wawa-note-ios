@@ -69,6 +69,8 @@ enum TranscriptionError: LocalizedError {
 final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Sendable {
     let id = "apple-speech"
     let displayName = "Apple Speech"
+    /// Set to true when the cloud fallback path succeeded (on-device was rejected).
+    var usedCloudFallback = false
 
     static let maxLocalDuration: TimeInterval = 50
     static let maxFileDuration: TimeInterval = 3600 // 1 hour max
@@ -201,6 +203,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
     func transcribeFile(_ audioFileURL: URL) async throws -> Transcript {
         isCancelled = false
+        usedCloudFallback = false
 
         let availability = checkAvailability()
         guard case .available = availability else {
@@ -364,6 +367,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                             }
                             guard let cloudResult = cloudResult, cloudResult.isFinal else { return }
                             cloudHasResumed = true
+                            self.usedCloudFallback = true
                             let transcript = self.buildTranscript(from: cloudResult, recognizer: recognizer)
                             AppLog.transcription.info("Cloud fallback succeeded: \(transcript.segments.count) segments")
                             continuation.resume(returning: transcript)
