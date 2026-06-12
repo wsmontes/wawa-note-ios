@@ -1236,9 +1236,19 @@ enum VFSService {
         }
         let svc = TaskService(context: context.modelContext)
         var newStatus: TaskStatus?
-        if let s = json["status"] as? String { newStatus = TaskStatus(rawValue: s) }
+        if let s = json["status"] as? String {
+            guard let status = TaskStatus(rawValue: s) else {
+                throw VFSError.invalidField("status", s, TaskStatus.allCases.map(\.rawValue))
+            }
+            newStatus = status
+        }
         var newPriority: TaskPriority?
-        if let p = json["priority"] as? String { newPriority = TaskPriority(rawValue: p) }
+        if let p = json["priority"] as? String {
+            guard let priority = TaskPriority(rawValue: p) else {
+                throw VFSError.invalidField("priority", p, TaskPriority.allCases.map(\.rawValue))
+            }
+            newPriority = priority
+        }
         let newTitle = json["title"] as? String
         let newOwner = json["owner"] as? String
         if let v = json["notes"] as? String { task.notes = v }
@@ -1457,6 +1467,7 @@ enum VFSError: Error, LocalizedError {
     case fileNotFound(path: String)
     case invalidContent
     case invalidJSON
+    case invalidField(String, String, [String])
     case cannotDelete(path: String)
     case cannotMove(from: String, to: String)
     case notImplemented
@@ -1466,6 +1477,7 @@ enum VFSError: Error, LocalizedError {
         case .fileNotFound(let path): return "File not found: \(path)"
         case .invalidContent: return "Invalid file content"
         case .invalidJSON: return "Invalid JSON content"
+        case .invalidField(let field, let value, let valid): return "Invalid value '\(value)' for field '\(field)'. Valid: \(valid.joined(separator: ", "))"
         case .cannotDelete(let path): return "Cannot delete: \(path)"
         case .cannotMove(let from, let to): return "Cannot move \(from) to \(to)"
         case .notImplemented: return "Operation not implemented"
