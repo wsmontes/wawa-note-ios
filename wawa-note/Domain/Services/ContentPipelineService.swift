@@ -113,6 +113,13 @@ final class ContentPipelineService: ObservableObject {
                 return
             }
 
+            // Respect the extraction review gate. Items in pendingReview wait for
+            // the user to approve the extracted text before analysis proceeds.
+            guard item.status != .pendingReview else {
+                AppLog.provider.info("ContentPipeline: item \(itemID) pending review — waiting for user approval")
+                return
+            }
+
             // Skip if already analyzed (re-analyze is triggered manually via the UI)
             guard item.analysisProviderId == nil || !AutomationSettings.shared.autoAnalyze else {
                 AppLog.provider.info("ContentPipeline: item \(itemID) already analyzed, skipping")
@@ -466,15 +473,14 @@ final class LensCatalogService {
     func lenses(in category: LensCategory) -> [Lens] { allLenses.filter { $0.category == category } }
     func resolve(id: String) -> Lens? { allLenses.first { $0.id == id } }
 
+    /// Active frameworks — Meeting, Research, and Blank are the core three.
+    /// Brainstorm, Journal, Coaching, Legal, and Product are deferred per the
+    /// scope discipline review (2026-06-11). Their framework definitions remain
+    /// in FrameworkService for future activation when users request them.
     private var frameworkLenses: [Lens] {
         [
             Lens(id: "builtin/meeting", name: "Meeting Analysis", description: "Decisions, actions, risks, dates, entities", icon: "mic.fill", category: .domain, framework: FrameworkService.meetingFramework),
             Lens(id: "builtin/research", name: "Research", description: "Hypotheses, findings, themes, sources", icon: "magnifyingglass", category: .domain, framework: FrameworkService.researchFramework),
-            Lens(id: "builtin/brainstorm", name: "Brainstorm", description: "Ideas, clusters, themes, questions", icon: "lightbulb.fill", category: .personal, framework: FrameworkService.brainstormFramework),
-            Lens(id: "builtin/journal", name: "Journal", description: "Themes, people, places, moods", icon: "book.fill", category: .personal, framework: FrameworkService.journalFramework),
-            Lens(id: "builtin/coaching", name: "Coaching", description: "Competencies, commitments, breakthroughs", icon: "person.fill.checkmark", category: .domain, framework: FrameworkService.coachingFramework),
-            Lens(id: "builtin/legal", name: "Legal Brief", description: "Cases, depositions, statutes, privilege", icon: "building.columns.fill", category: .domain, framework: FrameworkService.legalFramework),
-            Lens(id: "builtin/product", name: "Product Spec", description: "Stories, requirements, constraints, decisions", icon: "hammer.fill", category: .domain, framework: FrameworkService.productFramework),
             Lens(id: "builtin/blank", name: "Blank Slate", description: "Minimal — AI adapts to your content", icon: "doc.fill", category: .custom, framework: FrameworkService.blankFramework)
         ]
     }
