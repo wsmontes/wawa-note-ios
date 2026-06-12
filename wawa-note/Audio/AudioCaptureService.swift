@@ -185,7 +185,11 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// Deferred route-change reason. When a second settled route change arrives
     /// while a physical restart is already in progress, we store it here instead
     /// of silently dropping it. Drained at the end of restartCaptureForNewRoute.
-    private var pendingRouteChangeAfterRestart: AVAudioSession.RouteChangeReason?
+    /// Queue of route change reasons that arrived while a physical restart
+    /// was in progress. Drained in FIFO order when the restart completes.
+    /// Using an array instead of a single optional prevents silently dropping
+    /// a third route change that arrives before the pending one is drained.
+    private var pendingRouteChanges: [AVAudioSession.RouteChangeReason] = []
 
     /// Tracks whether the audio tap is currently installed on engine.inputNode.
     /// Must be kept in sync with every installTap/removeTap call so we never
@@ -701,15 +705,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         isPhysicalRestartInProgress = true
         defer {
             isPhysicalRestartInProgress = false
-            // Drain any route change that arrived while we were restarting.
-            // Schedule as a task so the current restart's cleanup fully
-            // completes before the next one begins.
-            if let pending = pendingRouteChangeAfterRestart {
-                pendingRouteChangeAfterRestart = nil
-                Task { @MainActor [weak self] in
-                    await self?.processSettledRouteChange(pending)
-                }
-            }
+            drainPendingRouteChanges()
         }
 
         logCrashDiagnostics("restartCapture-begin[\(reason)]")
@@ -937,12 +933,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         isPhysicalRestartInProgress = true
         defer {
             isPhysicalRestartInProgress = false
-            if let pending = pendingRouteChangeAfterRestart {
-                pendingRouteChangeAfterRestart = nil
-                Task { @MainActor [weak self] in
-                    await self?.processSettledRouteChange(pending)
-                }
-            }
+            drainPendingRouteChanges()
         }
 
         logCrashDiagnostics("forceBuiltInMic-begin")
@@ -1163,14 +1154,31 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// Drains the pending route change queue after a physical restart completes.
+    /// Multiple route changes can stack up during Bluetooth negotiation (e.g.
+    /// AirPods connecting → disconnecting → connecting again in <2s). Each is
+    /// processed sequentially so the last one wins, rather than silently losing
+    /// intermediate transitions.
+    private func drainPendingRouteChanges() {
+        let pending = pendingRouteChanges
+        guard !pending.isEmpty else { return }
+        pendingRouteChanges.removeAll()
+        AppLog.audio.info("Draining \(pending.count) deferred route change(s)")
+        for reason in pending {
+            Task { @MainActor [weak self] in
+                await self?.processSettledRouteChange(reason)
+            }
+        }
+    }
+
     @MainActor
     private func processSettledRouteChange(_ reason: AVAudioSession.RouteChangeReason) async {
         // Don't stack route changes on top of an in-progress restart.
         // Instead of silently dropping the change, store it so the running
         // restart can drain it when it completes (prevents lost route changes).
         guard !isPhysicalRestartInProgress else {
-            AppLog.audio.info("Route settled: restart already in progress — deferring route change (reason=\(reason.rawValue))")
-            pendingRouteChangeAfterRestart = reason
+            AppLog.audio.info("Route settled: restart already in progress — deferring route change (reason=\(reason.rawValue)) queueDepth=\(self.pendingRouteChanges.count + 1)")
+            pendingRouteChanges.append(reason)
             return
         }
 
@@ -1303,12 +1311,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         isPhysicalRestartInProgress = true
         defer {
             isPhysicalRestartInProgress = false
-            if let pending = pendingRouteChangeAfterRestart {
-                pendingRouteChangeAfterRestart = nil
-                Task { @MainActor [weak self] in
-                    await self?.processSettledRouteChange(pending)
-                }
-            }
+            drainPendingRouteChanges()
         }
 
         logCrashDiagnostics("rebuildForNewRoute-begin[\(reason)]")
