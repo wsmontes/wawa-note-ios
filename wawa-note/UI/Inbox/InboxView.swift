@@ -443,6 +443,7 @@ struct InboxView: View {
         lastTrashedItem = item
         showUndoToast = true
         undoTimer?.invalidate()
+        // Struct capture is fine — timer fires once and releases the copied struct within 5s.
         undoTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { _ in
             Task { @MainActor in
                 self.showUndoToast = false
@@ -458,6 +459,7 @@ struct InboxView: View {
         showUndoToast = false
         lastTrashedItem = nil
         undoTimer?.invalidate()
+        undoTimer = nil
     }
 
     private func shareItem(_ item: KnowledgeItem) {
