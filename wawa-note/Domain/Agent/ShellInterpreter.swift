@@ -28,19 +28,36 @@ enum ShellInterpreter {
         var allOutputs: [String] = []
         var lastError = false
 
+        var previousOutput: String?
         for cmdStr in commands {
-            let trimmed = cmdStr.trimmingCharacters(in: .whitespaces)
+            var trimmed = cmdStr.trimmingCharacters(in: .whitespaces)
             if trimmed.isEmpty { continue }
 
+            // Pipe: prepend previous output to the piped command's stdin context
+            let isPipe = trimmed.hasPrefix("| ")
+            if isPipe {
+                trimmed = String(trimmed.dropFirst(2))
+            }
+
             let cmd = tokenize(trimmed)
-            let result = dispatch(cmd, context)
+            let result: ToolResult
+            if isPipe, let prev = previousOutput {
+                // Pass previous output as stdin for the piped command
+                var pipedCmd = cmd
+                pipedCmd.args.append(prev)
+                result = dispatch(pipedCmd, context)
+            } else {
+                result = dispatch(cmd, context)
+            }
 
             if !result.content.isEmpty {
                 allOutputs.append(result.content)
+                previousOutput = result.content
+            } else {
+                previousOutput = nil
             }
             if result.isError {
                 lastError = true
-                // Continue executing remaining commands so all output is accumulated
             }
         }
 
@@ -49,11 +66,11 @@ enum ShellInterpreter {
         return ToolResult(content: combined, citations: [], isError: lastError, displaySummary: preview)
     }
 
-    /// Splits a command string by `&&`, `;`, and newlines.
+    /// Splits a command string by `&&`, `;`, `|`, and newlines.
+    /// Pipe (`|`) is recognized as a separator but commands are marked with
+    /// a "|" prefix to indicate piping — the execute() function handles chaining.
     static func splitCommands(_ raw: String) -> [String] {
-        // First split by newlines
         let lines = raw.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-        // Then split each line by && and ;
         var result: [String] = []
         for line in lines {
             var current = ""
@@ -74,6 +91,12 @@ enum ShellInterpreter {
                     if ch == ";" {
                         result.append(current.trimmingCharacters(in: .whitespaces))
                         current = ""
+                        prevWasAmpersand = false
+                        continue
+                    }
+                    if ch == "|" {
+                        result.append(current.trimmingCharacters(in: .whitespaces))
+                        current = "| " // Mark next command as piped
                         prevWasAmpersand = false
                         continue
                     }
