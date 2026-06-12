@@ -17,12 +17,38 @@ struct ShellCommand {
 @MainActor
 enum ShellInterpreter {
 
+    // MARK: Command History
+
+    /// Stores the last 50 executed commands for `history` and `!!` support.
+    private static var commandHistory: [String] = []
+    private static let maxHistory = 50
+
+    /// Record a command in history (skip empty, skip history/!! to avoid loops).
+    private static func recordHistory(_ cmd: String) {
+        let trimmed = cmd.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !trimmed.hasPrefix("history"), trimmed != "!!" else { return }
+        commandHistory.append(trimmed)
+        if commandHistory.count > maxHistory { commandHistory.removeFirst() }
+    }
+
     // MARK: Public entry point (intelligent multi-command)
 
     /// Executes one or more commands separated by `&&`, `;`, or newlines.
     /// After `cd`, automatically appends a directory listing.
     /// Accumulates output from all commands in the chain.
     static func execute(command raw: String, context: ToolContext) -> ToolResult {
+        // Handle !! and !prefix expansion
+        var expanded = raw
+        if expanded == "!!" {
+            expanded = commandHistory.last ?? raw
+        } else if expanded.hasPrefix("!") && !expanded.hasPrefix("! ") {
+            let prefix = String(expanded.dropFirst())
+            if let match = commandHistory.last(where: { $0.hasPrefix(prefix) }) {
+                expanded = match
+            }
+        }
+        recordHistory(expanded)
+
         // Split into individual commands
         let commands = splitCommands(raw)
         var allOutputs: [String] = []
@@ -178,6 +204,7 @@ enum ShellInterpreter {
         case "vision", "describe": result = handleVision(cmd, ctx)
         case "progress": result = handleProgress(cmd, ctx)
         case "cleanup": result = handleCleanup(cmd, ctx)
+        case "history": result = handleHistory(cmd, ctx)
         case "help":  result = handleHelp(cmd, ctx)
         case "ask_user": result = handleAskUser(cmd, ctx)
         default:
@@ -1635,6 +1662,16 @@ enum ShellInterpreter {
     }
 
     // MARK: - help
+
+    private static func handleHistory(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
+        if cmd.flags.keys.contains("clear") {
+            commandHistory.removeAll()
+            return ok("History cleared.")
+        }
+        if commandHistory.isEmpty { return ok("No commands in history.") }
+        let numbered = commandHistory.enumerated().map { "\($0.offset + 1): \($0.element)" }.joined(separator: "\n")
+        return ok("Recent commands (\(commandHistory.count)/\(maxHistory)):\n\(numbered)")
+    }
 
     private static func handleHelp(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
         let topic = cmd.args.first ?? "vfs"
