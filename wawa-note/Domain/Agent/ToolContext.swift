@@ -3,7 +3,10 @@ import SwiftData
 
 /// Mutable context passed to every tool execution.
 /// Reference type so that `cd` mutations persist across iterations of the agent loop.
-final class ToolContext: @unchecked Sendable {
+/// @MainActor — all mutations happen on the main actor (ShellInterpreter, ChatViewModel,
+/// AgentLoop are all @MainActor). The @unchecked Sendable was masking real concurrency risks.
+@MainActor
+final class ToolContext {
     let modelContext: ModelContext
     let fileStore: FileArtifactStore
     var activeProjectID: UUID?
