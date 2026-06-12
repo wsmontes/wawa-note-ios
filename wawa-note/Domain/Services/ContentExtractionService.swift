@@ -348,15 +348,20 @@ final class ContentExtractionService {
     // MARK: - Analyze text (source-aware)
 
     /// Runs AI analysis on extracted text. Uses the direct AnalysisService path
-    /// for reliable structured output. The iterative agent path is reserved for
-    /// framework-driven analysis (analyzeDynamic) where tools add value.
-    func analyze(text: String, item: KnowledgeItem) async -> Bool {
+    /// for reliable structured output.
+    /// - Returns: true on success, throws on transient errors (retryable),
+    ///   false on permanent errors (don't retry).
+    func analyze(text: String, item: KnowledgeItem) async throws -> Bool {
+        guard !text.trimmingCharacters(in: .whitespaces).isEmpty else {
+            AppLog.provider.warning("ContentExtraction.analyze: empty text for item \(item.id)")
+            return false
+        }
+
         guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
             AppLog.provider.warning("ContentExtraction.analyze: no provider configured")
             return false
         }
 
-        // Use configured analysis model (respects user's ai_config.json), with fallback
         let settings = AutomationSettings.shared
         let configModel = AIConfigService.shared.featureConfig(for: "analysis")?.model
         let model = configModel ?? settings.resolveAutoAnalysisModel(context: modelContext) ?? settings.autoAnalysisModel
@@ -379,10 +384,15 @@ final class ContentExtractionService {
             NotificationCenter.default.post(name: .analysisReady, object: item.id.uuidString)
             await EmbeddingPipelineService().ensureEmbedding(for: item, using: provider)
             return true
-        } catch {
-            AppLog.provider.error("ContentExtraction.analyze: FAILED for item \(item.id): \(error.localizedDescription)")
+        } catch let error as TranscriptionError {
+            // Permanent errors: model not found, invalid API key — don't retry
+            AppLog.provider.error("ContentExtraction.analyze: PERMANENT failure for item \(item.id): \(error.localizedDescription)")
             try? fileStore.createMeetingDirectory(for: item.id)
             return false
+        } catch {
+            // Transient errors: network timeout, rate limit, server error — retryable
+            AppLog.provider.error("ContentExtraction.analyze: TRANSIENT failure for item \(item.id): \(error.localizedDescription)")
+            throw error
         }
     }
 
