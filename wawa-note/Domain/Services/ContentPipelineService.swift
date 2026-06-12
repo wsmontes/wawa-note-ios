@@ -146,6 +146,11 @@ final class ContentPipelineService: ObservableObject {
                         userInfo: ["stage": "transcribing"])
                     if let transcribedText = await extractionSvc.extractTextFromAudio(item) {
                         AppLog.provider.info("ContentPipeline: pre-transcription complete for item \(itemID) — \(transcribedText.count) chars")
+                        // Set pendingReview so user can verify transcription before analysis
+                        if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+                            fresh.status = .pendingReview
+                            try? modelContext.save()
+                        }
                     } else {
                         AppLog.provider.warning("ContentPipeline: pre-transcription failed for item \(itemID)")
                     }
@@ -158,6 +163,11 @@ final class ContentPipelineService: ObservableObject {
                         userInfo: ["stage": "recognizing"])
                     if let ocrText = await extractionSvc.extractTextFromImage(item) {
                         AppLog.provider.info("ContentPipeline: OCR complete for item \(itemID) — \(ocrText.count) chars")
+                        // Set pendingReview so user can verify OCR before analysis
+                        if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+                            fresh.status = .pendingReview
+                            try? modelContext.save()
+                        }
                     } else {
                         AppLog.provider.warning("ContentPipeline: OCR failed for item \(itemID)")
                     }

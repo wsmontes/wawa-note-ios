@@ -429,11 +429,12 @@ my-project/
 2. Import engine (3 days) — PortableImportService, handles fresh import and re-import, handles Obsidian-style markdown
 3. UI integration (2 days) — Export button on project detail, import from Files.app
 
-### Proposal 3: Extraction Review Gate — Trust Layer
+### Proposal 3: Extraction Review Gate — Trust Layer ✅ PHASE 1 DONE 2026-06-12
 
 **Priority:** High — builds user trust in AI outputs
 **Effort:** Small (3-4 days)
 **Dependencies:** None
+**Status:** Phase 1 implemented — pipeline now sets .pendingReview after transcription/OCR. Pipeline respects the gate (skips analysis). UI review screen pending.
 
 **User flow:**
 
