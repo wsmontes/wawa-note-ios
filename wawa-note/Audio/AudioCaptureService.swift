@@ -641,7 +641,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         // 5. Try to stop engine/tap safely — don't crash if already broken
         safelyRemoveTap(reason: "forceFinish")
-        engine.stop()
+        if engine.isRunning { engine.stop() }
         try? sessionManager.deactivate()
 
         // 6. Close any open segment
