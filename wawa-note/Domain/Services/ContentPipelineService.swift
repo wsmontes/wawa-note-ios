@@ -2690,32 +2690,54 @@ final class ProcessingQueueService: ObservableObject {
         let entryID = next.id
         let itemID = next.itemID
         let task = Task { [weak self] in
-            defer {
-                Task { @MainActor [weak self] in
-                    self?.finishJob(entryID)
+            do {
+                try Task.checkCancellation()
+                await pipeline.processEntry(
+                    itemID: itemID,
+                    projectID: next.projectID
+                )
+                // Success — mark done
+                await MainActor.run { [weak self] in
+                    self?.finishJob(entryID, failed: false, error: nil)
+                }
+            } catch {
+                await MainActor.run { [weak self] in
+                    self?.finishJob(entryID, failed: true, error: error.localizedDescription)
                 }
             }
-            try Task.checkCancellation()
-            await pipeline.processEntry(
-                itemID: itemID,
-                projectID: next.projectID
-            )
         }
         activeTasks[entryID] = task
     }
 
-    private func finishJob(_ entryID: UUID) {
+    private func finishJob(_ entryID: UUID, failed: Bool = false, error: String? = nil) {
         guard let entry = entries.first(where: { $0.id == entryID }) else { return }
-        if entry.status != .cancelled {
+        if entry.status == .cancelled {
+            AppLog.warn("pipeline", "Processing cancelled — itemID=\(entry.itemID.uuidString.prefix(8))")
+        } else if failed {
+            entry.retryCount += 1
+            if entry.retryCount < entry.maxRetries {
+                // Re-queue for retry
+                entry.status = .queued
+                entry.lastError = error
+                AppLog.warn("pipeline", "Processing failed (attempt \(entry.retryCount)/\(entry.maxRetries)) — itemID=\(entry.itemID.uuidString.prefix(8)) error=\(error ?? "unknown")")
+                activeTasks[entryID] = nil
+                activeJobCount = max(0, activeJobCount - 1)
+                endBackgroundTask()
+                sortEntries()
+                processNext()
+                return
+            }
+            entry.status = .failed
+            entry.completedAt = Date()
+            entry.lastError = error
+            AppLog.error("pipeline", "Processing permanently failed after \(entry.retryCount) retries — itemID=\(entry.itemID.uuidString.prefix(8))")
+        } else {
             entry.status = .done
             entry.completedAt = Date()
-            AppLog.event("pipeline", "Processing complete — itemID=\(entry.itemID.uuidString.prefix(8)) status=\(entry.status)")
-        } else {
-            AppLog.warn("pipeline", "Processing cancelled — itemID=\(entry.itemID.uuidString.prefix(8))")
+            AppLog.event("pipeline", "Processing complete — itemID=\(entry.itemID.uuidString.prefix(8))")
         }
         activeTasks[entryID] = nil
         activeJobCount = max(0, activeJobCount - 1)
-        entries.removeAll { $0.id == entryID }
         endBackgroundTask()
         sortEntries()
         processNext()
