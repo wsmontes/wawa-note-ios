@@ -280,9 +280,16 @@ final class ContentExtractionService {
     /// Returns the best available text for an item without running expensive extraction.
     /// For webBookmarks, fetches URL content asynchronously (never blocks the calling actor).
     func bestAvailableText(for item: KnowledgeItem) async -> String? {
+        // WebBookmarks: fetch URL content
         if item.type == .webBookmark, let urlStr = item.importSourceURL, let url = URL(string: urlStr) {
             if let fetched = await fetchBookmarkContent(url: url) {
                 return fetched
+            }
+        }
+        // Images: attempt OCR if no body text yet
+        if item.type == .image, item.bodyText == nil {
+            if let ocr = await extractTextFromImage(item) {
+                return ocr
             }
         }
         if let transcript = loadExistingTranscriptText(for: item.id) {

@@ -133,23 +133,41 @@ final class ContentPipelineService: ObservableObject {
 
             let fileStore = FileArtifactStore()
 
-            // Pre-transcribe audio items BEFORE checking AI provider.
-            // Transcription uses Apple Speech (on-device) or Whisper API,
-            // neither of which requires the AI provider configured in Settings.
-            // Respect the user's autoTranscribe preference.
-            if AutomationSettings.shared.autoTranscribe,
-               item.type == .audio,
-               item.transcriptionEngineId == nil {
-                pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
-                    itemType: item.type.rawValue, phase: "transcribing",
-                    currentTool: nil, toolSummary: nil, toolLog: [], events: [], thinkingActive: false)
-                NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
-                    userInfo: ["stage": "transcribing"])
-                let extractionSvc = ContentExtractionService(modelContext: modelContext, fileStore: fileStore)
-                if let transcribedText = await extractionSvc.extractTextFromAudio(item) {
-                    AppLog.provider.info("ContentPipeline: pre-transcription complete for item \(itemID) — \(transcribedText.count) chars")
-                } else {
-                    AppLog.provider.warning("ContentPipeline: pre-transcription failed for item \(itemID)")
+            // Phase 0: Pre-extraction — transcribe audio, OCR images, fetch bookmarks.
+            // These operations don't require an AI provider and run before analysis.
+            let extractionSvc = ContentExtractionService(modelContext: modelContext, fileStore: fileStore)
+
+            if AutomationSettings.shared.autoTranscribe {
+                if item.type == .audio, item.transcriptionEngineId == nil {
+                    pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
+                        itemType: item.type.rawValue, phase: "transcribing",
+                        currentTool: nil, toolSummary: nil, toolLog: [], events: [], thinkingActive: false)
+                    NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
+                        userInfo: ["stage": "transcribing"])
+                    if let transcribedText = await extractionSvc.extractTextFromAudio(item) {
+                        AppLog.provider.info("ContentPipeline: pre-transcription complete for item \(itemID) — \(transcribedText.count) chars")
+                    } else {
+                        AppLog.provider.warning("ContentPipeline: pre-transcription failed for item \(itemID)")
+                    }
+                }
+                if item.type == .image, item.bodyText == nil {
+                    pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
+                        itemType: item.type.rawValue, phase: "recognizing",
+                        currentTool: nil, toolSummary: nil, toolLog: [], events: [], thinkingActive: false)
+                    NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
+                        userInfo: ["stage": "recognizing"])
+                    if let ocrText = await extractionSvc.extractTextFromImage(item) {
+                        AppLog.provider.info("ContentPipeline: OCR complete for item \(itemID) — \(ocrText.count) chars")
+                    } else {
+                        AppLog.provider.warning("ContentPipeline: OCR failed for item \(itemID)")
+                    }
+                }
+                if item.type == .webBookmark, item.bodyText == nil {
+                    pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
+                        itemType: item.type.rawValue, phase: "fetching",
+                        currentTool: nil, toolSummary: nil, toolLog: [], events: [], thinkingActive: false)
+                    // bestAvailableText handles the fetch; call it to cache the result
+                    _ = await extractionSvc.bestAvailableText(for: item)
                 }
             }
 
@@ -218,8 +236,12 @@ final class ContentPipelineService: ObservableObject {
             let availableText = await extractionSvc.bestAvailableText(for: item) ?? ""
             if availableText.trimmingCharacters(in: .whitespaces).isEmpty {
                 AppLog.provider.warning("ContentPipeline: no extractable text for item \(itemID) — deferring")
-                // Keep current status (.recorded, .transcribed, etc.) — don't mark failed.
-                // The item can be re-processed later when text becomes available.
+                // Mark as .draft so the UI can show "Needs transcription" or "No content"
+                // rather than leaving it at .recorded which implies success.
+                if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+                    fresh.status = .draft
+                    try? modelContext.save()
+                }
                 return
             }
 
