@@ -63,12 +63,25 @@ final class AudioSessionManager {
 
     /// Whether the current input is a Bluetooth device without a microphone
     /// (A2DP profile only — music headphones, not headsets).
+    ///
+    /// Checks both currentRoute and availableInputs. AirPods may momentarily
+    /// appear as A2DP (music profile) in currentRoute while also appearing as
+    /// HFP in availableInputs. Only returns true if NO known Bluetooth device
+    /// has microphone channels.
     var isBluetoothWithoutMic: Bool {
         let input = session.currentRoute.inputs.first
         guard let port = input else { return false }
         let isBT = port.portType == .bluetoothA2DP || port.portType == .bluetoothLE
+        guard isBT else { return false }
         let hasChannels = (port.channels?.count ?? 0) > 0
-        return isBT && !hasChannels
+        if hasChannels { return false }
+        // The current route says A2DP/LE without channels, but check availableInputs
+        // — the same device may be listed there with HFP capabilities.
+        let availableWithMic = (session.availableInputs ?? []).contains { avail in
+            (avail.portType == .bluetoothHFP || avail.portType == .bluetoothA2DP || avail.portType == .bluetoothLE)
+                && (avail.channels?.count ?? 0) > 0
+        }
+        return !availableWithMic
     }
 
     /// Whether any available input (or current route) is a Bluetooth device.

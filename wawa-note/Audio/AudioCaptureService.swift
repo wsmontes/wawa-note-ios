@@ -1162,8 +1162,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         case .ended:
             let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt
             let options = optionsValue.map { AVAudioSession.InterruptionOptions(rawValue: $0) }
-            if options?.contains(.shouldResume) == true,
-               recordingIntent == .userWantsRecording {
+            let shouldResume = options?.contains(.shouldResume) == true
+
+            if shouldResume {
                 AppLog.audio.info("System interruption ended — validating session before rebuild")
                 // After a phone call ends, the shared AVAudioSession may have
                 // been reconfigured by the phone app (category changed, mode
@@ -1177,9 +1178,14 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                         AppLog.error("audio", "Failed to reconfigure session after interruption: \(error)")
                     }
                 }
+                // Always rebuild the engine when the system says we can resume.
+                // The previous code only rebuilt if recordingIntent == .userWantsRecording,
+                // but if the user pressed Pause *during* the interruption, the intent is
+                // .userPaused and the engine was never rebuilt — leaving it dead on Resume.
+                let wantsRecording = recordingIntent == .userWantsRecording
                 let gen = routeRecoveryGeneration
                 physicalRestartTask = Task { @MainActor in
-                    _ = await self.restartCaptureForNewRoute(reason: "interruptionEnded", resumeRecording: true, generation: gen)
+                    _ = await self.restartCaptureForNewRoute(reason: "interruptionEnded", resumeRecording: wantsRecording, generation: gen)
                 }
             } else if state == .interruptedBySystem {
                 transition(to: .pausedByUser, reason: "interruption ended without shouldResume")

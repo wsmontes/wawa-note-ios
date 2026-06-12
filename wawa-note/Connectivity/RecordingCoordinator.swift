@@ -4,6 +4,14 @@ import AVFoundation
 import Combine
 import UIKit
 
+extension Notification.Name {
+    /// Posted after crash-recovered orphaned recordings have been cleaned up
+    /// and their pipeline processing has been triggered. Views observing this
+    /// should refresh their data to pick up items that transitioned from
+    /// .recording → .recorded / .failed.
+    static let wawaOrphanedRecordingsCleanedUp = Notification.Name("WawaOrphanedRecordingsCleanedUp")
+}
+
 @MainActor
 final class RecordingCoordinator: ObservableObject {
     @Published private(set) var state: RecordingUIState = .idle
@@ -619,6 +627,12 @@ final class RecordingCoordinator: ObservableObject {
                         }
                     }
                 }
+            }
+            // Notify views that items may have changed state so they can refresh.
+            // The bgContext save doesn't automatically update the main context used
+            // by SwiftUI views — they'd otherwise keep showing stale .recording status.
+            if !recoveredIds.isEmpty {
+                NotificationCenter.default.post(name: .wawaOrphanedRecordingsCleanedUp, object: nil)
             }
         } catch {
             AppLog.audio.error("Orphan cleanup failed: \(error.localizedDescription)")
