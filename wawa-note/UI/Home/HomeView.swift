@@ -670,6 +670,9 @@ struct HomeView: View {
                     Text("Recording")
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
+            } else if captureVM.isAutoPaused {
+                Text("Auto-Paused (silence)")
+                    .font(.subheadline).foregroundStyle(.orange)
             } else {
                 Text(isPaused ? "Paused" : "Recording")
                     .font(.subheadline).foregroundStyle(isPaused ? .orange : .secondary)

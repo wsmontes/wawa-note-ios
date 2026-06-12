@@ -8,6 +8,8 @@ final class CaptureViewModel: ObservableObject {
     @Published var elapsedTimeFormatted: String = "00:00"
     @Published var audioLevel: Float = 0
     @Published var liveTranscriptionText: String = ""
+    @Published var isAutoPaused: Bool = false
+    @Published var silenceDetected: Bool = false
     @Published var errorMessage: String?
     @Published var savedItemId: UUID?
     @Published var pipelineStage: PipelineStage?
@@ -50,6 +52,16 @@ final class CaptureViewModel: ObservableObject {
         coordinator.$liveTranscriptionText
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in self?.liveTranscriptionText = $0 }
+            .store(in: &cancellables)
+
+        coordinator.$isAutoPaused
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.isAutoPaused = $0 }
+            .store(in: &cancellables)
+
+        coordinator.$silenceDetected
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.silenceDetected = $0 }
             .store(in: &cancellables)
 
         coordinator.$errorMessage

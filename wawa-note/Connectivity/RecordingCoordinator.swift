@@ -12,6 +12,8 @@ final class RecordingCoordinator: ObservableObject {
     @Published private(set) var isClipping: Bool = false
     @Published private(set) var clipCount: Int = 0
     @Published private(set) var liveTranscriptionText: String = ""
+    @Published private(set) var isAutoPaused: Bool = false
+    @Published private(set) var silenceDetected: Bool = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var savedItemId: UUID?
     @Published private(set) var currentInputPortName: String = ""
@@ -629,6 +631,13 @@ final class RecordingCoordinator: ObservableObject {
                 self.clipCount += 1
             } else if level < 0.85 && self.isClipping {
                 self.isClipping = false
+            }
+            // Sync auto-pause / silence state from capture service
+            if self.isAutoPaused != self.captureService.isAutoPaused {
+                self.isAutoPaused = self.captureService.isAutoPaused
+            }
+            if self.silenceDetected != self.captureService.silenceDetected {
+                self.silenceDetected = self.captureService.silenceDetected
             }
             // Sync input port info (may change on route switch)
             // Segments are handled by onRouteChangeNewSegment callback
