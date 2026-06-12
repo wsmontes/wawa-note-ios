@@ -210,6 +210,12 @@ struct InboxView: View {
         .refreshable { refreshID = UUID() }
     }
 
+    private func transcriptionLabel(_ engineId: String) -> String {
+        if engineId.contains("whisper") { return "Whisper" }
+        if engineId.contains("apple-speech") { return "On-Device" }
+        return "Transcribed"
+    }
+
     private func inboxRow(_ item: KnowledgeItem) -> some View {
         HStack(spacing: 10) {
             Image(systemName: item.type.icon)
@@ -243,9 +249,9 @@ struct InboxView: View {
                             .background(Color.orange.opacity(0.1))
                             .clipShape(Capsule())
                     }
-                    if item.transcriptionEngineId != nil {
+                    if let engineId = item.transcriptionEngineId {
                         Text("·").font(.caption).foregroundStyle(.secondary)
-                        Text("Transcribed")
+                        Text(transcriptionLabel(engineId))
                             .font(.caption2)
                             .foregroundStyle(.green)
                             .padding(.horizontal, 4)

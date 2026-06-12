@@ -534,11 +534,12 @@ struct KnowledgeDetailView: View {
     private var badges: [(title: String, icon: String?, tone: BadgeTone)] {
         var b: [(String, String?, BadgeTone)] = []
         if hasPlayableAudio { b.append(("Audio", "mic", .success)) }
-        if item.transcriptionEngineId != nil { b.append(("Transcribed", "text.alignleft", .success)) }
-        else if hasPlayableAudio { b.append(("Not transcribed", "text.alignleft", .warning)) }
+        if let engineId = item.transcriptionEngineId {
+            let label = transcriptionServiceLabel(engineId)
+            b.append((label, "text.alignleft", .success))
+        } else if hasPlayableAudio { b.append(("Not transcribed", "text.alignleft", .warning)) }
         if item.analysisProviderId != nil {
-            let modelName = item.analysisProviderId ?? ""
-            b.append(("Analyzed · \(modelName)", "sparkles", .success))
+            b.append(("Analyzed", "sparkles", .success))
         } else if item.bodyText != nil && !item.bodyText!.isEmpty {
             b.append(("Analysis pending", "sparkles", .neutral))
         }
@@ -547,6 +548,12 @@ struct KnowledgeDetailView: View {
         if let cal = item.contextCalendarEventTitle { b.append((cal, "calendar", .neutral)) }
         if let route = item.contextAudioRoute { b.append((route, "airpodspro", .neutral)) }
         return b
+    }
+
+    private func transcriptionServiceLabel(_ engineId: String) -> String {
+        if engineId.contains("whisper") { return "Transcribed · Whisper" }
+        if engineId.contains("apple-speech") { return "Transcribed · On-Device" }
+        return "Transcribed"
     }
 
     private var projectName: String? {
