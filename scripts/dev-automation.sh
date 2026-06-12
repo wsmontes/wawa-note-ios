@@ -1,21 +1,16 @@
 #!/bin/bash
 # Wawa Note — Dev Automation
-# Usage: bash scripts/dev-automation.sh [build|install|logs|test|all]
+# Usage: bash scripts/dev-automation.sh [build|install|logs|test|all|clean] [device]
 #
 # Automates: build → install → log capture → test execution
-# on iPhone 14 Plus connected via USB or WiFi.
+# on iPhone 14 Plus (default) or iPhone 15 connected via WiFi.
 #
 # Requirements: Xcode 26+, device paired via devicectl
 
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-PROJECT="$PROJECT_DIR/wawa-note.xcodeproj"
-SCHEME="wawa-note"
-DEVICE_ID="BBA4F656-A5EA-5D81-934E-E484ED71B8E2"
-DEVICE_HOST="iPhone.coredevice.local"
-APP_PATH="$HOME/Library/Developer/Xcode/DerivedData/wawa-note-eoznleyektepfbdgabzbwwkbghuq/Build/Products/Debug-iphoneos/Wawa Note.app"
-SIM_DEVICE="iPhone 14 Plus"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/device-config.sh"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -28,35 +23,44 @@ err()  { echo -e "${RED}[$(date +%H:%M:%S)] ERROR${NC} $1"; }
 
 # ── build ──────────────────────────────────────────────
 do_build() {
-    log "Building for device..."
-    xcodebuild -project "$PROJECT" -scheme "$SCHEME" \
-        -destination "platform=iOS,id=$DEVICE_ID" \
+    local device_alias="${1:-$DEFAULT_DEVICE}"
+    resolve_device "$device_alias"
+
+    log "Building for $DEVICE_NAME (iOS $DEVICE_IOS)..."
+    xcodebuild -project "$PROJECT_DIR/wawa-note.xcodeproj" -scheme "$SCHEME" \
+        -destination "platform=iOS,id=$DEVICE_UDID" \
         -configuration Debug build 2>&1 | tail -5
-    if [ $? -eq 0 ]; then
+    if [ ${PIPESTATUS[0]} -eq 0 ]; then
         log "BUILD SUCCEEDED"
     else
-        err "BUILD FAILED — falling back to simulator"
-        xcodebuild -project "$PROJECT" -scheme "$SCHEME" \
-            -destination "platform=iOS Simulator,name=$SIM_DEVICE" \
-            -configuration Debug build 2>&1 | tail -5
+        err "BUILD FAILED — check Xcode for errors"
+        return 1
     fi
 }
 
 # ── install ────────────────────────────────────────────
 do_install() {
-    log "Installing on iPhone 14 Plus..."
-    if [ ! -d "$APP_PATH" ]; then
-        err "App bundle not found: $APP_PATH"
-        log "Run 'build' first or check DerivedData path"
+    local device_alias="${1:-$DEFAULT_DEVICE}"
+    resolve_device "$device_alias"
+
+    # Find latest DerivedData
+    local derived
+    derived=$(ls -dt $DERIVED_DATA_GLOB 2>/dev/null | head -1)
+    local app_path="$derived/Build/Products/Debug-iphoneos/Wawa Note.app"
+
+    if [ ! -d "$app_path" ]; then
+        err "App bundle not found: $app_path"
+        log "Run 'build' first or check DerivedData"
         return 1
     fi
-    # Try WiFi first, fall back to USB
-    if xcrun devicectl device install app --device "$DEVICE_ID" "$APP_PATH" 2>&1; then
-        log "INSTALL SUCCEEDED on $DEVICE_HOST"
+
+    log "Installing on $DEVICE_NAME..."
+    if xcrun devicectl device install app --device "$DEVICE_UDID" "$app_path" 2>&1; then
+        log "INSTALL SUCCEEDED on $DEVICE_NAME"
     else
-        warn "WiFi install failed — trying USB..."
-        if xcrun devicectl device install app --device "$DEVICE_HOST" "$APP_PATH" 2>&1; then
-            log "INSTALL SUCCEEDED via USB"
+        warn "WiFi install failed — trying alternate device ID..."
+        if xcrun devicectl device install app --device "$DEVICE_HOST" "$app_path" 2>&1; then
+            log "INSTALL SUCCEEDED via hostname"
         else
             err "INSTALL FAILED — is the device unlocked and trusted?"
             return 1
@@ -66,62 +70,63 @@ do_install() {
 
 # ── logs ───────────────────────────────────────────────
 do_logs() {
-    log "Streaming device logs (Ctrl+C to stop)..."
-    log "Filter: wawa, audio, recording, pipeline, agent, error"
-
-    # Try devicectl first (iOS 17+)
-    if command -v xcrun &>/dev/null; then
-        xcrun devicectl device info dmesg --device "$DEVICE_HOST" 2>/dev/null &
-        # Fall back to OSLog stream if devicectl dmesg doesn't work
-        xcrun xcdevice log stream --device "$DEVICE_ID" 2>/dev/null &
-    fi
-
-    # Also capture system log filtered for our app
-    log stream --predicate '
-        process == "Wawa Note" OR
-        (process == "kernel" AND (eventMessage CONTAINS "wawa" OR eventMessage CONTAINS "audio"))
-    ' --style compact 2>/dev/null || warn "log stream requires sudo — run: sudo log stream ..."
+    local device_alias="${1:-$DEFAULT_DEVICE}"
+    log "Streaming logs for $device_alias (Ctrl+C to stop)..."
+    bash "$SCRIPT_DIR/log-capture.sh" stream "$device_alias"
 }
 
 # ── test ────────────────────────────────────────────────
 do_test() {
-    log "Running tests on simulator..."
-    xcodebuild test -project "$PROJECT" -scheme "$SCHEME" \
-        -destination "platform=iOS Simulator,name=$SIM_DEVICE" \
+    log "Running tests on $SIM_DEVICE_NAME simulator..."
+    xcodebuild test -project "$PROJECT_DIR/wawa-note.xcodeproj" -scheme "$SCHEME" \
+        -destination "platform=iOS Simulator,name=$SIM_DEVICE_NAME" \
         -only-testing:wawa-noteTests 2>&1 | tail -20
 }
 
 # ── all ─────────────────────────────────────────────────
 do_all() {
-    do_build
-    do_install
-    log "Launch the app manually or use: xcrun devicectl device process launch --device $DEVICE_HOST com.wawa-note"
-    do_logs
+    local device_alias="${1:-$DEFAULT_DEVICE}"
+    do_build "$device_alias"
+    do_install "$device_alias"
+    log "Launch the app manually or: xcrun devicectl device process launch --device $(resolve_device "$device_alias" && echo "$DEVICE_UDID") com.wawa-note"
+    do_logs "$device_alias"
 }
 
 # ── clean ───────────────────────────────────────────────
 do_clean() {
     log "Cleaning DerivedData..."
-    rm -rf ~/Library/Developer/Xcode/DerivedData/wawa-note-*
+    rm -rf $DERIVED_DATA_GLOB
     log "Cleaned."
 }
 
 # ── main ────────────────────────────────────────────────
-case "${1:-all}" in
-    build)   do_build ;;
-    install) do_install ;;
-    logs)    do_logs ;;
+ACTION="${1:-all}"
+DEVICE_ARG="${2:-$DEFAULT_DEVICE}"
+
+case "$ACTION" in
+    build)   do_build "$DEVICE_ARG" ;;
+    install) do_install "$DEVICE_ARG" ;;
+    logs)    do_logs "$DEVICE_ARG" ;;
     test)    do_test ;;
-    all)     do_all ;;
+    all)     do_all "$DEVICE_ARG" ;;
     clean)   do_clean ;;
     *)
-        echo "Usage: bash scripts/dev-automation.sh [build|install|logs|test|all|clean]"
+        echo "Usage: bash scripts/dev-automation.sh [action] [device]"
         echo ""
-        echo "  build   — Build for iPhone 14 Plus (fallback: simulator)"
-        echo "  install — Install on device via WiFi/USB"
-        echo "  logs    — Stream device logs (filtered for Wawa Note)"
-        echo "  test    — Run unit tests on simulator"
-        echo "  all     — Build → Install → Logs"
-        echo "  clean   — Remove DerivedData"
+        echo "Actions:"
+        echo "  build     Build for device"
+        echo "  install   Install on device"
+        echo "  logs      Stream filtered device logs"
+        echo "  test      Run unit tests on simulator"
+        echo "  all       Build → Install → Logs"
+        echo "  clean     Remove DerivedData"
+        echo ""
+        echo "Devices:"
+        echo "  14plus    iPhone 14 Plus (default, primary tester)"
+        echo "  15        iPhone 15"
+        echo ""
+        echo "Examples:"
+        echo "  bash scripts/dev-automation.sh all 14plus"
+        echo "  bash scripts/dev-automation.sh build 15"
         ;;
 esac

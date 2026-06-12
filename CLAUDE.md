@@ -5,23 +5,41 @@ Updated: 2026-06-12
 ## Dev workflow (automated)
 
 ```bash
-# Single-command operations (zero human intervention):
-make all      # Build → Install on iPhone → Run tests
-make deploy   # Build → Install on iPhone
-make test     # Run unit tests on simulator
-make logs     # Stream device logs (Wawa Note + audio + pipeline + agent + errors)
-make clean    # Clear DerivedData
-make quick    # Build + test (no install)
+# ── Build & Deploy ────────────────────────────
+make all                              # Build → Install → Test (default: iPhone 14 Plus)
+make all DEVICE=15                    # Build → Install → Test on iPhone 15
+make deploy                           # Build → Install (no tests)
+make quick                            # Build + test (no install)
+make test                             # Run unit tests on simulator
+make clean                            # Clear DerivedData
 
-# Manual operations:
-bash scripts/dev-automation.sh all     # Full automation with color logging
-bash scripts/log-capture.sh --save     # Stream + save to ~/Desktop/wawa-logs/
-bash scripts/run-tests.sh --quick      # Core services only
-bash scripts/run-tests.sh --full       # All tests
+# ── Log Pipeline ──────────────────────────────
+make logs                             # Stream real-time logs (iPhone 14 Plus)
+make logs DEVICE=15                   # Stream real-time logs (iPhone 15)
+make logs-save                        # Stream + save to ~/Desktop/wawa-logs/
+make tail                             # Quick last-100 lines snapshot
+make bug-logs since=1h                # Collect last hour of logs (post-hoc)
+make bug-logs DEVICE=15 since=30m     # Collect from iPhone 15, last 30 min
+make bug-logs since=2h crashes=1      # + crash reports
+make bug-report since=1h              # Full bug report bundle (logs + crashes + device info)
+make devices                          # List configured test devices
+
+# ── Manual log operations ─────────────────────
+bash scripts/log-capture.sh stream 14plus --save
+bash scripts/log-capture.sh collect 14plus --since 1h --crashes --bundle
+bash scripts/log-capture.sh tail 14plus 200
+bash scripts/dev-automation.sh all 14plus
 ```
 
-**Target device:** iPhone 14 Plus (`BBA4F656`, WiFi: `iPhone.coredevice.local`)
-**Test device:** iPhone 14 Plus Simulator
+**Test devices:**
+| Device | UDID | iOS | Role |
+|--------|------|-----|------|
+| iPhone 14 Plus | `00008110-00067D861486201E` | 18.6.2 | Primary tester |
+| iPhone 15 | `00008120-000260903ED1A01E` | 26.5 | Secondary |
+| iPhone 14 Plus Simulator | `91BF4C97-...` | 26.5 | Automated tests |
+
+**Device config:** `scripts/device-config.sh` — single source of truth for all device identities.
+**Log pipeline:** `scripts/log-capture.sh` — stream, collect, tail modes for real-time + post-hoc.
 
 ## Project identity
 
