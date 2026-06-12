@@ -230,9 +230,7 @@ final class ContentPipelineService: ObservableObject {
                                               events: agentEvents, thinkingActive: false)
 
             // Verify we have content to analyze before launching the agent.
-            // Don't mark as .failed here — empty text may be temporary
-            // (OCR pending, transcription disabled, import still processing).
-            let extractionSvc = ContentExtractionService(modelContext: modelContext, fileStore: fileStore)
+            // Uses the extractionSvc already created in Phase 0 above.
             let availableText = await extractionSvc.bestAvailableText(for: item) ?? ""
             if availableText.trimmingCharacters(in: .whitespaces).isEmpty {
                 AppLog.provider.warning("ContentPipeline: no extractable text for item \(itemID) — deferring")
