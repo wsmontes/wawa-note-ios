@@ -620,8 +620,13 @@ struct KnowledgeDetailView: View {
                                     .font(.caption).foregroundStyle(.secondary).monospacedDigit()
                                 Spacer()
                                 if let conf = group.confidence {
-                                    Text("\(Int(conf * 100))%")
-                                        .font(.caption2).foregroundStyle(.tertiary)
+                                    HStack(spacing: 4) {
+                                        // Colored confidence bar
+                                        ConfidenceBar(confidence: conf)
+                                            .frame(width: 40, height: 4)
+                                        Text("\(Int(conf * 100))%")
+                                            .font(.caption2).foregroundStyle(confidenceColor(conf))
+                                    }
                                 }
                             }
                             Text(group.text)
@@ -1856,5 +1861,41 @@ private func moodColor(_ mood: String) -> Color {
     case "bad", "tired": return .orange
     case "terrible", "anxious": return .red
     default: return .secondary
+    }
+}
+
+private func confidenceColor(_ conf: Double) -> Color {
+    switch conf {
+    case 0.9...1.0: return .green
+    case 0.7..<0.9: return .blue
+    case 0.5..<0.7: return .orange
+    default: return .red
+    }
+}
+
+// MARK: - Confidence Bar
+
+struct ConfidenceBar: View {
+    let confidence: Double
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color(.systemGray5))
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(confidenceColor(confidence))
+                    .frame(width: geo.size.width * confidence)
+            }
+        }
+    }
+
+    private func confidenceColor(_ conf: Double) -> Color {
+        switch conf {
+        case 0.9...1.0: return .green
+        case 0.7..<0.9: return .blue
+        case 0.5..<0.7: return .orange
+        default: return .red
+        }
     }
 }

@@ -121,6 +121,28 @@
         "chat": "/v1/chat/completions",
         "models": "/api/tags"
       }
+    },
+    "groq": {
+      "id": "groq",
+      "displayName": "Groq",
+      "type": "openAICompatible",
+      "baseURL": "https://api.groq.com/openai/v1",
+      "authType": "api_key",
+      "helpURL": "https://console.groq.com/keys",
+      "iconName": "bolt.fill",
+      "category": "cloud",
+      "description": "Ultra-low latency inference. Requires an API key.",
+      "defaultModel": "llama-3.3-70b-versatile",
+      "endpoints": {
+        "chat": "/chat/completions",
+        "models": "/models"
+      },
+      "availableModels": [
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "mixtral-8x7b-32768",
+        "gemma2-9b-it"
+      ]
     }
   },
   "defaultModels": {
@@ -245,6 +267,22 @@
       "maxOutputTokens": 0,
       "supportsTemperature": false,
       "supportsMaxTokens": false,
+      "usesMaxCompletionTokens": false,
+      "reasoningModel": false
+    },
+    "llama-3.3-70b-versatile": {
+      "contextWindowTokens": 128000,
+      "maxOutputTokens": 32768,
+      "supportsTemperature": true,
+      "supportsMaxTokens": true,
+      "usesMaxCompletionTokens": false,
+      "reasoningModel": false
+    },
+    "llama-3.1-8b-instant": {
+      "contextWindowTokens": 128000,
+      "maxOutputTokens": 8192,
+      "supportsTemperature": true,
+      "supportsMaxTokens": true,
       "usesMaxCompletionTokens": false,
       "reasoningModel": false
     }

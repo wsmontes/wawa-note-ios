@@ -11,6 +11,20 @@ struct SettingsView: View {
     @State private var transcriptionMode: TranscriptionMode = TranscriptionSettings.shared.mode
     @State private var autoTranscribe: Bool = AutomationSettings.shared.autoTranscribe
     @State private var autoAnalyze: Bool = AutomationSettings.shared.autoAnalyze
+    @State private var autoAnalysisModel: String = AutomationSettings.shared.autoAnalysisModel
+    @State private var useVoiceProcessing: Bool = AudioSessionManager.useVoiceProcessing
+    @State private var speakerphoneMode: Bool = AudioSessionManager.speakerphoneMode
+    @State private var allowCloudTranscription: Bool = UserDefaults.standard.bool(forKey: "transcription_allow_cloud")
+    @State private var developerModeEnabled: Bool = UserDefaults.standard.bool(forKey: "developer_mode_enabled")
+
+    /// All non-deprecated, non-transcription models for the auto-analysis picker.
+    private var availableAutoAnalysisModels: [String] {
+        let presets = AIConfigService.shared.config.modelPresets ?? [:]
+        return presets
+            .filter { $0.key != "whisper-1" && $0.value.deprecated == nil }
+            .map { $0.key }
+            .sorted()
+    }
 
     var body: some View {
         NavigationStack {
@@ -35,6 +49,13 @@ struct SettingsView: View {
                             .tag(TranscriptionMode.whisper)
                     }
                     .pickerStyle(.menu)
+
+                    if transcriptionMode == .apple {
+                        Toggle("Allow Cloud Processing", isOn: $allowCloudTranscription)
+                            .onChange(of: allowCloudTranscription) { _, v in
+                                UserDefaults.standard.set(v, forKey: "transcription_allow_cloud")
+                            }
+                    }
                 } header: {
                     Text("Transcription Mode")
                 } footer: {
@@ -48,6 +69,10 @@ struct SettingsView: View {
                             }
                         } else {
                             Text("On-device transcription. Works offline, no API key needed. Locale: \(supportedLocales().joined(separator: ", "))")
+                            if allowCloudTranscription {
+                                Text("Cloud processing may improve accuracy but sends audio to Apple servers.")
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
@@ -61,13 +86,47 @@ struct SettingsView: View {
                         .onChange(of: autoTranscribe) { _, v in AutomationSettings.shared.autoTranscribe = v }
                     Toggle("Automatic Analysis", isOn: $autoAnalyze)
                         .onChange(of: autoAnalyze) { _, v in AutomationSettings.shared.autoAnalyze = v }
+
+                    if autoAnalyze {
+                        Picker("Analysis Model", selection: $autoAnalysisModel) {
+                            ForEach(availableAutoAnalysisModels, id: \.self) { model in
+                                Text(model).tag(model)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .onChange(of: autoAnalysisModel) { _, v in
+                            AutomationSettings.shared.autoAnalysisModel = v
+                        }
+                    }
                 } header: {
                     Text("Automation")
                 } footer: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("When enabled, new recordings are transcribed and analyzed automatically after saving.")
                         if autoAnalyze {
-                            Text("Automatic analysis uses a fast, affordable model (GPT-5 nano). Manual re-analysis uses your selected model.")
+                            Text("Automatic analysis uses the selected model above. Pick a fast, affordable model for cost efficiency.")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                // Audio
+                Section {
+                    Toggle("Voice Processing", isOn: $useVoiceProcessing)
+                        .onChange(of: useVoiceProcessing) { _, v in
+                            AudioSessionManager.useVoiceProcessing = v
+                        }
+                    Toggle("Speakerphone Mode", isOn: $speakerphoneMode)
+                        .onChange(of: speakerphoneMode) { _, v in
+                            AudioSessionManager.speakerphoneMode = v
+                        }
+                } header: {
+                    Text("Audio")
+                } footer: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Voice Processing enhances speech clarity and reduces background noise. Disable for raw audio capture (music, ambient sound).")
+                        if speakerphoneMode {
+                            Text("Speakerphone Mode uses the front microphone array with far-field beamforming — ideal when the iPhone is on a table during meetings.")
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -159,13 +218,40 @@ struct SettingsView: View {
                     } label: {
                         Label("Debug Logs", systemImage: "terminal")
                     }
+                    Toggle("Developer Mode", isOn: $developerModeEnabled)
+                        .onChange(of: developerModeEnabled) { _, v in
+                            UserDefaults.standard.set(v, forKey: "developer_mode_enabled")
+                        }
                 } header: {
                     Text("Developer")
                 } footer: {
                     let crashed = FileLogService.shared.previousSessionCrashed
                     Text(crashed
                          ? "⚠️ Previous session crashed. Logs may contain crash information."
-                         : "Persistent logs survive crashes. Use for debugging.")
+                         : "Developer Mode shows raw LLM responses in knowledge detail views.")
+                }
+
+                // Advanced
+                Section {
+                    NavigationLink {
+                        LensesSettingsView()
+                    } label: {
+                        Label("AI Lenses", systemImage: "eye")
+                    }
+                    NavigationLink {
+                        ModelResolverSettingsView()
+                    } label: {
+                        Label("Model Resolution", systemImage: "arrow.triangle.branch")
+                    }
+                    NavigationLink {
+                        SummaryCacheManagementView()
+                    } label: {
+                        Label("Summary Cache", systemImage: "memories")
+                    }
+                } header: {
+                    Text("Advanced")
+                } footer: {
+                    Text("Fine-tune AI behavior. Lenses define analysis perspectives, Model Resolution sets fallback chains per task, and Summary Cache stores previous analysis results to avoid redundant API calls.")
                 }
             }
             .navigationTitle("Settings")
@@ -252,6 +338,171 @@ struct DebugLogView: View {
             lines.append("[\(logEntry.date.formatted(.iso8601))] [\(logEntry.level)] \(msg)")
         }
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+}
+
+// MARK: - AI Lenses Settings
+
+struct LensesSettingsView: View {
+    private var lensEntries: [(key: String, lens: AIConfig.LensJSON)] {
+        guard let lenses = AIConfigService.shared.config.lenses else { return [] }
+        return lenses.map { ($0.key, $0.value) }.sorted { $0.0 < $1.0 }
+    }
+
+    var body: some View {
+        List {
+            if lensEntries.isEmpty {
+                ContentUnavailableView(
+                    "No Lenses Configured",
+                    systemImage: "eye.slash",
+                    description: Text("AI lenses are defined in ai_config.json. Add lenses to enable different analysis perspectives.")
+                )
+            } else {
+                ForEach(lensEntries, id: \.key) { entry in
+                    Section {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Image(systemName: entry.lens.icon ?? "sparkles")
+                                    .font(.title3)
+                                    .foregroundStyle(.tint)
+                                Text(entry.lens.name ?? entry.key)
+                                    .font(.headline)
+                            }
+                            if let desc = entry.lens.description {
+                                Text(desc)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if let model = entry.lens.model {
+                                LabeledContent("Default Model", value: model)
+                            }
+                            if let temp = entry.lens.temperature {
+                                LabeledContent("Temperature", value: String(format: "%.1f", temp))
+                            }
+                            if let prompt = entry.lens.systemPrompt {
+                                DisclosureGroup("System Prompt") {
+                                    Text(prompt)
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+        }
+        .navigationTitle("AI Lenses")
+    }
+}
+
+// MARK: - Model Resolver Settings
+
+struct ModelResolverSettingsView: View {
+    @State private var tiers: [ModelResolver.Task: [String]] = [:]
+    @State private var hasCustomTiers: Bool = false
+
+    var body: some View {
+        List {
+            ForEach(ModelResolver.Task.allCases, id: \.self) { task in
+                Section {
+                    ForEach(tiers[task] ?? [], id: \.self) { model in
+                        HStack {
+                            Text(model)
+                                .font(.system(.subheadline, design: .monospaced))
+                            Spacer()
+                            if model == (tiers[task]?.first ?? "") {
+                                Text("Primary")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color(.systemGray5))
+                                    .clipShape(Capsule())
+                            }
+                        }
+                    }
+                    if (tiers[task] ?? []).isEmpty {
+                        Text("No models configured for this task.")
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Label(task.displayName, systemImage: task.icon)
+                }
+            }
+        }
+        .navigationTitle("Model Resolution")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if hasCustomTiers {
+                    Button("Reset All") {
+                        ModelResolver.shared.resetAllToDefaults()
+                        loadTiers()
+                    }
+                }
+            }
+        }
+        .onAppear { loadTiers() }
+    }
+
+    private func loadTiers() {
+        var result: [ModelResolver.Task: [String]] = [:]
+        for task in ModelResolver.Task.allCases {
+            let models = ModelResolver.shared.models(for: task)
+            if !models.isEmpty { result[task] = models }
+        }
+        tiers = result
+
+        // Check if any task has custom tiers
+        let defaults = UserDefaults.standard
+        hasCustomTiers = defaults.data(forKey: "model_resolver_tiers") != nil
+    }
+}
+
+// MARK: - Summary Cache Management
+
+struct SummaryCacheManagementView: View {
+    @State private var stats = SummaryCache.shared.stats
+    @State private var showClearConfirmation = false
+
+    var body: some View {
+        List {
+            Section {
+                LabeledContent("Cached Summaries", value: "\(stats.entries)")
+                LabeledContent("Cache Hits", value: "\(stats.hits)")
+                LabeledContent("Cache Misses", value: "\(stats.misses)")
+                LabeledContent("Hit Rate", value: String(format: "%.1f%%", stats.hitRate * 100))
+            } header: {
+                Text("Statistics")
+            } footer: {
+                Text("The summary cache avoids redundant API calls by reusing analysis results when the transcript, template, and model haven't changed.")
+            }
+
+            Section {
+                Button(role: .destructive) {
+                    showClearConfirmation = true
+                } label: {
+                    Label("Clear Cache", systemImage: "trash")
+                }
+                .disabled(stats.entries == 0)
+            } header: {
+                Text("Maintenance")
+            }
+        }
+        .navigationTitle("Summary Cache")
+        .onAppear { stats = SummaryCache.shared.stats }
+        .confirmationDialog(
+            "Clear Summary Cache",
+            isPresented: $showClearConfirmation
+        ) {
+            Button("Clear All", role: .destructive) {
+                SummaryCache.shared.invalidateAll()
+                stats = SummaryCache.shared.stats
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will remove \(stats.entries) cached summaries. Future analyses will require fresh API calls.")
+        }
     }
 }
 

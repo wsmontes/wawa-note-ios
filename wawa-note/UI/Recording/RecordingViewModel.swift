@@ -28,6 +28,9 @@ final class RecordingViewModel: ObservableObject {
     var state: RecordingUIState { coordinator.state }
     var elapsedTime: TimeInterval { coordinator.elapsedTime }
     var audioLevel: Float { coordinator.audioLevel }
+    var isClipping: Bool { coordinator.isClipping }
+    var clipCount: Int { coordinator.clipCount }
+    var liveTranscriptionText: String { coordinator.liveTranscriptionText }
     var errorMessage: String? { coordinator.errorMessage }
     var savedItemId: UUID? { coordinator.savedItemId }
 

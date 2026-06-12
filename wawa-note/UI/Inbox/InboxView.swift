@@ -13,6 +13,13 @@ struct InboxView: View {
 
     @State private var searchText = ""
     @State private var filterMode: InboxFilter = .needsReview
+    @State private var refreshID = UUID()
+    @State private var lastTrashedItem: KnowledgeItem?
+    @State private var showUndoToast = false
+    @State private var undoTimer: Timer?
+    @State private var showDeleteConfirmation = false
+    @State private var itemToDelete: KnowledgeItem?
+    @State private var searchTask: Task<Void, Never>?
     @State private var showFolderPicker: KnowledgeItem? = nil
     @State private var searchResults: [SearchResult] = []
     @State private var matchingIDs: Set<UUID> = []
@@ -43,13 +50,27 @@ struct InboxView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            filterBar
-            Divider()
-            if filteredItems.isEmpty {
-                emptyState
-            } else {
-                itemList
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 0) {
+                filterBar
+                Divider()
+                if filteredItems.isEmpty {
+                    emptyState
+                } else {
+                    itemList
+                }
+            }
+
+            // Undo toast
+            if showUndoToast {
+                UndoToastView(
+                    message: "Item moved to Trash",
+                    onUndo: { undoTrash() },
+                    onDismiss: { showUndoToast = false }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .animation(.easeInOut(duration: 0.3), value: showUndoToast)
+                .padding(.bottom, 16)
             }
         }
         .navigationTitle("Inbox")
@@ -66,6 +87,12 @@ struct InboxView: View {
                     }
                 }
             }
+        }
+        .confirmationDialog("Move to Trash?", isPresented: $showDeleteConfirmation, presenting: itemToDelete) { item in
+            Button("Move to Trash", role: .destructive) { discardItem(item) }
+            Button("Cancel", role: .cancel) {}
+        } message: { item in
+            Text("\"\(item.title)\" will be moved to Trash. You can restore it later.")
         }
         .alert("Empty Trash?", isPresented: $showEmptyTrashConfirm) {
             Button("Cancel", role: .cancel) {}
@@ -136,6 +163,23 @@ struct InboxView: View {
                         } label: {
                             inboxRow(item)
                         }
+                        .contextMenu {
+                            Button { archiveItem(item) } label: {
+                                Label("Mark Reviewed", systemImage: "checkmark.circle")
+                            }
+                            Button { showFolderPicker = item } label: {
+                                Label("Move to Project", systemImage: "folder.badge.plus")
+                            }
+                            Divider()
+                            Button { shareItem(item) } label: {
+                                Label("Share", systemImage: "square.and.arrow.up")
+                            }
+                            Button(role: .destructive) { itemToDelete = item; showDeleteConfirmation = true } label: {
+                                Label("Trash", systemImage: "trash")
+                            }
+                        } preview: {
+                            inboxItemPreview(item)
+                        }
                         .swipeActions(edge: .leading) {
                             if filterMode == .trash {
                                 Button { try? TrashService(context: modelContext).restore(item) } label: {
@@ -151,7 +195,7 @@ struct InboxView: View {
                             Button { showFolderPicker = item } label: {
                                 Label("Move to Project", systemImage: "folder.badge.plus")
                             }.tint(.blue)
-                            Button(role: .destructive) { discardItem(item) } label: {
+                            Button(role: .destructive) { itemToDelete = item; showDeleteConfirmation = true } label: {
                                 Label("Trash", systemImage: "trash")
                             }
                         }
@@ -162,6 +206,8 @@ struct InboxView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .id(refreshID)
+        .refreshable { refreshID = UUID() }
     }
 
     private func inboxRow(_ item: KnowledgeItem) -> some View {
@@ -259,19 +305,27 @@ struct InboxView: View {
 
     // MARK: - Empty state
 
+    private var isSearchActive: Bool { !searchText.isEmpty }
+
     private var emptyState: some View {
         VStack(spacing: 16) {
             Spacer().frame(height: 60)
-            Image(systemName: "tray")
+            Image(systemName: isSearchActive ? "magnifyingglass" : "tray")
                 .font(.system(size: 44))
                 .foregroundStyle(.secondary)
-            Text(filterMode == .needsReview ? "All caught up" : "No items")
-                .font(.title3).fontWeight(.medium)
-            Text(emptyDescription)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
+            if isSearchActive {
+                Text("No results for \"\(searchText)\"")
+                    .font(.title3).fontWeight(.medium)
+                Text("Try different keywords or check the spelling.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).padding(.horizontal, 40)
+            } else {
+                Text(filterMode == .needsReview ? "All caught up" : "No items")
+                    .font(.title3).fontWeight(.medium)
+                Text(emptyDescription)
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).padding(.horizontal, 40)
+            }
             Spacer()
         }
     }
@@ -375,6 +429,7 @@ struct InboxView: View {
         let service = KnowledgeItemService(context: modelContext)
         try? service.removeFromInbox(item)
         WawaNoteApp.updateAppBadge(modelContext: modelContext)
+        Haptics.light()
     }
 
     private func loadTrashFolder() {
@@ -384,6 +439,53 @@ struct InboxView: View {
     private func discardItem(_ item: KnowledgeItem) {
         let trash = TrashService(context: modelContext)
         try? trash.moveToTrash(item)
+        Haptics.warning()
+        lastTrashedItem = item
+        showUndoToast = true
+        undoTimer?.invalidate()
+        undoTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { _ in
+            Task { @MainActor in
+                self.showUndoToast = false
+                self.lastTrashedItem = nil
+            }
+        }
+    }
+
+    private func undoTrash() {
+        guard let item = lastTrashedItem else { return }
+        try? TrashService(context: modelContext).restore(item)
+        Haptics.success()
+        showUndoToast = false
+        lastTrashedItem = nil
+        undoTimer?.invalidate()
+    }
+
+    private func shareItem(_ item: KnowledgeItem) {
+        let text = item.bodyText ?? item.title
+        let av = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let root = scene.windows.first?.rootViewController {
+            root.present(av, animated: true)
+        }
+    }
+
+    @ViewBuilder
+    private func inboxItemPreview(_ item: KnowledgeItem) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: item.type.icon).foregroundStyle(item.type.color)
+                Text(item.type.label).font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Text(item.createdAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+            Text(item.title).font(.headline).lineLimit(2)
+            if let body = item.bodyText, !body.isEmpty {
+                Text(body).font(.subheadline).foregroundStyle(.secondary).lineLimit(3)
+            }
+        }
+        .padding()
+        .frame(width: 300)
     }
 
     // MARK: - Folder picker
@@ -445,5 +547,33 @@ struct InboxView: View {
         let m = Int(seconds) / 60
         if m >= 60 { return "\(m / 60)h \(m % 60)m" }
         return "\(m)m"
+    }
+}
+
+// MARK: - Undo Toast
+
+struct UndoToastView: View {
+    let message: String
+    let onUndo: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "trash.fill").foregroundStyle(.red)
+            Text(message).font(.subheadline)
+            Spacer()
+            Button("Undo") { onUndo() }
+                .font(.subheadline).fontWeight(.semibold)
+                .foregroundStyle(.blue)
+                .accessibilityLabel("Undo delete")
+                .accessibilityHint("Restores the most recently trashed item")
+            Button { onDismiss() } label: {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+            }
+            .accessibilityLabel("Dismiss undo")
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 16)
     }
 }

@@ -42,6 +42,16 @@ final class AudioSessionManager {
         session.currentRoute.outputs.contains { $0.portType == .carAudio }
     }
 
+    /// Whether the current input is from an AirPlay source (e.g., Mac, Apple TV).
+    var isAirPlayInput: Bool {
+        session.currentRoute.inputs.contains { $0.portType == .airPlay }
+    }
+
+    /// Whether any output is routed via AirPlay.
+    var isAirPlayActive: Bool {
+        session.currentRoute.outputs.contains { $0.portType == .airPlay }
+    }
+
     /// Whether the current input is a Bluetooth device without a microphone
     /// (A2DP profile only — music headphones, not headsets).
     var isBluetoothWithoutMic: Bool {
@@ -88,6 +98,7 @@ final class AudioSessionManager {
     func bestModeForCurrentRoute() -> AVAudioSession.Mode {
         if isCarPlayActive { return .default }
         if isBluetoothWithoutMic { return .default }
+        if isAirPlayActive || isAirPlayInput { return .default }
         let input = session.currentRoute.inputs.first
         if input?.portType == .usbAudio { return .default }
         if input?.portType == .bluetoothHFP { return .default }
@@ -102,28 +113,18 @@ final class AudioSessionManager {
     /// Called after setActive(true) so availableInputs are fully populated.
     func selectBestInputForRecording() {
         let inputs = session.availableInputs ?? session.currentRoute.inputs
-        let viable = inputs.filter {
-            $0.portType != .bluetoothA2DP &&
-            $0.portType != .bluetoothLE &&
-            ($0.channels?.count ?? 0) > 0
-        }
-        let preferred =
-            viable.first(where: { $0.portType == .bluetoothHFP }) ??
-            viable.first(where: { $0.portType == .headsetMic }) ??
-            viable.first(where: { $0.portType == .usbAudio }) ??
-            viable.first(where: { $0.portType == .builtInMic }) ??
-            viable.first
+        let viable = viableInputs(from: inputs)
+        let preferred = rankedInputs(from: viable).first
 
         if let preferred {
             do {
                 try session.setPreferredInput(preferred)
-                AppLog.audio.info("Preferred input: \(preferred.portName) (\(preferred.portType.rawValue))")
+                AppLog.audio.info("Preferred input: \(preferred.portName)(\(preferred.portType.rawValue)) ch=\(preferred.channels?.count ?? 0) | all=\(self.availableInputsDescription)")
             } catch {
-                AppLog.audio.error("setPreferredInput failed: \(error.localizedDescription)")
+                AppLog.audio.error("setPreferredInput failed: \(error.localizedDescription) | all=\(self.availableInputsDescription)")
             }
         } else {
-            let names = session.availableInputs?.map(\.portName) ?? []
-            AppLog.audio.error("No valid recording input. availableInputs=\(names)")
+            AppLog.audio.error("No valid recording input. availableInputs=\(self.availableInputsDescription)")
         }
     }
 
@@ -150,12 +151,8 @@ final class AudioSessionManager {
             selectBestInputForRecording()
 
             // Audit session state after activation
-            let s = self.session
-            let route = s.currentRoute
-            let inputs = route.inputs.map { "\($0.portName)" }.joined(separator: ", ")
-            let sr = s.sampleRate
-            let ioBuf = s.ioBufferDuration
-            AppLog.audio.info("Session: sampleRate=\(sr)Hz ioBuffer=\(String(format: "%.1f", ioBuf * 1000))ms inputs=[\(inputs.isEmpty ? "none" : inputs)]")
+            let snap = self.routeSnapshot(label: "configureForRecording")
+            AppLog.audio.info("\(snap)")
         } catch {
             AppLog.error("audio", "Failed to configure audio session: \(error.localizedDescription)")
             throw AudioSessionError.configurationFailed
@@ -166,15 +163,37 @@ final class AudioSessionManager {
     /// The engine keeps running — only the category/mode/options change.
     func adaptToRouteChange() {
         let mode = bestModeForCurrentRoute()
+        let snapshot = routeSnapshot(label: "adaptToRouteChange")
         do {
             try session.setCategory(.playAndRecord, mode: mode, options: [
                 .allowBluetooth,
                 .defaultToSpeaker
             ])
-            AppLog.audio.info("Session adapted to route: mode=\(mode.rawValue)")
+            AppLog.audio.info("Session adapted to route: mode=\(mode.rawValue) \(snapshot)")
         } catch {
-            AppLog.error("audio", "Failed to adapt session to route change: \(error.localizedDescription)")
+            AppLog.error("audio", "Failed to adapt session to route change: \(error.localizedDescription) \(snapshot)")
         }
+    }
+
+    /// Human-readable snapshot of current audio route for debugging.
+    func routeSnapshot(label: String) -> String {
+        let inputs = session.currentRoute.inputs.map { port in
+            let ch = port.channels?.count ?? 0
+            let dataSources = port.dataSources?.map(\.dataSourceName) ?? []
+            let ds = dataSources.isEmpty ? "" : " src=[\(dataSources.joined(separator: ","))]"
+            return "\(port.portName)(\(port.portType.rawValue) ch=\(ch)\(ds))"
+        }.joined(separator: " ")
+        let outputs = session.currentRoute.outputs.map { port in
+            "\(port.portName)(\(port.portType.rawValue))"
+        }.joined(separator: " ")
+        let available = (session.availableInputs ?? []).map { port in
+            "\(port.portName)(\(port.portType.rawValue) ch=\(port.channels?.count ?? 0))"
+        }.joined(separator: " ")
+        let mode = session.mode.rawValue
+        let category = session.category.rawValue
+        let rate = Int(session.sampleRate)
+        let ioBuf = String(format: "%.1fms", session.ioBufferDuration * 1000)
+        return "[\(label)] mode=\(mode) cat=\(category) rate=\(rate)Hz ioBuf=\(ioBuf) | in=[\(inputs.isEmpty ? "none" : inputs)] out=[\(outputs.isEmpty ? "none" : outputs)] avail=[\(available.isEmpty ? "none" : available)]"
     }
 
     func reconfigureForRecording() throws {
@@ -220,17 +239,44 @@ final class AudioSessionManager {
     /// currentRoute may be empty while availableInputs still lists valid mics.
     var bestAvailableInput: AVAudioSessionPortDescription? {
         let candidates = session.availableInputs ?? session.currentRoute.inputs
-        // Exclude A2DP/LE (music-only, no mic)
-        let viable = candidates.filter { input in
-            input.portType != .bluetoothA2DP &&
-            input.portType != .bluetoothLE &&
-            (input.channels?.count ?? 0) > 0
+        let viable = viableInputs(from: candidates)
+        return rankedInputs(from: viable).first
+    }
+
+    /// Second-best available input — used as fallback if the primary disconnects.
+    /// Returns nil if only one input is available.
+    var fallbackInput: AVAudioSessionPortDescription? {
+        let candidates = session.availableInputs ?? session.currentRoute.inputs
+        let viable = viableInputs(from: candidates)
+        let ranked = rankedInputs(from: viable)
+        return ranked.count > 1 ? ranked[1] : nil
+    }
+
+    /// Human-readable description of available inputs for logging/UI.
+    var availableInputsDescription: String {
+        let candidates = session.availableInputs ?? session.currentRoute.inputs
+        let viable = viableInputs(from: candidates)
+        let ranked = rankedInputs(from: viable)
+        return ranked.enumerated().map { "\($0.offset == 0 ? "★" : "·") \($0.element.portName)(\($0.element.portType.rawValue))" }.joined(separator: ", ")
+    }
+
+    /// Filter to viable recording inputs (has channels, not music-only Bluetooth).
+    private func viableInputs(from inputs: [AVAudioSessionPortDescription]) -> [AVAudioSessionPortDescription] {
+        inputs.filter {
+            $0.portType != .bluetoothA2DP &&
+            $0.portType != .bluetoothLE &&
+            ($0.channels?.count ?? 0) > 0
         }
-        // Prefer HFP headsets, then wired, then built-in
-        if let hfp = viable.first(where: { $0.portType == .bluetoothHFP }) { return hfp }
-        if let wired = viable.first(where: { $0.portType == .headsetMic || $0.portType == .usbAudio }) { return wired }
-        if let builtIn = viable.first(where: { $0.portType == .builtInMic }) { return builtIn }
-        return viable.first
+    }
+
+    /// Rank inputs by priority: AirPlay > HFP > wired > USB > built-in.
+    private func rankedInputs(from inputs: [AVAudioSessionPortDescription]) -> [AVAudioSessionPortDescription] {
+        let priority: [AVAudioSession.Port] = [.airPlay, .bluetoothHFP, .headsetMic, .usbAudio, .builtInMic]
+        return inputs.sorted { a, b in
+            let pa = priority.firstIndex(of: a.portType) ?? priority.count
+            let pb = priority.firstIndex(of: b.portType) ?? priority.count
+            return pa < pb
+        }
     }
 
     /// Human-readable description of current route for logging.
@@ -259,6 +305,8 @@ final class AudioSessionManager {
             return input.portName
         case .carAudio:
             return "CarPlay"
+        case .airPlay:
+            return "AirPlay (\(input.portName))"
         case .usbAudio:
             return input.portName.isEmpty ? "USB Microphone" : input.portName
         default:
@@ -280,6 +328,8 @@ final class AudioSessionManager {
             return "airpodspro.chargingcase.wireless.fill"
         case .carAudio:
             return "car.fill"
+        case .airPlay:
+            return "airplayaudio"
         case .usbAudio:
             return "cable.connector"
         default:

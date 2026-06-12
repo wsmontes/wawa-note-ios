@@ -200,3 +200,75 @@ extension SpeakerLabeler {
         return hasDirectMic ? "You" : nil
     }
 }
+
+// MARK: - Overlap Detection
+
+/// An overlap event where two or more speakers talk simultaneously.
+struct SpeakerOverlap: Codable, Sendable {
+    let startMs: Double
+    let endMs: Double
+    let speakers: [String]
+    var durationMs: Double { endMs - startMs }
+
+    var description: String {
+        "\(speakers.joined(separator: " + ")) overlap for \(Int(durationMs))ms at \(Int(startMs))ms"
+    }
+}
+
+extension SpeakerLabeler {
+    /// Detect temporal overlaps between different speakers in labeled segments.
+    /// Returns overlap events where 2+ speakers talk simultaneously.
+    /// - Parameter segments: Labeled segments sorted by start time.
+    /// - Parameter minOverlapMs: Minimum overlap duration to report (avoids noise).
+    static func detectOverlaps(
+        in segments: [LabeledSegment],
+        minOverlapMs: Double = 200
+    ) -> [SpeakerOverlap] {
+        guard segments.count > 1 else { return [] }
+        let sorted = segments.sorted { $0.startMs < $1.startMs }
+
+        // Sweep line: process start/end events in time order.
+        // Each event is (time: Double, isStart: Bool, segIndex: Int)
+        var events: [(time: Double, isStart: Bool, segIndex: Int)] = []
+        for (i, seg) in sorted.enumerated() {
+            events.append((seg.startMs, true, i))
+            events.append((seg.endMs, false, i))
+        }
+        events.sort { a, b in
+            if a.time != b.time { return a.time < b.time }
+            return a.isStart && !b.isStart
+        }
+
+        var overlaps: [SpeakerOverlap] = []
+        var activeIndices = Set<Int>()
+        var overlapStart: Double?
+        var overlapSpeakers: Set<String> = []
+
+        for event in events {
+            if event.isStart {
+                activeIndices.insert(event.segIndex)
+            } else {
+                activeIndices.remove(event.segIndex)
+            }
+
+            let speakers = Set(activeIndices.map { sorted[$0].speaker })
+
+            if speakers.count >= 2 {
+                if overlapStart == nil { overlapStart = event.time }
+                overlapSpeakers = speakers
+            } else if let start = overlapStart {
+                let duration = event.time - start
+                if duration >= minOverlapMs, !overlapSpeakers.isEmpty {
+                    overlaps.append(SpeakerOverlap(
+                        startMs: start, endMs: event.time,
+                        speakers: Array(overlapSpeakers).sorted()
+                    ))
+                }
+                overlapStart = nil
+                overlapSpeakers = []
+            }
+        }
+
+        return overlaps
+    }
+}

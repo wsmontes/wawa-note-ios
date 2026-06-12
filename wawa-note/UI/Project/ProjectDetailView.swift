@@ -28,18 +28,22 @@ private func activitySignalColor(_ type: String) -> Color { signalColor(type) }
 
 // MARK: - Project Detail (Entry Point)
 
-/// Entry point for project navigation. Kept for backward compatibility with existing callers.
-/// Delegates immediately to the new ProjectHomeView.
+/// Entry point for project navigation. Routes config projects to ConfigProjectBrowserView.
 struct ProjectDetailView: View {
     let project: Project
     @EnvironmentObject private var chatState: ChatOverlayState
 
     var body: some View {
-        ProjectHomeView(project: project)
-            .onAppear {
-                chatState.context = .project(project.id)
-                AppLog.debug("project", "ProjectDetailView appeared — project=\(project.name) id=\(project.id.uuidString.prefix(8)) status=\(project.status.rawValue) health=\(project.healthStatus ?? "nil")")
-            }
+        if ConfigProjectService.isConfigProject(project) {
+            ConfigProjectBrowserView(project: project)
+                .onAppear { chatState.context = .project(project.id) }
+        } else {
+            ProjectHomeView(project: project)
+                .onAppear {
+                    chatState.context = .project(project.id)
+                    AppLog.debug("project", "ProjectDetailView appeared — project=\(project.name) id=\(project.id.uuidString.prefix(8)) status=\(project.status.rawValue) health=\(project.healthStatus ?? "nil")")
+                }
+        }
     }
 }
 
@@ -1077,6 +1081,514 @@ enum ItemSortOrder: CaseIterable {
         case .name: "Name"
         case .type: "Type"
         case .created: "Created"
+        }
+    }
+}
+
+// MARK: - Config Project Browser
+
+/// Dedicated browser for the wawa-note-config system project.
+/// Shows Providers, Prompts, Schemas, Settings, and Memories as editable sections.
+struct ConfigProjectBrowserView: View {
+    let project: Project
+    @Environment(\.modelContext) private var modelContext
+    @State private var providers: [AIProviderConfigModel] = []
+    @State private var promptEntries: [EditablePrompt] = []
+    @State private var schemaEntries: [(key: String, fw: ProjectFramework)] = []
+    @State private var memoryEntries: [AgentMemory] = []
+    @State private var settingsJSON: String = ""
+
+    var body: some View {
+        List {
+            // Providers
+            Section {
+                if providers.isEmpty {
+                    Text("No providers configured. Add one in Settings → AI Services.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                } else {
+                    ForEach(providers) { config in
+                        HStack {
+                            Image(systemName: providerIcon(for: config.typeRaw))
+                                .foregroundStyle(.tint)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(config.name).font(.subheadline).fontWeight(.medium)
+                                Text("\(config.typeRaw) · \(config.defaultModel)")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if config.supportsStreaming {
+                                Image(systemName: "waveform").font(.caption2).foregroundStyle(.secondary)
+                            }
+                            if config.supportsTools {
+                                Image(systemName: "hammer").font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            } header: {
+                Label("Providers", systemImage: "brain.head.profile")
+            } footer: {
+                Text("Manage AI providers in Settings → AI Services.")
+            }
+
+            // Prompts
+            Section {
+                if promptEntries.isEmpty {
+                    Text("No prompts loaded.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                } else {
+                    ForEach(promptEntries, id: \.name) { prompt in
+                        NavigationLink {
+                            ConfigPromptEditorView(promptName: prompt.name, content: prompt.content, category: prompt.category)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(prompt.name.replacingOccurrences(of: "_", with: " ").capitalized)
+                                        .font(.subheadline)
+                                    Text(prompt.category)
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if prompt.isUserEdited {
+                                    Text("edited").font(.caption2)
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(Color.orange.opacity(0.15))
+                                        .clipShape(Capsule())
+                                }
+                                if !prompt.variables.isEmpty {
+                                    Text("\(prompt.variables.count) vars").font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(Color(.systemGray5))
+                                        .clipShape(Capsule())
+                                }
+                            }
+                        }
+                    }
+                }
+            } header: {
+                Label("Prompts", systemImage: "text.word.spacing")
+            } footer: {
+                Text("\(promptEntries.count) prompts. Edit to customize AI behavior. Changes persist to PromptStore.")
+            }
+
+            // Schemas
+            Section {
+                ForEach(schemaEntries, id: \.key) { entry in
+                    NavigationLink {
+                        ConfigSchemaViewer(framework: entry.fw)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.fw.name).font(.subheadline)
+                                Text(entry.fw.description)
+                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            Spacer()
+                            Text("\(entry.fw.views.count) views")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            } header: {
+                Label("Schemas", systemImage: "square.grid.3x3")
+            } footer: {
+                Text("Analysis frameworks define output structure for each domain. \(schemaEntries.count) built-in.")
+            }
+
+            // Settings
+            Section {
+                NavigationLink {
+                    ConfigSettingsJSONView(json: settingsJSON)
+                } label: {
+                    HStack {
+                        Label("App Settings", systemImage: "gearshape.fill")
+                        Spacer()
+                        Text("\(settingsJSON.count) bytes")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Label("Settings", systemImage: "slider.horizontal.3")
+            }
+
+            // Memories
+            Section {
+                if memoryEntries.isEmpty {
+                    Text("No agent memories yet. The agent learns from processing content.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                } else {
+                    ForEach(memoryEntries) { mem in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(mem.pattern).font(.subheadline).lineLimit(1)
+                                Text(mem.strategy).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            Spacer()
+                            if mem.isStale {
+                                Text("stale").font(.caption2)
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Color.red.opacity(0.15)).clipShape(Capsule())
+                            }
+                            Text("\(Int(mem.relevance * 100))%")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            } header: {
+                Label("Memories", systemImage: "memories")
+            } footer: {
+                Text("Agent memories are learned patterns. Stale memories (>3 failures) are excluded from search.")
+            }
+        }
+        .navigationTitle(project.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { loadData() }
+        .refreshable { loadData() }
+    }
+
+    private func loadData() {
+        let context = modelContext
+        providers = (try? context.fetch(FetchDescriptor<AIProviderConfigModel>())) ?? []
+        promptEntries = PromptStore.shared.prompts(in: nil)
+        schemaEntries = FrameworkService.allBuiltInFrameworks.map { ($0.key, $0.value) }
+            .sorted { $0.fw.name < $1.fw.name }
+        memoryEntries = AgentMemoryStore.shared.listAll()
+        settingsJSON = buildSettingsJSON()
+    }
+
+    private func buildSettingsJSON() -> String {
+        let snapshot = ConfigProjectService.buildSettingsSnapshot()
+        guard let data = try? JSONSerialization.data(withJSONObject: snapshot, options: .prettyPrinted),
+              let json = String(data: data, encoding: .utf8) else { return "{}" }
+        return json
+    }
+
+    private func providerIcon(for type: String) -> String {
+        switch type {
+        case "openAI": "brain.head.profile"
+        case "anthropic": "sparkles"
+        case "gemini": "circle.hexagongrid"
+        default: "desktopcomputer"
+        }
+    }
+}
+
+// MARK: - Config Prompt Editor
+
+struct ConfigPromptEditorView: View {
+    let promptName: String
+    @State private var content: String
+    let category: String
+    @State private var hasChanges = false
+    @Environment(\.dismiss) private var dismiss
+
+    init(promptName: String, content: String, category: String) {
+        self.promptName = promptName
+        self._content = State(initialValue: content)
+        self.category = category
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header info
+            VStack(alignment: .leading, spacing: 4) {
+                Text(promptName.replacingOccurrences(of: "_", with: " ").capitalized)
+                    .font(.headline)
+                Text("Category: \(category)")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+
+            // Editor
+            TextEditor(text: $content)
+                .font(.system(size: 13, design: .monospaced))
+                .scrollContentBackground(.hidden)
+                .background(Color(.systemGray6))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal)
+                .onChange(of: content) { _, _ in hasChanges = true }
+        }
+        .navigationTitle("Edit Prompt")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if hasChanges {
+                    Button("Save") {
+                        PromptStore.shared.updatePrompt(named: promptName, content: content)
+                        hasChanges = false
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+            ToolbarItem(placement: .topBarLeading) {
+                if hasChanges {
+                    Button("Reset") {
+                        PromptStore.shared.resetPrompt(named: promptName)
+                        content = PromptStore.shared.prompt(named: promptName)?.content ?? ""
+                        hasChanges = false
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - JSON Tree View (Recursive, interactive)
+
+/// Interactive JSON tree with expand/collapse for objects and arrays.
+struct JSONTreeView: View {
+    let json: String
+    let title: String
+
+    var body: some View {
+        Group {
+            if let data = json.data(using: .utf8),
+               let parsed = try? JSONSerialization.jsonObject(with: data) {
+                List {
+                    JSONNodeView(key: nil, value: parsed)
+                }
+            } else {
+                Text(json)
+                    .font(.system(size: 11, design: .monospaced))
+                    .padding()
+            }
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Recursive node that renders any JSON value.
+struct JSONNodeView: View {
+    let key: String?
+    let value: Any
+
+    var body: some View {
+        switch value {
+        case let dict as [String: Any]:
+            JSONObjectView(key: key, dict: dict)
+        case let array as [Any]:
+            JSONArrayView(key: key, array: array)
+        case let str as String:
+            JSONLeafView(key: key, value: str, color: .green)
+        case let num as NSNumber:
+            JSONLeafView(key: key, value: num.stringValue, color: .blue)
+        case let bool as Bool:
+            JSONLeafView(key: key, value: bool ? "true" : "false", color: .orange)
+        case is NSNull:
+            JSONLeafView(key: key, value: "null", color: .gray)
+        default:
+            JSONLeafView(key: key, value: "\(value)", color: .primary)
+        }
+    }
+}
+
+// MARK: - JSON Object View
+
+struct JSONObjectView: View {
+    let key: String?
+    let dict: [String: Any]
+    @State private var isExpanded = true
+
+    private var sortedKeys: [String] { dict.keys.sorted() }
+
+    var body: some View {
+        if let key {
+            DisclosureGroup(isExpanded: $isExpanded) {
+                ForEach(sortedKeys, id: \.self) { k in
+                    JSONNodeView(key: k, value: dict[k] ?? NSNull())
+                        .padding(.leading, 12)
+                }
+            } label: {
+                HStack {
+                    Text(key).font(.subheadline).fontWeight(.semibold).foregroundStyle(.purple)
+                    Spacer()
+                    Text("{ \(sortedKeys.count) }").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        } else {
+            // Root object — no key, always expanded
+            ForEach(sortedKeys, id: \.self) { k in
+                JSONNodeView(key: k, value: dict[k] ?? NSNull())
+            }
+        }
+    }
+}
+
+// MARK: - JSON Array View
+
+struct JSONArrayView: View {
+    let key: String?
+    let array: [Any]
+    @State private var isExpanded = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            ForEach(0..<array.count, id: \.self) { idx in
+                JSONNodeView(key: "[\(idx)]", value: array[idx])
+                    .padding(.leading, 12)
+            }
+        } label: {
+            HStack {
+                if let key {
+                    Text(key).font(.subheadline).fontWeight(.semibold).foregroundStyle(.blue)
+                }
+                Spacer()
+                Text("[ \(array.count) ]").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+// MARK: - JSON Leaf Value
+
+struct JSONLeafView: View {
+    let key: String?
+    let value: String
+    let color: Color
+
+    var body: some View {
+        HStack(alignment: .top) {
+            if let key {
+                Text(key).font(.subheadline).foregroundStyle(.secondary)
+                    .frame(width: 140, alignment: .leading)
+            }
+            Text(value)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(color)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Spacer()
+        }
+        .padding(.vertical, 1)
+    }
+}
+
+// MARK: - Config Settings JSON Viewer
+
+struct ConfigSettingsJSONView: View {
+    let json: String
+
+    var body: some View {
+        JSONTreeView(json: json, title: "App Settings")
+    }
+}
+
+// MARK: - Config Schema Viewer
+
+struct ConfigSchemaViewer: View {
+    let framework: ProjectFramework
+    @State private var schemaJSON: String = ""
+    @State private var expandedSection: String? = nil
+
+    var body: some View {
+        List {
+            // Header
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(framework.name).font(.title2).fontWeight(.bold)
+                    Text(framework.description).font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+
+            // Entity Kinds
+            if !framework.entityKinds.isEmpty {
+                Section {
+                    ForEach(framework.entityKinds, id: \.self) { kind in
+                        Label(kind, systemImage: "cube").font(.subheadline)
+                    }
+                } header: {
+                    Text("Entity Kinds (\(framework.entityKinds.count))")
+                }
+            }
+
+            // Edge Types
+            if !framework.edgeTypes.isEmpty {
+                Section {
+                    ForEach(framework.edgeTypes, id: \.self) { edge in
+                        Label(edge, systemImage: "arrow.triangle.branch").font(.subheadline)
+                    }
+                } header: {
+                    Text("Edge Types (\(framework.edgeTypes.count))")
+                }
+            }
+
+            // Views
+            if !framework.views.isEmpty {
+                Section {
+                    ForEach(framework.views, id: \.id) { view in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(view.title).font(.subheadline)
+                                Spacer()
+                                Text(view.type.rawValue).font(.caption2)
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Color(.systemGray5)).clipShape(Capsule())
+                            }
+                            Text("Source: \(view.source)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                } header: {
+                    Text("Views (\(framework.views.count))")
+                }
+            }
+
+            // Item Analysis
+            Section {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("System Prompt").font(.caption).foregroundStyle(.secondary)
+                    Text(framework.itemAnalysis.systemPrompt)
+                        .font(.system(size: 11, design: .monospaced))
+                        .lineLimit(5)
+                }
+            } header: {
+                Text("Item Analysis")
+            }
+
+            // Output Schema — interactive tree
+            Section {
+                if !schemaJSON.isEmpty,
+                   let data = schemaJSON.data(using: .utf8),
+                   let parsed = try? JSONSerialization.jsonObject(with: data) {
+                    JSONNodeView(key: nil, value: parsed)
+                }
+            } header: {
+                Text("Output Schema")
+            }
+
+            // Field Renderers
+            if !framework.itemAnalysis.renderAs.isEmpty {
+                Section {
+                    ForEach(framework.itemAnalysis.renderAs, id: \.field) { renderer in
+                        HStack {
+                            Image(systemName: renderer.icon ?? "doc")
+                                .foregroundStyle(.secondary)
+                            Text(renderer.title).font(.subheadline)
+                            Spacer()
+                            Text(renderer.type.rawValue).font(.caption2)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color(.systemGray5)).clipShape(Capsule())
+                        }
+                    }
+                } header: {
+                    Text("Field Renderers")
+                }
+            }
+        }
+        .navigationTitle("Schema")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            if let data = try? JSONEncoder().encode(framework.itemAnalysis.outputSchema),
+               let json = String(data: data, encoding: .utf8) {
+                if let obj = try? JSONSerialization.jsonObject(with: data),
+                   let pretty = try? JSONSerialization.data(withJSONObject: obj, options: .prettyPrinted) {
+                    schemaJSON = String(data: pretty, encoding: .utf8) ?? json
+                } else {
+                    schemaJSON = json
+                }
+            }
         }
     }
 }

@@ -7,6 +7,7 @@ final class CaptureViewModel: ObservableObject {
     @Published var recordingState: RecordingUIState = .idle
     @Published var elapsedTimeFormatted: String = "00:00"
     @Published var audioLevel: Float = 0
+    @Published var liveTranscriptionText: String = ""
     @Published var errorMessage: String?
     @Published var savedItemId: UUID?
     @Published var pipelineStage: PipelineStage?
@@ -44,6 +45,11 @@ final class CaptureViewModel: ObservableObject {
         coordinator.$audioLevel
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in self?.audioLevel = $0 }
+            .store(in: &cancellables)
+
+        coordinator.$liveTranscriptionText
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.liveTranscriptionText = $0 }
             .store(in: &cancellables)
 
         coordinator.$errorMessage

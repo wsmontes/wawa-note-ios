@@ -249,6 +249,8 @@ struct HomeView: View {
     @StateObject private var captureVM = CaptureViewModel()
     @StateObject private var importVM = HomeViewModel()
     @StateObject private var scannerVM = ScannerViewModel()
+    @ScaledMetric(relativeTo: .largeTitle) private var iconSize: CGFloat = 48
+    @ScaledMetric(relativeTo: .title) private var buttonIconSize: CGFloat = 28
     @State private var navigateToItem: KnowledgeItem?
     @State private var navigateToProject: Project?
     @State private var showCreationSheet = false
@@ -320,7 +322,7 @@ struct HomeView: View {
         } message: {
             Text(captureVM.errorMessage ?? "Could not start recording.")
         }
-        .sheet(isPresented: $showCreationSheet) { CreationSheetView() }
+        .sheet(isPresented: $showCreationSheet) { CreationSheetView().presentationDragIndicator(.visible) }
         .fullScreenCover(isPresented: $showScanner) {
             ScannerView(scannedImages: $scannerVM.scannedImages)
         }
@@ -453,6 +455,8 @@ struct HomeView: View {
                             .foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 52)
                             .background(LinearGradient(colors: [.red, .red.opacity(0.85)], startPoint: .leading, endPoint: .trailing))
                             .clipShape(RoundedRectangle(cornerRadius: 14))
+                            .accessibilityLabel("Start Recording")
+                            .accessibilityHint("Double-tap to begin recording")
                         }
                         Button(action: { showScanMenu = true }) {
                             VStack(spacing: 4) {
@@ -660,9 +664,25 @@ struct HomeView: View {
             } else if isSystemInterrupted {
                 Text("Recording interrupted")
                     .font(.subheadline).foregroundStyle(.red)
+            } else if isActive {
+                HStack(spacing: 6) {
+                    PulsingRecordingDot()
+                    Text("Recording")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
             } else {
                 Text(isPaused ? "Paused" : "Recording")
                     .font(.subheadline).foregroundStyle(isPaused ? .orange : .secondary)
+            }
+            if !captureVM.liveTranscriptionText.isEmpty && isActive {
+                Text(captureVM.liveTranscriptionText)
+                    .font(.system(.caption, design: .serif))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+                    .padding(.top, 8)
+                    .animation(.easeInOut(duration: 0.3), value: captureVM.liveTranscriptionText)
             }
             if let error = captureVM.errorMessage {
                 Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 32).multilineTextAlignment(.center)
@@ -675,6 +695,7 @@ struct HomeView: View {
                             ZStack {
                                 Circle().fill(.white).frame(width: 64, height: 64)
                                 Image(systemName: "pause.fill").font(.system(size: 24)).foregroundStyle(.orange)
+                                    .accessibilityLabel("Pause Recording")
                             }
                         }
                         Button(action: { UINotificationFeedbackGenerator().notificationOccurred(.success); captureVM.stopRecording() }) {
@@ -689,7 +710,7 @@ struct HomeView: View {
                             ZStack {
                                 Circle().fill(isSystemInterrupted ? .orange : .red).frame(width: 64, height: 64)
                                 Image(systemName: isSystemInterrupted ? "arrow.clockwise.circle.fill" : "record.circle.fill")
-                                    .font(.system(size: 28)).foregroundStyle(.white)
+                                    .font(.system(size: buttonIconSize)).foregroundStyle(.white)
                             }
                         }
                         Button(action: { UINotificationFeedbackGenerator().notificationOccurred(.success); captureVM.stopRecording() }) {
@@ -1060,5 +1081,92 @@ struct PhotoPickerView: UIViewControllerRepresentable {
                 }
             }
         }
+    }
+}
+
+// MARK: - Empty State View
+
+/// Reusable empty state with context-appropriate icons and messages per tab.
+struct EmptyStateView: View {
+    enum Tab { case capture, inbox, explore, chat, projects }
+
+    let tab: Tab
+    @ScaledMetric(relativeTo: .largeTitle) private var iconSize: CGFloat = 48
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Spacer().frame(height: 60)
+            Image(systemName: icon)
+                .font(.system(size: iconSize))
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.title3).fontWeight(.medium)
+            Text(subtitle)
+                .font(.subheadline).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+            Spacer()
+        }
+    }
+
+    private var icon: String {
+        switch tab {
+        case .capture: "mic.badge.plus"
+        case .inbox: "tray"
+        case .explore: "rectangle.grid.1x2"
+        case .chat: "bubble.left.and.bubble.right"
+        case .projects: "folder.badge.questionmark"
+        }
+    }
+
+    private var title: String {
+        switch tab {
+        case .capture: "Ready to Capture"
+        case .inbox: "Inbox Empty"
+        case .explore: "Explore Your Workspace"
+        case .chat: "Start a Conversation"
+        case .projects: "No Projects Yet"
+        }
+    }
+
+    private var subtitle: String {
+        switch tab {
+        case .capture: "Tap the mic to record audio, scan documents, or import files."
+        case .inbox: "New captures and imports appear here for triage."
+        case .explore: "Create a project to organize items, tasks, and insights."
+        case .chat: "Ask questions about your knowledge workspace or run analysis."
+        case .projects: "Capture audio or create a project to get started."
+        }
+    }
+}
+
+// MARK: - Skeleton Loader
+
+struct SkeletonRow: View {
+    @State private var shimmer = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 6)
+            .fill(Color(.systemGray5))
+            .opacity(shimmer ? 0.3 : 0.6)
+            .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: shimmer)
+            .onAppear { shimmer = true }
+    }
+}
+
+// MARK: - Pulsing Recording Dot
+
+struct PulsingRecordingDot: View {
+    @State private var pulse = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Circle()
+            .fill(colorScheme == .dark ? Color(red: 1.0, green: 0.3, blue: 0.3) : .red)
+            .frame(width: 10, height: 10)
+            .scaleEffect(pulse ? 1.3 : 0.9)
+            .opacity(pulse ? 0.5 : 1.0)
+            .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulse)
+            .onAppear { pulse = true }
     }
 }

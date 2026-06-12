@@ -115,6 +115,14 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             }
         }
 
+        // Auto-detect: prioritize the device language, then system preferred languages
+        let deviceLang = Locale.current.language.languageCode?.identifier ?? "en"
+        let deviceLocale = Locale(identifier: deviceLang)
+        if !locales.contains(where: { $0.identifier == deviceLocale.identifier }),
+           let _ = SFSpeechRecognizer(locale: deviceLocale) {
+            locales.insert(deviceLocale, at: max(0, locales.count - 1))
+        }
+
         for lang in Locale.preferredLanguages {
             let locale = Locale(identifier: lang)
             if !locales.contains(where: { $0.identifier == locale.identifier }) {
@@ -122,9 +130,18 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             }
         }
 
+        // Move the first locale that has an available recognizer to the front
+        if let bestIdx = locales.firstIndex(where: {
+            SFSpeechRecognizer(locale: $0)?.isAvailable == true
+        }) {
+            let best = locales.remove(at: bestIdx)
+            locales.insert(best, at: 0)
+        }
+
         self.candidateLocales = locales
+        let bestLabel = locales.first?.identifier ?? "unknown"
         self.chunker = AudioChunker(chunkDuration: Self.maxLocalDuration, overlap: Self.chunkOverlap)
-        AppLog.transcription.info("AppleSpeech engine ready — locales: \(locales.map(\.identifier).prefix(5).joined(separator: ", "))")
+        AppLog.transcription.info("AppleSpeech ready — best=\(bestLabel) locales=\(locales.map(\.identifier).prefix(5).joined(separator: ", "))")
     }
 
     // MARK: - Availability check

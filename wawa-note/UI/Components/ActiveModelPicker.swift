@@ -29,6 +29,15 @@ struct ActiveModelPicker: View {
                     } label: {
                         HStack {
                             Text(model)
+                            if isDeprecated(model) {
+                                Text("Deprecated")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 1)
+                                    .background(Color.orange.opacity(0.15))
+                                    .clipShape(Capsule())
+                            }
                             if model == selectedModel {
                                 Image(systemName: "checkmark")
                             }
@@ -90,6 +99,10 @@ struct ActiveModelPicker: View {
         if availableModels.isEmpty {
             availableModels = [selectedModel]
         }
+    }
+
+    private func isDeprecated(_ model: String) -> Bool {
+        AIConfigService.shared.presetFor(model: model)?.deprecated != nil
     }
 }
 

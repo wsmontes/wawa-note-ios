@@ -171,3 +171,43 @@ extension View {
         modifier(ProjectCard(padding: padding, cornerRadius: cornerRadius))
     }
 }
+
+// MARK: - Input Sanitizer
+
+enum InputSanitizer {
+    static let maxUserMessageChars = 50000
+
+    static func sanitize(_ text: String) -> String {
+        var s = text.replacingOccurrences(of: "\0", with: "")
+        if s.count > maxUserMessageChars {
+            s = String(s.prefix(maxUserMessageChars)) + "\n\n[Truncated]"
+        }
+        return s
+    }
+}
+
+// MARK: - AppStorage Keys
+
+/// Single source of truth for all UserDefaults keys.
+/// Replace raw string literals across the codebase with these constants.
+enum AppStorageKey {
+    static let activeProviderID = "active_provider_id"
+    static func modelPreference(providerId: String) -> String { "model_pref_\(providerId)" }
+    static let transcriptionMode = "transcription_mode"
+    static let transcriptionAllowCloud = "transcription_allow_cloud"
+    static let autoTranscribe = "automation_auto_transcribe"
+    static let autoAnalyze = "automation_auto_analyze"
+    static let autoAnalysisModel = "automation_auto_analysis_model"
+    static let autoAnalysisProvider = "automation_auto_analysis_provider"
+    static let audioRawMode = "audio_raw_mode"
+    static let audioSpeakerphoneMode = "audio_speakerphone_mode"
+    static let anarlogAutoImport = "anarlog_auto_import"
+    static let anarlogAutoExport = "anarlog_auto_export"
+    static let anarlogSyncBookmark = "anarlog_sync_bookmark"
+    static let developerModeEnabled = "developer_mode_enabled"
+    static let modelResolverTiers = "model_resolver_tiers"
+    static let meetilySummaryCache = "meetily_summary_cache"
+    static let meetilyCustomTemplates = "meetily_custom_templates"
+    static let hasCompletedOnboarding = "has_completed_onboarding"
+    static let lastSeenVersion = "last_seen_version"
+}

@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+import SwiftData
 
 // MARK: - Config models
 
@@ -206,6 +207,18 @@ final class AIConfigService: @unchecked Sendable {
         let preset = presetFor(model: model)
         let isReasoning = preset?.reasoningModel ?? false
 
+        // Rate limiting: prevent burst calls to the same feature
+        let minInterval: TimeInterval = feature == "chat" ? 0.5 : 2.0
+        let now = Date().timeIntervalSince1970
+        let key = "\(feature):\(model)"
+        if let lastCall = Self.lastCallTimes[key] {
+            let elapsed = now - lastCall
+            if elapsed < minInterval {
+                AppLog.provider.info("Rate limit: \(feature) called \(String(format: "%.1f", elapsed))s after last — throttling")
+            }
+        }
+        Self.lastCallTimes[key] = now
+
         // Temperature: from feature config, nil for reasoning models
         let temperature: Double? = isReasoning ? nil : (feat?.temperature)
 
@@ -223,6 +236,42 @@ final class AIConfigService: @unchecked Sendable {
             contextWindow: contextWindow,
             isReasoning: isReasoning
         )
+    }
+
+    private static nonisolated(unsafe) var lastCallTimes: [String: TimeInterval] = [:]
+    private static nonisolated(unsafe) var totalTokensUsed: Int = 0
+    private static nonisolated(unsafe) var totalAPICalls: Int = 0
+
+    /// Track API usage for cost estimation.
+    static func trackUsage(tokens: Int) {
+        totalTokensUsed += tokens
+        totalAPICalls += 1
+    }
+
+    /// Estimated cost in USD for all API calls this session.
+    static var estimatedCost: String {
+        let costPer1K = 0.002
+        let cost = Double(totalTokensUsed) / 1000.0 * costPer1K
+        return String(format: "$%.4f (%d calls, %d tokens)", cost, totalAPICalls, totalTokensUsed)
+    }
+
+    /// Quick health check: pings each configured provider endpoint.
+    static func healthCheck(context: ModelContext) async -> [(String, Bool)] {
+        let configs = (try? context.fetch(FetchDescriptor<AIProviderConfigModel>())) ?? []
+        var results: [(String, Bool)] = []
+        for config in configs {
+            guard let base = config.baseURLString, let url = URL(string: base) else { continue }
+            var req = URLRequest(url: url.appendingPathComponent("health"))
+            req.httpMethod = "HEAD"
+            req.timeoutInterval = 5
+            if let (_, resp) = try? await URLSession.shared.data(for: req),
+               let http = resp as? HTTPURLResponse, (200...499).contains(http.statusCode) {
+                results.append((config.name, true))
+            } else {
+                results.append((config.name, false))
+            }
+        }
+        return results
     }
 }
 

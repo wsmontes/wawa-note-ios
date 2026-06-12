@@ -19,6 +19,9 @@ struct ContentView: View {
     @State private var safeAreaBottom: CGFloat = 0
     @StateObject private var chatState = ChatOverlayState()
     @StateObject private var chatViewModel = ChatViewModel()
+    @Query(filter: #Predicate<KnowledgeItem> { $0.inboxDate != nil }) private var inboxItems: [KnowledgeItem]
+
+    private var inboxPendingCount: Int { inboxItems.count }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -67,6 +70,7 @@ struct ContentView: View {
 
                 NavigationStack { InboxView() }
                     .tabItem { Label("Inbox", systemImage: "tray") }
+                    .badge(inboxPendingCount)
                     .tag(1)
 
                 NavigationStack { ExploreView() }
@@ -77,6 +81,7 @@ struct ContentView: View {
                     .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }
                     .tag(3)
             }
+            .animation(.easeInOut(duration: 0.25), value: selectedTab)
             .ignoresSafeArea(.keyboard, edges: .bottom)
 
             if showChat {
@@ -121,7 +126,7 @@ struct ContentView: View {
             chatViewModel.setup(modelContext: modelContext)
             chatViewModel.observeContext(from: chatState)
             ConfigProjectService.ensureConfigProject(context: modelContext)
-            ConfigProjectService.populateIfEmpty(context: modelContext)
+            ConfigProjectService.syncConfigProject(context: modelContext)
             WawaNoteApp.updateAppBadge(modelContext: modelContext)
             autoProcessPendingItems()
             // Capture safe area bottom for keyboard positioning

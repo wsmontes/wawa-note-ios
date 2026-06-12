@@ -87,7 +87,13 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     // MARK: - Internal state
 
     private var timerTask: Task<Void, Never>?
+    private var checkpointTask: Task<Void, Never>?
     private var levelMonitorTask: Task<Void, Never>?
+    private var silenceDetectionTask: Task<Void, Never>?
+    private static let silenceThreshold: Float = 0.015
+    private static let silenceDurationBeforePause: TimeInterval = 5.0
+    @Published private(set) var isAutoPaused: Bool = false
+    @Published private(set) var silenceDetected: Bool = false
     private var recordingStartTime: Date?
     private var currentMeetingId: UUID?
 
@@ -159,6 +165,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private static let levelDecayFactor: Float = 0.85
     private static let levelUpdateIntervalNS: UInt64 = 30_000_000
     private static let timerUpdateInterval: TimeInterval = 0.1
+    private static let checkpointInterval: TimeInterval = 5.0
 
     var outputFileURL: URL? {
         fileWriter.currentFileURL
@@ -187,7 +194,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                     reason = "Recording stopped — write failed (\(error.localizedDescription))."
                 }
 
-                self.timerTask?.cancel()
+                self.stopTimer()
                 _ = self.checkpointCurrentSegment(reason: "writeFailure")
                 self.transition(to: .failedFatal(reason), reason: "writeFailure")
                 self.audioInterruptionReason = reason
@@ -389,10 +396,14 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // Create file BEFORE engine start using session sample rate (reflects
         // current audio route). The tap writes raw hardware PCM — file format
         // matches exactly, no upsampling needed.
-        let sessionRate = sessionManager.sampleRate > 0 ? sessionManager.sampleRate : 44100
+        // Adaptive compression: reduce sample rate when disk space is low.
+        let baseRate = sessionManager.sampleRate > 0 ? sessionManager.sampleRate : 44100
+        let (sessionRate, qualityTier) = adaptiveSampleRate(baseRate: baseRate)
         guard let recordFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sessionRate, channels: 1, interleaved: false) else {
             throw AudioCaptureError.engineStartFailed
         }
+        let freeMB = freeDiskMB()
+        AppLog.audio.info("Recording format: \(Int(sessionRate))Hz \(qualityTier) (free space: \(freeMB)MB)")
         currentMeetingId = meetingId
         try fileWriter.startRecording(format: recordFormat, meetingId: meetingId)
 
@@ -450,7 +461,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             // Normal pause — engine stays alive, tap stops writing.
             transition(to: .pausedByUser, reason: "user paused")
             recordingIntent = .userPaused
-            timerTask?.cancel()
+            stopTimer()
             AppLog.audio.info("Recording paused (engine kept alive)")
 
         case .reconfiguringRoute, .validatingRoute:
@@ -514,8 +525,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         removeAudioNotificationObservers()
 
         // 4. Stop timer
-        timerTask?.cancel()
-        timerTask = nil
+        stopTimer()
+        AudioFileWriter.clearCrashCheckpoint()
         levelMonitorTask?.cancel()
 
         // 5. Try to stop engine/tap safely — don't crash if already broken
@@ -1045,7 +1056,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             if state == .recording {
                 transition(to: .interruptedBySystem, reason: "system interruption began")
                 audioInterruptionReason = "Recording paused due to interruption (phone call, alarm, etc.)."
-                timerTask?.cancel()
+                stopTimer()
                 _ = checkpointCurrentSegment(reason: "systemInterruptionBegan")
             }
         case .ended:
@@ -1118,7 +1129,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 }
                 transition(to: .waitingForUsableInput, reason: "input lost")
                 audioInterruptionReason = "Microphone disconnected. Waiting for input…"
-                timerTask?.cancel()
+                stopTimer()
                 _ = checkpointCurrentSegment(reason: "inputLost")
             }
             return
@@ -1382,6 +1393,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     private func startTimer() {
         timerTask?.cancel()
+        checkpointTask?.cancel()
         recordingStartTime = Date()
         timerTask = Task { [weak self] in
             guard let self else { return }
@@ -1395,6 +1407,27 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 try? await Task.sleep(nanoseconds: UInt64(Self.timerUpdateInterval * 1_000_000_000))
             }
         }
+        // Crash recovery checkpoint every 5s
+        checkpointTask = Task { [weak self] in
+            guard let self else { return }
+            var lastCheckpoint = Date()
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(Self.checkpointInterval * 1_000_000_000))
+                guard !Task.isCancelled, let mid = self.currentMeetingId else { return }
+                let rate = self.sessionManager.sampleRate > 0 ? self.sessionManager.sampleRate : 44100
+                guard let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: 1, interleaved: false) else { return }
+                self.fileWriter.writeCheckpoint(meetingId: mid, segmentIndex: self.fileWriter.segmentIndex, format: fmt)
+                lastCheckpoint = Date()
+            }
+        }
+    }
+
+    private func stopTimer() {
+        timerTask?.cancel()
+        timerTask = nil
+        checkpointTask?.cancel()
+        checkpointTask = nil
+        stopSilenceDetection()
     }
 
     // MARK: - Audio level
@@ -1419,6 +1452,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     private func startLevelSmoothing() {
         levelMonitorTask?.cancel()
+        silenceDetectionTask?.cancel()
         levelMonitorTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: Self.levelUpdateIntervalNS)
@@ -1432,5 +1466,79 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 }
             }
         }
+        // Silence detection: auto-pause after sustained silence
+        silenceDetectionTask = Task { [weak self] in
+            guard let self else { return }
+            var silentStart: Date?
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 500_000_000) // check every 0.5s
+                guard !Task.isCancelled else { return }
+                let level = await MainActor.run { self.audioLevel }
+                if level < Self.silenceThreshold {
+                    let now = Date()
+                    if silentStart == nil { silentStart = now }
+                    let duration = now.timeIntervalSince(silentStart ?? now)
+                    await MainActor.run {
+                        self.silenceDetected = duration > 1.0
+                        if duration > Self.silenceDurationBeforePause && !self.isAutoPaused && self.state == .recording {
+                            self.isAutoPaused = true
+                            AppLog.audio.info("Auto-paused: silence for \(Int(duration))s")
+                        }
+                    }
+                } else if level > Self.silenceThreshold * 3 {
+                    if let start = silentStart {
+                        let duration = Date().timeIntervalSince(start)
+                        await MainActor.run {
+                            self.silenceDetected = false
+                            if self.isAutoPaused && duration > Self.silenceDurationBeforePause {
+                                self.isAutoPaused = false
+                                AppLog.audio.info("Auto-resumed: audio detected after \(Int(duration))s silence")
+                            }
+                        }
+                    }
+                    silentStart = nil
+                }
+            }
+        }
+    }
+
+    private func stopSilenceDetection() {
+        silenceDetectionTask?.cancel()
+        silenceDetectionTask = nil
+        isAutoPaused = false
+        silenceDetected = false
+    }
+
+    // MARK: - Adaptive Compression
+
+    /// Returns (sampleRate, qualityLabel) based on available disk space.
+    /// Reduces quality to prevent filling the device during long recordings.
+    private func adaptiveSampleRate(baseRate: Double) -> (Double, String) {
+        let freeMB = freeDiskMB()
+        switch freeMB {
+        case ..<50:
+            AppLog.audio.warning("Critical disk space (\(freeMB)MB) — using minimal quality")
+            return (11025, "low")
+        case 50..<200:
+            AppLog.audio.info("Low disk space (\(freeMB)MB) — using reduced quality")
+            return (22050, "medium")
+        case 200..<500:
+            return (baseRate > 44100 ? 44100 : baseRate, "high")
+        default:
+            return (baseRate, "full")
+        }
+    }
+
+    /// Available free disk space in megabytes.
+    private func freeDiskMB() -> Int64 {
+        do {
+            let attrs = try FileManager.default.attributesOfFileSystem(forPath: NSHomeDirectory())
+            if let free = attrs[.systemFreeSize] as? Int64 {
+                return free / 1_048_576
+            }
+        } catch {
+            AppLog.audio.warning("Could not read disk free space: \(error)")
+        }
+        return Int64.max // If we can't read, assume plenty
     }
 }

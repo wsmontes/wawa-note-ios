@@ -9,6 +9,9 @@ final class RecordingCoordinator: ObservableObject {
     @Published private(set) var state: RecordingUIState = .idle
     @Published private(set) var elapsedTime: TimeInterval = 0
     @Published private(set) var audioLevel: Float = 0
+    @Published private(set) var isClipping: Bool = false
+    @Published private(set) var clipCount: Int = 0
+    @Published private(set) var liveTranscriptionText: String = ""
     @Published private(set) var errorMessage: String?
     @Published private(set) var savedItemId: UUID?
     @Published private(set) var currentInputPortName: String = ""
@@ -356,6 +359,8 @@ final class RecordingCoordinator: ObservableObject {
         elapsedTime = 0
         pausedDuration = 0
         audioLevel = 0
+        isClipping = false
+        clipCount = 0
         savedItemId = nil
         errorMessage = nil
         captureService.resetToIdle()
@@ -617,6 +622,14 @@ final class RecordingCoordinator: ObservableObject {
                 self.elapsedTime = Date().timeIntervalSince(start)
             }
             self.audioLevel = self.captureService.audioLevel
+            // Clipping detection (hysteresis: on at > 0.95, off at < 0.85)
+            let level = self.captureService.audioLevel
+            if level > 0.95 && !self.isClipping {
+                self.isClipping = true
+                self.clipCount += 1
+            } else if level < 0.85 && self.isClipping {
+                self.isClipping = false
+            }
             // Sync input port info (may change on route switch)
             // Segments are handled by onRouteChangeNewSegment callback
             let portName = self.captureService.currentInputPortName

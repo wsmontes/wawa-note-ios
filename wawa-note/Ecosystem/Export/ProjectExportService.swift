@@ -785,4 +785,67 @@ final class InstanceExportService {
         let ms = Int((seconds - Double(Int(seconds))) * 1000)
         return String(format: "%02d:%02d:%02d,%03d", h, m, s, ms)
     }
+
+    // MARK: - VTT / WebVTT Export
+
+    /// Export transcript segments as WebVTT (.vtt) subtitle format.
+    /// Supports speaker labels via `<v Speaker>` tags when speaker info is available.
+    func exportVTT(for itemId: UUID) -> String? {
+        let store = FileArtifactStore()
+        guard let transcript = try? store.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: itemId),
+              !transcript.segments.isEmpty else { return nil }
+
+        var vtt = "WEBVTT\n\n"
+        // Add a note header
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        vtt += "NOTE\nExported from Wawa Note — \(formatter.string(from: Date()))\n\n"
+
+        for (index, segment) in transcript.segments.enumerated() {
+            let text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+
+            let start = formatVTTTimestamp(segment.startTime)
+            let end = formatVTTTimestamp(segment.endTime ?? segment.startTime + 5)
+
+            // Optional cue identifier
+            let cueId = "\(index + 1)"
+            vtt += "\(cueId)\n\(start) --> \(end)"
+
+            // Add speaker if available
+            if let speakerId = segment.speakerId {
+                let shortId = speakerId.uuidString.prefix(6)
+                vtt += "\n<v Speaker-\(shortId)>\(text)</v>"
+            } else {
+                vtt += "\n\(text)"
+            }
+            vtt += "\n\n"
+        }
+        return vtt.isEmpty ? nil : vtt
+    }
+
+    /// Export as plain WebVTT without cue identifiers or speaker tags.
+    func exportVTTSimple(for itemId: UUID) -> String? {
+        let store = FileArtifactStore()
+        guard let transcript = try? store.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: itemId),
+              !transcript.segments.isEmpty else { return nil }
+
+        var vtt = "WEBVTT\n\n"
+        for segment in transcript.segments {
+            let text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+            let start = formatVTTTimestamp(segment.startTime)
+            let end = formatVTTTimestamp(segment.endTime ?? segment.startTime + 5)
+            vtt += "\(start) --> \(end)\n\(text)\n\n"
+        }
+        return vtt.isEmpty ? nil : vtt
+    }
+
+    private func formatVTTTimestamp(_ seconds: Double) -> String {
+        let h = Int(seconds) / 3600
+        let m = (Int(seconds) % 3600) / 60
+        let s = Int(seconds) % 60
+        let ms = Int((seconds - Double(Int(seconds))) * 1000)
+        return String(format: "%02d:%02d:%02d.%03d", h, m, s, ms)
+    }
 }

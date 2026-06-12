@@ -221,6 +221,10 @@ enum VFSService {
         if let text = fileContent(for: vpath, context: context) {
             return Data(text.utf8)
         }
+        // Config project files (providers, settings — generated on read)
+        if let text = readConfigProjectFile(rawPath, context: context) {
+            return Data(text.utf8)
+        }
         // Fallback: for item-level files (body.md, analysis.json, etc.)
         if let text = readItemFile(rawPath, context: context) {
             return Data(text.utf8)
@@ -1272,30 +1276,53 @@ enum VFSService {
 
     // MARK: - Config project children
 
+    /// Lists top-level directories under /projects/wawa-note-config/.
+    /// Note: VFS routing currently only supports navigating into /config/schemas/
+    /// via the .configSchemas VFSPath case. Providers, prompts, settings, and memories
+    /// are listed as flat file nodes directly under the project root for agent visibility.
     private static func configProjectChildren(base: String, context: ToolContext) -> [VFSNode] {
-        let schemaCount = FrameworkService.allBuiltInFrameworks.count
-        return [
-            .directory(path: "\(base)/providers", name: "Providers",
-                childrenCount: configProviderNodes(context: context).count),
-            .directory(path: "\(base)/prompts", name: "Prompts",
-                childrenCount: configPromptNodes().count),
-            .directory(path: "\(base)/schemas", name: "Schemas",
-                childrenCount: schemaCount),
-            .directory(path: "\(base)/settings", name: "Settings",
-                childrenCount: configSettingsNodes().count),
-            .directory(path: "\(base)/memories", name: "Memories",
-                childrenCount: configMemoryNodes().count),
-        ]
+        var nodes: [VFSNode] = []
+
+        // Providers — flattened as files for agent visibility
+        nodes.append(contentsOf: configProviderNodes(context: context, base: base))
+
+        // Prompts — flattened as files
+        nodes.append(contentsOf: configPromptNodes(base: base))
+
+        // Schemas — accessible via /projects/{slug}/config/schemas/ VFS routing
+        let schemaNodes = configSchemaNodes(base: base)
+        nodes.append(.directory(path: "\(base)/config/schemas", name: "Schemas",
+            childrenCount: schemaNodes.count))
+
+        // Settings — flattened as files
+        nodes.append(contentsOf: configSettingsNodes(base: base))
+
+        // Memories — flattened as files
+        nodes.append(contentsOf: configMemoryNodes(base: base))
+
+        return nodes
     }
 
-    private static func configProviderNodes(context: ToolContext) -> [VFSNode] {
-        // Security: Provider configs contain sensitive data (API keys). Not exposed via VFS.
-        return []
+    /// Provider configs exposed without API keys. Serialized as JSON with safe fields.
+    private static func configProviderNodes(context: ToolContext, base: String = "/projects/wawa-note-config") -> [VFSNode] {
+        let configs = (try? context.modelContext.fetch(FetchDescriptor<AIProviderConfigModel>())) ?? []
+        return configs.map { config in
+            .file(
+                path: "\(base)/provider-\(config.name.replacingOccurrences(of: " ", with: "-")).json",
+                name: "provider-\(config.name.replacingOccurrences(of: " ", with: "-")).json",
+                nodeType: .jsonFile,
+                metadata: VFSNodeMetadata(
+                    itemType: config.defaultModel,
+                    itemStatus: config.typeRaw,
+                    swiftDataID: config.id
+                )
+            )
+        }
     }
 
-    private static func configPromptNodes() -> [VFSNode] {
+    /// Prompt templates as markdown files.
+    private static func configPromptNodes(base: String = "/projects/wawa-note-config") -> [VFSNode] {
         let prompts = PromptStore.shared.prompts(in: nil)
-        let base = "/projects/wawa-note-config/prompts"
         return prompts.map { p in
             .file(
                 path: "\(base)/\(p.name).md", name: "\(p.name).md",
@@ -1305,21 +1332,43 @@ enum VFSService {
         }
     }
 
-    private static func configSettingsNodes() -> [VFSNode] {
-        let base = "/projects/wawa-note-config/settings"
+    /// Analysis framework schemas as JSON files.
+    private static func configSchemaNodes(base: String = "/projects/wawa-note-config") -> [VFSNode] {
+        return FrameworkService.allBuiltInFrameworks.sorted(by: { $0.key < $1.key }).map { (name, fw) in
+            .file(
+                path: "\(base)/config/schemas/\(name).json", name: "\(name).json",
+                nodeType: .jsonFile,
+                metadata: VFSNodeMetadata(
+                    owner: fw.description,
+                    edgeType: fw.id,
+                    confidence: Double(fw.views.count)
+                )
+            )
+        }
+    }
+
+    /// App settings as JSON files (generated on read).
+    private static func configSettingsNodes(base: String = "/projects/wawa-note-config") -> [VFSNode] {
         return [
-            .file(path: "\(base)/general.json", name: "general.json", nodeType: .jsonFile),
-            .file(path: "\(base)/models.json", name: "models.json", nodeType: .jsonFile),
-            .file(path: "\(base)/features.json", name: "features.json", nodeType: .jsonFile),
+            .file(path: "\(base)/settings-general.json", name: "settings-general.json",
+                nodeType: .jsonFile,
+                metadata: VFSNodeMetadata(itemStatus: "app-config")),
+            .file(path: "\(base)/settings-models.json", name: "settings-models.json",
+                nodeType: .jsonFile,
+                metadata: VFSNodeMetadata(itemStatus: "model-presets")),
+            .file(path: "\(base)/settings-features.json", name: "settings-features.json",
+                nodeType: .jsonFile,
+                metadata: VFSNodeMetadata(itemStatus: "feature-configs")),
         ]
     }
 
-    private static func configMemoryNodes() -> [VFSNode] {
+    /// Agent memories as JSON files.
+    private static func configMemoryNodes(base: String = "/projects/wawa-note-config") -> [VFSNode] {
         let memories = AgentMemoryStore.shared.listAll()
-        let base = "/projects/wawa-note-config/memories"
         return memories.map { m in
             .file(
-                path: "\(base)/\(m.id.uuidString).json", name: "memory-\(m.id.uuidString.prefix(8)).json",
+                path: "\(base)/memory-\(m.id.uuidString.prefix(8)).json",
+                name: "memory-\(m.id.uuidString.prefix(8)).json",
                 nodeType: .jsonFile,
                 metadata: VFSNodeMetadata(
                     swiftDataID: m.id, isFlagged: m.isStale,
@@ -1327,6 +1376,60 @@ enum VFSService {
                 )
             )
         }
+    }
+
+    // MARK: - Config project file read (generated on-the-fly)
+
+    /// Reads config project files that are generated on demand (providers, settings).
+    private static func readConfigProjectFile(_ rawPath: String, context: ToolContext) -> String? {
+        let parts = rawPath.split(separator: "/").map(String.init).filter { !$0.isEmpty }
+        guard parts.count >= 3,
+              parts[0] == "projects",
+              parts[1] == "wawa-note-config" else { return nil }
+
+        let fileName = parts.last ?? ""
+
+        // Provider files: provider-{name}.json
+        if fileName.hasPrefix("provider-") && fileName.hasSuffix(".json") {
+            let providerName = String(fileName.dropFirst(9).dropLast(5))
+                .replacingOccurrences(of: "-", with: " ")
+            let configs = (try? context.modelContext.fetch(FetchDescriptor<AIProviderConfigModel>())) ?? []
+            guard let config = configs.first(where: { $0.name == providerName }) else { return nil }
+            let dict: [String: Any] = [
+                "name": config.name, "type": config.typeRaw,
+                "defaultModel": config.defaultModel,
+                "baseURL": config.baseURLString as Any,
+                "supportsStreaming": config.supportsStreaming,
+                "supportsTools": config.supportsTools,
+                "supportsAudio": config.supportsAudio,
+                "supportsEmbeddings": config.supportsEmbeddings
+            ]
+            guard let data = try? JSONSerialization.data(withJSONObject: dict, options: .prettyPrinted) else { return nil }
+            return String(data: data, encoding: .utf8)
+        }
+
+        // Settings files: settings-{kind}.json
+        if fileName.hasPrefix("settings-") && fileName.hasSuffix(".json") {
+            let kind = String(fileName.dropFirst(9).dropLast(5))
+            switch kind {
+            case "general":
+                let snapshot = ConfigProjectService.buildSettingsSnapshot()
+                guard let data = try? JSONSerialization.data(withJSONObject: snapshot, options: .prettyPrinted) else { return nil }
+                return String(data: data, encoding: .utf8)
+            case "models":
+                let presets = AIConfigService.shared.config.modelPresets ?? [:]
+                guard let data = try? JSONEncoder().encode(presets) else { return nil }
+                return String(data: data, encoding: .utf8)
+            case "features":
+                let features = AIConfigService.shared.config.features ?? [:]
+                guard let data = try? JSONEncoder().encode(features) else { return nil }
+                return String(data: data, encoding: .utf8)
+            default:
+                return nil
+            }
+        }
+
+        return nil
     }
 
     // MARK: - Shared helpers (moved from ShellInterpreter)

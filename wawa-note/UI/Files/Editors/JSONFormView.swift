@@ -5,13 +5,14 @@ import SwiftUI
 /// Renders any JSON as an interactive, editable form with collapsible sections.
 /// Adapts automatically to any JSON structure — strings, numbers, booleans,
 /// nested objects, and arrays.
+/// Uses NavigationLink for nested navigation instead of a nested NavigationStack
+/// to avoid conflicts with the parent navigation context.
 struct JSONFormView: View {
     let root: JSONValue
     let onUpdate: (JSONValue) -> Void
 
     @State private var editedRoot: JSONValue
     @State private var expandedKeys: Set<String> = []
-    @State private var navigationPath = NavigationPath()
 
     init(root: JSONValue, onUpdate: @escaping (JSONValue) -> Void) {
         self.root = root
@@ -20,62 +21,45 @@ struct JSONFormView: View {
     }
 
     var body: some View {
-        NavigationStack(path: $navigationPath) {
-            ScrollView {
-                VStack(spacing: 0) {
-                    switch editedRoot {
-                    case .object(let fields):
-                        ForEach(fields) { field in
-                            JSONFieldRow(
-                                key: field.key,
-                                value: binding(for: field.id, in: fields),
-                                isExpanded: isExpanded(field.key),
-                                onToggle: { toggleExpanded(field.key) },
-                                onNavigate: { section in
-                                    navigationPath.append(section)
-                                }
-                            )
-                        }
-                        addFieldButton(for: fields)
-                    case .array(let items):
-                        ForEach(Array(items.enumerated()), id: \.offset) { idx, item in
-                            JSONFieldRow(
-                                key: "[\(idx)]",
-                                value: binding(forArrayIndex: idx),
-                                isExpanded: isExpanded("[\(idx)]"),
-                                onToggle: { toggleExpanded("[\(idx)]") },
-                                onNavigate: { section in
-                                    navigationPath.append(section)
-                                }
-                            )
-                        }
-                        addArrayItemButton(for: items)
-                    default:
-                        // Single primitive value (shouldn't normally happen at root)
-                        JSONPrimitiveRow(
-                            key: "value",
-                            value: bindingForPrimitiveRoot(),
-                            onUpdate: { saveRoot() }
+        ScrollView {
+            VStack(spacing: 0) {
+                switch editedRoot {
+                case .object(let fields):
+                    ForEach(fields) { field in
+                        JSONFieldRow(
+                            key: field.key,
+                            value: binding(for: field.id, in: fields),
+                            isExpanded: isExpanded(field.key),
+                            onToggle: { toggleExpanded(field.key) },
+                            onNavigate: nil
                         )
                     }
-                }
-                .padding(.vertical, 8)
-            }
-            .navigationTitle("Form")
-            .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: JSONFormSection.self) { section in
-                JSONFormDetailView(section: section) { updatedValue in
-                    // Update the root when a nested section is edited
-                    if !navigationPath.isEmpty {
-                        updateNestedValue(at: section.path, with: updatedValue)
+                    addFieldButton(for: fields)
+                case .array(let items):
+                    ForEach(Array(items.enumerated()), id: \.offset) { idx, item in
+                        JSONFieldRow(
+                            key: "[\(idx)]",
+                            value: binding(forArrayIndex: idx),
+                            isExpanded: isExpanded("[\(idx)]"),
+                            onToggle: { toggleExpanded("[\(idx)]") },
+                            onNavigate: nil
+                        )
                     }
+                    addArrayItemButton(for: items)
+                default:
+                    JSONPrimitiveRow(
+                        key: "value",
+                        value: bindingForPrimitiveRoot(),
+                        onUpdate: { saveRoot() }
+                    )
                 }
             }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Save") { saveRoot() }
-                        .fontWeight(.semibold)
-                }
+            .padding(.vertical, 8)
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Save") { saveRoot() }
+                    .fontWeight(.semibold)
             }
         }
     }
@@ -198,7 +182,7 @@ struct JSONFieldRow: View {
     @Binding var value: JSONValue
     let isExpanded: Bool
     let onToggle: () -> Void
-    let onNavigate: (JSONFormSection) -> Void
+    let onNavigate: ((JSONFormSection) -> Void)?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -208,18 +192,36 @@ struct JSONFieldRow: View {
                     .padding(.horizontal, 16)
 
             case .object(let fields):
-                JSONObjectRow(
-                    key: key, fields: fields,
-                    value: $value, isExpanded: isExpanded,
-                    onToggle: onToggle, onNavigate: onNavigate
-                )
+                NavigationLink {
+                    JSONFormView(root: value) { updatedValue in
+                        value = updatedValue
+                    }
+                    .navigationTitle(key)
+                    .navigationBarTitleDisplayMode(.inline)
+                } label: {
+                    JSONObjectRow(
+                        key: key, fields: fields,
+                        value: $value, isExpanded: isExpanded,
+                        onToggle: onToggle
+                    )
+                }
+                .buttonStyle(.plain)
 
             case .array(let items):
-                JSONArrayRow(
-                    key: key, items: items,
-                    value: $value, isExpanded: isExpanded,
-                    onToggle: onToggle, onNavigate: onNavigate
-                )
+                NavigationLink {
+                    JSONFormView(root: value) { updatedValue in
+                        value = updatedValue
+                    }
+                    .navigationTitle(key)
+                    .navigationBarTitleDisplayMode(.inline)
+                } label: {
+                    JSONArrayRow(
+                        key: key, items: items,
+                        value: $value, isExpanded: isExpanded,
+                        onToggle: onToggle
+                    )
+                }
+                .buttonStyle(.plain)
             }
 
             Divider().padding(.leading, 16)
@@ -325,36 +327,26 @@ struct JSONObjectRow: View {
     @Binding var value: JSONValue
     let isExpanded: Bool
     let onToggle: () -> Void
-    let onNavigate: (JSONFormSection) -> Void
 
     var body: some View {
-        Button {
-            onNavigate(JSONFormSection(
-                title: key,
-                value: value,
-                path: key
-            ))
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .frame(width: 16)
-                Image(systemName: "curlybraces")
-                    .font(.caption).foregroundStyle(.teal)
-                Text(key)
-                    .font(.subheadline).fontWeight(.medium)
-                Spacer()
-                Text("{ \(fields.count) }")
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .padding(.horizontal, 6).padding(.vertical, 1)
-                    .background(Color.teal.opacity(0.1)).clipShape(Capsule())
-                Image(systemName: "arrow.up.forward.app")
-                    .font(.caption2).foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 16).padding(.vertical, 8)
-            .contentShape(Rectangle())
+        HStack(spacing: 10) {
+            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                .font(.caption).foregroundStyle(.secondary)
+                .frame(width: 16)
+            Image(systemName: "curlybraces")
+                .font(.caption).foregroundStyle(.teal)
+            Text(key)
+                .font(.subheadline).fontWeight(.medium)
+            Spacer()
+            Text("{ \(fields.count) }")
+                .font(.caption2).foregroundStyle(.secondary)
+                .padding(.horizontal, 6).padding(.vertical, 1)
+                .background(Color.teal.opacity(0.1)).clipShape(Capsule())
+            Image(systemName: "chevron.right")
+                .font(.caption2).foregroundStyle(.tertiary)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 16).padding(.vertical, 8)
+        .contentShape(Rectangle())
     }
 }
 
@@ -366,36 +358,26 @@ struct JSONArrayRow: View {
     @Binding var value: JSONValue
     let isExpanded: Bool
     let onToggle: () -> Void
-    let onNavigate: (JSONFormSection) -> Void
 
     var body: some View {
-        Button {
-            onNavigate(JSONFormSection(
-                title: key,
-                value: value,
-                path: key
-            ))
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .frame(width: 16)
-                Image(systemName: "list.bullet.rectangle")
-                    .font(.caption).foregroundStyle(.orange)
-                Text(key)
-                    .font(.subheadline).fontWeight(.medium)
-                Spacer()
-                Text("[ \(items.count) ]")
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .padding(.horizontal, 6).padding(.vertical, 1)
-                    .background(Color.orange.opacity(0.1)).clipShape(Capsule())
-                Image(systemName: "arrow.up.forward.app")
-                    .font(.caption2).foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 16).padding(.vertical, 8)
-            .contentShape(Rectangle())
+        HStack(spacing: 10) {
+            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                .font(.caption).foregroundStyle(.secondary)
+                .frame(width: 16)
+            Image(systemName: "list.bullet.rectangle")
+                .font(.caption).foregroundStyle(.orange)
+            Text(key)
+                .font(.subheadline).fontWeight(.medium)
+            Spacer()
+            Text("[ \(items.count) ]")
+                .font(.caption2).foregroundStyle(.secondary)
+                .padding(.horizontal, 6).padding(.vertical, 1)
+                .background(Color.orange.opacity(0.1)).clipShape(Capsule())
+            Image(systemName: "chevron.right")
+                .font(.caption2).foregroundStyle(.tertiary)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 16).padding(.vertical, 8)
+        .contentShape(Rectangle())
     }
 }
 

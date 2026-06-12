@@ -23,7 +23,8 @@ struct ProjectListView: View {
     @State private var projectToDelete: Project?
 
     private var sortedProjects: [Project] {
-        let filtered = searchText.isEmpty ? projects : projects.filter {
+        let nonConfig = projects.filter { !ConfigProjectService.isConfigProject($0) }
+        let filtered = searchText.isEmpty ? nonConfig : nonConfig.filter {
             $0.name.localizedCaseInsensitiveContains(searchText) ||
             ($0.summary ?? "").localizedCaseInsensitiveContains(searchText)
         }
@@ -131,6 +132,7 @@ struct ProjectListView: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .id(listRefreshID)
+        .refreshable { listRefreshID = UUID() }
         .alert("Delete Project", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) { projectToDelete = nil }
             Button("Delete", role: .destructive) {

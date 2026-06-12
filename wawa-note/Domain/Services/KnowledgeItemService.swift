@@ -114,6 +114,24 @@ final class KnowledgeItemService {
         SpotlightIndexService().deleteItem(itemId)
     }
 
+    /// Batch delete multiple items efficiently (single save).
+    func deleteItems(_ items: [KnowledgeItem]) throws {
+        let ids = Set(items.map(\.id))
+        let annPred = FetchDescriptor<Annotation>(predicate: #Predicate { ids.contains($0.itemID) })
+        if let anns = try? context.fetch(annPred) { for ann in anns { context.delete(ann) } }
+        let edges = try context.fetch(FetchDescriptor<GraphEdge>(predicate: #Predicate {
+            ids.contains($0.fromID) || ids.contains($0.toID)
+        }))
+        for edge in edges { context.delete(edge) }
+        for item in items {
+            try? fileStore.deleteMeetingDirectory(for: item.id)
+            context.delete(item)
+        }
+        try context.save()
+        for id in ids { SpotlightIndexService().deleteItem(id) }
+        AppLog.event("batch", "Batch deleted \(items.count) items")
+    }
+
     // MARK: - Update
 
     func updateItem(_ item: KnowledgeItem, title: String?, bodyText: String?, tags: [String]?) throws {

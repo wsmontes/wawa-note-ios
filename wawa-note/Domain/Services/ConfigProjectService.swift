@@ -60,19 +60,38 @@ final class ConfigProjectService {
         return project
     }
 
-    // MARK: - Population
+    // MARK: - Sync
 
-    /// Populate the config project with sub-items for each configuration category.
-    /// Only runs if the project has no items yet (first launch after creation).
-    static func populateIfEmpty(context: ModelContext) {
+    /// Sync the config project items with the current app state.
+    /// Unlike populateIfEmpty (one-shot), this runs every launch to keep items current.
+    static func syncConfigProject(context: ModelContext) {
         guard let project = findConfigProject(context: context) else { return }
         let psvc = ProjectService(context: context)
-        let existingItems = (try? psvc.items(in: project.id)) ?? []
-        guard existingItems.isEmpty else { return }
 
-        let isvc = KnowledgeItemService(context: context)
+        // Remove all existing auto-generated config items (batch: detach + mark for delete)
+        let existing = (try? psvc.items(in: project.id)) ?? []
+        let toRemove = existing.filter { item in
+            item.title.hasPrefix("Provider: ") ||
+            item.title.hasPrefix("Prompt: ") ||
+            item.title == "App Settings" ||
+            item.title == "Agent Memories"
+        }
+        for item in toRemove {
+            item.projectID = nil // detach from project
+            context.delete(item) // mark for deletion
+        }
 
-        // 1. Providers — one item per AI provider
+        // Helper: create item directly without intermediate saves
+        func makeItem(title: String, body: String, tags: [String]) -> KnowledgeItem {
+            let item = KnowledgeItem(type: .note, title: title, status: .draft,
+                tags: tags, folderID: nil, bodyText: body,
+                durationSeconds: nil, languageCode: nil, inboxDate: nil)
+            context.insert(item)
+            item.projectID = project.id
+            return item
+        }
+
+        // 1. Providers
         let configs = (try? context.fetch(FetchDescriptor<AIProviderConfigModel>())) ?? []
         for config in configs {
             let dict: [String: Any] = [
@@ -80,49 +99,92 @@ final class ConfigProjectService {
                 "defaultModel": config.defaultModel,
                 "baseURL": config.baseURLString as Any,
                 "supportsStreaming": config.supportsStreaming,
-                "supportsTools": config.supportsTools
+                "supportsTools": config.supportsTools,
+                "supportsAudio": config.supportsAudio,
+                "supportsEmbeddings": config.supportsEmbeddings
             ]
             let json = (try? JSONSerialization.data(withJSONObject: dict, options: .prettyPrinted))
                 .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-            if let item = try? isvc.createItem(type: .note, title: "Provider: \(config.name)",
-                bodyText: json, tags: ["config", "provider"], inboxDate: nil) {
-                try? psvc.addItem(item.id, to: project.id)
-            }
+            _ = makeItem(title: "Provider: \(config.name)", body: json, tags: ["config", "provider"])
         }
 
-        // 2. Prompts — one item per prompt template
+        // 2. Prompts
         let prompts = PromptStore.shared.prompts(in: nil)
         for prompt in prompts {
-            if let item = try? isvc.createItem(type: .note, title: "Prompt: \(prompt.name)",
-                bodyText: prompt.content, tags: ["config", "prompt"], inboxDate: nil) {
-                try? psvc.addItem(item.id, to: project.id)
-            }
+            let meta: [String: Any] = [
+                "name": prompt.name, "category": prompt.category,
+                "isUserEdited": prompt.isUserEdited,
+                "variables": prompt.variables
+            ]
+            let metaJSON = (try? JSONSerialization.data(withJSONObject: meta, options: .prettyPrinted))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+            _ = makeItem(title: "Prompt: \(prompt.name)", body: "# Metadata\n\(metaJSON)\n\n# Content\n\(prompt.content)", tags: ["config", "prompt"])
         }
 
-        // 3. Settings — one item with app preferences
-        let settingsDict: [String: Any] = [
-            "automation": AutomationSettings.shared.autoAnalyze,
-            "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
-            "buildNumber": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
-        ]
+        // 3. Settings
+        let settingsDict = buildSettingsSnapshot()
         let settingsJSON = (try? JSONSerialization.data(withJSONObject: settingsDict, options: .prettyPrinted))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        if let item = try? isvc.createItem(type: .note, title: "App Settings",
-            bodyText: settingsJSON, tags: ["config", "settings"], inboxDate: nil) {
-            try? psvc.addItem(item.id, to: project.id)
-        }
+        _ = makeItem(title: "App Settings", body: settingsJSON, tags: ["config", "settings"])
 
-        // 4. Memories — one item as JSON
+        // 4. Memories
         let memories = AgentMemoryStore.shared.listAll()
         if !memories.isEmpty,
            let data = try? JSONEncoder().encode(memories),
-           let json = String(data: data, encoding: .utf8),
-           let item = try? isvc.createItem(type: .note, title: "Agent Memories",
-            bodyText: json, tags: ["config", "memories"], inboxDate: nil) {
-            try? psvc.addItem(item.id, to: project.id)
+           let json = String(data: data, encoding: .utf8) {
+            _ = makeItem(title: "Agent Memories", body: json, tags: ["config", "memories"])
         }
 
+        // Single save
         try? context.save()
-        AppLog.event("config", "Populated wawa-note-config with \(existingItems.count) items")
+        AppLog.event("config", "Synced wawa-note-config: \(configs.count) providers, \(prompts.count) prompts, settings, \(memories.count) memories")
+    }
+
+    /// Build a complete settings snapshot from all UserDefaults and app state.
+    static func buildSettingsSnapshot() -> [String: Any] {
+        let defs = UserDefaults.standard
+        var s: [String: Any] = [:]
+
+        // App info
+        s["appVersion"] = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        s["buildNumber"] = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
+
+        // Transcription
+        s["transcriptionMode"] = defs.string(forKey: "transcription_mode") ?? "apple"
+        s["transcriptionAllowCloud"] = defs.bool(forKey: "transcription_allow_cloud")
+
+        // Automation
+        s["autoTranscribe"] = defs.object(forKey: "automation_auto_transcribe") as? Bool ?? true
+        s["autoAnalyze"] = defs.object(forKey: "automation_auto_analyze") as? Bool ?? true
+        s["autoAnalysisModel"] = defs.string(forKey: "automation_auto_analysis_model") ?? "gpt-5-nano"
+        s["autoAnalysisProvider"] = defs.string(forKey: "automation_auto_analysis_provider") ?? "openAI"
+
+        // Audio
+        s["voiceProcessing"] = !defs.bool(forKey: "audio_raw_mode")
+        s["speakerphoneMode"] = defs.bool(forKey: "audio_speakerphone_mode")
+
+        // Developer
+        s["developerModeEnabled"] = defs.bool(forKey: "developer_mode_enabled")
+
+        // Active provider
+        s["activeProviderId"] = defs.string(forKey: "active_provider_id") ?? "none"
+
+        // Anarlog
+        s["anarlogAutoImport"] = defs.object(forKey: "anarlog_auto_import") as? Bool ?? true
+        s["anarlogAutoExport"] = defs.object(forKey: "anarlog_auto_export") as? Bool ?? false
+
+        // AI Config summary
+        let aiCfg = AIConfigService.shared.config
+        s["aiProviders"] = Array(aiCfg.providers.keys)
+        s["aiFeatures"] = aiCfg.features.map { Array($0.keys) } ?? []
+        s["aiModelPresets"] = aiCfg.modelPresets?.count ?? 0
+        s["aiLenses"] = aiCfg.lenses.map { Array($0.keys) } ?? []
+
+        // Summary cache stats
+        let cacheStats = SummaryCache.shared.stats
+        s["summaryCacheEntries"] = cacheStats.entries
+        s["summaryCacheHitRate"] = String(format: "%.1f%%", cacheStats.hitRate * 100)
+
+        return s
     }
 }

@@ -185,6 +185,49 @@ final class AudioFileWriter: @unchecked Sendable {
         }
     }
 
+    // MARK: - Crash Recovery Checkpoint
+
+    /// Write a crash recovery checkpoint so an interrupted recording can be resumed.
+    /// Called periodically from the capture service during active recording.
+    func writeCheckpoint(meetingId: UUID, segmentIndex: Int, format: AVAudioFormat) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            let checkpoint: [String: Any] = [
+                "meetingId": meetingId.uuidString,
+                "segmentIndex": segmentIndex,
+                "sampleRate": format.sampleRate,
+                "channels": format.channelCount,
+                "timestamp": Date().timeIntervalSince1970,
+                "fileName": self._currentFileURL?.lastPathComponent ?? "unknown"
+            ]
+            guard let data = try? JSONSerialization.data(withJSONObject: checkpoint) else { return }
+            let url = self.fileStore.configsDirectoryURL().appendingPathComponent("recording_checkpoint.json")
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    /// Check if a crash recovery checkpoint exists from a previous session.
+    /// Returns (meetingId, segmentIndex, sampleRate) if found, nil otherwise.
+    static func loadCrashCheckpoint(fileStore: FileArtifactStore = FileArtifactStore()) -> (UUID, Int, Double)? {
+        let url = fileStore.configsDirectoryURL().appendingPathComponent("recording_checkpoint.json")
+        guard let data = try? Data(contentsOf: url),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let meetingIdStr = dict["meetingId"] as? String,
+              let meetingId = UUID(uuidString: meetingIdStr),
+              let segmentIndex = dict["segmentIndex"] as? Int,
+              let sampleRate = dict["sampleRate"] as? Double,
+              let timestamp = dict["timestamp"] as? TimeInterval else { return nil }
+        // Only recover if checkpoint is less than 24h old
+        guard Date().timeIntervalSince1970 - timestamp < 86400 else { return nil }
+        return (meetingId, segmentIndex, sampleRate)
+    }
+
+    /// Remove the checkpoint file after successful recording stop.
+    static func clearCrashCheckpoint(fileStore: FileArtifactStore = FileArtifactStore()) {
+        let url = fileStore.configsDirectoryURL().appendingPathComponent("recording_checkpoint.json")
+        try? FileManager.default.removeItem(at: url)
+    }
+
     func cleanupAbandonedRecording(for meetingId: UUID) {
         queue.sync {
             guard _currentMeetingId == nil else { return }

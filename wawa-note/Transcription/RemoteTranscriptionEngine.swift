@@ -140,58 +140,87 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
         )
     }
 
-    // MARK: - Single chunk
+    // MARK: - Single chunk (with exponential backoff)
+
+    private static let maxRetries = 3
+    private static let baseDelayMs: UInt64 = 1_000_000_000 // 1 second
 
     private func transcribeSingle(url: URL, prompt: String?) async throws -> Transcript {
         let endpoint = baseURL.appendingPathComponent("audio/transcriptions")
         let boundary = UUID().uuidString
         let model = AIConfigService.shared.modelFor(feature: "transcription")
 
-        // Build multipart body to temp file (memory-efficient)
+        // Build multipart body once (memory-efficient)
         let tempDir = FileManager.default.temporaryDirectory
         let bodyURL = tempDir.appendingPathComponent("transcription_\(UUID().uuidString).body")
         defer { try? FileManager.default.removeItem(at: bodyURL) }
-
         try buildBodyFile(audioURL: url, prompt: prompt, model: model, boundary: boundary, outputURL: bodyURL)
 
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 120
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        if !apiKey.isEmpty {
-            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        }
-
-        let (resData, response) = try await session.upload(for: request, fromFile: bodyURL)
-        guard let http = response as? HTTPURLResponse else {
-            throw TranscriptionError.recognitionFailed("Remote transcription error")
-        }
-
-        guard (200...299).contains(http.statusCode) else {
-            let body = String(data: resData, encoding: .utf8) ?? "<no body>"
-            AppLog.transcription.error("Transcription API returned \(http.statusCode): \(body.prefix(300))")
-            if http.statusCode == 413 {
-                throw TranscriptionError.fileTooLarge
+        var lastError: Error?
+        for attempt in 0...Self.maxRetries {
+            if attempt > 0 {
+                // Exponential backoff: 1s, 2s, 4s with ±25% jitter
+                let baseNs = Self.baseDelayMs << (attempt - 1)
+                let jitter = Int64(Double(baseNs) * Double.random(in: -0.25...0.25))
+                let delay = UInt64(max(0, Int64(baseNs) + jitter))
+                AppLog.transcription.info("Retry \(attempt)/\(Self.maxRetries) — waiting \(delay / 1_000_000)ms")
+                try await Task.sleep(nanoseconds: delay)
             }
-            throw TranscriptionError.recognitionFailed("Remote transcription error")
+
+            do {
+                var request = URLRequest(url: endpoint)
+                request.httpMethod = "POST"
+                request.timeoutInterval = 120
+                request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+                if !apiKey.isEmpty {
+                    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+                }
+
+                let (resData, response) = try await session.upload(for: request, fromFile: bodyURL)
+                guard let http = response as? HTTPURLResponse else {
+                    throw TranscriptionError.recognitionFailed("Remote transcription error")
+                }
+
+                guard (200...299).contains(http.statusCode) else {
+                    let body = String(data: resData, encoding: .utf8) ?? "<no body>"
+                    AppLog.transcription.error("API returned \(http.statusCode): \(body.prefix(300))")
+                    if http.statusCode == 413 { throw TranscriptionError.fileTooLarge }
+                    // Retry on server errors (5xx) and rate limits (429)
+                    if http.statusCode == 429 || (500...599).contains(http.statusCode) {
+                        lastError = TranscriptionError.recognitionFailed("HTTP \(http.statusCode)")
+                        continue
+                    }
+                    throw TranscriptionError.recognitionFailed("Remote transcription error")
+                }
+
+                guard let json = try JSONSerialization.jsonObject(with: resData) as? [String: Any],
+                      let text = json["text"] as? String else {
+                    let body = String(data: resData, encoding: .utf8) ?? "<no body>"
+                    AppLog.transcription.error("Parse error: \(body.prefix(300))")
+                    throw TranscriptionError.recognitionFailed("Remote transcription error")
+                }
+
+                return Transcript(
+                    languageCode: json["language"] as? String,
+                    segments: [TranscriptSegment(
+                        meetingId: UUID(), startTime: 0,
+                        text: text.trimmingCharacters(in: .whitespacesAndNewlines),
+                        sourceEngineId: id
+                    )],
+                    sourceEngineId: id
+                )
+            } catch let error as TranscriptionError {
+                lastError = error
+                if case .fileTooLarge = error { throw error }   // don't retry
+                if case .cancelled = error { throw error }      // don't retry
+            } catch {
+                lastError = error
+                // Network errors are retryable
+                AppLog.transcription.warning("Network error (attempt \(attempt+1)): \(error.localizedDescription)")
+            }
         }
 
-        guard let json = try JSONSerialization.jsonObject(with: resData) as? [String: Any],
-              let text = json["text"] as? String else {
-            let body = String(data: resData, encoding: .utf8) ?? "<no body>"
-            AppLog.transcription.error("Transcription response parse error: \(body.prefix(300))")
-            throw TranscriptionError.recognitionFailed("Remote transcription error")
-        }
-
-        return Transcript(
-            languageCode: json["language"] as? String,
-            segments: [TranscriptSegment(
-                meetingId: UUID(), startTime: 0,
-                text: text.trimmingCharacters(in: .whitespacesAndNewlines),
-                sourceEngineId: id
-            )],
-            sourceEngineId: id
-        )
+        throw lastError ?? TranscriptionError.recognitionFailed("Remote transcription failed after \(Self.maxRetries + 1) attempts")
     }
 
     // MARK: - Multipart to temp file

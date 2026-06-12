@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import UIKit
+import Network
 import JavaScriptCore
 import PDFKit
 
@@ -2627,6 +2628,15 @@ final class ProcessingQueueService: ObservableObject {
         cancel(entryID)
     }
 
+    /// Re-enqueue a failed item (e.g., after connectivity restored).
+    func retry(_ entryID: UUID) {
+        guard let entry = entries.first(where: { $0.id == entryID }) else { return }
+        entry.status = .queued
+        entry.completedAt = nil
+        sortEntries()
+        processNext()
+    }
+
     // MARK: - Processing
 
     private func processNext() {
@@ -2705,6 +2715,40 @@ final class ProcessingQueueService: ObservableObject {
         UIApplication.shared.endBackgroundTask(backgroundTaskID)
         backgroundTaskID = .invalid
     }
+}
+
+// MARK: - Connectivity Monitor
+
+/// Monitors network connectivity and notifies when the device goes online.
+/// Used to auto-retry transcription jobs queued while offline.
+@MainActor
+final class ConnectivityMonitor: ObservableObject {
+    static let shared = ConnectivityMonitor()
+
+    @Published private(set) var isOnline: Bool = true
+    @Published private(set) var isExpensive: Bool = false
+
+    private let monitor = NWPathMonitor()
+    private let queue = DispatchQueue(label: "com.wawa-note.connectivity")
+
+    private init() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            let online = path.status == .satisfied
+            let expensive = path.isExpensive
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let wasOffline = !self.isOnline
+                self.isOnline = online
+                self.isExpensive = expensive
+                if wasOffline && online {
+                    AppLog.event("network", "Connectivity restored — retrying queued jobs")
+                }
+            }
+        }
+        monitor.start(queue: queue)
+    }
+
+    deinit { monitor.cancel() }
 }
 
 // MARK: - OntologyInertiaService
