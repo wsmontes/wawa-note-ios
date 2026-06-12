@@ -31,6 +31,11 @@ final class ChatViewModel: ObservableObject {
     private var modelContext: ModelContext?
     private var streamTask: Task<Void, Never>?
     private var greetingTask: Task<Void, Never>?
+
+    deinit {
+        streamTask?.cancel()
+        greetingTask?.cancel()
+    }
     private var cancellables = Set<AnyCancellable>()
     private var hasObservedContext = false
     private var pendingContext: ChatContext?
@@ -293,7 +298,7 @@ final class ChatViewModel: ObservableObject {
         let params = AIConfigService.shared.requestParams(for: "chat", model: model)
 
         greetingTask?.cancel()
-        greetingTask = Task.detached { [weak self] in
+        greetingTask = Task { @MainActor [weak self] in
             let request = AIRequest(
                 model: model,
                 messages: [
@@ -358,7 +363,7 @@ final class ChatViewModel: ObservableObject {
         isGreetingLoading = true
         streamingText = "..."
 
-        greetingTask = Task.detached { [weak self] in
+        greetingTask = Task { @MainActor [weak self] in
             let request = AIRequest(
                 model: model,
                 messages: [
