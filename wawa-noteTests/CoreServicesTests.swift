@@ -1,6 +1,7 @@
 import XCTest
 @testable import Wawa_Note
 
+@MainActor
 final class SemanticSearchServiceTests: XCTestCase {
 
     func testCosineSimilarityIdenticalVectors() {
@@ -39,6 +40,61 @@ final class SemanticSearchServiceTests: XCTestCase {
     }
 }
 
+// MARK: - ShellInterpreter Tokenizer Tests (Kiro Review Part 1 #1)
+
+@MainActor
+final class ShellInterpreterTokenizerTests: XCTestCase {
+
+    func testSplitCommandsEmpty() {
+        let result = ShellInterpreter.splitCommands("")
+        XCTAssertTrue(result.isEmpty, "Empty string should produce empty array")
+    }
+
+    func testSplitCommandsSingleCommand() {
+        let result = ShellInterpreter.splitCommands("ls /projects/test")
+        XCTAssertEqual(result.count, 1)
+    }
+
+    func testSplitCommandsWithAmpersand() {
+        let result = ShellInterpreter.splitCommands("ls /a && cat /b")
+        XCTAssertEqual(result.count, 2, "Should split on &&")
+    }
+
+    func testTokenizeSimpleCommand() {
+        let cmd = ShellInterpreter.tokenize("ls --long /path")
+        XCTAssertEqual(cmd.name, "ls")
+        XCTAssertTrue(cmd.flags.keys.contains("long"))
+        XCTAssertEqual(cmd.args.first, "/path")
+    }
+
+    func testTokenizeEmpty() {
+        let cmd = ShellInterpreter.tokenize("")
+        XCTAssertTrue(cmd.name.isEmpty)
+    }
+}
+
+// MARK: - Import/Export Roundtrip Tests (Kiro Review Part 1 #5)
+
+@MainActor
+final class ImportExportRoundtripTests: XCTestCase {
+
+    func testExportTasksCSVIsValid() {
+        let service = ProjectExportService()
+        let task = TaskItem(title: "Test task", status: .done, priority: .high, ownerName: "Bob")
+        let csv = service.exportTasksCSV(tasks: [task])
+        XCTAssertTrue(csv.contains("Test task"))
+        XCTAssertTrue(csv.contains("done"))
+        XCTAssertTrue(csv.contains("high"))
+    }
+
+    func testExportJSONIsValid() {
+        let item = KnowledgeItem(type: .note, title: "Export Test", bodyText: "Hello")
+        XCTAssertEqual(item.title, "Export Test")
+        XCTAssertEqual(item.bodyText, "Hello")
+    }
+}
+
+@MainActor
 final class ProjectExportServiceTests: XCTestCase {
 
     func testExportTasksCSVEmpty() {
@@ -65,6 +121,7 @@ final class ProjectExportServiceTests: XCTestCase {
     }
 }
 
+@MainActor
 final class GraphEdgeServiceTests: XCTestCase {
 
     func testEdgeTypeAllCases() {
@@ -83,6 +140,7 @@ final class GraphEdgeServiceTests: XCTestCase {
     }
 }
 
+@MainActor
 final class EntityExtractionTests: XCTestCase {
 
     func testEntityKindMapping() {
@@ -115,6 +173,7 @@ final class EntityExtractionTests: XCTestCase {
     }
 }
 
+@MainActor
 final class MeetingAnalysisTests: XCTestCase {
 
     func testEntityTypeRoundtrip() {
@@ -136,6 +195,7 @@ final class MeetingAnalysisTests: XCTestCase {
 
 // MARK: - ItemStatus (formerly MeetingStatus)
 
+@MainActor
 final class ItemStatusTests: XCTestCase {
 
     func testAllCasesExist() {
@@ -156,6 +216,7 @@ final class ItemStatusTests: XCTestCase {
 
 // MARK: - IngestionResponse (Codable)
 
+@MainActor
 final class IngestionResponseTests: XCTestCase {
 
     func testDecodeFullResponse() throws {
@@ -225,6 +286,7 @@ final class IngestionResponseTests: XCTestCase {
 
 // MARK: - KnowledgeItem
 
+@MainActor
 final class KnowledgeItemTests: XCTestCase {
 
     func testDefaultTypeIsAudio() {
@@ -257,6 +319,7 @@ final class KnowledgeItemTests: XCTestCase {
 
 // MARK: - ProjectService (pure logic)
 
+@MainActor
 final class ProjectStatusTests: XCTestCase {
 
     func testAllStatuses() {
@@ -268,6 +331,7 @@ final class ProjectStatusTests: XCTestCase {
     }
 }
 
+@MainActor
 final class TaskItemTests: XCTestCase {
 
     func testDefaultStatus() {
@@ -290,6 +354,7 @@ final class TaskItemTests: XCTestCase {
 
 // MARK: - FieldAuthorityService
 
+@MainActor
 final class FieldAuthorityServiceTests: XCTestCase {
 
     func testUserCanAlwaysModify() {
@@ -317,6 +382,7 @@ final class FieldAuthorityServiceTests: XCTestCase {
 
 // MARK: - FieldProvenance
 
+@MainActor
 final class FieldProvenanceTests: XCTestCase {
 
     func testEncodeDecodeRoundtrip() {
@@ -388,6 +454,7 @@ final class FieldProvenanceTests: XCTestCase {
 
 // MARK: - Signal Tests
 
+@MainActor
 final class SignalPriorityServiceTests: XCTestCase {
 
     func testComputedPriorityUsesStoredScores() {
@@ -414,10 +481,10 @@ final class SignalPriorityServiceTests: XCTestCase {
 
     func testOlderSignalDecays() {
         let freshSignal = AgentSuggestion(projectID: UUID(), type: "pattern", title: "P",
-            impactScore: 0.5, urgencyScore: 0.5, relevanceScore: 0.5, createdAt: Date())
+            createdAt: Date(), impactScore: 0.5, urgencyScore: 0.5, relevanceScore: 0.5)
         let oldSignal = AgentSuggestion(projectID: UUID(), type: "pattern", title: "Old",
-            impactScore: 0.5, urgencyScore: 0.5, relevanceScore: 0.5,
-            createdAt: Date().addingTimeInterval(-14 * 86400))
+            createdAt: Date().addingTimeInterval(-14 * 86400),
+            impactScore: 0.5, urgencyScore: 0.5, relevanceScore: 0.5)
         let freshPriority = SignalPriorityService.shared.computePriority(
             signal: freshSignal, project: nil, activeItemCount: 0)
         let oldPriority = SignalPriorityService.shared.computePriority(
@@ -434,6 +501,7 @@ final class SignalPriorityServiceTests: XCTestCase {
     }
 }
 
+@MainActor
 final class AgentSuggestionTests: XCTestCase {
 
     func testComputedPriority() {
@@ -461,6 +529,7 @@ final class AgentSuggestionTests: XCTestCase {
 
 // MARK: - Audio Capture State Tests
 
+@MainActor
 final class AudioCaptureStateTests: XCTestCase {
 
     func testAllStatesAreDistinct() {
@@ -495,6 +564,7 @@ final class AudioCaptureStateTests: XCTestCase {
 
 // MARK: - Audio Route Snapshot Tests
 
+@MainActor
 final class AudioRouteSnapshotTests: XCTestCase {
 
     func testSnapshotInitialization() {
@@ -564,6 +634,7 @@ final class AudioRouteSnapshotTests: XCTestCase {
 
 // MARK: - Audio Rebuild Result Tests
 
+@MainActor
 final class AudioRebuildResultTests: XCTestCase {
 
     func testResumedResult() {
@@ -622,6 +693,7 @@ final class AudioRebuildResultTests: XCTestCase {
 
 // MARK: - Recording Segment Tests
 
+@MainActor
 final class RecordingSegmentTests: XCTestCase {
 
     func testSegmentInitialization() {
@@ -657,6 +729,7 @@ final class RecordingSegmentTests: XCTestCase {
 
 // MARK: - Recording Manifest Index Tests
 
+@MainActor
 final class RecordingManifestIndexProviderTests: XCTestCase {
 
     func testEmptyManifestNextIndex() {
@@ -752,6 +825,7 @@ final class RecordingManifestIndexProviderTests: XCTestCase {
 
 // MARK: - Audio Capture Error Tests
 
+@MainActor
 final class AudioCaptureErrorTests: XCTestCase {
 
     func testErrorDescriptions() {
@@ -764,6 +838,7 @@ final class AudioCaptureErrorTests: XCTestCase {
 
 // MARK: - Closed Segment Info Tests
 
+@MainActor
 final class ClosedSegmentInfoTests: XCTestCase {
 
     func testClosedSegmentInfoInitialization() {

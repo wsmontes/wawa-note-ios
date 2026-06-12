@@ -3,7 +3,7 @@ import SwiftData
 
 // MARK: - Shell Command
 
-private struct ShellCommand {
+struct ShellCommand {
     let name: String
     let args: [String]
     var flags: [String: String]
@@ -50,7 +50,7 @@ enum ShellInterpreter {
     }
 
     /// Splits a command string by `&&`, `;`, and newlines.
-    private static func splitCommands(_ raw: String) -> [String] {
+    static func splitCommands(_ raw: String) -> [String] {
         // First split by newlines
         let lines = raw.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         // Then split each line by && and ;
@@ -158,7 +158,7 @@ enum ShellInterpreter {
 
     // MARK: - Tokenizer
 
-    private static func tokenize(_ raw: String) -> ShellCommand {
+    static func tokenize(_ raw: String) -> ShellCommand {
         var tokens: [String] = []
         var current = ""
         var inSingle = false
