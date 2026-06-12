@@ -66,31 +66,74 @@ do_stream() {
 
     local predicate
     predicate=$(build_predicate "all")
+    local temp_archive="/tmp/wawa-stream-${DEVICE_UDID}.logarchive"
 
     echo "═══════════════════════════════════════════════════"
-    echo "  📡 Wawa Note — Live Log Stream"
+    echo "  📡 Wawa Note — Live Device Log Stream"
     echo "  Device:  $DEVICE_NAME ($DEVICE_UDID)"
     echo "  iOS:     $DEVICE_IOS"
     echo "  Started: $(date)"
-    echo "  Filter:  wawa, audio, recording, pipeline, agent, transcription"
+    echo "  Method:  sudo log collect polling (2s interval)"
     echo "  Press Ctrl+C to stop."
     echo "═══════════════════════════════════════════════════"
     echo ""
 
+    # Pre-auth sudo so the loop doesn't prompt
+    sudo -v 2>/dev/null || true
+    if ! sudo -n true 2>/dev/null; then
+        echo "  🔐 sudo required for device log access."
+        echo "     Please authenticate. Credential caches for 5 min."
+        echo ""
+        sudo -v || {
+            echo "  ❌ sudo auth failed. Cannot access device logs."
+            return 1
+        }
+    fi
+
     if $save; then
-        local logfile
         logfile=$(output_path "$device_alias" "stream.log")
         echo "  💾 Saving to: $logfile"
         echo ""
         echo "Started: $(iso_date)" > "$logfile"
         echo "Device: $DEVICE_NAME ($DEVICE_UDID) iOS $DEVICE_IOS" >> "$logfile"
-        echo "Mode: stream" >> "$logfile"
+        echo "Mode: stream (device polling via log collect)" >> "$logfile"
         echo "---" >> "$logfile"
-
-        log stream --predicate "$predicate" --style compact 2>/dev/null | tee -a "$logfile"
-    else
-        log stream --predicate "$predicate" --style compact 2>/dev/null
     fi
+    echo ""
+
+    # Stream loop: collect last 5s of device logs every 3s
+    # sudo log collect gets ACTUAL device process logs from the iPhone
+    local batch=0
+
+    while true; do
+        batch=$((batch + 1))
+
+        # Refresh sudo if needed (non-interactive check)
+        sudo -n true 2>/dev/null || {
+            echo "  ⚠️  sudo expired. Re-run with: sudo -v && bash scripts/log-capture.sh stream $device_alias"
+            break
+        }
+
+        sudo log collect --device-udid "$DEVICE_UDID" \
+            --last 5s \
+            --output "$temp_archive" \
+            2>/dev/null
+
+        if [ -d "$temp_archive" ]; then
+            local output
+            output=$(log show "$temp_archive" --style compact --predicate "$predicate" 2>/dev/null || echo "")
+            if [ -n "$output" ]; then
+                echo "── batch $batch ($(date +%H:%M:%S)) ──"
+                echo "$output"
+                if $save; then
+                    echo "── batch $batch ($(date +%H:%M:%S)) ──" >> "$logfile"
+                    echo "$output" >> "$logfile"
+                fi
+            fi
+        fi
+
+        sleep 3
+    done
 }
 
 # ═══════════════════════════════════════════════════════════
