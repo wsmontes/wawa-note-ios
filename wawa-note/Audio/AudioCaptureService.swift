@@ -519,29 +519,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         _isCapturingAudio = true
 
         // Retry engine start for Bluetooth devices that need time to stabilize
-        var engineError: Error?
-        for attempt in 0...2 {
-            do {
-                try engine.start()
-                engineError = nil
-                break
-            } catch {
-                engineError = error
-                AppLog.error("audio", "Engine start attempt \(attempt + 1) failed: \(error.localizedDescription)")
-                if attempt < 2 {
-                    try? await Task.sleep(nanoseconds: 300_000_000)
-                    engine.reset()
-                    // engine.reset() destroys any installed tap — reinstall before retry.
-                    isTapInstalled = false
-                    engine.prepare()
-                    safelyInstallTap(reason: "engineStart retry \(attempt + 1)")
-                }
-            }
-        }
+        let engineStarted = await startEngineWithRetry(label: "startRecording", reinstallTap: true)
 
-        if let engineError {
+        if !engineStarted {
             _isCapturingAudio = false  // rollback pre-arm — engine never started
-            AppLog.error("audio", "All engine start attempts failed: \(engineError.localizedDescription)")
             safelyRemoveTap(reason: "engineStartFailed")
             fileWriter.finishRecording()
             try? sessionManager.deactivate()
@@ -677,6 +658,38 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     /// Remove the audio tap only if one is installed. Calling removeTap when
     /// no tap exists crashes on some iOS versions (AVAudioNode internal assert).
+    /// Shared engine.start() retry loop. Attempts up to 3 times with 300ms
+    /// sleep between attempts. Between retries, calls engine.reset() (which
+    /// clears the audio graph including any installed tap) and engine.prepare().
+    /// When `reinstallTap` is true, also marks isTapInstalled=false and
+    /// reinstalls the tap before retrying — this is required when a tap was
+    /// installed before calling this method. Logs each failure with the given
+    /// label for diagnostics.
+    ///
+    /// - Returns: true if engine.start() succeeded, false after 3 failures.
+    private func startEngineWithRetry(label: String, reinstallTap: Bool) async -> Bool {
+        for attempt in 0...2 {
+            do {
+                try engine.start()
+                return true
+            } catch {
+                AppLog.error("audio", "\(label): engine start attempt \(attempt+1)/3 failed: \(error.localizedDescription)")
+                if attempt < 2 {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    engine.reset()
+                    if reinstallTap {
+                        isTapInstalled = false
+                        engine.prepare()
+                        safelyInstallTap(reason: "\(label) retry \(attempt+1)")
+                    } else {
+                        engine.prepare()
+                    }
+                }
+            }
+        }
+        return false
+    }
+
     private func safelyRemoveTap(reason: String) {
         guard isTapInstalled else {
             AppLog.audio.info("safelyRemoveTap: skipped — no tap installed (\(reason))")
@@ -836,24 +849,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // that transition. Rolled back on start failure.
         _isCapturingAudio = true
 
-        var engineStartSucceeded = false
-        for attempt in 0...2 {
-            do {
-                try engine.start()
-                engineStartSucceeded = true
-                break
-            } catch {
-                AppLog.error("audio", "restartCapture: engine start attempt \(attempt+1) failed: \(error.localizedDescription)")
-                if attempt < 2 {
-                    try? await Task.sleep(nanoseconds: 300_000_000)
-                    engine.reset()
-                    // engine.reset() destroys any installed tap — reinstall before retry.
-                    isTapInstalled = false
-                    engine.prepare()
-                    safelyInstallTap(reason: "engineStart retry \(attempt + 1)")
-                }
-            }
-        }
+        let engineStartSucceeded = await startEngineWithRetry(label: "restartCapture", reinstallTap: true)
 
         guard generation == routeRecoveryGeneration else {
             fileWriter.closeCurrentSegment()
@@ -1029,13 +1025,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         safelyInstallTap(reason: "forceBuiltInMic new engine")
         engine.prepare()
         _isCapturingAudio = true
-        var started = false
-        for attempt in 0...2 {
-            do { try engine.start(); started = true; break }
-            catch {
-                if attempt < 2 { try? await Task.sleep(nanoseconds: 300_000_000); engine.reset(); engine.prepare() }
-            }
-        }
+        let started = await startEngineWithRetry(label: "forceBuiltInMic", reinstallTap: false)
 
         guard started else {
             _isCapturingAudio = false  // rollback pre-arm
@@ -1096,6 +1086,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private var routeChangeObserver: NSObjectProtocol?
     private var mediaServicesResetObserver: NSObjectProtocol?
     private var engineConfigChangeObserver: NSObjectProtocol?
+    private var silenceHintObserver: NSObjectProtocol?
 
     private func observeAudioNotifications() {
         interruptionObserver = NotificationCenter.default.addObserver(
@@ -1119,6 +1110,18 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         ) { [weak self] notification in
             self?.handleMediaServicesReset(notification)
         }
+        // Siri / VoiceOver may not trigger interruptionNotification — instead the
+        // system sends silenceSecondaryAudioHint to tell us our audio should be
+        // silenced. Observing this prevents recording silent buffers when Siri
+        // takes the microphone without a full interruption.
+        silenceHintObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.silenceSecondaryAudioHintNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleSilenceHint(notification)
+        }
+
         // CRITICAL: AVAudioEngineConfigurationChange fires BEFORE routeChangeNotification
         // when Bluetooth connects. iOS internally clears all taps and stops the engine.
         // Without this observer, isTapInstalled stays true → removeTap(onBus:) crashes.
@@ -1131,10 +1134,36 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         if let obs = routeChangeObserver { NotificationCenter.default.removeObserver(obs) }
         if let obs = mediaServicesResetObserver { NotificationCenter.default.removeObserver(obs) }
         if let obs = engineConfigChangeObserver { NotificationCenter.default.removeObserver(obs) }
+        if let obs = silenceHintObserver { NotificationCenter.default.removeObserver(obs) }
         interruptionObserver = nil
         routeChangeObserver = nil
         mediaServicesResetObserver = nil
         engineConfigChangeObserver = nil
+        silenceHintObserver = nil
+    }
+
+    /// Handles AVAudioSession.silenceSecondaryAudioHintNotification.
+    /// Siri, VoiceOver, and other system audio services may take the microphone
+    /// without firing a full interruptionNotification. When the hint type is
+    /// `.begin`, we pause audio writing so we don't record silence. When `.end`,
+    /// we resume writing if the recording is still active.
+    private func handleSilenceHint(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let typeValue = userInfo[AVAudioSessionSilenceSecondaryAudioHintTypeKey] as? UInt,
+              let type = AVAudioSession.SilenceSecondaryAudioHintType(rawValue: typeValue) else { return }
+
+        switch type {
+        case .begin:
+            AppLog.audio.info("Silence hint began — pausing audio writing (likely Siri/VoiceOver)")
+            _isCapturingAudio = false
+        case .end:
+            if state == .recording || state == .validatingRoute {
+                AppLog.audio.info("Silence hint ended — resuming audio writing")
+                _isCapturingAudio = true
+            }
+        @unknown default:
+            break
+        }
     }
 
     private func handleInterruption(_ notification: Notification) {
@@ -1441,24 +1470,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         engine.prepare()
         _isCapturingAudio = true
 
-        var engineStartSucceeded = false
-        for attempt in 0...2 {
-            do {
-                try engine.start()
-                engineStartSucceeded = true
-                break
-            } catch {
-                AppLog.error("audio", "rebuildForNewRoute: engine start attempt \(attempt+1) failed: \(error.localizedDescription)")
-                if attempt < 2 {
-                    try? await Task.sleep(nanoseconds: 300_000_000)
-                    engine.reset()
-                    // engine.reset() destroys any installed tap — reinstall before retry.
-                    isTapInstalled = false
-                    engine.prepare()
-                    safelyInstallTap(reason: "engineStart retry \(attempt + 1)")
-                }
-            }
-        }
+        let engineStartSucceeded = await startEngineWithRetry(label: "rebuildForNewRoute", reinstallTap: true)
 
         guard generation == routeRecoveryGeneration else {
             fileWriter.closeCurrentSegment()
