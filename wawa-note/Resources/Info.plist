@@ -55,8 +55,6 @@
 	<string>Wawa Note creates reminders from your meeting action items so you can track follow-ups.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Speech recognition is used to turn your recorded meetings into a searchable transcript.</string>
-	<key>NSSupportsLiveActivities</key>
-	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
