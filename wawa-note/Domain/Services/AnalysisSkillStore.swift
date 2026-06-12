@@ -169,7 +169,18 @@ final class AnalysisSkillStore: ObservableObject {
     }
 
     private var defaultSkill: AnalysisSkill {
-        skills["meeting_analysis"] ?? skills.first!.value
+        if let meeting = skills["meeting_analysis"] { return meeting }
+        if let first = skills.first?.value { return first }
+        // Safety fallback: create a minimal built-in skill if bundle is corrupted
+        logger.warning("No skills loaded — using emergency fallback")
+        return AnalysisSkill(
+            id: UUID(), name: "basic_extract", displayName: "Basic Extract",
+            description: "Emergency fallback skill", category: "extraction",
+            templateID: "", systemPrompt: "Extract key information from the content.",
+            procedure: nil, validation: nil,
+            defaultModel: "gpt-5-nano", maxIterations: 3,
+            allowedTools: [], isUserEdited: false, updatedAt: Date()
+        )
     }
 
     // MARK: - CRUD
