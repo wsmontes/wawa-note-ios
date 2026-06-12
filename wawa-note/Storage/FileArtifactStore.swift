@@ -52,6 +52,18 @@ final class FileArtifactStore: @unchecked Sendable {
         )
     }
 
+    // MARK: - Disk space
+
+    /// Returns free space (in bytes) on the volume containing the base store
+    /// directory, or nil if the resource values can't be read.
+    func freeSpaceForCurrentRecording() -> Int64? {
+        guard let values = try? baseURL.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
+              let free = values.volumeAvailableCapacityForImportantUsage else {
+            return nil
+        }
+        return free
+    }
+
     // MARK: - Directory management
 
     func meetingDirectoryURL(for meetingId: UUID) -> URL {

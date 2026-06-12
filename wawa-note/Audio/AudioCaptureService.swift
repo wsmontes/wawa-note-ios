@@ -142,6 +142,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private var checkpointTask: Task<Void, Never>?
     private var levelMonitorTask: Task<Void, Never>?
     private var silenceDetectionTask: Task<Void, Never>?
+    private var diskSpaceCheckTask: Task<Void, Never>?
+    /// Watchdog that force-resets isPhysicalRestartInProgress after a timeout
+    /// to prevent permanent deadlock if engine.start() hangs.
+    private var restartWatchdogTask: Task<Void, Never>?
     private static let silenceThreshold: Float = 0.015
     private static let silenceDurationBeforePause: TimeInterval = 5.0
     @Published private(set) var isAutoPaused: Bool = false
@@ -161,6 +165,34 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// this token before applying success — prevents a stale recovery from
     /// transitioning to .recording after the user already pressed Stop.
     private var routeRecoveryGeneration: UUID = UUID()
+
+    /// Invalidates the current route recovery generation, logging the caller
+    /// so "recording stopped mysteriously" bugs are easier to trace.
+    private func invalidateRouteRecovery(caller: String = #function) {
+        let old = routeRecoveryGeneration
+        let new = UUID()
+        routeRecoveryGeneration = new
+        AppLog.audio.info("Route recovery generation invalidated by \(caller): \(old.uuidString.prefix(8)) → \(new.uuidString.prefix(8))")
+    }
+
+    /// Arms a watchdog that force-resets isPhysicalRestartInProgress after
+    /// `seconds` if no one cancels it. Prevents permanent deadlock when
+    /// engine.start() hangs (observed with some Bluetooth adapters).
+    private func armRestartWatchdog(seconds: UInt64 = 15) {
+        restartWatchdogTask?.cancel()
+        restartWatchdogTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+            guard let self, !Task.isCancelled, self.isPhysicalRestartInProgress else { return }
+            AppLog.error("audio", "WATCHDOG: isPhysicalRestartInProgress stuck for \(seconds)s — force-resetting")
+            self.isPhysicalRestartInProgress = false
+            self.drainPendingRouteChanges()
+        }
+    }
+
+    private func cancelRestartWatchdog() {
+        restartWatchdogTask?.cancel()
+        restartWatchdogTask = nil
+    }
 
     /// Debounce task for route change notifications — Bluetooth transitions can fire
     /// multiple notifications in quick succession. We collapse them into one settled
@@ -222,6 +254,11 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private static let levelUpdateIntervalNS: UInt64 = 30_000_000
     private static let timerUpdateInterval: TimeInterval = 0.1
     private static let checkpointInterval: TimeInterval = 5.0
+    private static let diskSpaceCheckInterval: TimeInterval = 10.0
+    /// Stop recording when free space drops below this threshold (bytes).
+    private static let criticalDiskThreshold: Int64 = 5_000_000   // 5 MB
+    /// Log a warning when free space drops below this threshold.
+    private static let lowDiskWarningThreshold: Int64 = 20_000_000 // 20 MB
 
     var outputFileURL: URL? {
         fileWriter.currentFileURL
@@ -531,7 +568,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         case .reconfiguringRoute, .validatingRoute:
             // User paused during route switch — invalidate recovery, stay paused.
-            routeRecoveryGeneration = UUID()
+            invalidateRouteRecovery()
             transition(to: .pausedByUser, reason: "user paused during route switch")
             recordingIntent = .userPaused
             AppLog.audio.info("Recording paused — route switch cancelled")
@@ -541,7 +578,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             stopWaitingInputProbe()
             transition(to: .pausedByUser, reason: "user paused while waiting for mic")
             recordingIntent = .userPaused
-            routeRecoveryGeneration = UUID()
+            invalidateRouteRecovery()
             AppLog.audio.info("Recording paused — waiting cancelled")
 
         case .interruptedBySystem:
@@ -581,7 +618,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         routeChangeTask?.cancel()
         routeChangeTask = nil
         stopWaitingInputProbe()
-        routeRecoveryGeneration = UUID()
+        invalidateRouteRecovery()
 
         // 2. Mark intent as stopped — no recovery can resurrect
         recordingIntent = .userStopped
@@ -703,7 +740,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return .noUsableInput(takeRouteSnapshot(reason: "skipped: restart in progress"))
         }
         isPhysicalRestartInProgress = true
+        armRestartWatchdog()
         defer {
+            cancelRestartWatchdog()
             isPhysicalRestartInProgress = false
             drainPendingRouteChanges()
         }
@@ -931,7 +970,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return
         }
         isPhysicalRestartInProgress = true
+        armRestartWatchdog()
         defer {
+            cancelRestartWatchdog()
             isPhysicalRestartInProgress = false
             drainPendingRouteChanges()
         }
@@ -940,7 +981,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         AppLog.audio.info("Force built-in mic recovery — beginning")
 
         // Cancel any in-progress recovery
-        routeRecoveryGeneration = UUID()
+        invalidateRouteRecovery()
         let gen = routeRecoveryGeneration
 
         // Clean stop — release everything before creating new
@@ -1297,7 +1338,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         }
 
         let resume = recordingIntent == .userWantsRecording
-        routeRecoveryGeneration = UUID()
+        invalidateRouteRecovery()
         let gen = routeRecoveryGeneration
         AppLog.audio.info("Engine config change: triggering lightweight rebuild (resume=\(resume))")
         physicalRestartTask = Task { @MainActor [weak self] in
@@ -1321,7 +1362,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return .noUsableInput(takeRouteSnapshot(reason: "skipped: restart in progress"))
         }
         isPhysicalRestartInProgress = true
+        armRestartWatchdog()
         defer {
+            cancelRestartWatchdog()
             isPhysicalRestartInProgress = false
             drainPendingRouteChanges()
         }
@@ -1475,6 +1518,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private func startTimer() {
         timerTask?.cancel()
         checkpointTask?.cancel()
+        diskSpaceCheckTask?.cancel()
         recordingStartTime = Date()
         timerTask = Task { [weak self] in
             guard let self else { return }
@@ -1501,6 +1545,31 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 lastCheckpoint = Date()
             }
         }
+        // Periodic disk space check — prevents silent audio loss when disk
+        // fills mid-recording (iCloud backup, app downloads, etc.).
+        diskSpaceCheckTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(Self.diskSpaceCheckInterval * 1_000_000_000))
+                guard !Task.isCancelled, self.state == .recording || self.state == .validatingRoute else { continue }
+                guard let mid = self.currentMeetingId else { return }
+                // Check free space on the volume containing the meeting directory.
+                let store = FileArtifactStore()
+                let free = store.freeSpaceForCurrentRecording() ?? .max
+                AppLog.audio.debug("Disk check: free=\(free/1_000_000)MB meetingId=\(mid.uuidString.prefix(8))")
+                if free < Self.criticalDiskThreshold {
+                    AppLog.error("audio", "CRITICAL: free space \(free/1_000_000)MB — stopping recording to preserve audio")
+                    _ = self.checkpointCurrentSegment(reason: "criticalDiskSpace")
+                    await MainActor.run {
+                        self.audioInterruptionReason = "Recording stopped — storage is full."
+                        self.transition(to: .failedFatal("diskFull"), reason: "critical disk space: \(free) bytes free")
+                    }
+                    return
+                } else if free < Self.lowDiskWarningThreshold {
+                    AppLog.audio.warning("Low disk space: \(free/1_000_000)MB free — consider freeing space")
+                }
+            }
+        }
     }
 
     private func stopTimer() {
@@ -1508,6 +1577,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         timerTask = nil
         checkpointTask?.cancel()
         checkpointTask = nil
+        diskSpaceCheckTask?.cancel()
+        diskSpaceCheckTask = nil
         stopSilenceDetection()
     }
 

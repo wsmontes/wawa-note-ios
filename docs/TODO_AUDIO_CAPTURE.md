@@ -4,7 +4,7 @@
 > 1 tópico por iteração. Meta: 500 tópicos pontiagudos.
 > Formato: `[#N] [P?] [Categoria] Descrição` onde P0=crítico, P1=alta, P2=média, P3=baixa.
 
-**Progresso:** 95 / 500
+\*\*Progresso:\*\* 100 / 500
 
 ---
 
