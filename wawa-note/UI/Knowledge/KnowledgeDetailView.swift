@@ -591,6 +591,62 @@ struct KnowledgeDetailView: View {
             .padding(.horizontal, 16)
         }
 
+        // MARK: Extraction Review Card
+        if item.status == .pendingReview, let extracted = extractionPreview() {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("Review Extraction", systemImage: "eye")
+                        .font(.headline).foregroundStyle(.orange)
+                    Spacer()
+                    Button {
+                        isEditing = true
+                        editedBody = extracted
+                    } label: {
+                        Label("Edit", systemImage: "pencil").font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                Text(extracted)
+                    .font(.subheadline)
+                    .lineLimit(8)
+                    .padding(10)
+                    .background(Color(.systemGray6))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                HStack(spacing: 8) {
+                    Button {
+                        item.status = .draft
+                        try? modelContext.save()
+                        // Re-queue for analysis now that user approved
+                        processingQueue.enqueue(itemID: item.id, projectID: item.projectID, trigger: .directUserAction)
+                    } label: {
+                        Label("Approve & Analyze", systemImage: "checkmark.circle.fill")
+                            .font(.subheadline).fontWeight(.medium)
+                    }
+                    .buttonStyle(.borderedProminent).tint(.green)
+
+                    Button(role: .destructive) {
+                        // Re-extract: delete transcript, retry
+                        let dir = fileStore.itemDirectoryURL(for: item.id)
+                        try? FileManager.default.removeItem(at: dir.appendingPathComponent("transcript.json"))
+                        item.status = .recorded
+                        try? modelContext.save()
+                        processingQueue.enqueue(itemID: item.id, projectID: item.projectID, trigger: .newCapture)
+                    } label: {
+                        Label("Re-extract", systemImage: "arrow.counterclockwise")
+                            .font(.subheadline)
+                    }
+                    .buttonStyle(.bordered).tint(.orange)
+                }
+            }
+            .padding(16)
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+        }
+
         if let transcript {
             let groups = transcript.groupedSegments()
             let transcriptText = groups.map { g in
@@ -1675,6 +1731,18 @@ struct KnowledgeDetailView: View {
         let m = Int(seconds) / 60
         let s = Int(seconds) % 60
         return String(format: "%02d:%02d", m, s)
+    }
+
+    /// Get the first available extracted text for review (transcript, body, raw body).
+    private func extractionPreview() -> String? {
+        if let transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id) {
+            let text = transcript.segments.map(\.text).joined(separator: " ")
+            if !text.trimmingCharacters(in: .whitespaces).isEmpty { return text }
+        }
+        if let body = item.bodyText, !body.trimmingCharacters(in: .whitespaces).isEmpty {
+            return body
+        }
+        return nil
     }
 
     // MARK: - Agent event badge
