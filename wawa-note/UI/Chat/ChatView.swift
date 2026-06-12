@@ -1025,7 +1025,6 @@ struct AgentStatusBar: View {
     }
 }
 
-}
 
 // MARK: - Streaming message
 

@@ -762,7 +762,8 @@ final class InstanceExportService {
     /// Export transcript segments as SubRip (.srt) subtitle format.
     /// Each segment becomes a numbered subtitle block with HH:MM:SS,mmm timestamps.
     func exportSRT(for itemId: UUID) -> String? {
-        guard let transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: itemId),
+        let store = FileArtifactStore()
+        guard let transcript = try? store.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: itemId),
               !transcript.segments.isEmpty else { return nil }
 
         var srt = ""
