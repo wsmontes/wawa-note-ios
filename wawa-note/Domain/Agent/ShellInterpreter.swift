@@ -1740,8 +1740,8 @@ enum ShellInterpreter {
         ToolResult(content: content, blocks: blocks, citations: [], isError: false, displaySummary: String(content.prefix(80)))
     }
 
-    private static func err(_ message: String) -> ToolResult {
-        ToolResult(content: message, blocks: nil, citations: [], isError: true, displaySummary: message)
-    }
+    /// Known command names for did-you-mean suggestions.
+    private static let knownCommands: Set<String> = ["ls", "cd", "cat", "echo", "touch", "rm", "mv", "find",
+        "grep", "wc", "man", "history", "help", "pwd", "mkdir", "ask_user", "plan", "assign", "progress", "cleanup"]
 }
 
