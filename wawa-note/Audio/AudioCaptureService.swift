@@ -1,4 +1,5 @@
 import AVFoundation
+import Accelerate
 import OSLog
 
 // MARK: - State enums
@@ -1267,11 +1268,32 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         AppLog.audio.info("Audio route change notification: reason=\(reason.rawValue)")
 
+        // Debounce timing varies by reason. Bluetooth HFP negotiation can
+        // fire 3-4 notifications in rapid succession and needs ~500ms to
+        // settle. Device removal is final — no more notifications coming,
+        // so process immediately. Category changes and overrides settle
+        // faster than new-device discovery.
+        let debounceNs: UInt64 = switch reason {
+        case .oldDeviceUnavailable: 0           // device is gone — act now
+        case .newDeviceAvailable:   500_000_000  // Bluetooth negotiation window
+        case .categoryChange,
+             .override,
+             .wakeFromSleep:        250_000_000  // faster settling
+        default:                    500_000_000  // safe default for unknown reasons
+        }
+
         routeChangeTask?.cancel()
-        routeChangeTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 500_000_000)
-            guard let self, !Task.isCancelled else { return }
-            await self.processSettledRouteChange(reason)
+        if debounceNs == 0 {
+            routeChangeTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.processSettledRouteChange(reason)
+            }
+        } else {
+            routeChangeTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: debounceNs)
+                guard let self, !Task.isCancelled else { return }
+                await self.processSettledRouteChange(reason)
+            }
         }
     }
 
@@ -1661,16 +1683,13 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private func updateAudioLevel(from buffer: AVAudioPCMBuffer) {
         guard let channelData = buffer.floatChannelData else { return }
         let frameLength = Int(buffer.frameLength)
-        // Single-pass peak detection: zero heap allocations.
-        // Real-time audio threads must never call malloc (Array allocation,
-        // map, etc.) — it can block and cause the engine to drop buffers.
-        let samples = channelData[0]
+        // vDSP_maxmgv: vectorized max-magnitude via Accelerate NEON SIMD.
+        // Guaranteed zero heap allocation — safe for real-time audio thread.
+        // The manual for-loop was also zero-allocation in practice (Swift
+        // inlines Float.abs), but vDSP is explicitly documented as real-time
+        // safe and ~4x faster via SIMD on Apple Silicon.
         var peak: Float = 0.0
-        for i in 0..<frameLength {
-            let sample = samples[i]
-            let absolute = sample < 0 ? -sample : sample
-            if absolute > peak { peak = absolute }
-        }
+        vDSP_maxmgv(channelData[0], 1, &peak, vDSP_Length(frameLength))
         audioLevelLock.withLock {
             rawAudioLevel = min(1.0, peak * 4.0)
         }
