@@ -1307,9 +1307,11 @@ enum VFSService {
     private static func configProviderNodes(context: ToolContext, base: String = "/projects/wawa-note-config") -> [VFSNode] {
         let configs = (try? context.modelContext.fetch(FetchDescriptor<AIProviderConfigModel>())) ?? []
         return configs.map { config in
-            .file(
-                path: "\(base)/provider-\(config.name.replacingOccurrences(of: " ", with: "-")).json",
-                name: "provider-\(config.name.replacingOccurrences(of: " ", with: "-")).json",
+            let safeName = config.name.replacingOccurrences(of: " ", with: "-")
+                .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? config.name
+            return .file(
+                path: "\(base)/provider-\(safeName).json",
+                name: "provider-\(safeName).json",
                 nodeType: .jsonFile,
                 metadata: VFSNodeMetadata(
                     itemType: config.defaultModel,
@@ -1391,10 +1393,14 @@ enum VFSService {
 
         // Provider files: provider-{name}.json
         if fileName.hasPrefix("provider-") && fileName.hasSuffix(".json") {
-            let providerName = String(fileName.dropFirst(9).dropLast(5))
-                .replacingOccurrences(of: "-", with: " ")
+            let encoded = String(fileName.dropFirst(9).dropLast(5))
+            let providerName = encoded.removingPercentEncoding ?? encoded
             let configs = (try? context.modelContext.fetch(FetchDescriptor<AIProviderConfigModel>())) ?? []
-            guard let config = configs.first(where: { $0.name == providerName }) else { return nil }
+            // Match by decoded name (space-safe) or by percent-encoded prefix
+            guard let config = configs.first(where: {
+                $0.name == providerName ||
+                $0.name.replacingOccurrences(of: " ", with: "-") == encoded
+            }) else { return nil }
             let dict: [String: Any] = [
                 "name": config.name, "type": config.typeRaw,
                 "defaultModel": config.defaultModel,
