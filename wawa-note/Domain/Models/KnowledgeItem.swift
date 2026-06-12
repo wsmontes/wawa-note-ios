@@ -7,6 +7,9 @@ enum ItemStatus: String, Codable, CaseIterable {
     case recorded
     case transcribing
     case transcribed
+    /// Extraction/transcription is complete but user hasn't reviewed yet.
+    /// Pipeline pauses here — user must approve before analysis proceeds.
+    case pendingReview
     case analyzing
     case analyzed
     case failed
