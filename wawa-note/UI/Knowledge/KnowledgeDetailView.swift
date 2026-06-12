@@ -692,9 +692,10 @@ struct KnowledgeDetailView: View {
                 .frame(maxWidth: .infinity)
             }
 
-            let segments = transcript.segments
-            let transcriptText = segments.map { s in
-                "[\(formatTime(s.startTime))] \(s.text)"
+            // Group word-level segments into readable subtitle-like phrases
+            let groups = transcript.groupedSegments(pauseThreshold: 0.5, maxChars: 120)
+            let transcriptText = groups.map { g in
+                "[\(formatTime(g.startTime))] \(g.text)"
             }.joined(separator: "\n\n")
 
             VStack(alignment: .leading, spacing: 0) {
@@ -713,13 +714,13 @@ struct KnowledgeDetailView: View {
                 .padding(.horizontal, 16)
 
                 VStack(spacing: 0) {
-                    ForEach(Array(segments.enumerated()), id: \.offset) { idx, seg in
+                    ForEach(Array(groups.enumerated()), id: \.element.id) { idx, group in
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
-                                Text("[\(formatTime(seg.startTime))]")
+                                Text("[\(formatTime(group.startTime))]")
                                     .font(.caption).foregroundStyle(.secondary).monospacedDigit()
                                 Spacer()
-                                if let conf = seg.confidence {
+                                if let conf = group.confidence {
                                     HStack(spacing: 4) {
                                         ConfidenceBar(confidence: conf)
                                             .frame(width: 40, height: 4)
@@ -728,13 +729,13 @@ struct KnowledgeDetailView: View {
                                     }
                                 }
                             }
-                            Text(seg.text)
+                            Text(group.text)
                                 .font(.body).textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         .padding(12)
 
-                        if idx < segments.count - 1 {
+                        if idx < groups.count - 1 {
                             Divider().padding(.leading, 12)
                         }
                     }
