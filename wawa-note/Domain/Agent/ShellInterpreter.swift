@@ -834,7 +834,9 @@ enum ShellInterpreter {
             }
             // Create item
             let svc = KnowledgeItemService(context: ctx.modelContext)
-            let item = try! svc.createItem(type: kt, title: t, bodyText: body, tags: tags, inboxDate: Date())
+            guard let item = try? svc.createItem(type: kt, title: t, bodyText: body, tags: tags, inboxDate: Date()) else {
+                return err("touch: failed to create item — database error")
+            }
             // Set type-specific fields
             if kt == .webBookmark, let url = urlFlag { item.importSourceURL = url }
             if kt == .journalEntry, let mood = cmd.flags["mood"] {
@@ -880,10 +882,11 @@ enum ShellInterpreter {
             guard let pid = ctx.activeProjectID else { return err("touch: no active project. cd /projects/{slug} first") }
             let prio = TaskPriority(rawValue: priority) ?? .medium
             let due = dueStr.flatMap { ISO8601DateFormatter().date(from: $0) }
-            let task = try! TaskService(context: ctx.modelContext).create(
+            guard let task = try? TaskService(context: ctx.modelContext).create(
                 title: t, projectID: pid, priority: prio,
-                ownerName: owner, dueAt: due, createdBy: .llm
-            )
+                ownerName: owner, dueAt: due, createdBy: .llm) else {
+                return err("touch: failed to create task — database error")
+            }
             let card = TaskCardData(
                 taskID: task.id.uuidString, title: t, status: task.statusRaw, priority: priority,
                 owner: owner, projectSlug: ctx.activeProjectSlug, needsConfirmation: true
@@ -925,10 +928,12 @@ enum ShellInterpreter {
             // If path ends with a filename-like segment, try to create anyway in current context
             if let t = fallbackTitle, let pid = ctx.activeProjectID {
                 let prio = TaskPriority(rawValue: priority) ?? .medium
-                let task = try! TaskService(context: ctx.modelContext).create(
+                guard let task = try? TaskService(context: ctx.modelContext).create(
                     title: t, projectID: pid, priority: prio,
                     ownerName: owner, dueAt: nil, createdBy: .llm
-                )
+                ) else {
+                    return err("touch: failed to create task — database error")
+                }
                 return ok("Created /projects/\(ctx.activeProjectSlug ?? "?")/tasks/\(task.id.uuidString.prefix(8)).json  (\(t) [\(priority)])")
             }
             return err("touch: cannot create here. Use tasks/ or items/ inside a project, or /inbox/ for notes. Examples:\n  touch tasks/ --title \"My Task\"\n  touch tasks/my-task.json\n  touch /inbox/ --title \"My Note\" --type note")
@@ -1168,9 +1173,9 @@ enum ShellInterpreter {
         switch (src, dst) {
         case (.inboxItem(let itemID), .projectItems(_, let pid)):
             try? ProjectService(context: ctx.modelContext).addItem(itemID, to: pid)
-            try? KnowledgeItemService(context: ctx.modelContext).removeFromInbox(
-                try! KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID)!
-            )
+            if let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) {
+                try? KnowledgeItemService(context: ctx.modelContext).removeFromInbox(item)
+            }
             let destName = (try? ProjectService(context: ctx.modelContext).fetch(id: pid)).map { VFSService.safeDirName($0) } ?? "?"
             return ok("Moved item to /projects/\(destName)/items/")
 
@@ -1499,13 +1504,12 @@ enum ShellInterpreter {
 
         let semaphore = DispatchSemaphore(value: 0)
         var resultText = ""; var resultError: String?
-        Task {
+        let visionTask = Task {
             do {
                 let response = try await provider.send(request)
                 resultText = response.content
                 let analysisData = try? JSONEncoder().encode(["question": question, "response": resultText, "timestamp": Date().ISO8601Format()])
                 try? analysisData?.write(to: dir.appendingPathComponent("vision_analysis.json"))
-                // Save as note if requested
                 if saveAsNote, !resultText.isEmpty {
                     let svc = KnowledgeItemService(context: ctx.modelContext)
                     if let note = try? svc.createItem(type: .note, title: "Vision: \(item.title)",
@@ -1518,7 +1522,10 @@ enum ShellInterpreter {
             } catch { resultError = error.localizedDescription }
             semaphore.signal()
         }
-        semaphore.wait()
+        // Timeout after 30s instead of blocking indefinitely.
+        // The cooperative thread pool runs the Task asynchronously so this
+        // doesn't deadlock in practice, but a timeout is safety.
+        _ = semaphore.wait(timeout: .now() + 30)
 
         if let error = resultError { return err("vision: \(error)") }
         let extra = saveAsNote ? " Also saved as a new note." : ""
