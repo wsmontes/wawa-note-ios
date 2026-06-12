@@ -644,7 +644,7 @@ struct HomeView: View {
             .background(.ultraThinMaterial, in: Capsule())
             Spacer().frame(height: 16)
             Text(captureVM.elapsedTimeFormatted)
-                .font(.system(size: 48, weight: .thin, design: .monospaced))
+                .font(.system(.largeTitle, design: .monospaced).weight(.thin))
                 .foregroundStyle(isTroubled ? .orange : (isPaused ? .orange : .primary))
             if isSwitching {
                 VStack(spacing: 4) {
