@@ -42,10 +42,7 @@ enum ShellInterpreter {
             let cmd = tokenize(trimmed)
             let result: ToolResult
             if isPipe, let prev = previousOutput {
-                // Pass previous output as stdin for the piped command
-                var pipedCmd = cmd
-                pipedCmd.args.append(prev)
-                result = dispatch(pipedCmd, context)
+                result = dispatchPipe(cmd, stdin: prev, context: context)
             } else {
                 result = dispatch(cmd, context)
             }
@@ -114,6 +111,25 @@ enum ShellInterpreter {
     }
 
     /// Dispatches a single command, with intelligent enhancements:
+    /// Execute a piped command — passes `stdin` as context for commands that support it.
+    private static func dispatchPipe(_ cmd: ShellCommand, stdin: String, context ctx: ToolContext) -> ToolResult {
+        switch cmd.name {
+        case "cat": return ok(stdin)
+        case "grep":
+            let pattern = cmd.args.first ?? ""
+            guard !pattern.isEmpty else { return err("grep: missing pattern") }
+            let lines = stdin.components(separatedBy: "\n").filter { $0.contains(pattern) }
+            return ok(lines.joined(separator: "\n"))
+        case "wc":
+            let lines = stdin.components(separatedBy: "\n").count
+            let words = stdin.components(separatedBy: .whitespaces).filter { !$0.isEmpty }.count
+            return ok("\(lines) lines, \(words) words, \(stdin.count) chars")
+        default:
+            return err("\(cmd.name): does not support pipe input. Supports: cat, grep, wc")
+        }
+    }
+
+    /// Dispatches a single command. Handles:
     /// - `cd` auto-lists the target directory
     /// - Partial UUIDs are fuzzy-matched in cat/echo paths
     private static func dispatch(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
