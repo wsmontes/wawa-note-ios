@@ -461,10 +461,16 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             throw TranscriptionError.recognitionFailed("Cannot allocate output buffer")
         }
 
+        var inputProvided = false
         var convertError: NSError?
         converter.convert(to: outputBuf, error: &convertError) { _, outStatus in
-            outStatus.pointee = .haveData
-            return inputBuf
+            if !inputProvided {
+                inputProvided = true
+                outStatus.pointee = .haveData
+                return inputBuf
+            }
+            outStatus.pointee = .noDataNow
+            return nil
         }
 
         if let convertError { throw convertError }
