@@ -1546,6 +1546,10 @@ struct KnowledgeDetailView: View {
             return
         }
 
+        isTranscribing = true
+        transcriptionProgress = "Transcribing..."
+        transcriptionError = nil
+
         // Delegate to canonical transcription service (handles manifest + legacy)
         let extractionSvc = ContentExtractionService(modelContext: modelContext, fileStore: fileStore)
         if let text = await extractionSvc.extractTextFromAudio(item) {
