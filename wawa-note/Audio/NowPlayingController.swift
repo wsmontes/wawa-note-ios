@@ -1,6 +1,7 @@
 import MediaPlayer
 import OSLog
 
+@MainActor
 final class NowPlayingController {
     private let remoteCommand: MPRemoteCommandCenter
     private let nowPlayingInfo: MPNowPlayingInfoCenter

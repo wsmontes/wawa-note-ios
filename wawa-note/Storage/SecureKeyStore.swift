@@ -29,7 +29,10 @@ final class SecureKeyStore: @unchecked Sendable {
             kSecAttrService as String: serviceName,
             kSecAttrAccount as String: identifier,
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            // AfterFirstUnlock allows background pipeline (transcription/analysis)
+            // to access API keys while the device is locked. WhenUnlocked would
+            // cause pipeline failures when the user locks their phone after recording.
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
 
         let status = SecItemAdd(query as CFDictionary, nil)

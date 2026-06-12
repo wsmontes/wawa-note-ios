@@ -255,34 +255,23 @@ final class AudioFileWriter: @unchecked Sendable {
         try fileManager.createDirectory(at: segmentsDir, withIntermediateDirectories: true)
 
         let sampleRate = format.sampleRate
-        // AAC encoder rejects sample rates below ~16kHz on iOS (kAudioFormatUnsupportedDataFormatError).
-        // Use Linear PCM WAV for low rates (Bluetooth HFP at 8kHz), AAC for standard rates.
-        let usePCM = sampleRate < 16000
-        let ext = usePCM ? "wav" : "m4a"
-
-        // Build settings FIRST so we can use them in the overwrite guard below.
-        let settings: [String: Any]
-        if usePCM {
-            settings = [
-                AVFormatIDKey: kAudioFormatLinearPCM,
-                AVSampleRateKey: sampleRate,
-                AVNumberOfChannelsKey: 1,
-                AVLinearPCMBitDepthKey: 16,
-                AVLinearPCMIsFloatKey: false,
-                AVLinearPCMIsBigEndianKey: false
-            ]
-        } else {
-            let bitRate: Int = sampleRate >= 44100 ? 96000
-                : sampleRate >= 32000 ? 64000
-                : sampleRate >= 22050 ? 48000
-                : 24000
-            settings = [
-                AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: sampleRate,
-                AVNumberOfChannelsKey: 1,
-                AVEncoderBitRateKey: bitRate
-            ]
-        }
+        // Always use Linear PCM WAV. AAC M4A bitstream causes SFSpeechRecognizer
+        // to lose sync, producing 40-90s gaps (kAFAssistantErrorDomain Code=1101).
+        // PCM guarantees recognizer compatibility; storage compression can be done
+        // in background post-recording if needed.
+        //
+        // Estimated sizes (mono 16-bit):
+        //   16 kHz → ~7 MB/min   | 44.1 kHz → ~5.3 MB/min
+        //   1-hour recording at 44.1 kHz ≈ 318 MB
+        let ext = "wav"
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: sampleRate,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false
+        ]
 
         let fileName = String(format: "segment-%03d.\(ext)", self._segmentIndex)
         let fileURL = segmentsDir.appendingPathComponent(fileName)
@@ -313,7 +302,7 @@ final class AudioFileWriter: @unchecked Sendable {
                 let finalURL = segmentsDir.appendingPathComponent(finalName)
                 self._audioFile = try AVAudioFile(forWriting: finalURL, settings: settings, commonFormat: format.commonFormat, interleaved: format.isInterleaved)
                 self._currentFileURL = finalURL
-                AppLog.audio.info("Segment \(self._segmentIndex): \(finalName) \(sampleRate)Hz \(usePCM ? "PCM" : "AAC") (index adjusted)")
+                AppLog.audio.info("Segment \(self._segmentIndex): \(finalName) \(sampleRate)Hz PCM (index adjusted)")
                 return
             }
             AppLog.audio.info("Segment \(self._segmentIndex): \(fileName) exists but is 0 bytes — safe to reuse")
@@ -325,6 +314,6 @@ final class AudioFileWriter: @unchecked Sendable {
             interleaved: format.isInterleaved
         )
         self._currentFileURL = fileURL
-        AppLog.audio.info("Segment \(self._segmentIndex): \(fileName) \(sampleRate)Hz \(usePCM ? "PCM" : "AAC")")
+        AppLog.audio.info("Segment \(self._segmentIndex): \(fileName) \(sampleRate)Hz PCM")
     }
 }

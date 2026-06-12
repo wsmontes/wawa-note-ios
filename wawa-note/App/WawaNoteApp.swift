@@ -57,6 +57,7 @@ struct WawaNoteApp: App {
 
         let coordinator = RecordingCoordinator(modelContainer: modelContainer)
         coordinator.contentPipeline = contentPipeline
+        coordinator.processingQueue = processingQueue
         recordingCoordinator = coordinator
 
         sharedEventStore = EKEventStore()

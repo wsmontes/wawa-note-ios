@@ -149,7 +149,8 @@ final class ContentPipelineService: ObservableObject {
                         // Set pendingReview so user can verify transcription before analysis
                         if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
                             fresh.status = .pendingReview
-                            try? modelContext.save()
+                            do { try modelContext.save() }
+                            catch { AppLog.provider.error("ContentPipeline: save failed (transcribe→pendingReview): \(error.localizedDescription)") }
                         }
                     } else {
                         AppLog.provider.warning("ContentPipeline: pre-transcription failed for item \(itemID)")
@@ -166,7 +167,8 @@ final class ContentPipelineService: ObservableObject {
                         // Set pendingReview so user can verify OCR before analysis
                         if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
                             fresh.status = .pendingReview
-                            try? modelContext.save()
+                            do { try modelContext.save() }
+                            catch { AppLog.provider.error("ContentPipeline: save failed (OCR→pendingReview): \(error.localizedDescription)") }
                         }
                     } else {
                         AppLog.provider.warning("ContentPipeline: OCR failed for item \(itemID)")
@@ -394,6 +396,12 @@ final class ContentPipelineService: ObservableObject {
 
                 if !failed { break }
                 AppLog.provider.warning("Pipeline attempt \(attemptCount) failed, \(maxAttempts - attemptCount) remaining")
+                // Backoff between retries — prevents hammering rate-limited APIs.
+                // 5s, 15s for attempts 1-3
+                if attemptCount < maxAttempts {
+                    let delaySeconds = Int(pow(3.0, Double(attemptCount))) * 5
+                    try? await Task.sleep(nanoseconds: UInt64(delaySeconds) * 1_000_000_000)
+                }
             }
 
             if let error = lastError {
@@ -2730,15 +2738,22 @@ final class ProcessingQueueService: ObservableObject {
         } else if failed {
             entry.retryCount += 1
             if entry.retryCount < entry.maxRetries {
-                // Re-queue for retry
+                // Re-queue for retry with exponential backoff.
+                // Immediate retry on rate-limited API is doomed — wait
+                // 5s, 15s, 45s between attempts.
                 entry.status = .queued
                 entry.lastError = error
-                AppLog.warn("pipeline", "Processing failed (attempt \(entry.retryCount)/\(entry.maxRetries)) — itemID=\(entry.itemID.uuidString.prefix(8)) error=\(error ?? "unknown")")
+                let backoffSeconds = Int(pow(3.0, Double(entry.retryCount))) * 5 // 5, 15, 45
+                AppLog.warn("pipeline", "Processing failed (attempt \(entry.retryCount)/\(entry.maxRetries)) — itemID=\(entry.itemID.uuidString.prefix(8)) retry in \(backoffSeconds)s error=\(error ?? "unknown")")
                 activeTasks[entryID] = nil
                 activeJobCount = max(0, activeJobCount - 1)
                 endBackgroundTask()
                 sortEntries()
-                processNext()
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: UInt64(backoffSeconds) * 1_000_000_000)
+                    guard entries.contains(where: { $0.id == entryID && $0.status == .queued }) else { return }
+                    processNext()
+                }
                 return
             }
             entry.status = .failed

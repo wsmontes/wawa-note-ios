@@ -30,21 +30,36 @@ final class ContentExtractionService {
     /// Never returns nil as long as a transcript exists on disk — extraction failure
     /// falls back to the existing transcript instead of blocking Phase 3.
     func extractTextFromAudio(_ item: KnowledgeItem) async -> String? {
+        let startTime = Date()
+        let id = item.id
+        AppLog.provider.info("ContentExtraction: transcribing item \(id.uuidString.prefix(8)) — type=audio duration=\(item.durationSeconds.map { "\(Int($0))s" } ?? "nil")")
+
         // Reuse existing transcript when available
         if let existing = loadExistingTranscriptText(for: item.id) {
-            AppLog.provider.info("ContentExtraction: reusing existing transcript for item \(item.id)")
+            AppLog.provider.info("ContentExtraction: reusing existing transcript for item \(id)")
             return existing
         }
 
-        // Check for segmented recording (manifest.json) first
-        if fileStore.recordingManifestExists(for: item.id),
-           let manifest = try? fileStore.readRecordingManifest(for: item.id),
-           !manifest.segments.isEmpty {
-            return await transcribeSegmented(manifest: manifest, item: item)
+        let engine = resolveTranscriptionEngine()
+        let engineLabel = engine.map { $0.id } ?? "none"
+        let isSegmented = fileStore.recordingManifestExists(for: item.id)
+            && (try? fileStore.readRecordingManifest(for: item.id))?.segments.isEmpty == false
+        let pathLabel = isSegmented ? "segmented" : "singleFile"
+
+        AppLog.provider.info("ContentExtraction: path=\(pathLabel) engine=\(engineLabel)")
+
+        let result: String?
+        if isSegmented, let manifest = try? fileStore.readRecordingManifest(for: item.id) {
+            result = await transcribeSegmented(manifest: manifest, item: item)
+        } else {
+            result = await transcribeSingleFile(item: item)
         }
 
-        // Legacy: single audio.m4a file
-        return await transcribeSingleFile(item: item)
+        let elapsed = Int(Date().timeIntervalSince(startTime) * 1000)
+        let chars = result?.count ?? 0
+        AppLog.provider.info("ContentExtraction: transcription finished — path=\(pathLabel) engine=\(engineLabel) elapsed=\(elapsed)ms chars=\(chars)")
+
+        return result
     }
 
     /// Transcribe a segmented recording — all segments in order with merged timestamps.

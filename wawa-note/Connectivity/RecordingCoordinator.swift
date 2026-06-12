@@ -25,6 +25,10 @@ final class RecordingCoordinator: ObservableObject {
     private let contextCaptureService = ContextCaptureService()
     private var annotationService: AnnotationService
     var contentPipeline: ContentPipelineService?
+    /// When set, pipeline processing is enqueued through this service instead of
+    /// calling ContentPipelineService.process() directly. This enables retry with
+    /// backoff, offline queueing, and cancellation — direct calls skip all of that.
+    var processingQueue: ProcessingQueueService?
 
     private var recordingStartDate: Date?
     private var pausedDuration: TimeInterval = 0
@@ -158,6 +162,16 @@ final class RecordingCoordinator: ObservableObject {
         guard sessionManager.hasMinimumDiskSpace() else {
             AppLog.warn("audio", "Recording blocked: insufficient disk space")
             errorMessage = "Not enough storage space to record. Please free up some space."
+            notifyStatusChange()
+            return
+        }
+
+        // Block early if mic permission is denied — avoids creating an item
+        // that would be immediately rolled back when startRecording fails.
+        let micPermission = AVAudioSession.sharedInstance().recordPermission
+        guard micPermission != .denied else {
+            AppLog.warn("audio", "Recording blocked: microphone permission denied")
+            errorMessage = "Microphone access is off. Turn it on in Settings to record audio."
             notifyStatusChange()
             return
         }
@@ -312,11 +326,14 @@ final class RecordingCoordinator: ObservableObject {
         nowPlayingTimer?.invalidate()
         nowPlayingTimer = nil
 
-        // Finalize manifest
+        // Finalize manifest — capture a copy so the pipeline closure below
+        // can still access it after the if-var scope closes.
+        var finalizedManifest: RecordingManifest? = nil
         if var m = manifest, let meetingId = savedItemId {
             if let idx = m.segments.indices.last { m.segments[idx].endedAt = Date() }
             m.endedAt = Date()
             saveManifest(m, meetingId: meetingId)
+            finalizedManifest = m
         }
 
         if let pauseStart = pauseStartDate {
@@ -330,17 +347,24 @@ final class RecordingCoordinator: ObservableObject {
         // Trigger pipeline AFTER concatenation and validation complete.
         // The Task is non-blocking for the UI (stop returns immediately),
         // but the pipeline is gated behind concat so audio.m4a is ready.
-        if let itemId, let pipeline = contentPipeline, let m = manifest {
+        if let itemId, let manifest = finalizedManifest {
             Task {
                 // 1. Concatenate segments into audio.m4a (await, not fire-and-forget)
-                await AudioSegmentConcatenator.concatenate(manifest: m, meetingId: itemId)
+                await AudioSegmentConcatenator.concatenate(manifest: manifest, meetingId: itemId)
 
                 // 2. Debug validation report — mandatory until route switching is stable
                 logRecordingArtifactReport(itemId: itemId)
 
-                // 3. Only then trigger pipeline — audio is confirmed ready
-                AppLog.event("audio", "Pipeline for item \(itemId.uuidString.prefix(8))")
-                pipeline.process(itemId, using: modelContext)
+                // 3. Route through ProcessingQueue when available — enables retry with
+                //    backoff, offline queueing, and cancellation. Direct call is the
+                //    fallback for backwards compatibility.
+                if let queue = processingQueue {
+                    AppLog.event("audio", "Enqueuing item \(itemId.uuidString.prefix(8)) into ProcessingQueue")
+                    queue.enqueue(itemID: itemId, trigger: .newCapture)
+                } else if let pipeline = contentPipeline {
+                    AppLog.event("audio", "Pipeline (direct) for item \(itemId.uuidString.prefix(8))")
+                    pipeline.process(itemId, using: modelContext)
+                }
             }
         }
     }
@@ -527,6 +551,7 @@ final class RecordingCoordinator: ObservableObject {
             guard let orphans = try? bgContext.fetch(descriptor), !orphans.isEmpty else { return }
 
             AppLog.audio.info("Found \(orphans.count) interrupted recording(s) — recovering")
+            var recoveredIds: [UUID] = []
             for item in orphans {
                 AppLog.audio.info("Recovering interrupted recording: \(item.id)")
                 item.status = .recorded
@@ -538,10 +563,33 @@ final class RecordingCoordinator: ObservableObject {
                     item.audioFileRelativePath = AppFileConstants.audioFileName
                 } else {
                     item.status = .failed
+                    continue
                 }
+                recoveredIds.append(item.id)
             }
             try bgContext.save()
-            AppLog.audio.info("Recovered \(orphans.count) interrupted recording(s) — saved as recorded")
+            AppLog.audio.info("Recovered \(recoveredIds.count)/\(orphans.count) interrupted recording(s)")
+
+            // Trigger pipeline for successfully recovered items so they get
+            // transcribed and analyzed. Without this, crash-recovered items
+            // remain stuck in .recorded state forever.
+            if !recoveredIds.isEmpty {
+                for itemId in recoveredIds {
+                    AppLog.event("audio", "Enqueuing recovered item \(itemId.uuidString.prefix(8)) for pipeline processing")
+                    // Use Task to avoid blocking app init — pipeline runs async.
+                    Task { @MainActor in
+                        // Concatenate segments first (essential for multi-segment recordings)
+                        if let m = try? FileArtifactStore().readRecordingManifest(for: itemId) {
+                            await AudioSegmentConcatenator.concatenate(manifest: m, meetingId: itemId)
+                        }
+                        if let queue = processingQueue {
+                            queue.enqueue(itemID: itemId, trigger: .newCapture)
+                        } else if let pipeline = contentPipeline {
+                            pipeline.process(itemId, using: modelContext)
+                        }
+                    }
+                }
+            }
         } catch {
             AppLog.audio.error("Orphan cleanup failed: \(error.localizedDescription)")
         }
@@ -614,6 +662,14 @@ final class RecordingCoordinator: ObservableObject {
     // MARK: - Observation
 
     private func startObservation() {
+        // Timer.scheduledTimer MUST be created on the main thread — otherwise
+        // it fires on a background run loop and triggers BUG IN CLIENT OF LIBDISPATCH
+        // in MPNowPlayingInfoCenter, which asserts on the main-thread requirement.
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.startObservation() }
+            return
+        }
+
         observationTimer?.invalidate()
         observationTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             guard let self else { return }

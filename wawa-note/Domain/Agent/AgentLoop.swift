@@ -92,7 +92,8 @@ final class AgentLoop: @unchecked Sendable {
         tools: [any AgentTool],
         history: [ChatMessage] = [],
         provider: any AIProvider,
-        maxIterations overrideIterations: Int? = nil
+        maxIterations overrideIterations: Int? = nil,
+        timeoutSeconds: TimeInterval = 600 // 10-minute default safety net
     ) -> AsyncThrowingStream<AgentStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             Task {
@@ -100,6 +101,7 @@ final class AgentLoop: @unchecked Sendable {
                     let toolDefs = tools.map { tool in
                         AIToolDefinition(name: tool.name, description: tool.description, parameters: tool.parameters)
                     }
+                    let startTime = Date()
                     try await self.runLoop(
                         initialMessage: task,
                         initialRole: .system,
@@ -109,7 +111,8 @@ final class AgentLoop: @unchecked Sendable {
                         provider: provider,
                         continuation: continuation,
                         maxIterations: overrideIterations ?? self.maxIterations,
-                        toolRegistry: AgentToolRegistry(tools: tools)
+                        toolRegistry: AgentToolRegistry(tools: tools),
+                        deadline: startTime.addingTimeInterval(timeoutSeconds)
                     )
                 } catch {
                     continuation.yield(.error(error))
@@ -130,7 +133,8 @@ final class AgentLoop: @unchecked Sendable {
         provider: any AIProvider,
         continuation: AsyncThrowingStream<AgentStreamEvent, Error>.Continuation,
         maxIterations: Int? = nil,
-        toolRegistry customRegistry: AgentToolRegistry? = nil
+        toolRegistry customRegistry: AgentToolRegistry? = nil,
+        deadline: Date = Date.distantFuture
     ) async throws {
         let effectiveRegistry = customRegistry ?? registry
         let iterations = maxIterations ?? self.maxIterations
@@ -142,6 +146,13 @@ final class AgentLoop: @unchecked Sendable {
         for iteration in 0..<iterations {
             // Cooperative cancellation — allows ProcessingQueueService to cancel
             if Task.isCancelled { continuation.finish(); return }
+            // Deadline check prevents infinite hangs from stuck tool calls or API loops.
+            // The pipeline marks the item as .failed so the user can retry manually.
+            guard Date() < deadline else {
+                AppLog.agent.error("Agent loop timeout — iteration \(iteration) — deadline reached")
+                continuation.finish()
+                return
+            }
             continuation.yield(.thinking)
             let model = resolveModel(for: iteration)
 
@@ -204,11 +215,21 @@ final class AgentLoop: @unchecked Sendable {
 
                     let args = parseArguments(tc.arguments, toolName: tc.name)
                     let result: ToolResult
-                    do { result = try await tool.execute(args, context: toolContext) }
+                    do {
+                        // Circuit breaker: each tool call gets a 2-minute deadline.
+                        // A hung tool (ShellTool waiting on nonexistent file, write
+                        // blocking on full disk, etc.) won't freeze the entire agent.
+                        result = try await executeWithTimeout(seconds: 120) {
+                            try await tool.execute(args, context: self.toolContext)
+                        }
+                    }
                     catch {
+                        let errorMsg = error is TimeoutError
+                            ? "TOOL TIMEOUT: \(tc.name) exceeded 120s — hung or stuck"
+                            : "TOOL ERROR: \(tc.name): \(error.localizedDescription)"
                         messages.append(ChatMessage(conversationId: UUID(), role: .tool,
-                            content: "TOOL ERROR: \(tc.name): \(error.localizedDescription)", toolCallId: tc.id))
-                        continuation.yield(.toolCallCompleted(name: tc.name, id: tc.id, summary: "Error"))
+                            content: errorMsg, toolCallId: tc.id))
+                        continuation.yield(.toolCallCompleted(name: tc.name, id: tc.id, summary: error is TimeoutError ? "Timeout" : "Error"))
                         continue
                     }
 
@@ -435,6 +456,36 @@ final class AgentLoop: @unchecked Sendable {
             else if let d = v as? Double { result[k] = d }
             else if let b = v as? Bool { result[k] = b }
             else if let a = v as? [String] { result[k] = a }
+        }
+        return result
+    }
+}
+
+// MARK: - Tool execution timeout
+
+/// Thrown when a tool call exceeds its deadline.
+struct TimeoutError: Error, LocalizedError {
+    let toolName: String
+    let seconds: Int
+    var errorDescription: String? { "Tool '\(toolName)' timed out after \(seconds)s" }
+}
+
+/// Execute an async operation with a deadline. If the operation doesn't complete
+/// within `seconds`, its Task is cancelled and `TimeoutError` is thrown.
+/// Uses cooperative cancellation — the operation must check `Task.isCancelled`.
+private func executeWithTimeout<T: Sendable>(
+    seconds: Int,
+    operation: @escaping @Sendable () async throws -> T
+) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask { try await operation() }
+        group.addTask {
+            try await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
+            throw TimeoutError(toolName: "unknown", seconds: seconds)
+        }
+        defer { group.cancelAll() }
+        guard let result = try await group.next() else {
+            throw TimeoutError(toolName: "unknown", seconds: seconds)
         }
         return result
     }

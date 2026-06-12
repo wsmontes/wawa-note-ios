@@ -928,7 +928,7 @@ enum ShellInterpreter {
             if kt == .webBookmark, let url = urlFlag { item.importSourceURL = url }
             if kt == .journalEntry, let mood = cmd.flags["mood"] {
                 if !item.tags.contains(where: { $0.hasPrefix("mood/") }) {
-                    item.tags.append("mood/\(mood)")
+                    item.tags = item.tags + ["mood/\(mood)"]
                 }
             }
             let proj = vpath.isProjectLike ? (try? ProjectService(context: ctx.modelContext).fetch(id: ctx.activeProjectID!)) : nil

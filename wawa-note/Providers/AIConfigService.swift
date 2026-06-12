@@ -163,7 +163,27 @@ final class AIConfigService: @unchecked Sendable {
     }
 
     func isReasoningModel(_ model: String) -> Bool {
-        presetFor(model: model)?.reasoningModel ?? false
+        // Config-provided presets are the source of truth.
+        if let explicit = presetFor(model: model)?.reasoningModel { return explicit }
+        // Heuristic fallback: detect new/unknown reasoning models by name pattern.
+        // This prevents silent failures when users configure models that don't
+        // have presets yet (e.g., newly released o-series, Claude 5, etc.).
+        // Reasoning models MUST NOT receive temperature — sending it causes
+        // API errors on most providers.
+        let lower = model.lowercased()
+        let reasoningPatterns = [
+            // OpenAI reasoning
+            "o1", "o3", "o4", "o5", "o6", "o7", "o8", "o9",
+            // Anthropic (Claude 4+ has extended thinking)
+            // Match "claude-sonnet-4", "claude-opus-4", etc.
+            // DeepSeek reasoning
+            "r1", "reasoner",
+            // Other
+            "qwq", // Qwen thinking
+            "gemini-thinking", // Gemini thinking variants
+            "thinking", // general thinking models
+        ]
+        return reasoningPatterns.contains(where: { lower.contains($0) })
     }
 
     /// Whether to explicitly disable thinking mode (DeepSeek, Qwen, etc.).

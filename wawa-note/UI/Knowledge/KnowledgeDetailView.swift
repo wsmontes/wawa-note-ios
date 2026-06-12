@@ -152,12 +152,16 @@ struct KnowledgeDetailView: View {
                 // Context metadata (read-only display)
                 if hasContextFields { contextSection }
 
-                // Debug: show raw LLM response (Developer Mode only)
+                // Debug: show raw LLM response (Developer Mode only).
+                // Gated behind #if DEBUG so it's NEVER compiled into App Store builds,
+                // even if the UserDefaults key is accidentally set.
+                #if DEBUG
                 if UserDefaults.standard.bool(forKey: "developer_mode_enabled"),
                    let a = analysis, a.shortSummary.trimmingCharacters(in: .whitespaces).isEmpty {
                     rawResponseSection
                         .padding(.top, 12)
                 }
+                #endif
 
                 if !annotations.isEmpty {
                     annotationsSection

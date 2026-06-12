@@ -16,6 +16,58 @@ enum AudioCaptureState: Equatable {
     case interruptedBySystem
     case failedFatal(String)
     case stopped
+
+    /// Validates whether a transition from `self` to `target` is legal.
+    /// Returns `false` for transitions that should never happen
+    /// (e.g. `.stopped → .pausedByUser`, `.idle → .validatingRoute`).
+    func canTransition(to target: AudioCaptureState) -> Bool {
+        switch (self, target) {
+        // idle → recording only
+        case (.idle, .recording): return true
+
+        // recording can go to any non-idle except .validatingRoute (needs engine running first)
+        case (.recording, .pausedByUser), (.recording, .reconfiguringRoute),
+             (.recording, .interruptedBySystem), (.recording, .failedFatal),
+             (.recording, .stopped): return true
+
+        // pausedByUser can go to most states
+        case (.pausedByUser, .recording), (.pausedByUser, .reconfiguringRoute),
+             (.pausedByUser, .interruptedBySystem), (.pausedByUser, .failedFatal),
+             (.pausedByUser, .stopped): return true
+
+        // reconfiguringRoute can go to most states (it's a transient hub)
+        case (.reconfiguringRoute, .recording), (.reconfiguringRoute, .pausedByUser),
+             (.reconfiguringRoute, .validatingRoute), (.reconfiguringRoute, .waitingForUsableInput),
+             (.reconfiguringRoute, .interruptedBySystem), (.reconfiguringRoute, .failedFatal),
+             (.reconfiguringRoute, .stopped): return true
+
+        // validatingRoute — transient, most outgoing allowed
+        case (.validatingRoute, .recording), (.validatingRoute, .pausedByUser),
+             (.validatingRoute, .waitingForUsableInput), (.validatingRoute, .interruptedBySystem),
+             (.validatingRoute, .failedFatal), (.validatingRoute, .stopped): return true
+
+        // waitingForUsableInput — probe is active, most outgoing allowed
+        case (.waitingForUsableInput, .recording), (.waitingForUsableInput, .validatingRoute),
+             (.waitingForUsableInput, .pausedByUser), (.waitingForUsableInput, .reconfiguringRoute),
+             (.waitingForUsableInput, .interruptedBySystem), (.waitingForUsableInput, .failedFatal),
+             (.waitingForUsableInput, .stopped): return true
+
+        // interruptedBySystem — transient, most outgoing allowed
+        case (.interruptedBySystem, .recording), (.interruptedBySystem, .pausedByUser),
+             (.interruptedBySystem, .reconfiguringRoute), (.interruptedBySystem, .validatingRoute),
+             (.interruptedBySystem, .waitingForUsableInput), (.interruptedBySystem, .failedFatal),
+             (.interruptedBySystem, .stopped): return true
+
+        // failedFatal is terminal except for explicit stop
+        case (.failedFatal, .stopped): return true
+
+        // stopped is truly terminal — no outgoing transitions
+        case (.stopped, _): return false
+
+        // Everything else is illegal (e.g. .idle → .validatingRoute, .stopped → .pausedByUser)
+        default: return false
+        }
+    }
 }
 
 /// The user's recording intention. Central source of truth for whether
@@ -248,6 +300,15 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// Single point of state mutation. Every state change goes through here.
     private func transition(to newState: AudioCaptureState, reason: String) {
         let oldState = state
+
+        // Validate the transition against the allowed matrix. Reject illegal
+        // transitions (e.g. .stopped → .pausedByUser) that can only happen
+        // through async notification races or bugs.
+        guard oldState.canTransition(to: newState) else {
+            AppLog.error("audio", "REJECTED illegal state transition: \(String(describing: oldState)) → \(String(describing: newState)) — reason: \(reason)")
+            return
+        }
+
         state = newState
         AppLog.audio.info("State: \(String(describing: oldState)) → \(String(describing: newState)) — \(reason)")
 
@@ -1163,6 +1224,11 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     private func handleMediaServicesReset(_ notification: Notification) {
         AppLog.error("audio", "Media services reset — restarting capture")
+        // CRITICAL: media services reset destroys the entire audio stack
+        // including all engine taps. Mark tap as NOT installed before
+        // triggering rebuild, otherwise safelyInstallTap will try to
+        // removeTap(onBus:) on the new engine (which has no tap) and crash.
+        isTapInstalled = false
         if recordingIntent == .userWantsRecording || recordingIntent == .userPaused {
             let resume = recordingIntent == .userWantsRecording
             let gen = routeRecoveryGeneration

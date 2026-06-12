@@ -14,6 +14,45 @@ enum ItemStatus: String, Codable, CaseIterable {
     case analyzed
     case failed
     case archived
+
+    /// State machine: valid transitions for each status.
+    /// Transitions not listed here are illegal and indicate a bug.
+    ///
+    /// Flow:
+    ///   draft → recording → recorded → transcribing → transcribed
+    ///                                                   ↓
+    ///                                           pendingReview → analyzing → analyzed
+    ///   Any active state → failed (terminal)
+    ///   Any state → archived (terminal, manual only)
+    var validNextStatuses: Set<ItemStatus> {
+        switch self {
+        case .draft:
+            [.recording]
+        case .recording:
+            [.recorded, .failed]
+        case .recorded:
+            [.transcribing, .failed]
+        case .transcribing:
+            [.transcribed, .failed]
+        case .transcribed:
+            [.pendingReview, .analyzing, .failed]
+        case .pendingReview:
+            [.analyzing, .failed]
+        case .analyzing:
+            [.analyzed, .failed]
+        case .analyzed:
+            [.failed] // re-analysis allowed
+        case .failed:
+            [.recorded] // retry from recorded state
+        case .archived:
+            [] // terminal
+        }
+    }
+
+    /// Returns true if transitioning to `next` is allowed by the state machine.
+    func canTransition(to next: ItemStatus) -> Bool {
+        validNextStatuses.contains(next)
+    }
 }
 
 enum KnowledgeItemType: String, Codable, CaseIterable, Hashable {
@@ -48,7 +87,28 @@ final class KnowledgeItem {
     var createdAt: Date
     var updatedAt: Date
     var statusRaw: String
-    var tags: [String]
+    // [String] is NOT supported as a direct SwiftData attribute — CoreData
+    // cannot materialize "Array<String>" (crash: "Could not materialize
+    // Objective-C class named 'Array'"). Store as JSON string instead.
+    private var _tagsJSON: String = "[]"
+    @Transient
+    var tags: [String] {
+        get {
+            guard let data = _tagsJSON.data(using: .utf8),
+                  let result = try? JSONDecoder().decode([String].self, from: data) else {
+                return []
+            }
+            return result
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue),
+               let json = String(data: data, encoding: .utf8) {
+                _tagsJSON = json
+            } else {
+                _tagsJSON = "[]"
+            }
+        }
+    }
 
     // Cross-type queryable columns
     var durationSeconds: Double?
@@ -102,6 +162,19 @@ final class KnowledgeItem {
         set { statusRaw = newValue.rawValue }
     }
 
+    /// Transition to a new status with validation. Logs a warning if the
+    /// transition is illegal per the state machine, but still allows it
+    /// for backwards compatibility. Prefer this over direct `status = ...`.
+    func transitionStatus(to next: ItemStatus, reason: String) {
+        let current = self.status
+        guard current.canTransition(to: next) else {
+            AppLog.warn("status", "⚠️ Illegal state transition: \(current.rawValue) → \(next.rawValue) — \(reason). Fix the call site.")
+            self.status = next
+            return
+        }
+        self.status = next
+    }
+
     init(
         id: UUID = UUID(),
         type: KnowledgeItemType = .audio,
@@ -123,7 +196,10 @@ final class KnowledgeItem {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.statusRaw = status.rawValue
-        self.tags = tags
+        if let data = try? JSONEncoder().encode(tags),
+           let json = String(data: data, encoding: .utf8) {
+            self._tagsJSON = json
+        }
         self.folderID = folderID
         self.projectID = nil
         self.isFlagged = isFlagged

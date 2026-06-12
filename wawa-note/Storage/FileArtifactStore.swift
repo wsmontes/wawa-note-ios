@@ -37,6 +37,19 @@ final class FileArtifactStore: @unchecked Sendable {
             self.baseURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
                 .appendingPathComponent("Meetings", isDirectory: true)
         }
+        // Ensure base directory exists with file protection so all meeting data
+        // (audio, transcripts, analyses) is encrypted at rest on disk.
+        applyBaseProtection()
+    }
+
+    private func applyBaseProtection() {
+        if !fileManager.fileExists(atPath: baseURL.path) {
+            try? fileManager.createDirectory(at: baseURL, withIntermediateDirectories: true)
+        }
+        try? fileManager.setAttributes(
+            [.protectionKey: FileProtectionType.completeUnlessOpen],
+            ofItemAtPath: baseURL.path
+        )
     }
 
     // MARK: - Directory management
@@ -68,6 +81,13 @@ final class FileArtifactStore: @unchecked Sendable {
     func createMeetingDirectory(for meetingId: UUID) throws {
         let url = meetingDirectoryURL(for: meetingId)
         try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+        // Protect all meeting data (audio, transcript, analysis) at rest.
+        // completeUnlessOpen allows recording to continue writing while device
+        // is locked; files become encrypted once closed. All child files inherit.
+        try? fileManager.setAttributes(
+            [.protectionKey: FileProtectionType.completeUnlessOpen],
+            ofItemAtPath: url.path
+        )
     }
 
     func deleteMeetingDirectory(for meetingId: UUID) throws {

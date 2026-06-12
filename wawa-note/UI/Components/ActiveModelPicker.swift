@@ -13,15 +13,21 @@ struct ActiveModelPicker: View {
     @State private var providerName: String = ""
 
     var body: some View {
-        HStack(spacing: 6) {
-            if !providerName.isEmpty {
-                Text(providerName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+        HStack(spacing: 4) {
+            // Provider indicator dot — green for configured, gray when unknown.
+            // Gives immediate visibility into which AI provider is active.
+            Circle()
+                .fill(providerName.isEmpty ? Color.gray : providerColor)
+                .frame(width: 6, height: 6)
             Menu {
                 if isLoading {
                     ProgressView()
+                }
+                if !providerName.isEmpty {
+                    Text("Provider: \(providerName)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Divider()
                 }
                 ForEach(availableModels, id: \.self) { model in
                     Button {
@@ -48,7 +54,7 @@ struct ActiveModelPicker: View {
                 HStack(spacing: 4) {
                     Image(systemName: "cpu")
                         .font(.caption)
-                    Text(selectedModel)
+                    Text(displayLabel)
                         .font(.caption)
                         .fontWeight(.medium)
                     Image(systemName: "chevron.up.chevron.down")
@@ -63,6 +69,28 @@ struct ActiveModelPicker: View {
         }
         .task {
             await loadModels()
+        }
+    }
+
+    /// Shortened label: model name, with provider prefix when user has multiple configs.
+    private var displayLabel: String {
+        let shortModel = selectedModel.components(separatedBy: "/").last ?? selectedModel
+        if providerName.isEmpty {
+            return shortModel
+        }
+        return "\(providerName)·\(shortModel)"
+    }
+
+    /// Color dot matching the provider type for quick visual identification.
+    private var providerColor: Color {
+        guard let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext) else {
+            return .gray
+        }
+        switch config.typeRaw {
+        case "openai": return .green
+        case "anthropic": return .orange
+        case "gemini": return .blue
+        default: return .purple
         }
     }
 
