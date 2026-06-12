@@ -2584,7 +2584,7 @@ final class ProcessingQueueService: ObservableObject {
 
     let maxConcurrentJobs = 2
 
-    private var activeTasks: [UUID: Task<Void, Error>] = [:]
+    private var activeTasks: [UUID: Task<Void, Never>] = [:]
     private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
     private var backgroundTaskCount = 0
     private var pipeline: ContentPipelineService?
@@ -2696,7 +2696,6 @@ final class ProcessingQueueService: ObservableObject {
                     itemID: itemID,
                     projectID: next.projectID
                 )
-                // Success — mark done
                 await MainActor.run { [weak self] in
                     self?.finishJob(entryID, failed: false, error: nil)
                 }
