@@ -20,9 +20,10 @@ struct WawaNoteApp: App {
     private let notificationTokens = NotificationTokens()
 
     init() {
+        let isTesting = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
         do {
-            modelContainer = try ModelContainer(
-                for: AIProviderConfigModel.self,
+            let schema = Schema([
+                AIProviderConfigModel.self,
                 KnowledgeItem.self,
                 Folder.self,
                 Annotation.self,
@@ -36,7 +37,14 @@ struct WawaNoteApp: App {
                 ProjectFrame.self,
                 ChangeRecord.self,
                 ProjectSnapshot.self
-            )
+            ])
+            if isTesting {
+                // In-memory store for tests — no disk I/O, fast setup
+                let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+                modelContainer = try ModelContainer(for: schema, configurations: config)
+            } else {
+                modelContainer = try ModelContainer(for: schema)
+            }
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
