@@ -679,7 +679,13 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         let inputs = route.inputs.map { "\($0.portName)(\($0.portType.rawValue))" }
         let outputs = route.outputs.map { "\($0.portName)(\($0.portType.rawValue))" }
         let available = self.sessionManager.session.availableInputs?.map { "\($0.portName)(\($0.portType.rawValue))" } ?? []
-        let msg = "CrashDiag [\(marker)]: state=\(String(describing: self.state)) gen=\(self.routeRecoveryGeneration.uuidString.prefix(8)) tap=\(self.isTapInstalled) engRunning=\(self.engine.isRunning) restarting=\(self.isPhysicalRestartInProgress) inputs=[\(inputs.joined(separator: ", "))] outputs=[\(outputs.joined(separator: ", "))] avail=[\(available.joined(separator: ", "))] rate=\(self.sessionManager.sampleRate) mid=\(self.currentMeetingId?.uuidString.prefix(8) ?? "nil") file=\(self.fileWriter.currentFileURL?.lastPathComponent ?? "nil")"
+        let intentStr: String = switch self.recordingIntent {
+        case .none: "none"
+        case .userWantsRecording: "wantsRecord"
+        case .userPaused: "paused"
+        case .userStopped: "stopped"
+        }
+        let msg = "CrashDiag [\(marker)]: state=\(String(describing: self.state)) intent=\(intentStr) gen=\(self.routeRecoveryGeneration.uuidString.prefix(8)) tap=\(self.isTapInstalled) engRunning=\(self.engine.isRunning) restarting=\(self.isPhysicalRestartInProgress) inputs=[\(inputs.joined(separator: ", "))] outputs=[\(outputs.joined(separator: ", "))] avail=[\(available.joined(separator: ", "))] rate=\(self.sessionManager.sampleRate) mid=\(self.currentMeetingId?.uuidString.prefix(8) ?? "nil") file=\(self.fileWriter.currentFileURL?.lastPathComponent ?? "nil")"
         AppLog.audio.info("\(msg)")
     }
 

@@ -715,7 +715,7 @@ final class RecordingCoordinator: ObservableObject {
         }
 
         observationTimer?.invalidate()
-        observationTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+        observationTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in  // 10Hz — smooth enough for UI, half the CPU of 20Hz
             guard let self else { return }
             // Timer.scheduledTimer fires on main run loop — already on main thread.
             if let start = self.recordingStartDate {
