@@ -415,8 +415,8 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         )
     }
 
-    /// Decodes compressed audio (AAC/M4A) to 16kHz 16-bit mono PCM WAV
-    /// using AVAssetReader — no manual buffer management, no callback bugs.
+    /// Decodes compressed audio (AAC/M4A) to 16kHz 16-bit mono PCM WAV.
+    /// Uses AVAssetReader to decode → AVAudioFile to write PCM.
     /// WAV and other uncompressed formats pass through unchanged.
     private func prepareForRecognition(_ url: URL) async throws -> URL {
         let ext = url.pathExtension.lowercased()
@@ -447,50 +447,44 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             throw TranscriptionError.recognitionFailed("Cannot add reader output")
         }
         reader.add(readerOutput)
-
-        let tempURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("pcm_\(UUID().uuidString).wav")
-
-        guard let writer = try? AVAssetWriter(url: tempURL, fileType: .wav) else {
-            throw TranscriptionError.recognitionFailed("Cannot create AVAssetWriter")
-        }
-        let writerInput = AVAssetWriterInput(mediaType: .audio, outputSettings: outputSettings)
-        writerInput.expectsMediaDataInRealTime = false
-        guard writer.canAdd(writerInput) else {
-            throw TranscriptionError.recognitionFailed("Cannot add writer input")
-        }
-        writer.add(writerInput)
-
         guard reader.startReading() else {
             throw reader.error ?? TranscriptionError.recognitionFailed("Reader failed to start")
         }
-        guard writer.startWriting() else {
-            throw writer.error ?? TranscriptionError.recognitionFailed("Writer failed to start")
-        }
-        writer.startSession(atSourceTime: .zero)
 
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let queue = DispatchQueue(label: "pcm.decode.\(UUID().uuidString)")
-            writerInput.requestMediaDataWhenReady(on: queue) {
-                while writerInput.isReadyForMoreMediaData {
-                    if let sample = readerOutput.copyNextSampleBuffer() {
-                        writerInput.append(sample)
-                    } else {
-                        writerInput.markAsFinished()
-                        writer.finishWriting {
-                            if writer.status == .completed {
-                                continuation.resume()
-                            } else {
-                                continuation.resume(throwing: writer.error ?? TranscriptionError.recognitionFailed("Writer failed: \(writer.status.rawValue)"))
-                            }
-                        }
-                        return
+        // Write decoded PCM to WAV via AVAudioFile (AVAssetWriter doesn't support .wav)
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pcm_\(UUID().uuidString).wav")
+
+        guard let fmt = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 1, interleaved: false),
+              let outputFile = try? AVAudioFile(forWriting: tempURL, settings: fmt.settings, commonFormat: .pcmFormatInt16, interleaved: false) else {
+            throw TranscriptionError.recognitionFailed("Cannot create output WAV")
+        }
+
+        var frameCount: AVAudioFrameCount = 0
+        while let sample = readerOutput.copyNextSampleBuffer() {
+            guard let blockBuf = CMSampleBufferGetDataBuffer(sample) else { continue }
+            var length = 0
+            var dataPtr: UnsafeMutablePointer<Int8>?
+            CMBlockBufferGetDataPointer(blockBuf, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &length, dataPointerOut: &dataPtr)
+
+            let frameLength = AVAudioFrameCount(length / MemoryLayout<Int16>.stride)
+            if let pcmBuf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: frameLength) {
+                pcmBuf.frameLength = frameLength
+                if let dest = pcmBuf.int16ChannelData?.pointee {
+                    dest.withMemoryRebound(to: Int8.self, capacity: length) { ptr in
+                        if let src = dataPtr { memcpy(ptr, src, length) }
                     }
                 }
+                try? outputFile.write(from: pcmBuf)
+                frameCount += frameLength
             }
         }
 
-        AppLog.transcription.info("PCM decode complete → \(tempURL.lastPathComponent)")
+        guard frameCount > 0 else {
+            throw TranscriptionError.recognitionFailed("Decode produced empty output")
+        }
+
+        AppLog.transcription.info("PCM decode complete: \(frameCount) frames → \(tempURL.lastPathComponent)")
         return tempURL
     }
 
