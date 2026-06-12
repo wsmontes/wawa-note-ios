@@ -2648,6 +2648,18 @@ final class ProcessingQueueService: ObservableObject {
 
         guard let next = pending.first else { return }
 
+        // Safety: if pipeline was never injected via setPipeline(), mark all queued
+        // items as failed rather than leaving them stuck in "queued" state forever.
+        guard let pipeline = self.pipeline else {
+            AppLog.error("pipeline", "Pipeline not set — aborting queue. \(pending.count) items will be marked failed.")
+            for entry in pending where entry.status == .queued {
+                entry.status = .failed
+                entry.completedAt = Date()
+            }
+            entries.removeAll { $0.status == .failed && Date().timeIntervalSince($0.completedAt ?? Date()) > 60 }
+            return
+        }
+
         AppLog.event("pipeline", "Processing item — itemID=\(next.itemID.uuidString.prefix(8)) priority=\(next.priority) projectID=\(next.projectID?.uuidString.prefix(8) ?? "nil")")
 
         next.status = .processing
@@ -2664,7 +2676,7 @@ final class ProcessingQueueService: ObservableObject {
                 }
             }
             try Task.checkCancellation()
-            await self?.pipeline?.processEntry(
+            await pipeline.processEntry(
                 itemID: itemID,
                 projectID: next.projectID
             )
