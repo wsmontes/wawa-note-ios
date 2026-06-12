@@ -160,7 +160,7 @@ try! KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID)!
 
 **Fix:** Replace with `guard let` and return structured errors. Every `try!` in a path reachable by AI output is a ticking bomb.
 
-### 🔴 2. ToolContext is `@unchecked Sendable` with unprotected mutable state
+### 🔴 2. ToolContext is `@unchecked Sendable` with unprotected mutable state ✅ FIXED 2026-06-12
 
 **Location:** `ToolContext.swift`
 
@@ -181,7 +181,7 @@ Passed to AgentLoop which runs in a Task. ShellInterpreter mutates these on `@Ma
 
 **Fix:** Make ToolContext explicitly `@MainActor`, or use an actor with proper locking.
 
-### 🔴 3. AgentLoop is `@unchecked Sendable` — hides real concurrency issues
+### 🔴 3. AgentLoop is `@unchecked Sendable` — hides real concurrency issues ✅ FIXED 2026-06-12
 
 **Location:** `AgentLoop.swift`
 
@@ -193,7 +193,7 @@ AgentLoop captures ToolContext (mutable, `@unchecked Sendable`) and AgentToolReg
 
 **Fix:** Extract into `executeAgentLoop(text:conversationId:isInternal:)`.
 
-### 🟠 5. No deinit cleanup — tasks leak
+### 🟠 5. No deinit cleanup — tasks leak ✅ FIXED (already existed)
 
 **Location:** `ChatViewModel.swift`
 
@@ -206,7 +206,7 @@ No `deinit` that cancels these. If ChatViewModel is deallocated while a stream i
 
 **Fix:** Add `deinit { streamTask?.cancel(); greetingTask?.cancel() }`.
 
-### 🟠 6. `Task.detached` for greeting generation — wrong pattern
+### 🟠 6. `Task.detached` for greeting generation — wrong pattern ✅ FIXED (already uses Task{})
 
 **Location:** `ChatViewModel.pregenerateGreeting()`
 

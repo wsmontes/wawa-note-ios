@@ -22,6 +22,7 @@ enum AgentStreamEvent {
 
 // MARK: - Agent Loop
 
+@MainActor
 final class AgentLoop: @unchecked Sendable {
     let maxIterations: Int
     let registry: AgentToolRegistry
