@@ -143,7 +143,7 @@ enum ShellInterpreter {
         case "cat": return ok(stdin)
         case "grep":
             let pattern = cmd.args.first ?? ""
-            guard !pattern.isEmpty else { return err("grep: missing pattern") }
+            guard !pattern.isEmpty else { return shellErr("grep: missing pattern") }
             let lines = stdin.components(separatedBy: "\n").filter { $0.contains(pattern) }
             return ok(lines.joined(separator: "\n"))
         case "wc":
@@ -151,7 +151,7 @@ enum ShellInterpreter {
             let words = stdin.components(separatedBy: .whitespaces).filter { !$0.isEmpty }.count
             return ok("\(lines) lines, \(words) words, \(stdin.count) chars")
         default:
-            return err("\(cmd.name): does not support pipe input. Supports: cat, grep, wc")
+            return shellErr("\(cmd.name): does not support pipe input. Supports: cat, grep, wc")
         }
     }
 
@@ -403,7 +403,7 @@ enum ShellInterpreter {
 
         case .project(let slug, let pid):
             guard let p = try? ProjectService(context: ctx.modelContext).fetch(id: pid) else {
-                return err("ls: /projects/\(slug): not found")
+                return shellErr("ls: /projects/\(slug): not found")
             }
             let tasks = (try? TaskService(context: ctx.modelContext).tasks(for: pid)) ?? []
             let items = (try? ProjectService(context: ctx.modelContext).items(in: pid)) ?? []
@@ -489,13 +489,13 @@ enum ShellInterpreter {
                     if let t = transcriptText {
                         return ok("analysis/\(iid.uuidString.prefix(8)).transcript.json:\n\(t)")
                     }
-                    return err("cat: analysis/\(iid.uuidString.prefix(8)).transcript.json: No transcript found")
+                    return shellErr("cat: analysis/\(iid.uuidString.prefix(8)).transcript.json: No transcript found")
                 }
                 let analysisText = VFSService.readAnalysis(itemID: iid, fileStore: ctx.fileStore)
                 if let t = analysisText {
                     return ok("analysis/\(iid.uuidString.prefix(8)).json:\n\(t)")
                 }
-                return err("cat: analysis/\(iid.uuidString.prefix(8)).json: No analysis found")
+                return shellErr("cat: analysis/\(iid.uuidString.prefix(8)).json: No analysis found")
             }
             // List both analysis and transcript files
             let items = (try? ProjectService(context: ctx.modelContext).items(in: pid)) ?? []
@@ -576,7 +576,7 @@ enum ShellInterpreter {
 
     private static func handleCat(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
         guard let pathArg = cmd.args.first else {
-            return err("cat: missing path. Usage: cat <path>")
+            return shellErr("cat: missing path. Usage: cat <path>")
         }
         let vpath = VFSService.resolve(pathArg, context: ctx)
         let jsonOutput = cmd.flags["json"] != nil
@@ -585,7 +585,7 @@ enum ShellInterpreter {
         switch vpath {
         case .project(let slug, let pid):
             guard let p = try? ProjectService(context: ctx.modelContext).fetch(id: pid) else {
-                return err("cat: /projects/\(slug)/project.json: not found")
+                return shellErr("cat: /projects/\(slug)/project.json: not found")
             }
             let tasks = (try? TaskService(context: ctx.modelContext).tasks(for: pid)) ?? []
             let items = (try? ProjectService(context: ctx.modelContext).items(in: pid)) ?? []
@@ -602,7 +602,7 @@ enum ShellInterpreter {
                    let json = String(data: data, encoding: .utf8) {
                     return ok(json)
                 }
-                return err("cat: failed to serialize project.json")
+                return shellErr("cat: failed to serialize project.json")
             }
             var lines = ["# \(p.name)", ""]
             if let intent = p.intention { lines.append("Intention: \(intent)") }
@@ -614,7 +614,7 @@ enum ShellInterpreter {
 
         case .projectItem(_, _, let itemID):
             guard let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) else {
-                return err("cat: item not found")
+                return shellErr("cat: item not found")
             }
             if jsonOutput {
                 let dict = VFSService.itemToDict(item, fileStore: ctx.fileStore, fields: fields)
@@ -622,13 +622,13 @@ enum ShellInterpreter {
                    let json = String(data: data, encoding: .utf8) {
                     return ok(json)
                 }
-                return err("cat: failed to serialize item")
+                return shellErr("cat: failed to serialize item")
             }
             return ok(VFSService.formatItemFull(item, fileStore: ctx.fileStore))
 
         case .projectTask(_, _, let taskID):
             guard let task = try? TaskService(context: ctx.modelContext).fetch(id: taskID) else {
-                return err("cat: task not found")
+                return shellErr("cat: task not found")
             }
             if jsonOutput {
                 let dict: [String: Any] = [
@@ -640,7 +640,7 @@ enum ShellInterpreter {
                    let json = String(data: data, encoding: .utf8) {
                     return ok(json)
                 }
-                return err("cat: failed to serialize task")
+                return shellErr("cat: failed to serialize task")
             }
             let due = task.dueAt.map { "Due: \($0.formatted(date: .complete, time: .omitted))" } ?? ""
             let owner = task.ownerName.map { "Owner: \($0)" } ?? ""
@@ -648,18 +648,18 @@ enum ShellInterpreter {
 
         case .inboxItem(let id):
             guard let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: id) else {
-                return err("cat: /inbox/\(id.uuidString.prefix(8)).json: not found")
+                return shellErr("cat: /inbox/\(id.uuidString.prefix(8)).json: not found")
             }
             return ok(VFSService.formatItemFull(item, fileStore: ctx.fileStore))
 
         case .projectAnalysis(_, _, let itemID):
             guard let iid = itemID else {
-                return err("cat: specify an analysis file, e.g. cat analysis/abc123.json")
+                return shellErr("cat: specify an analysis file, e.g. cat analysis/abc123.json")
             }
             if let text = VFSService.readAnalysis(itemID: iid, fileStore: ctx.fileStore) {
                 return ok(text)
             }
-            return err("cat: analysis/\(iid.uuidString.prefix(8)).json: No analysis found")
+            return shellErr("cat: analysis/\(iid.uuidString.prefix(8)).json: No analysis found")
 
         case .agentChat:
             let chatSvc = ChatService(fileStore: ctx.fileStore)
@@ -685,10 +685,10 @@ enum ShellInterpreter {
             return ok(lines.joined(separator: "\n"))
 
         case .unknown(let msg):
-            return err("cat: \(msg)")
+            return shellErr("cat: \(msg)")
 
         default:
-            return err("cat: cannot read directory. Use ls to list contents, then cat <file> to read")
+            return shellErr("cat: cannot read directory. Use ls to list contents, then cat <file> to read")
         }
     }
 
@@ -764,7 +764,7 @@ enum ShellInterpreter {
             return ok("Focused on item \(itemID.uuidString.prefix(8))")
 
         default:
-            return err("cd: \(target): No such directory")
+            return shellErr("cd: \(target): No such directory")
         }
     }
 
@@ -834,7 +834,7 @@ enum ShellInterpreter {
 
     private static func handleGrep(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
         guard cmd.args.count >= 1 else {
-            return err("grep: missing query. Usage: grep \"keyword\" <path>")
+            return shellErr("grep: missing query. Usage: grep \"keyword\" <path>")
         }
         let query = cmd.args[0]
         let target = cmd.args.count >= 2 ? cmd.args[1] : nil
@@ -855,7 +855,7 @@ enum ShellInterpreter {
                 return ok("grep: \(matches.count) match(es) for '\(query)'\n" + matches.prefix(limit).joined(separator: "\n"))
             case .projectItem(_, _, let itemID):
                 guard let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) else {
-                    return err("grep: item not found")
+                    return shellErr("grep: item not found")
                 }
                 let text = VFSService.formatItemFull(item, fileStore: ctx.fileStore)
                 let lines = text.components(separatedBy: "\n")
@@ -906,22 +906,22 @@ enum ShellInterpreter {
 
         switch vpath {
         case .inbox, .projectItems, .projectItem:
-            guard let t = effectiveTitle else { return err("touch: --title is required. Or use: touch items/my-title.json") }
+            guard let t = effectiveTitle else { return shellErr("touch: --title is required. Or use: touch items/my-title.json") }
             guard let kt = KnowledgeItemType(rawValue: type) else {
-                return err("touch: unknown type '\(type)'. Valid: audio, note, journalEntry, webBookmark, image")
+                return shellErr("touch: unknown type '\(type)'. Valid: audio, note, journalEntry, webBookmark, image")
             }
             // Validate type-specific requirements
             if kt == .image {
-                return err("touch: image items cannot be created via shell. Use the Scan or Photo capture buttons in the app to create image items.")
+                return shellErr("touch: image items cannot be created via shell. Use the Scan or Photo capture buttons in the app to create image items.")
             }
             let urlFlag = cmd.flags["url"]
             if kt == .webBookmark && urlFlag == nil {
-                return err("touch: --url is required for webBookmark items. Usage: touch /inbox/ --type webBookmark --title \"Name\" --url \"https://...\"")
+                return shellErr("touch: --url is required for webBookmark items. Usage: touch /inbox/ --type webBookmark --title \"Name\" --url \"https://...\"")
             }
             // Create item
             let svc = KnowledgeItemService(context: ctx.modelContext)
             guard let item = try? svc.createItem(type: kt, title: t, bodyText: body, tags: tags, inboxDate: Date()) else {
-                return err("touch: failed to create item — database error")
+                return shellErr("touch: failed to create item — database error")
             }
             // Set type-specific fields
             if kt == .webBookmark, let url = urlFlag { item.importSourceURL = url }
@@ -956,16 +956,16 @@ enum ShellInterpreter {
 
         case .projects:
             // Create a new project: touch /projects/ --name "Project Name" --summary "..."
-            guard let name = cmd.flags["name"] else { return err("touch: --name is required to create a project") }
+            guard let name = cmd.flags["name"] else { return shellErr("touch: --name is required to create a project") }
             let summary = cmd.flags["summary"]
             let project = try? ProjectService(context: ctx.modelContext).create(name: name, summary: summary)
-            guard let p = project else { return err("touch: failed to create project") }
+            guard let p = project else { return shellErr("touch: failed to create project") }
             ctx.activeProjectID = p.id; ctx.activeProjectSlug = p.slug; ctx.activeProjectName = p.name
             return ok("✅ Created project: \(p.name) (\(p.slug))")
 
         case .projectTasks, .projectTask:
-            guard let t = effectiveTitle else { return err("touch: --title is required. Or use: touch tasks/my-task-name.json") }
-            guard let pid = ctx.activeProjectID else { return err("touch: no active project. cd /projects/{slug} first") }
+            guard let t = effectiveTitle else { return shellErr("touch: --title is required. Or use: touch tasks/my-task-name.json") }
+            guard let pid = ctx.activeProjectID else { return shellErr("touch: no active project. cd /projects/{slug} first") }
             let prio = TaskPriority(rawValue: priority) ?? .medium
             if priority != prio.rawValue {
                 let valid = TaskPriority.allCases.map { $0.rawValue }.joined(separator: ", ")
@@ -975,7 +975,7 @@ enum ShellInterpreter {
             guard let task = try? TaskService(context: ctx.modelContext).create(
                 title: t, projectID: pid, priority: prio,
                 ownerName: owner, dueAt: due, createdBy: .llm) else {
-                return err("touch: failed to create task — database error")
+                return shellErr("touch: failed to create task — database error")
             }
             let card = TaskCardData(
                 taskID: task.id.uuidString, title: t, status: task.statusRaw, priority: priority,
@@ -987,14 +987,14 @@ enum ShellInterpreter {
         case .projectPeople:
             // Create a person: touch people/ --name "Display Name" --email "..." --role "Developer"
             guard let name = cmd.flags["name"] else {
-                return err("touch people/: --name is required. Optional: --email, --role")
+                return shellErr("touch people/: --name is required. Optional: --email, --role")
             }
             let email = cmd.flags["email"]
             let role = cmd.flags["role"]
             let person = try? PersonService(context: ctx.modelContext).findOrCreate(
                 displayName: name, email: email, role: role
             )
-            guard let p = person else { return err("touch: failed to create person") }
+            guard let p = person else { return shellErr("touch: failed to create person") }
             return ok("✅ Person: \(p.displayName) (\(p.id.uuidString.prefix(8)))")
 
         case .projectEdges:
@@ -1003,7 +1003,7 @@ enum ShellInterpreter {
                   let toStr = cmd.flags["to"],
                   let fromID = UUID(uuidString: fromStr),
                   let toID = UUID(uuidString: toStr) else {
-                return err("touch edges/: --from <uuid> --to <uuid> required. --type <edgeType> optional.")
+                return shellErr("touch edges/: --from <uuid> --to <uuid> required. --type <edgeType> optional.")
             }
             let edgeType = EdgeType(rawValue: cmd.flags["type"] ?? "relatesTo") ?? .relatesTo
             let weight = Double(cmd.flags["weight"] ?? "1.0") ?? 1.0
@@ -1011,7 +1011,7 @@ enum ShellInterpreter {
                 fromID: fromID, toID: toID, edgeType: edgeType, weight: weight,
                 provenanceItemID: nil, provenanceSegmentIDs: []
             )
-            guard let e = edge else { return err("touch: failed to create edge") }
+            guard let e = edge else { return shellErr("touch: failed to create edge") }
             return ok("✅ Created edge: \(e.id.uuidString.prefix(8)) (\(edgeType.rawValue))")
 
         case .unknown(let msg):
@@ -1022,14 +1022,14 @@ enum ShellInterpreter {
                     title: t, projectID: pid, priority: prio,
                     ownerName: owner, dueAt: nil, createdBy: .llm
                 ) else {
-                    return err("touch: failed to create task — database error")
+                    return shellErr("touch: failed to create task — database error")
                 }
                 return ok("Created /projects/\(ctx.activeProjectSlug ?? "?")/tasks/\(task.id.uuidString.prefix(8)).json  (\(t) [\(priority)])")
             }
-            return err("touch: cannot create here. Use tasks/ or items/ inside a project, or /inbox/ for notes. Examples:\n  touch tasks/ --title \"My Task\"\n  touch tasks/my-task.json\n  touch /inbox/ --title \"My Note\" --type note")
+            return shellErr("touch: cannot create here. Use tasks/ or items/ inside a project, or /inbox/ for notes. Examples:\n  touch tasks/ --title \"My Task\"\n  touch tasks/my-task.json\n  touch /inbox/ --title \"My Note\" --type note")
 
         default:
-            return err("touch: cannot create in this location. Use /inbox/ or /projects/{slug}/items/ or /projects/{slug}/tasks/")
+            return shellErr("touch: cannot create in this location. Use /inbox/ or /projects/{slug}/items/ or /projects/{slug}/tasks/")
         }
     }
 
@@ -1037,11 +1037,11 @@ enum ShellInterpreter {
 
     private static func handleEcho(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
         guard let body = cmd.redirectBody, let target = cmd.redirectTarget else {
-            return err("echo: usage: echo '{\"field\":\"value\"}' > <path>")
+            return shellErr("echo: usage: echo '{\"field\":\"value\"}' > <path>")
         }
         guard let data = body.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return err("echo: body must be valid JSON. Example: echo '{\"status\":\"done\"}' > path")
+            return shellErr("echo: body must be valid JSON. Example: echo '{\"status\":\"done\"}' > path")
         }
 
         let vpath = VFSService.resolve(target, context: ctx)
@@ -1049,7 +1049,7 @@ enum ShellInterpreter {
         switch vpath {
         case .projectTask(_, _, let taskID):
             guard let task = try? TaskService(context: ctx.modelContext).fetch(id: taskID) else {
-                return err("echo: task not found")
+                return shellErr("echo: task not found")
             }
             let rawJSON = body
             do {
@@ -1059,12 +1059,12 @@ enum ShellInterpreter {
                 }
                 return ok("Updated")
             } catch {
-                return err("echo: update failed: \(error.localizedDescription)")
+                return shellErr("echo: update failed: \(error.localizedDescription)")
             }
 
         case .projectItem(_, _, let itemID):
             guard let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) else {
-                return err("echo: item not found")
+                return shellErr("echo: item not found")
             }
             // Delegate to VFSService for full field coverage
             let rawJSON = body
@@ -1072,12 +1072,12 @@ enum ShellInterpreter {
                 try VFSService.updateItemFromJSON(item, jsonText: rawJSON, context: ctx)
                 return ok("Updated item \(itemID.uuidString.prefix(8))")
             } catch {
-                return err("echo: update failed: \(error.localizedDescription)")
+                return shellErr("echo: update failed: \(error.localizedDescription)")
             }
 
         case .project(let slug, let pid):
             guard let project = try? ProjectService(context: ctx.modelContext).fetch(id: pid) else {
-                return err("echo: project not found")
+                return shellErr("echo: project not found")
             }
             if let newSummary = json["summary"] as? String {
                 project.summary = newSummary
@@ -1127,7 +1127,7 @@ enum ShellInterpreter {
                     try VFSService.writeItemFile(target, content: rawJSON, context: ctx)
                     return ok("Written to \(target)")
                 } catch {
-                    return err("echo: write failed: \(error.localizedDescription)")
+                    return shellErr("echo: write failed: \(error.localizedDescription)")
                 }
             }
             // Also support raw body text for .md files
@@ -1153,15 +1153,15 @@ enum ShellInterpreter {
                     }
                     return ok("\(action) \(target)")
                 } catch {
-                    return err("echo: write failed: \(error.localizedDescription)")
+                    return shellErr("echo: write failed: \(error.localizedDescription)")
                 }
             }
-            return err("echo: body must be valid JSON for .json files, or raw text for .md files")
+            return shellErr("echo: body must be valid JSON for .json files, or raw text for .md files")
 
         case .projectAnalysis(_, _, let itemID):
             // Write analysis.json for an item via the analysis path
             guard let iid = itemID else {
-                return err("echo: specify item ID in analysis path")
+                return shellErr("echo: specify item ID in analysis path")
             }
             let rawJSON = body
             if let data = rawJSON.data(using: .utf8),
@@ -1171,13 +1171,13 @@ enum ShellInterpreter {
                     try rawJSON.write(to: fileURL, atomically: true, encoding: .utf8)
                     return ok("Analysis written for item \(iid.uuidString.prefix(8))")
                 } catch {
-                    return err("echo: failed to write analysis: \(error.localizedDescription)")
+                    return shellErr("echo: failed to write analysis: \(error.localizedDescription)")
                 }
             }
-            return err("echo: body must be valid JSON for analysis files")
+            return shellErr("echo: body must be valid JSON for analysis files")
 
         default:
-            return err("echo: cannot write to this path")
+            return shellErr("echo: cannot write to this path")
         }
     }
 
@@ -1185,34 +1185,34 @@ enum ShellInterpreter {
 
     private static func handleRm(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
         guard let target = cmd.args.first else {
-            return err("rm: missing path. Usage: rm <path>")
+            return shellErr("rm: missing path. Usage: rm <path>")
         }
         let vpath = VFSService.resolve(target, context: ctx)
 
         switch vpath {
         case .projectItem(_, _, let itemID):
             guard let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) else {
-                return err("rm: item not found")
+                return shellErr("rm: item not found")
             }
             try? TrashService(context: ctx.modelContext).moveToTrash(item)
             return ok("Moved '\(item.title)' to trash. Use the app to restore or permanently delete.")
 
         case .inboxItem(let id):
             guard let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: id) else {
-                return err("rm: item not found")
+                return shellErr("rm: item not found")
             }
             try? TrashService(context: ctx.modelContext).moveToTrash(item)
             return ok("Moved '\(item.title)' to trash.")
 
         case .projectTask(_, _, let taskID):
             guard let task = try? TaskService(context: ctx.modelContext).fetch(id: taskID) else {
-                return err("rm: task not found")
+                return shellErr("rm: task not found")
             }
             try? TaskService(context: ctx.modelContext).deleteTask(task)
             return ok("Deleted task '\(task.title)'. This is permanent.")
 
         case .projectItemContents(_, _, let itemID), .inboxItemFile(let itemID):
-            return err("rm: cannot delete individual files inside items. Delete the parent item instead, or overwrite the file with empty content.")
+            return shellErr("rm: cannot delete individual files inside items. Delete the parent item instead, or overwrite the file with empty content.")
 
         case .agentPrompt(let name):
             PromptStore.shared.resetPrompt(named: name)
@@ -1242,12 +1242,12 @@ enum ShellInterpreter {
                     try? gsvc.deleteEdge(edge)
                     return ok("Deleted edge \(edge.id.uuidString.prefix(8))")
                 }
-                return err("rm: edge not found. Use ls edges/ to list edge IDs.")
+                return shellErr("rm: edge not found. Use ls edges/ to list edge IDs.")
             }
-            return err("rm: \(msg)")
+            return shellErr("rm: \(msg)")
 
         default:
-            return err("rm: can only remove items, tasks, edges, prompts, memories, or conversations.")
+            return shellErr("rm: can only remove items, tasks, edges, prompts, memories, or conversations.")
         }
     }
 
@@ -1255,7 +1255,7 @@ enum ShellInterpreter {
 
     private static func handleMv(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
         guard cmd.args.count >= 2 else {
-            return err("mv: usage: mv <source> <destination>")
+            return shellErr("mv: usage: mv <source> <destination>")
         }
         let src = VFSService.resolve(cmd.args[0], context: ctx)
         let dst = VFSService.resolve(cmd.args[1], context: ctx)
@@ -1283,7 +1283,7 @@ enum ShellInterpreter {
             return ok("Moved item back to inbox from /projects/\(slug)/")
 
         default:
-            return err("mv: can only move items between /inbox/ and /projects/{slug}/items/")
+            return shellErr("mv: can only move items between /inbox/ and /projects/{slug}/items/")
         }
     }
 
@@ -1291,7 +1291,7 @@ enum ShellInterpreter {
 
     private static func handleHead(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
         guard let target = cmd.args.first else {
-            return err("head: missing path. Usage: head -n <count> <path>")
+            return shellErr("head: missing path. Usage: head -n <count> <path>")
         }
         let count = Int(cmd.flags["n"] ?? cmd.flags["lines"] ?? "10") ?? 10
         let vpath = VFSService.resolve(target, context: ctx)
@@ -1403,7 +1403,7 @@ enum ShellInterpreter {
             return ok(lines.joined(separator: "\n"))
 
         default:
-            return err("history: can only show history for /projects/{slug}/project.json or items/{id}.json")
+            return shellErr("history: can only show history for /projects/{slug}/project.json or items/{id}.json")
         }
     }
 
@@ -1411,14 +1411,14 @@ enum ShellInterpreter {
 
     private static func handleExtract(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
         guard let idStr = cmd.args.first, let itemID = UUID(uuidString: idStr) else {
-            return err("extract: usage: extract <item-id>")
+            return shellErr("extract: usage: extract <item-id>")
         }
         guard let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) else {
-            return err("extract: item not found")
+            return shellErr("extract: item not found")
         }
         let extractSvc = ContentExtractionService(modelContext: ctx.modelContext, fileStore: ctx.fileStore)
         let text = extractSvc.bestAvailableTextSync(for: item) ?? ""
-        if text.isEmpty { return err("extract: no extractable text found for this item") }
+        if text.isEmpty { return shellErr("extract: no extractable text found for this item") }
         return ok(text)
     }
 
@@ -1470,12 +1470,12 @@ enum ShellInterpreter {
     // MARK: - semantic (semantic search)
 
     private static func handleSemantic(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
-        guard cmd.args.count >= 1 else { return err("semantic: usage: semantic \"query\" [--limit N]") }
+        guard cmd.args.count >= 1 else { return shellErr("semantic: usage: semantic \"query\" [--limit N]") }
         let query = cmd.args.joined(separator: " ")
         let limit = Int(cmd.flags["limit"] ?? "10") ?? 10
         let allItems = (try? KnowledgeItemService(context: ctx.modelContext).allItems()) ?? []
         guard let provider = try? ProviderRouter.resolveActive(context: ctx.modelContext) else {
-            return err("semantic: no AI provider configured. Semantic search requires an embedding model.")
+            return shellErr("semantic: no AI provider configured. Semantic search requires an embedding model.")
         }
         // Run async search and return stub for now - agent can check back
         let svc = SemanticSearchService(fileStore: ctx.fileStore)
@@ -1492,10 +1492,10 @@ enum ShellInterpreter {
 
     private static func handleAnalyze(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
         guard let idStr = cmd.args.first, let itemID = UUID(uuidString: idStr) else {
-            return err("analyze: usage: analyze <item-id>")
+            return shellErr("analyze: usage: analyze <item-id>")
         }
         guard let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) else {
-            return err("analyze: item \(idStr) not found")
+            return shellErr("analyze: item \(idStr) not found")
         }
         // Set flag: mark item as ready for analysis by setting analysisProviderId to "pending"
         if item.analysisProviderId == nil {
@@ -1511,7 +1511,7 @@ enum ShellInterpreter {
         let sub = cmd.args.first ?? "list"
         switch sub {
         case "add":
-            guard let title = cmd.flags["title"] else { return err("cal add: --title required. --start (ISO8601), --end, --notes optional.") }
+            guard let title = cmd.flags["title"] else { return shellErr("cal add: --title required. --start (ISO8601), --end, --notes optional.") }
             let startStr = cmd.flags["start"] ?? Date().ISO8601Format()
             let endStr = cmd.flags["end"]
             let notes = cmd.flags["notes"]
@@ -1522,7 +1522,7 @@ enum ShellInterpreter {
                 let eventID = try svc.createEvent(title: title, startDate: start, endDate: end, notes: notes)
                 return ok("Calendar event created: \(title) (\(eventID.prefix(8)))")
             } catch {
-                return err("cal add: failed — \(error.localizedDescription)")
+                return shellErr("cal add: failed — \(error.localizedDescription)")
             }
         case "list":
             let svc = CalendarSyncService()
@@ -1536,7 +1536,7 @@ enum ShellInterpreter {
             }
             return ok(lines.joined(separator: "\n"))
         default:
-            return err("cal: usage: cal list | cal add --title \"Event\" --start \"2026-06-07T14:00:00Z\" [--end ...] [--notes ...]")
+            return shellErr("cal: usage: cal list | cal add --title \"Event\" --start \"2026-06-07T14:00:00Z\" [--end ...] [--notes ...]")
         }
     }
 
@@ -1544,18 +1544,18 @@ enum ShellInterpreter {
 
     private static func handleCleanup(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
         guard let idStr = cmd.args.first, let itemID = UUID(uuidString: idStr) else {
-            return err("cleanup: usage: cleanup <item-id>   Deletes the raw audio file for processed items to free disk space.")
+            return shellErr("cleanup: usage: cleanup <item-id>   Deletes the raw audio file for processed items to free disk space.")
         }
         guard let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) else {
-            return err("cleanup: item \(idStr) not found")
+            return shellErr("cleanup: item \(idStr) not found")
         }
-        guard item.type == .audio else { return err("cleanup: only audio items have raw audio files to clean up.") }
-        guard item.transcriptionEngineId != nil else { return err("cleanup: item must be transcribed first. The raw audio is still needed.") }
+        guard item.type == .audio else { return shellErr("cleanup: only audio items have raw audio files to clean up.") }
+        guard item.transcriptionEngineId != nil else { return shellErr("cleanup: item must be transcribed first. The raw audio is still needed.") }
         do {
             try ctx.fileStore.deleteAudio(for: itemID)
             return ok("Deleted raw audio for '\(item.title)'. Transcript and analysis are preserved.")
         } catch {
-            return err("cleanup: \(error.localizedDescription)")
+            return shellErr("cleanup: \(error.localizedDescription)")
         }
     }
 
@@ -1563,7 +1563,7 @@ enum ShellInterpreter {
 
     private static func handleProgress(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
         guard let stepStr = cmd.args.first, let step = Int(stepStr) else {
-            return err("progress: usage: progress <step> <total> [--label \"Processing...\"]")
+            return shellErr("progress: usage: progress <step> <total> [--label \"Processing...\"]")
         }
         let total = Int(cmd.args.count > 1 ? cmd.args[1] : "1") ?? 1
         let label = cmd.flags["label"] ?? "Processing..."
@@ -1575,18 +1575,18 @@ enum ShellInterpreter {
 
     private static func handleVision(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
         guard let idStr = cmd.args.first, let itemID = UUID(uuidString: idStr) else {
-            return err("vision: usage: vision <item-id> [--question \"...\"] [--save-as-note]")
+            return shellErr("vision: usage: vision <item-id> [--question \"...\"] [--save-as-note]")
         }
         guard let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) else {
-            return err("vision: item \(idStr) not found")
+            return shellErr("vision: item \(idStr) not found")
         }
         let dir = ctx.fileStore.itemDirectoryURL(for: item.id)
         let scanURL = dir.appendingPathComponent("scan_0.jpg")
         guard FileManager.default.fileExists(atPath: scanURL.path) else {
-            return err("vision: no image found for item '\(item.title)'. It must have a scanned image (scan_0.jpg).")
+            return shellErr("vision: no image found for item '\(item.title)'. It must have a scanned image (scan_0.jpg).")
         }
         guard let provider = try? ProviderRouter.resolveActive(context: ctx.modelContext) else {
-            return err("vision: no AI provider configured. Vision requires a provider with image support.")
+            return shellErr("vision: no AI provider configured. Vision requires a provider with image support.")
         }
         let question = cmd.args.count > 1
             ? cmd.args.dropFirst().joined(separator: " ")
@@ -1624,7 +1624,7 @@ enum ShellInterpreter {
         // doesn't deadlock in practice, but a timeout is safety.
         _ = semaphore.wait(timeout: .now() + 30)
 
-        if let error = resultError { return err("vision: \(error)") }
+        if let error = resultError { return shellErr("vision: \(error)") }
         let extra = saveAsNote ? " Also saved as a new note." : ""
         return ok("Image analysis for '\(item.title)':\(extra)\n\n\(resultText)")
     }
@@ -1632,7 +1632,7 @@ enum ShellInterpreter {
     // MARK: - export
 
     private static func handleExport(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
-        guard let target = cmd.args.first else { return err("export: usage: export <item-id | project-id> [--format md|json]") }
+        guard let target = cmd.args.first else { return shellErr("export: usage: export <item-id | project-id> [--format md|json]") }
         let format = cmd.flags["format"] ?? "md"
         let ext = format == "json" ? "json" : "md"
         // Try as item ID
@@ -1642,7 +1642,7 @@ enum ShellInterpreter {
                 let exporter = JSONExporter()
                 if let data = try? exporter.export(item: item, transcript: nil, analysis: nil) {
                     output = String(data: data, encoding: .utf8) ?? ""
-                } else { return err("export: JSON export failed") }
+                } else { return shellErr("export: JSON export failed") }
             } else {
                 output = MarkdownExporter().export(item: item, transcript: nil, analysis: nil)
             }
@@ -1664,7 +1664,7 @@ enum ShellInterpreter {
             try? output.write(to: url, atomically: true, encoding: .utf8)
             return ok("Project exported to \(url.path) (\(items.count) items, \(tasks.count) tasks)")
         }
-        return err("export: '\(target)' not found as item or project ID")
+        return shellErr("export: '\(target)' not found as item or project ID")
     }
 
     // MARK: - help
@@ -1720,12 +1720,12 @@ enum ShellInterpreter {
 
     private static func handleJsEval(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
         guard let code = cmd.args.first else {
-            return err("js-eval: usage: js-eval '<javascript code>'")
+            return shellErr("js-eval: usage: js-eval '<javascript code>'")
         }
         let bridge = WawaJSBridge(modelContext: ctx.modelContext, fileStore: ctx.fileStore)
         let result = JSSandbox.execute(code, bridge: bridge)
         if let error = result.error {
-            return err("js-eval error: \(error)")
+            return shellErr("js-eval error: \(error)")
         }
         var out = result.output
         if !result.logs.isEmpty {
@@ -1738,6 +1738,10 @@ enum ShellInterpreter {
 
     private static func ok(_ content: String, blocks: [ChatBlock]? = nil) -> ToolResult {
         ToolResult(content: content, blocks: blocks, citations: [], isError: false, displaySummary: String(content.prefix(80)))
+    }
+
+    private static func shellErr(_ message: String) -> ToolResult {
+        ToolResult(content: message, blocks: nil, citations: [], isError: true, displaySummary: message)
     }
 
     /// Known command names for did-you-mean suggestions (used by dispatch default).
