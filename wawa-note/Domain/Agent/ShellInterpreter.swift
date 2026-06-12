@@ -204,7 +204,6 @@ enum ShellInterpreter {
         case "vision", "describe": result = handleVision(cmd, ctx)
         case "progress": result = handleProgress(cmd, ctx)
         case "cleanup": result = handleCleanup(cmd, ctx)
-        case "history": result = handleHistory(cmd, ctx)
         case "help":  result = handleHelp(cmd, ctx)
         case "ask_user": result = handleAskUser(cmd, ctx)
         default:
@@ -1367,8 +1366,15 @@ enum ShellInterpreter {
     // MARK: - history
 
     private static func handleHistory(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
+        // If no path given, show command history (new behavior)
         guard let target = cmd.args.first else {
-            return err("history: missing path. Usage: history <path>")
+            if cmd.flags.keys.contains("clear") {
+                commandHistory.removeAll()
+                return ok("Command history cleared.")
+            }
+            if commandHistory.isEmpty { return ok("No commands in history.") }
+            let numbered = commandHistory.enumerated().map { "\($0.offset + 1): \($0.element)" }.joined(separator: "\n")
+            return ok("Recent commands (\(commandHistory.count)/\(maxHistory)):\n\(numbered)")
         }
         let limit = Int(cmd.flags["limit"] ?? "30") ?? 30
         let vpath = VFSService.resolve(target, context: ctx)
@@ -1662,16 +1668,6 @@ enum ShellInterpreter {
     }
 
     // MARK: - help
-
-    private static func handleHistory(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
-        if cmd.flags.keys.contains("clear") {
-            commandHistory.removeAll()
-            return ok("History cleared.")
-        }
-        if commandHistory.isEmpty { return ok("No commands in history.") }
-        let numbered = commandHistory.enumerated().map { "\($0.offset + 1): \($0.element)" }.joined(separator: "\n")
-        return ok("Recent commands (\(commandHistory.count)/\(maxHistory)):\n\(numbered)")
-    }
 
     private static func handleHelp(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
         let topic = cmd.args.first ?? "vfs"
