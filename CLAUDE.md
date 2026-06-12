@@ -1,6 +1,27 @@
 # CLAUDE.md — Wawa Note
 
-Updated: 2026-05-30
+Updated: 2026-06-12
+
+## Dev workflow (automated)
+
+```bash
+# Single-command operations (zero human intervention):
+make all      # Build → Install on iPhone → Run tests
+make deploy   # Build → Install on iPhone
+make test     # Run unit tests on simulator
+make logs     # Stream device logs (Wawa Note + audio + pipeline + agent + errors)
+make clean    # Clear DerivedData
+make quick    # Build + test (no install)
+
+# Manual operations:
+bash scripts/dev-automation.sh all     # Full automation with color logging
+bash scripts/log-capture.sh --save     # Stream + save to ~/Desktop/wawa-logs/
+bash scripts/run-tests.sh --quick      # Core services only
+bash scripts/run-tests.sh --full       # All tests
+```
+
+**Target device:** iPhone 14 Plus (`BBA4F656`, WiFi: `iPhone.coredevice.local`)
+**Test device:** iPhone 14 Plus Simulator
 
 ## Project identity
 
