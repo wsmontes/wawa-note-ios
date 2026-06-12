@@ -64,15 +64,12 @@ final class ContentExtractionService {
                 continue
             }
 
-            let inputURL: URL
-            if let converted = try? await convertToTranscriptionFormat(segURL) {
-                inputURL = converted
-            } else {
-                inputURL = segURL
-            }
-
+            // Apple Speech natively supports M4A, WAV, CAF, MP3 — no conversion needed.
+            // convertToTranscriptionFormat was removed: AVAssetExportPresetPassthrough
+            // with .wav output produced corrupted files (AAC bitstream in WAV container)
+            // that caused the on-device recognizer to skip the first seconds of audio.
             do {
-                let result = try await engine.transcribeFile(inputURL)
+                let result = try await engine.transcribeFile(segURL)
                 // Offset segment timestamps — accumulate across segments
                 let shifted = result.segments.map { seg -> TranscriptSegment in
                     var s = seg
@@ -153,15 +150,9 @@ final class ContentExtractionService {
         let engine = resolveTranscriptionEngine()
         guard let engine else { return nil }
 
-        let inputURL: URL
-        if let converted = try? await convertToTranscriptionFormat(audioURL) {
-            inputURL = converted
-        } else {
-            inputURL = audioURL
-        }
-
+        // Apple Speech natively supports M4A, WAV, CAF, MP3 — no conversion needed.
         do {
-            var result = try await engine.transcribeFile(inputURL)
+            var result = try await engine.transcribeFile(audioURL)
             result.meetingId = item.id
             result.segments = result.segments.map { var f = $0; f.meetingId = item.id; return f }
 

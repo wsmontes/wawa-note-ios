@@ -569,4 +569,256 @@ my-project/
 
 ---
 
+## Latest Findings: Apple Speech On-Device Missing First Seconds of Audio
+
+Date: 2026-06-12
+Investigation: Root cause analysis of why on-device transcription (Apple Speech) drops the first seconds of recorded audio.
+
+### Executive Summary
+
+After full-stack tracing of the audio pipeline (`AVAudioSession` → `AVAudioEngine` tap → `AudioFileWriter` AAC encoding → `AudioSegmentConcatenator` → `ContentExtractionService` → `AppleSpeechTranscriptionEngine`), **three interacting issues** were identified as responsible for the missing initial audio. The primary culprit is **`convertToTranscriptionFormat` using an invalid passthrough preset**, which can produce corrupted audio files that Apple Speech miscounts. Secondary factors include **AAC encoder priming compounding** and **missing initial audio validation in `startRecording()`**.
+
+---
+
+### 🔴 Primary Culprit: `convertToTranscriptionFormat` — broken WAV conversion via passthrough
+
+**File:** `ContentExtractionService.swift:541-576`
+
+```swift
+func convertToTranscriptionFormat(_ sourceURL: URL) async throws -> URL {
+    let asset = AVURLAsset(url: sourceURL)
+    let tempURL = fileStore.itemDirectoryURL(for: UUID())
+        .appendingPathComponent("transcription_input.wav")
+
+    guard let export = AVAssetExportSession(asset: asset,
+        presetName: AVAssetExportPresetPassthrough) else { throw ... }
+
+    export.outputURL = tempURL
+    export.outputFileType = .wav       // ← FUNDAMENTALLY BROKEN
+    export.audioMix = nil
+```
+
+**The problem:** `AVAssetExportPresetPassthrough` passes encoded audio bitstreams through WITHOUT re-encoding. You cannot "passthrough" AAC-compressed audio into a WAV container — WAV expects uncompressed PCM. This combination is **semantically invalid**.
+
+**What actually happens (iOS version-dependent):**
+
+| Scenario | Probability | Result |
+|---|---|---|
+| Export fails with error | High | Caller catches error, falls back to original file → **works correctly** |
+| Export "succeeds" but WAV has AAC bitstream | Medium (iOS 17-18 edge case) | WAV read as PCM → noise/silence → Apple Speech VAD filters it as non-speech → **first seconds lost** |
+| Export truncates/corrupts header | Low | Apple Speech fails to open file → **entire transcription fails** |
+
+When scenario 2 occurs, the first frames of the "WAV" file contain AAC encoder initialization data interpreted as PCM samples. These produce near-silence (very low amplitude) that `SFSpeechRecognizer`'s internal voice activity detection treats as non-speech and skips. The transcript starts only when enough "real" audio data accumulates to be recognized as speech.
+
+**Evidence chain:**
+
+1. `convertToTranscriptionFormat` is called for EVERY segment in `transcribeSegmented()` and for single-file transcription in `transcribeSingleFile()`. It is the gatekeeper before Apple Speech receives the audio file.
+2. The function name implies "make this format suitable for transcription" — the developer knew Apple Speech needed a specific format but chose the wrong conversion mechanism.
+3. The comment "Uses passthrough to avoid re-encoding — when it fails (AAC can't go into WAV), callers fall back to the original file which engines handle natively" reveals awareness that this SHOULD fail for AAC. But `AVAssetExportSession` behavior with invalid preset+fileType combinations is not guaranteed to fail cleanly across iOS versions.
+4. **The fallback path works correctly** — Apple Speech handles M4A natively. The bug is that the conversion path sometimes doesn't fail when it should.
+
+**Fix:**
+
+```swift
+func convertToTranscriptionFormat(_ sourceURL: URL) async throws -> URL {
+    // Option A: Remove entirely. Apple Speech handles M4A, WAV, and CAF natively.
+    // The conversion is unnecessary.
+    return sourceURL
+
+    // Option B: If conversion is truly needed for some edge case, use proper PCM:
+    let asset = AVAsset(url: sourceURL)
+    guard let reader = try? AVAssetReader(asset: asset) else { throw ... }
+    guard let track = try? await asset.loadTracks(withMediaType: .audio).first
+        else { throw ... }
+
+    let outputSettings: [String: Any] = [
+        AVFormatIDKey: kAudioFormatLinearPCM,
+        AVSampleRateKey: 16000,             // 16kHz is optimal for speech recognition
+        AVNumberOfChannelsKey: 1,
+        AVLinearPCMBitDepthKey: 16,
+        AVLinearPCMIsFloatKey: false,
+        AVLinearPCMIsBigEndianKey: false
+    ]
+    let readerOutput = AVAssetReaderTrackOutput(track: track, outputSettings: outputSettings)
+    reader.add(readerOutput)
+
+    guard let writer = try? AVAssetWriter(url: tempURL, fileType: .wav) else { throw ... }
+    let writerInput = AVAssetWriterInput(mediaType: .audio, outputSettings: outputSettings)
+    writer.add(writerInput)
+
+    reader.startReading()
+    writer.startWriting()
+    writer.startSession(atSourceTime: .zero)
+
+    // Copy samples (can be optimized with requestMediaDataWhenReady)
+    while let sample = readerOutput.copyNextSampleBuffer() {
+        if writerInput.isReadyForMoreMediaData {
+            writerInput.append(sample)
+        }
+    }
+    writerInput.markAsFinished()
+    await writer.finishWriting()
+    return tempURL
+}
+```
+
+---
+
+### 🟠 Secondary Culprit: AAC encoder priming samples compound across encode cycles
+
+**How AAC priming works:**
+
+When `AVAudioFile` encodes PCM audio to AAC (which happens for every segment file with sampleRate ≥ 16kHz), the AAC encoder adds:
+
+- **Priming samples** at the beginning (~2112 samples = ~48ms at 44.1kHz) — needed for the encoder's filter bank to initialize
+- **Remainder samples** at the end — needed to flush the encoder's internal buffers
+
+The MP4/M4A container stores an **edit list** (elst atom) that tells decoders: "skip the first 2112 samples, play from there." This makes the priming transparent to playback.
+
+**The problem:** The audio goes through **multiple encode-decode cycles:**
+
+```
+Cycle 1: Microphone PCM → AVAudioFile → AAC/M4A segment file (priming added)
+Cycle 2: Segment M4A → AVAssetExportSession → concatenated audio.m4a (priming added AGAIN)
+```
+
+Each AAC encode cycle adds its own priming samples with its own edit list. After Cycle 2, the concatenated file has:
+- Inner edit list from Cycle 1 (trimming the first encode's priming)
+- Outer edit list from Cycle 2 (trimming the second encode's priming)
+
+When `SFSpeechRecognizer` processes the file:
+- **Server-based recognizer:** Uses Apple's server-side decoder which handles nested edit lists correctly
+- **On-device recognizer (`requiresOnDeviceRecognition: true`):** Uses a different, lighter decoder that may not perfectly resolve nested edit lists. The on-device model's audio preprocessing pipeline may trim more audio than expected at the beginning.
+
+**This affects the concatenated `audio.m4a` significantly** (used by legacy `transcribeSingleFile()` path), but affects individual segments less (used by `transcribeSegmented()` path) since segments only go through Cycle 1.
+
+**Note:** ~48ms per cycle is tiny — not "a few seconds." But if the on-device decoder misinterprets the edit list and trims an entire AAC frame (1024 samples = ~23ms) or multiple frames, it could add up. Combined with Issue 1 (corrupted WAV conversion), the total loss could reach 1-2 seconds.
+
+**Fix:** For `transcribeSegmented()`, skip the concatenation step and transcribe individual segments. This is already the behavior for segmented recordings. For the concatenated file, consider using ALAC (Apple Lossless) instead of AAC for the concatenated `audio.m4a` to avoid the second encode cycle, or use PCM/WAV directly.
+
+---
+
+### 🟡 Contributing Factor: No initial audio validation in `startRecording()`
+
+**File:** `AudioCaptureService.swift:380-456`
+
+**The asymmetry:**
+
+`restartCaptureForNewRoute()` (used for Bluetooth reconnection, route changes) has a **validation phase**:
+
+```swift
+// restartCaptureForNewRoute: wait for first audio buffer
+transition(to: .validatingRoute, reason: "validating: \(reason)")
+let bufferCheckStart = lastBufferReceivedAt
+for _ in 0..<maxIterations where lastBufferReceivedAt <= bufferCheckStart {
+    try? await Task.sleep(nanoseconds: 100_000_000)
+}
+// Only commits to .recording if audio is actually arriving
+```
+
+`startRecording()` (initial recording start) does **NOT validate**:
+
+```swift
+// startRecording: transitions immediately
+try engine.start()
+transition(to: .recording, reason: "startRecording succeeded")
+// No check that audio buffers are actually arriving
+```
+
+**Impact by audio route:**
+
+| Route | Time until first buffer | Audio lost |
+|---|---|---|
+| Built-in mic | ~100-200ms | Negligible (~0.2s) |
+| Wired headset | ~200-500ms | Minor (~0.5s) |
+| AirPods / Bluetooth HFP | 2-4 seconds | **Significant (2-4s)** |
+| CarPlay | 2-5 seconds | **Significant (2-5s)** |
+
+For Bluetooth devices, the HFP (Hands-Free Profile) link negotiation happens AFTER the audio session is activated. The engine starts and reports success, but the SCO (Synchronous Connection Oriented) audio link for HFP hasn't been established yet. No PCM audio arrives until the Bluetooth stack completes HFP service level connection, codec negotiation, and SCO link establishment — a process that takes 2-4 seconds.
+
+**Evidence:**
+- `AudioSessionManager.validationTimeoutSeconds` already accounts for this: returns 4.0s for Bluetooth, 2.0s otherwise
+- `restartCaptureForNewRoute()` correctly uses the validation timeout
+- `startRecording()` has the pre-arm fix (`_isCapturingAudio = true` before `engine.start()`) but no validation of audio arrival
+
+**Fix:**
+
+Add validation to `startRecording()` matching the pattern from `restartCaptureForNewRoute()`:
+
+```swift
+try engine.start()
+
+// Validate audio is actually arriving (Bluetooth HFP needs 2-4s)
+transition(to: .validatingRoute, reason: "validating initial start")
+let bufferCheckStart = lastBufferReceivedAt
+let timeoutIterations = Int(sessionManager.validationTimeoutSeconds * 1000) / 100
+for _ in 0..<timeoutIterations where lastBufferReceivedAt <= bufferCheckStart {
+    try? await Task.sleep(nanoseconds: 100_000_000)
+}
+guard lastBufferReceivedAt > bufferCheckStart else {
+    // No audio arriving — try built-in mic fallback
+    throw AudioCaptureError.engineStartFailed
+}
+transition(to: .recording, reason: "startRecording + validation succeeded")
+```
+
+---
+
+### 🟡 Minor Issues (low impact individually, additive collectively)
+
+#### 4. `AudioFileWriter.write()` uses async dispatch on serial queue
+
+**File:** `AudioFileWriter.swift:124-148`
+
+```swift
+func write(samples: [Float], frameLength: Int, format: AVAudioFormat) {
+    queue.async { [weak self] in   // ← async dispatch
+        // ... write to AVAudioFile
+    }
+}
+```
+
+The tap callback (real-time audio thread) creates the samples array and dispatches the write to a serial queue. The serial queue guarantees ordering, but `async` means the tap callback returns before the write completes. If the recording is force-finished while writes are queued, `finishRecording()` calls `queue.sync { ... }` which drains the queue. **This is correct behavior** — no data is lost.
+
+However, the `async` dispatch adds a small window of vulnerability: if `forceFinish()` is called AND the queue is blocked on an I/O operation AND iOS terminates the process, the last ~23ms of audio could be lost. This is a crash-recovery edge case, not the primary issue.
+
+#### 5. `AVAssetExportSession` during concatenation can silently drop short segments
+
+**File:** `AudioSegmentConcatenator.swift:27-47`
+
+```swift
+let rawDuration = (try? await asset.load(.duration)) ?? .invalid
+guard rawDuration.isValid, rawDuration > .zero else {
+    AppLog.audio.warning("SegmentConcatenator: skipping \(url.lastPathComponent) — invalid duration")
+    continue   // ← silently skips segment
+}
+```
+
+For very short segment files (e.g., a segment created and immediately closed during a rapid route change), `AVURLAsset.load(.duration)` can return `.invalid` or `.zero` if the file metadata hasn't been fully flushed to disk. When this happens, the segment is silently skipped.
+
+This is a concatenation issue, not a transcription issue (since `transcribeSegmented()` reads segment files directly). But if the concatenated file is used for any purpose (playback, export, legacy transcription), the missing segment would be noticeable.
+
+---
+
+### Summary: fix priority
+
+| # | Issue | Severity | Effort | Fix |
+|---|---|---|---|---|
+| 1 | `convertToTranscriptionFormat` — invalid passthrough + WAV | 🔴 Primary | 1 hour | Remove function, pass original file directly to Apple Speech |
+| 2 | AAC priming compound across encode cycles | 🟠 Secondary | 2 hours | Use PCM/WAV for concatenated output or skip concatenation for transcription |
+| 3 | Missing audio validation in `startRecording()` | 🟡 Contributing | 30 min | Add validation phase matching `restartCaptureForNewRoute()` pattern |
+| 4 | `AVAssetExportSession` skips segments with invalid duration | 🟡 Minor | 1 hour | Add retry with delay for freshly-written segment files |
+
+### Immediate action (quickest fix with highest impact)
+
+**Delete or bypass `convertToTranscriptionFormat`.** Apple Speech's `SFSpeechURLRecognitionRequest` natively supports AAC/M4A, WAV, CAF, and MP3. The conversion function was written under the incorrect assumption that Apple Speech needs WAV input. It doesn't. Removing this function eliminates the primary corruption vector and simplifies the code path.
+
+In `ContentExtractionService.swift`:
+- `transcribeSegmented()` line 67-72: remove `convertToTranscriptionFormat` call, use `segURL` directly
+- `transcribeSingleFile()` line 156-161: remove `convertToTranscriptionFormat` call, use `audioURL` directly
+
+This single change removes the most likely cause of missing initial audio.
+
+---
+
 *This document is a self-review. The underlying bet — that meeting evidence can become explorable project memory with AI — is a good bet. Validation requires daily use on real meetings for real projects.*

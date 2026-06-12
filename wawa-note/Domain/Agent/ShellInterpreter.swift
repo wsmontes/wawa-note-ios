@@ -129,12 +129,33 @@ enum ShellInterpreter {
         }
     }
 
+    private static let manPages: [String: String] = [
+        "ls": "ls [path] — List directory contents.\n  Flags: --long, --type audio|note|image, --status todo|done|analyzed, --tag 'x', --since 7d, --limit 20\n  Examples: ls /, ls tasks/, ls items/ --type audio --since 7d",
+        "cat": "cat <path> — Read file contents.\n  Examples: cat items/<uuid>/body.md, cat /agent/prompts/analysis_system.md",
+        "echo": "echo '{\"field\":\"value\"}' > <path> — Write/update file.\n  Flags: --append (>> instead of >)\n  Examples: echo '{\"status\":\"done\"}' > tasks/task-filename",
+        "touch": "touch <path> [flags] — Create files/tasks.\n  Flags: --title, --type audio|note|image, --body, --priority low|medium|high|critical, --owner, --due (ISO8601)",
+        "rm": "rm <path> — Remove (trash) items/tasks.\n  Items go to Trash (recoverable). Tasks cannot be undone.",
+        "mv": "mv <from> <to> — Move items.\n  Examples: mv /inbox/<uuid> /projects/<slug>/items/<uuid>",
+        "find": "find [path] — Search with filters.\n  Flags: --tag X, --since 7d, --type audio|note, --status todo|analyzed, --project 'name', --limit 20",
+        "pipe": "Pipes (|) — Chain commands.\n  Supported: cat, grep, wc\n  Examples: ls items/ | grep keyword, cat file | wc",
+    ]
+
     /// Dispatches a single command. Handles:
     /// - `cd` auto-lists the target directory
     /// - Partial UUIDs are fuzzy-matched in cat/echo paths
     private static func dispatch(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
         var result: ToolResult
         switch cmd.name {
+        case "man":
+            let topic = cmd.args.first ?? ""
+            if topic.isEmpty {
+                let available = Self.manPages.keys.sorted().joined(separator: ", ")
+                result = ok("man <command> — Show detailed help. Available: \(available)")
+            } else if let page = Self.manPages[topic] {
+                result = ok(page)
+            } else {
+                result = err("man: no entry for '\(topic)'. Try 'man' without arguments to see available commands.")
+            }
         case "ls":     result = handleLs(cmd, ctx)
         case "cd":     result = handleCd(cmd, ctx); if !result.isError { result = autoLsAfterCd(result, ctx) }
         case "cat":    result = handleCat(cmd, ctx)
