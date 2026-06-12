@@ -180,7 +180,7 @@ enum ShellInterpreter {
             } else if let page = Self.manPages[topic] {
                 result = ok(page)
             } else {
-                result = err("man: no entry for '\(topic)'. Try 'man' without arguments to see available commands.")
+                result = shellErr("man: no entry for '\(topic)'. Try 'man' without arguments to see available commands.")
             }
         case "ls":     result = handleLs(cmd, ctx)
         case "cd":     result = handleCd(cmd, ctx); if !result.isError { result = autoLsAfterCd(result, ctx) }
@@ -214,7 +214,7 @@ enum ShellInterpreter {
             let tip = cmd.name.count > 0 && cmd.name.first?.isLowercase != true
                 ? " Commands are lowercase. Use 'help' to see available commands."
                 : ""
-            result = err("\(cmd.name): command not found\(hint)\(tip)")
+            result = shellErr("\(cmd.name): command not found\(hint)\(tip)")
         }
         return result
     }
