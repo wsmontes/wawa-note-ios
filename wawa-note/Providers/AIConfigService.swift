@@ -207,17 +207,12 @@ final class AIConfigService: @unchecked Sendable {
         let preset = presetFor(model: model)
         let isReasoning = preset?.reasoningModel ?? false
 
-        // Rate limiting: prevent burst calls to the same feature
+        // Rate limiting: monitor burst calls (non-blocking, just logs)
         let minInterval: TimeInterval = feature == "chat" ? 0.5 : 2.0
-        let now = Date().timeIntervalSince1970
-        let key = "\(feature):\(model)"
-        if let lastCall = Self.lastCallTimes[key] {
-            let elapsed = now - lastCall
-            if elapsed < minInterval {
-                AppLog.provider.info("Rate limit: \(feature) called \(String(format: "%.1f", elapsed))s after last — throttling")
-            }
+        if let elapsed = Self.timeSinceLastCall(feature: feature, model: model), elapsed < minInterval {
+            AppLog.provider.info("Rate limit: \(feature) called \(String(format: "%.1f", elapsed))s after last")
         }
-        Self.lastCallTimes[key] = now
+        Self.recordCall(feature: feature, model: model)
 
         // Temperature: from feature config, nil for reasoning models
         let temperature: Double? = isReasoning ? nil : (feat?.temperature)
@@ -238,21 +233,38 @@ final class AIConfigService: @unchecked Sendable {
         )
     }
 
-    private static nonisolated(unsafe) var lastCallTimes: [String: TimeInterval] = [:]
-    private static nonisolated(unsafe) var totalTokensUsed: Int = 0
-    private static nonisolated(unsafe) var totalAPICalls: Int = 0
+    private static let usageLock = NSLock()
+    private static nonisolated(unsafe) var _lastCallTimes: [String: TimeInterval] = [:]
+    private static nonisolated(unsafe) var _totalTokens: Int = 0
+    private static nonisolated(unsafe) var _totalCalls: Int = 0
+
+    /// Thread-safe last call time for a feature+model pair.
+    static func recordCall(feature: String, model: String) {
+        usageLock.withLock { _lastCallTimes["\(feature):\(model)"] = Date().timeIntervalSince1970 }
+    }
+
+    /// Thread-safe elapsed time since last call (nil if never called).
+    static func timeSinceLastCall(feature: String, model: String) -> TimeInterval? {
+        usageLock.withLock {
+            guard let last = _lastCallTimes["\(feature):\(model)"] else { return nil }
+            return Date().timeIntervalSince1970 - last
+        }
+    }
 
     /// Track API usage for cost estimation.
     static func trackUsage(tokens: Int) {
-        totalTokensUsed += tokens
-        totalAPICalls += 1
+        usageLock.withLock {
+            _totalTokens += tokens
+            _totalCalls += 1
+        }
     }
 
-    /// Estimated cost in USD for all API calls this session.
+    /// Estimated cost in USD for all API calls this session (thread-safe snapshot).
     static var estimatedCost: String {
+        let (tokens, calls) = usageLock.withLock { (_totalTokens, _totalCalls) }
         let costPer1K = 0.002
-        let cost = Double(totalTokensUsed) / 1000.0 * costPer1K
-        return String(format: "$%.4f (%d calls, %d tokens)", cost, totalAPICalls, totalTokensUsed)
+        let cost = Double(tokens) / 1000.0 * costPer1K
+        return String(format: "$%.4f (%d calls, %d tokens)", cost, calls, tokens)
     }
 
     /// Quick health check: pings each configured provider endpoint.
