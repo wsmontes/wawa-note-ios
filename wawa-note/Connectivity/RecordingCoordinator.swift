@@ -455,6 +455,9 @@ final class RecordingCoordinator: ObservableObject {
         }
         state = .recording
         startObservation()
+        // Re-activate lock screen controls — may have been deactivated by
+        // pause timeout (engine stopped to save battery) or interruption.
+        activateLockScreenControls()
         nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: true)
         notifyStatusChange()
     }
@@ -758,6 +761,12 @@ final class RecordingCoordinator: ObservableObject {
                 self.currentInputPortName = portName
                 self.currentInputIcon = AudioSessionManager().currentInputIcon
             }
+            // When the engine is stopped to save battery during a long pause,
+            // deactivate lock screen controls — there's no engine to resume.
+            if self.captureService.engineStoppedForPauseTimeout && self.state == .pausedByUser {
+                self.nowPlayingController.deactivate()
+            }
+
             if self.captureService.state == .stopped {
                 self.state = .stopped
                 self.nowPlayingController.deactivate()

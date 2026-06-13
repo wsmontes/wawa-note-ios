@@ -151,7 +151,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// ~3-5% battery per hour while engine is idling.
     private var pauseEngineTimeoutTask: Task<Void, Never>?
     /// True when the engine was stopped by the pause timeout (not by user stop).
-    private var engineStoppedForPauseTimeout: Bool = false
+    /// True when the engine was stopped to save battery during a long pause.
+    /// The coordinator reads this to update NowPlayingController and UI state.
+    private(set) var engineStoppedForPauseTimeout: Bool = false
     /// Duration before idling engine is stopped during pause.
     private static let pauseEngineTimeoutSeconds: UInt64 = 300  // 5 minutes
     private static let silenceThreshold: Float = 0.015
