@@ -161,6 +161,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     @Published private(set) var isAutoPaused: Bool = false
     @Published private(set) var silenceDetected: Bool = false
     private var recordingStartTime: Date?
+    /// Accumulated auto-pause duration. Subtracted from elapsed wall-clock
+    /// time so the reported duration reflects actual speech, not silence.
+    private var totalAutoPausedDuration: TimeInterval = 0
+    private var autoPauseStartDate: Date?
     private var currentMeetingId: UUID?
 
     /// The user's intent. Central source of truth — auto-recovery only happens
@@ -654,6 +658,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         audioLevel = 0.0
         elapsedTime = 0.0
         recordingStartTime = nil
+        totalAutoPausedDuration = 0
+        autoPauseStartDate = nil
         currentInputPortName = ""
         currentMeetingId = nil
         stateBeforeSystemInterruption = nil
@@ -1649,9 +1655,16 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             guard let self else { return }
             while !Task.isCancelled {
                 if let start = self.recordingStartTime {
-                    let elapsed = Date().timeIntervalSince(start)
+                    var elapsed = Date().timeIntervalSince(start)
+                    // Subtract accumulated auto-pause duration so the timer
+                    // freezes during silence (same behavior as manual pause).
+                    if let autoStart = self.autoPauseStartDate {
+                        elapsed -= (self.totalAutoPausedDuration + Date().timeIntervalSince(autoStart))
+                    } else {
+                        elapsed -= self.totalAutoPausedDuration
+                    }
                     await MainActor.run {
-                        self.elapsedTime = elapsed
+                        self.elapsedTime = max(0, elapsed)
                     }
                 }
                 try? await Task.sleep(nanoseconds: UInt64(Self.timerUpdateInterval * 1_000_000_000))
@@ -1762,6 +1775,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                         self.silenceDetected = duration > 1.0
                         if duration > Self.silenceDurationBeforePause && !self.isAutoPaused {
                             self.isAutoPaused = true
+                            // Freeze elapsed time during silence so the reported
+                            // duration reflects actual speech, not dead air.
+                            self.autoPauseStartDate = Date()
                             // Stop writing silence to the file — saves disk space
                             // and prevents the transcriber from processing empty audio.
                             self._isCapturingAudio = false
@@ -1775,11 +1791,17 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                             self.silenceDetected = false
                             if self.isAutoPaused {
                                 self.isAutoPaused = false
+                                // Accumulate auto-pause duration so elapsed time
+                                // correctly excludes this silence period.
+                                if let autoStart = self.autoPauseStartDate {
+                                    self.totalAutoPausedDuration += Date().timeIntervalSince(autoStart)
+                                    self.autoPauseStartDate = nil
+                                }
                                 // Resume writing — audio is back.
                                 if self.state == .recording {
                                     self._isCapturingAudio = true
                                 }
-                                AppLog.audio.info("Auto-resumed after \(Int(duration))s silence")
+                                AppLog.audio.info("Auto-resumed after \(Int(duration))s silence (total auto-paused: \(Int(self.totalAutoPausedDuration))s)")
                             }
                         }
                     }
@@ -1793,7 +1815,11 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         silenceDetectionTask?.cancel()
         silenceDetectionTask = nil
         isAutoPaused = false
-        silenceDetected = false
+        // Accumulate any in-progress auto-pause so elapsed time is correct
+        if let autoStart = autoPauseStartDate {
+            totalAutoPausedDuration += Date().timeIntervalSince(autoStart)
+            autoPauseStartDate = nil
+        }
     }
 
     // MARK: - Adaptive Compression
