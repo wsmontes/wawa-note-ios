@@ -128,12 +128,28 @@ struct ContentView: View {
             _ = ConfigProjectService.ensureConfigProject(context: modelContext)
             ConfigProjectService.syncConfigProject(context: modelContext)
             WawaNoteApp.updateAppBadge(modelContext: modelContext)
+            checkFirstLaunchConfig()
             autoProcessPendingItems()
             // Capture safe area bottom for keyboard positioning
             if let window = UIApplication.shared.connectedScenes
                 .compactMap({ $0 as? UIWindowScene }).first?.windows.first {
                 safeAreaBottom = window.safeAreaInsets.bottom
             }
+        }
+    }
+
+    /// Check minimum configuration state on launch and log guidance.
+    private func checkFirstLaunchConfig() {
+        let allConfigs = (try? modelContext.fetch(FetchDescriptor<AIProviderConfigModel>())) ?? []
+        if allConfigs.isEmpty {
+            AppLog.event("lifecycle", "No AI providers configured — user should add a provider in Settings")
+        } else {
+            let withKeys = allConfigs.filter { $0.isAPIKeyPresent() }
+            let activeID = ActiveProviderManager.shared.getActiveProviderID()
+            if activeID == nil {
+                AppLog.config.warning("Providers exist but none is active — auto-selecting first available")
+            }
+            AppLog.event("lifecycle", "Config check: \(allConfigs.count) provider(s), \(withKeys.count) with API keys, active: \(activeID ?? "none")")
         }
     }
 

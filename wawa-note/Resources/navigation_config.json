@@ -1,4 +1,5 @@
 {
+  "_note": "DEPRECATED (2026-06-12): This file is bundled but NOT read by any code. Navigation is managed by ContentView with hardcoded tabs (Capture, Inbox, Explore, Chat). Kept for reference only. See docs/TODO_CONFIGURABLE_ELEMENTS.md #44.",
   "version": "1.0",
   "sidebar": {
     "sections": [
