@@ -18,13 +18,33 @@ struct SettingsView: View {
     @State private var allowCloudTranscription: Bool = UserDefaults.standard.bool(forKey: "transcription_allow_cloud")
     @State private var developerModeEnabled: Bool = UserDefaults.standard.bool(forKey: "developer_mode_enabled")
 
-    /// All non-deprecated, non-transcription models for the auto-analysis picker.
+    /// All available models for the auto-analysis picker, sourced exclusively
+    /// from the user's active AI providers — never from hardcoded presets.
     private var availableAutoAnalysisModels: [String] {
-        let presets = AIConfigService.shared.config.modelPresets ?? [:]
-        return presets
-            .filter { $0.key != "whisper-1" && $0.value.deprecated == nil }
-            .map { $0.key }
-            .sorted()
+        var models = Set<String>()
+
+        // Collect models from ALL configured providers, not just the active one.
+        // The user may switch providers and should see all options.
+        let allConfigs = ActiveProviderManager.shared.allProviders(context: modelContext)
+        for config in allConfigs {
+            // Provider's persisted available models (from connection flow)
+            config.availableModels.forEach { models.insert($0) }
+            // Default model for the provider
+            if !config.defaultModel.isEmpty { models.insert(config.defaultModel) }
+            // Models from ai_config.json for this provider
+            let staticModels = AIConfigService.shared.availableModels(for: config.providerConfigId)
+            staticModels.forEach { models.insert($0) }
+            let typeModels = AIConfigService.shared.availableModels(for: config.typeRaw)
+            typeModels.forEach { models.insert($0) }
+        }
+
+        // Always include the currently selected model so it's never hidden
+        models.insert(autoAnalysisModel)
+
+        // Filter out transcription-only models
+        models.remove("whisper-1")
+
+        return models.sorted()
     }
 
     var body: some View {
@@ -265,10 +285,16 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .onAppear {
-                // Ensure auto-analysis model is valid (not deprecated or missing)
+                // Ensure auto-analysis model comes from the user's configured
+                // providers, never from hardcoded defaults. If the current
+                // model is invalid or empty, pick the first available one.
                 let valid = availableAutoAnalysisModels
-                if !valid.contains(autoAnalysisModel) {
-                    autoAnalysisModel = valid.first ?? "gpt-5-nano"
+                if autoAnalysisModel.isEmpty, let first = valid.first {
+                    autoAnalysisModel = first
+                    AutomationSettings.shared.autoAnalysisModel = first
+                } else if !valid.contains(autoAnalysisModel), let first = valid.first {
+                    autoAnalysisModel = first
+                    AutomationSettings.shared.autoAnalysisModel = first
                 }
             }
         }
@@ -301,6 +327,15 @@ struct DebugLogView: View {
             }
         }
         .navigationTitle("Debug Logs")
+        .safeAreaInset(edge: .top) {
+            Text("⚠️ Logs may contain personal data (transcripts, file paths, metadata). API keys are automatically redacted. Review before sharing.")
+                .font(.caption2)
+                .foregroundStyle(.orange)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+                .padding(.horizontal, 8)
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 16) {
