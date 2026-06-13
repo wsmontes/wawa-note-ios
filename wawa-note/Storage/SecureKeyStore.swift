@@ -8,6 +8,21 @@ enum SecureKeyStoreError: Error {
     case itemNotFound
 }
 
+/// Controls when a Keychain item is accessible.
+/// - `whenUnlocked`: Only when device is unlocked. Use for keys that don't need background access (chat, export).
+/// - `afterFirstUnlock`: After first unlock until reboot. Use for keys needed by background pipelines (transcription, auto-analysis).
+enum KeychainAccessLevel {
+    case whenUnlocked
+    case afterFirstUnlock
+
+    var secAttr: CFString {
+        switch self {
+        case .whenUnlocked: return kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        case .afterFirstUnlock: return kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        }
+    }
+}
+
 final class SecureKeyStore: @unchecked Sendable {
     private let serviceName: String
 
@@ -17,7 +32,10 @@ final class SecureKeyStore: @unchecked Sendable {
 
     // MARK: - API Key
 
-    func saveAPIKey(_ key: String, for identifier: String) throws {
+    /// Save an API key to the Keychain.
+    /// - Parameter accessLevel: Controls key accessibility. Default `.afterFirstUnlock` for background pipeline access.
+    ///   Use `.whenUnlocked` for keys that don't need background access (e.g., chat-only providers).
+    func saveAPIKey(_ key: String, for identifier: String, accessLevel: KeychainAccessLevel = .afterFirstUnlock) throws {
         guard let data = key.data(using: .utf8) else {
             throw SecureKeyStoreError.saveFailed
         }
@@ -29,10 +47,7 @@ final class SecureKeyStore: @unchecked Sendable {
             kSecAttrService as String: serviceName,
             kSecAttrAccount as String: identifier,
             kSecValueData as String: data,
-            // AfterFirstUnlock allows background pipeline (transcription/analysis)
-            // to access API keys while the device is locked. WhenUnlocked would
-            // cause pipeline failures when the user locks their phone after recording.
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            kSecAttrAccessible as String: accessLevel.secAttr
         ]
 
         let status = SecItemAdd(query as CFDictionary, nil)

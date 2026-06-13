@@ -71,7 +71,7 @@ final class ConfigProjectService {
         let psvc = ProjectService(context: context)
 
         let existing = (try? psvc.items(in: project.id)) ?? []
-        let configPrefixes = ["Provider: ", "Prompt: ", "App Settings", "Agent Memories", "Memory: ", "Skill: ", "Lens: "]
+        let configPrefixes = ["Provider: ", "Prompt: ", "App Settings", "Agent Memories", "Memory: ", "Skill: ", "Lens: ", "Model Preset: "]
         var existingByTitle: [String: KnowledgeItem] = [:]
         for item in existing where configPrefixes.contains(where: { item.title.hasPrefix($0) || item.title == $0 }) {
             existingByTitle[item.title] = item
@@ -206,7 +206,21 @@ final class ConfigProjectService {
             upsertItem(title: "Lens: \(lens.name)", body: lensJSON, tags: ["config", "lens"])
         }
 
-        // 7. Remove orphaned items (titles no longer present in current state)
+        // 7. Model Presets (from AIConfigService)
+        let presets = AIConfigService.shared.config.modelPresets ?? [:]
+        for (modelName, preset) in presets {
+            let presetDict: [String: Any] = [
+                "model": modelName,
+                "temperature": preset.temperature as Any,
+                "maxOutputTokens": preset.maxOutputTokens as Any,
+                "responseFormat": preset.responseFormat?.rawValue as Any
+            ]
+            let presetJSON = (try? JSONSerialization.data(withJSONObject: presetDict, options: .prettyPrinted))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+            upsertItem(title: "Model Preset: \(modelName)", body: presetJSON, tags: ["config", "model-preset"])
+        }
+
+        // 8. Remove orphaned items (titles no longer present in current state)
         for (title, item) in existingByTitle where !seenTitles.contains(title) {
             item.projectID = nil
             context.delete(item)
