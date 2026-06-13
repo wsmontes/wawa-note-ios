@@ -14,6 +14,7 @@ struct SettingsView: View {
     @State private var autoAnalysisModel: String = AutomationSettings.shared.autoAnalysisModel
     @State private var useVoiceProcessing: Bool = AudioSessionManager.useVoiceProcessing
     @State private var speakerphoneMode: Bool = AudioSessionManager.speakerphoneMode
+    @State private var preferBuiltInMic: Bool = AudioSessionManager.preferBuiltInMicOverBluetooth
     @State private var allowCloudTranscription: Bool = UserDefaults.standard.bool(forKey: "transcription_allow_cloud")
     @State private var developerModeEnabled: Bool = UserDefaults.standard.bool(forKey: "developer_mode_enabled")
 
@@ -120,6 +121,10 @@ struct SettingsView: View {
                         .onChange(of: speakerphoneMode) { _, v in
                             AudioSessionManager.speakerphoneMode = v
                         }
+                    Toggle("Prefer Built-in Mic", isOn: $preferBuiltInMic)
+                        .onChange(of: preferBuiltInMic) { _, v in
+                            AudioSessionManager.preferBuiltInMicOverBluetooth = v
+                        }
                 } header: {
                     Text("Audio")
                 } footer: {
@@ -127,6 +132,10 @@ struct SettingsView: View {
                         Text("Voice Processing enhances speech clarity and reduces background noise. Disable for raw audio capture (music, ambient sound).")
                         if speakerphoneMode {
                             Text("Speakerphone Mode uses the front microphone array with far-field beamforming — ideal when the iPhone is on a table during meetings.")
+                                .foregroundStyle(.secondary)
+                        }
+                        if preferBuiltInMic {
+                            Text("The iPhone microphone (48 kHz with beamforming) will be preferred over Bluetooth headsets (8 kHz call quality). Enable for maximum transcription accuracy.")
                                 .foregroundStyle(.secondary)
                         }
                     }
