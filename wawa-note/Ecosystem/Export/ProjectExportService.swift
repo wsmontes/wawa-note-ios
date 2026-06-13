@@ -752,7 +752,9 @@ final class InstanceExportService {
 
     private func exportConfig() -> ConfigExport {
         let auto = AutomationSettings.shared
-        return ConfigExport(activeProviderID: nil, preferredModel: nil,
+        let activeProviderID = ActiveProviderManager.shared.getActiveProviderID()
+        let preferredModel = auto.autoAnalysisModel.isEmpty ? nil : auto.autoAnalysisModel
+        return ConfigExport(activeProviderID: activeProviderID, preferredModel: preferredModel,
             autoTranscribe: auto.autoTranscribe, autoAnalyze: auto.autoAnalyze,
             autoAnalysisModel: auto.autoAnalysisModel, autoAnalysisProvider: auto.autoAnalysisProvider)
     }

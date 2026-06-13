@@ -125,7 +125,7 @@ struct ContentView: View {
         .onAppear {
             chatViewModel.setup(modelContext: modelContext)
             chatViewModel.observeContext(from: chatState)
-            ConfigProjectService.ensureConfigProject(context: modelContext)
+            _ = ConfigProjectService.ensureConfigProject(context: modelContext)
             ConfigProjectService.syncConfigProject(context: modelContext)
             WawaNoteApp.updateAppBadge(modelContext: modelContext)
             autoProcessPendingItems()

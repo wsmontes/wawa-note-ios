@@ -11,7 +11,8 @@ final class ConfigProjectService {
     private init() {}
 
     /// Returns the config project, creating it if it doesn't exist.
-    static func ensureConfigProject(context: ModelContext) -> Project {
+    /// Returns nil only if creation fails — callers should gracefully degrade.
+    static func ensureConfigProject(context: ModelContext) -> Project? {
         if let existing = findConfigProject(context: context) {
             return existing
         }
@@ -36,7 +37,7 @@ final class ConfigProjectService {
         return try? context.fetch(descriptor).first
     }
 
-    private static func createConfigProject(context: ModelContext) -> Project {
+    private static func createConfigProject(context: ModelContext) -> Project? {
         let svc = ProjectService(context: context)
         let project: Project
         do {
@@ -46,7 +47,7 @@ final class ConfigProjectService {
             )
         } catch {
             AppLog.general.error("ConfigProjectService: failed to create config project — \(error.localizedDescription)")
-            fatalError("ConfigProjectService: failed to create config project: \(error.localizedDescription)")
+            return nil
         }
         // Override the auto-generated slug to ensure it's always wawa-note-config
         project.slug = configProjectSlug
@@ -57,87 +58,147 @@ final class ConfigProjectService {
         try? context.save()
         AppLog.event("config", "Created wawa-note-config project")
         return project
-        return project
     }
 
     // MARK: - Sync
 
     /// Sync the config project items with the current app state.
-    /// Unlike populateIfEmpty (one-shot), this runs every launch to keep items current.
+    /// Uses diff-based updates: only modifies items whose content has changed,
+    /// preserving manual edits and item identity (id, createdAt, tags).
     static func syncConfigProject(context: ModelContext) {
         guard let project = findConfigProject(context: context) else { return }
         let psvc = ProjectService(context: context)
 
-        // Remove all existing auto-generated config items (batch: detach + mark for delete)
         let existing = (try? psvc.items(in: project.id)) ?? []
-        let toRemove = existing.filter { item in
-            item.title.hasPrefix("Provider: ") ||
-            item.title.hasPrefix("Prompt: ") ||
-            item.title == "App Settings" ||
-            item.title == "Agent Memories"
+        let configPrefixes = ["Provider: ", "Prompt: ", "App Settings", "Agent Memories", "Skill: ", "Lens: "]
+        var existingByTitle: [String: KnowledgeItem] = [:]
+        for item in existing where configPrefixes.contains(where: { item.title.hasPrefix($0) || item.title == $0 }) {
+            existingByTitle[item.title] = item
         }
-        for item in toRemove {
-            item.projectID = nil // detach from project
-            context.delete(item) // mark for deletion
+        var seenTitles = Set<String>()
+        var changedCount = 0
+        var createdCount = 0
+        var skippedCount = 0
+
+        // Helper: upsert item — update if exists and changed, create if new, skip if identical
+        func upsertItem(title: String, body: String, tags: [String]) {
+            seenTitles.insert(title)
+            if let existingItem = existingByTitle[title] {
+                if existingItem.bodyText == body {
+                    skippedCount += 1
+                    return
+                }
+                existingItem.bodyText = body
+                existingItem.tags = tags
+                changedCount += 1
+            } else {
+                let item = KnowledgeItem(type: .note, title: title, status: .draft,
+                    tags: tags, folderID: nil, bodyText: body,
+                    durationSeconds: nil, languageCode: nil, inboxDate: nil)
+                context.insert(item)
+                item.projectID = project.id
+                createdCount += 1
+            }
         }
 
-        // Helper: create item directly without intermediate saves
-        func makeItem(title: String, body: String, tags: [String]) -> KnowledgeItem {
-            let item = KnowledgeItem(type: .note, title: title, status: .draft,
-                tags: tags, folderID: nil, bodyText: body,
-                durationSeconds: nil, languageCode: nil, inboxDate: nil)
-            context.insert(item)
-            item.projectID = project.id
-            return item
-        }
-
-        // 1. Providers
+        // 1. Providers — expose all fields including key status
         let configs = (try? context.fetch(FetchDescriptor<AIProviderConfigModel>())) ?? []
+        let keyStore = SecureKeyStore()
         for config in configs {
+            let keyPresent = config.apiKeyKeychainIdentifier.map { (try? keyStore.loadAPIKey(for: $0)) != nil } ?? false
             let dict: [String: Any] = [
-                "name": config.name, "type": config.typeRaw,
+                "name": config.name,
+                "type": config.typeRaw,
                 "defaultModel": config.defaultModel,
                 "baseURL": config.baseURLString as Any,
                 "supportsStreaming": config.supportsStreaming,
                 "supportsTools": config.supportsTools,
                 "supportsAudio": config.supportsAudio,
-                "supportsEmbeddings": config.supportsEmbeddings
+                "supportsEmbeddings": config.supportsEmbeddings,
+                "keyStatus": keyPresent ? "present" : "missing",
+                "availableModels": config.availableModels,
+                "notes": config.notes as Any
             ]
             let json = (try? JSONSerialization.data(withJSONObject: dict, options: .prettyPrinted))
                 .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-            _ = makeItem(title: "Provider: \(config.name)", body: json, tags: ["config", "provider"])
+            upsertItem(title: "Provider: \(config.name)", body: json, tags: ["config", "provider"])
         }
 
-        // 2. Prompts
+        // 2. Prompts — preserve user-edited flag, include usage info
         let prompts = PromptStore.shared.prompts(in: nil)
         for prompt in prompts {
             let meta: [String: Any] = [
-                "name": prompt.name, "category": prompt.category,
+                "name": prompt.name,
+                "category": prompt.category,
                 "isUserEdited": prompt.isUserEdited,
                 "variables": prompt.variables
             ]
             let metaJSON = (try? JSONSerialization.data(withJSONObject: meta, options: .prettyPrinted))
                 .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-            _ = makeItem(title: "Prompt: \(prompt.name)", body: "# Metadata\n\(metaJSON)\n\n# Content\n\(prompt.content)", tags: ["config", "prompt"])
+            upsertItem(title: "Prompt: \(prompt.name)",
+                body: "# Metadata\n\(metaJSON)\n\n# Content\n\(prompt.content)",
+                tags: ["config", "prompt"])
         }
 
-        // 3. Settings
+        // 3. Settings — tagged with readOnly vs editable sections
         let settingsDict = buildSettingsSnapshot()
         let settingsJSON = (try? JSONSerialization.data(withJSONObject: settingsDict, options: .prettyPrinted))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        _ = makeItem(title: "App Settings", body: settingsJSON, tags: ["config", "settings"])
+        upsertItem(title: "App Settings", body: settingsJSON, tags: ["config", "settings"])
 
         // 4. Memories
         let memories = AgentMemoryStore.shared.listAll()
         if !memories.isEmpty,
            let data = try? JSONEncoder().encode(memories),
            let json = String(data: data, encoding: .utf8) {
-            _ = makeItem(title: "Agent Memories", body: json, tags: ["config", "memories"])
+            upsertItem(title: "Agent Memories", body: json, tags: ["config", "memories"])
+        }
+
+        // 5. Skills (from AnalysisSkillStore)
+        let skills = AnalysisSkillStore.shared.allSkills
+        for skill in skills {
+            let skillDict: [String: Any] = [
+                "id": skill.id.uuidString,
+                "name": skill.name,
+                "displayName": skill.displayName,
+                "description": skill.description,
+                "category": skill.category,
+                "templateID": skill.templateID,
+                "defaultModel": skill.defaultModel,
+                "maxIterations": skill.maxIterations,
+                "allowedTools": skill.allowedTools,
+                "isUserEdited": skill.isUserEdited
+            ]
+            let skillJSON = (try? JSONSerialization.data(withJSONObject: skillDict, options: .prettyPrinted))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+            upsertItem(title: "Skill: \(skill.name)", body: skillJSON, tags: ["config", "skill"])
+        }
+
+        // 6. Lenses (from AIConfigService)
+        let lenses = AIConfigService.shared.config.lenses ?? [:]
+        for (lensId, lens) in lenses {
+            let lensDict: [String: Any] = [
+                "id": lensId,
+                "name": lens.name,
+                "description": lens.description,
+                "systemPrompt": lens.systemPrompt,
+                "userPrompt": lens.userPrompt as Any
+            ]
+            let lensJSON = (try? JSONSerialization.data(withJSONObject: lensDict, options: .prettyPrinted))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+            upsertItem(title: "Lens: \(lens.name)", body: lensJSON, tags: ["config", "lens"])
+        }
+
+        // 7. Remove orphaned items (titles no longer present in current state)
+        for (title, item) in existingByTitle where !seenTitles.contains(title) {
+            item.projectID = nil
+            context.delete(item)
+            changedCount += 1
         }
 
         // Single save
         try? context.save()
-        AppLog.event("config", "Synced wawa-note-config: \(configs.count) providers, \(prompts.count) prompts, settings, \(memories.count) memories")
+        AppLog.event("config", "Synced wawa-note-config: \(createdCount)c/\(changedCount)u/\(skippedCount)s — \(configs.count) providers, \(prompts.count) prompts, settings, \(memories.count) memories, \(skills.count) skills, \(lenses.count) lenses")
     }
 
     /// Build a complete settings snapshot from all UserDefaults and app state.
@@ -156,8 +217,8 @@ final class ConfigProjectService {
         // Automation
         s["autoTranscribe"] = defs.object(forKey: "automation_auto_transcribe") as? Bool ?? true
         s["autoAnalyze"] = defs.object(forKey: "automation_auto_analyze") as? Bool ?? true
-        s["autoAnalysisModel"] = defs.string(forKey: "automation_auto_analysis_model") ?? "gpt-5-nano"
-        s["autoAnalysisProvider"] = defs.string(forKey: "automation_auto_analysis_provider") ?? "openAI"
+        s["autoAnalysisModel"] = defs.string(forKey: "automation_auto_analysis_model") ?? ""
+        s["autoAnalysisProvider"] = defs.string(forKey: "automation_auto_analysis_provider") ?? ""
 
         // Audio
         s["voiceProcessing"] = !defs.bool(forKey: "audio_raw_mode")

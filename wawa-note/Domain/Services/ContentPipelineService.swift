@@ -142,6 +142,11 @@ final class ContentPipelineService: ObservableObject {
                     pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
                         itemType: item.type.rawValue, phase: "transcribing",
                         currentTool: nil, toolSummary: nil, toolLog: [], events: [], thinkingActive: false)
+                    // Update item status so KnowledgeDetailView can show the right indicator
+                    // without guessing. This is the authoritative state transition.
+                    item.status = .transcribing
+                    do { try modelContext.save() }
+                    catch { AppLog.provider.error("ContentPipeline: save failed (→transcribing): \(error.localizedDescription)") }
                     NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
                         userInfo: ["stage": "transcribing"])
                     if let transcribedText = await extractionSvc.extractTextFromAudio(item) {
@@ -328,6 +333,17 @@ final class ContentPipelineService: ObservableObject {
                             NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
                                 userInfo: ["phase": "completed", "events": agentEvents, "itemTitle": item.title])
                             failed = false
+                        case .truncated(let reason, let progress):
+                            AppLog.provider.warning("Pipeline agent truncated for item \(itemID): \(reason) (\(progress))")
+                            lastError = "Agent truncated: \(reason)"
+                            agentEvents.append(PipelineAgentEvent(
+                                id: UUID(), kind: .failed, timestamp: Date(),
+                                detail: "Truncated: \(reason) (\(progress))", metadata: nil))
+                            pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
+                                itemType: item.type.rawValue, phase: "error",
+                                currentTool: nil, toolSummary: "Truncated: \(reason)", toolLog: toolLog,
+                                events: agentEvents, thinkingActive: false)
+                            failed = true
                         case .error(let error):
                             AppLog.provider.error("Pipeline agent error [attempt \(attemptCount)]: \(error.localizedDescription)")
                             lastError = error.localizedDescription
@@ -1390,6 +1406,9 @@ final class AgentMemoryStore: ObservableObject {
             .filter { mem in
                 if let t = itemType, mem.itemType != nil, mem.itemType != t { return false }
                 if let l = language, mem.language != nil, mem.language != l { return false }
+                if let d = minDuration, let memDur = mem.minDuration, memDur < d { return false }
+                if let ch = minChars, let memCh = mem.minChars, memCh < ch { return false }
+                if let ct = contentType, mem.contentType != nil, mem.contentType != ct { return false }
                 return true
             }
             .sorted { $0.relevance > $1.relevance }

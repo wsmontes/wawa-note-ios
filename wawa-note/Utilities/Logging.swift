@@ -12,6 +12,7 @@ enum AppLog {
     static let storage = Logger(subsystem: subsystem, category: "storage")
     static let general = Logger(subsystem: subsystem, category: "general")
     static let agent = Logger(subsystem: subsystem, category: "agent")
+    static let config = Logger(subsystem: subsystem, category: "config")
 }
 
 // MARK: - FileLogService (persistent, crash-safe)
@@ -182,52 +183,89 @@ final class FileLogService: @unchecked Sendable {
 extension AppLog {
     /// Logs a critical lifecycle event to both OSLog and the persistent file log.
     /// Usage: AppLog.event("audio", "Recording started with AirPods")
+    /// API keys are automatically redacted via sanitizedForLog.
     static func event(_ category: String, _ message: String) {
-        FileLogService.shared.log(category: category, level: "EVENT", message: message)
+        let safe = message.sanitizedForLog
+        FileLogService.shared.log(category: category, level: "EVENT", message: safe)
         switch category {
-        case "audio": audio.info("\(message)")
-        case "transcription": transcription.info("\(message)")
-        case "provider": provider.info("\(message)")
-        case "storage": storage.info("\(message)")
-        case "agent": agent.info("\(message)")
-        case "general": general.info("\(message)")
-        default: general.info("[\(category)] \(message)")
+        case "audio": audio.info("\(safe)")
+        case "transcription": transcription.info("\(safe)")
+        case "provider": provider.info("\(safe)")
+        case "storage": storage.info("\(safe)")
+        case "agent": agent.info("\(safe)")
+        case "config": config.info("\(safe)")
+        case "general": general.info("\(safe)")
+        default: general.info("[\(category)] \(safe)")
         }
     }
 
     /// Logs a warning to both OSLog and the persistent file log.
     /// Use for recoverable error states that may precede a crash.
+    /// API keys are automatically redacted via sanitizedForLog.
     static func warn(_ category: String, _ message: String) {
-        FileLogService.shared.log(category: category, level: "WARN", message: message)
+        let safe = message.sanitizedForLog
+        FileLogService.shared.log(category: category, level: "WARN", message: safe)
         switch category {
-        case "audio": audio.warning("\(message)")
-        case "transcription": transcription.warning("\(message)")
-        case "provider": provider.warning("\(message)")
-        case "storage": storage.warning("\(message)")
-        case "agent": agent.warning("\(message)")
-        case "general": general.warning("\(message)")
-        default: general.warning("[\(category)] \(message)")
+        case "audio": audio.warning("\(safe)")
+        case "transcription": transcription.warning("\(safe)")
+        case "provider": provider.warning("\(safe)")
+        case "storage": storage.warning("\(safe)")
+        case "agent": agent.warning("\(safe)")
+        case "config": config.warning("\(safe)")
+        case "general": general.warning("\(safe)")
+        default: general.warning("[\(category)] \(safe)")
         }
     }
 
     /// Logs an error to both OSLog and the persistent file log.
     /// Use for every error that could be crash-adjacent.
+    /// API keys are automatically redacted via sanitizedForLog.
     static func error(_ category: String, _ message: String) {
-        FileLogService.shared.log(category: category, level: "ERROR", message: message)
+        let safe = message.sanitizedForLog
+        FileLogService.shared.log(category: category, level: "ERROR", message: safe)
         switch category {
-        case "audio": audio.error("\(message)")
-        case "transcription": transcription.error("\(message)")
-        case "provider": provider.error("\(message)")
-        case "storage": storage.error("\(message)")
-        case "agent": agent.error("\(message)")
-        case "general": general.error("\(message)")
-        default: general.error("[\(category)] \(message)")
+        case "audio": audio.error("\(safe)")
+        case "transcription": transcription.error("\(safe)")
+        case "provider": provider.error("\(safe)")
+        case "storage": storage.error("\(safe)")
+        case "agent": agent.error("\(safe)")
+        case "config": config.error("\(safe)")
+        case "general": general.error("\(safe)")
+        default: general.error("[\(category)] \(safe)")
         }
     }
 
     /// Logs a detailed trace with file+line to the persistent log.
+    /// API keys are automatically redacted via sanitizedForLog.
     static func debug(_ category: String, _ message: String, file: String = #file, line: Int = #line) {
         let src = "\(file.split(separator: "/").last ?? ""):\(line)"
-        FileLogService.shared.log(category: category, level: "DEBUG", message: "\(src) — \(message)")
+        let safe = message.sanitizedForLog
+        FileLogService.shared.log(category: category, level: "DEBUG", message: "\(src) — \(safe)")
+    }
+}
+
+// MARK: - API Key Sanitization
+
+extension String {
+    /// Replaces API key patterns with [REDACTED] for safe logging.
+    /// Detects: sk-... (OpenAI), sk-ant-... (Anthropic), org-... (OpenAI org),
+    /// AIza... (Google), hf_... (HuggingFace), and generic Bearer tokens.
+    var sanitizedForLog: String {
+        let patterns: [(String, String)] = [
+            ("sk-[a-zA-Z0-9_-]{20,}", "sk-[REDACTED]"),
+            ("sk-ant-[a-zA-Z0-9_-]{20,}", "sk-ant-[REDACTED]"),
+            ("org-[a-zA-Z0-9_-]{20,}", "org-[REDACTED]"),
+            ("AIza[0-9A-Za-z_-]{30,}", "AIza[REDACTED]"),
+            ("hf_[a-zA-Z0-9]{20,}", "hf_[REDACTED]"),
+            ("Bearer [a-zA-Z0-9_\\-\\.]{20,}", "Bearer [REDACTED]"),
+            ("x-api-key: [a-zA-Z0-9_\\-\\.]{10,}", "x-api-key: [REDACTED]"),
+        ]
+        var result = self
+        for (pattern, replacement) in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
+                result = regex.stringByReplacingMatches(in: result, options: [], range: NSRange(location: 0, length: result.utf16.count), withTemplate: replacement)
+            }
+        }
+        return result
     }
 }
