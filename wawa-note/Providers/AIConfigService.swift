@@ -79,9 +79,13 @@ final class AIConfigService: @unchecked Sendable {
                 let data = try Data(contentsOf: url)
                 config = try JSONDecoder().decode(AIConfig.self, from: data)
                 AppLog.provider.info("Loaded AI config v\(self.config.version): \(self.config.providers.count) providers, \(self.config.features?.count ?? 0) features")
+                validateConfig()
                 return
+            } catch let decodingError as DecodingError {
+                let detail = Self.describeDecodingError(decodingError)
+                AppLog.provider.error("ai_config.json decode failed: \(detail) — using default config")
             } catch {
-                AppLog.provider.error("Failed to decode ai_config.json: \(error) — using default config")
+                AppLog.provider.error("Failed to load ai_config.json: \(error) — using default config")
             }
         } else {
             AppLog.provider.error("ai_config.json not found in bundle — using default config")
@@ -96,6 +100,51 @@ final class AIConfigService: @unchecked Sendable {
             features: [:],
             lenses: nil
         )
+    }
+
+    /// Validate loaded config and warn about critical issues.
+    private func validateConfig() {
+        var warnings: [String] = []
+
+        if config.providers.isEmpty {
+            warnings.append("No providers defined — provider templates will be empty")
+        }
+        for (id, p) in config.providers {
+            if p.name.isEmpty { warnings.append("Provider '\(id)' has empty name") }
+            if p.models.isEmpty { warnings.append("Provider '\(id)' has no models listed") }
+            if p.defaultModel.isEmpty { warnings.append("Provider '\(id)' has no defaultModel") }
+        }
+
+        if let features = config.features {
+            if features["analysis"] == nil { warnings.append("No 'analysis' feature config defined") }
+            if features["chat"] == nil { warnings.append("No 'chat' feature config defined") }
+        } else {
+            warnings.append("No features defined — analysis/chat will use hardcoded defaults")
+        }
+
+        for w in warnings {
+            AppLog.provider.warning("ai_config.json: \(w)")
+        }
+
+        if !warnings.isEmpty {
+            AppLog.event("config", "ai_config.json loaded with \(warnings.count) warning(s)")
+        }
+    }
+
+    /// Human-readable description of a DecodingError for debugging.
+    private static func describeDecodingError(_ error: DecodingError) -> String {
+        switch error {
+        case .keyNotFound(let key, let ctx):
+            return "missing key '\(key.stringValue)' at \(ctx.codingPath.map(\.stringValue).joined(separator: "/"))"
+        case .typeMismatch(let type, let ctx):
+            return "type mismatch: expected \(type) at \(ctx.codingPath.map(\.stringValue).joined(separator: "/"))"
+        case .valueNotFound(let type, let ctx):
+            return "nil value for \(type) at \(ctx.codingPath.map(\.stringValue).joined(separator: "/"))"
+        case .dataCorrupted(let ctx):
+            return "corrupted data at \(ctx.codingPath.map(\.stringValue).joined(separator: "/")): \(ctx.debugDescription)"
+        @unknown default:
+            return "unknown decode error: \(error.localizedDescription)"
+        }
     }
 
     // MARK: - Providers
@@ -170,20 +219,25 @@ final class AIConfigService: @unchecked Sendable {
         // have presets yet (e.g., newly released o-series, Claude 5, etc.).
         // Reasoning models MUST NOT receive temperature — sending it causes
         // API errors on most providers.
+        //
+        // Strategy: prefix/family patterns for known model series + a broad
+        // "-thinking"/"reasoner" catch-all. False positives (treating a non-reasoning
+        // model as reasoning → temperature=nil) are far less harmful than false
+        // negatives (sending temperature to a reasoning model → API error).
         let lower = model.lowercased()
-        let reasoningPatterns = [
-            // OpenAI reasoning
-            "o1", "o3", "o4", "o5", "o6", "o7", "o8", "o9",
-            // Anthropic (Claude 4+ has extended thinking)
-            // Match "claude-sonnet-4", "claude-opus-4", etc.
-            // DeepSeek reasoning
-            "r1", "reasoner",
-            // Other
-            "qwq", // Qwen thinking
-            "gemini-thinking", // Gemini thinking variants
-            "thinking", // general thinking models
-        ]
-        return reasoningPatterns.contains(where: { lower.contains($0) })
+        // Model family prefixes: o1, o3, o4, ... match "o1-mini", "o3-pro", etc.
+        // r1 matches "deepseek-r1", "r1-distill", etc.
+        // qwq matches "qwq-32b", "qwq-v2", etc.
+        let reasoningPrefixes = ["o1", "o3", "o4", "o5", "o6", "o7", "o8", "o9",
+                                 "r1", "qwq"]
+        for prefix in reasoningPrefixes {
+            // Match at word boundary: starts with prefix, or has "/<prefix>" or "-<prefix>"
+            if lower.hasPrefix(prefix) { return true }
+            if lower.contains("/\(prefix)") || lower.contains("-\(prefix)") { return true }
+        }
+        // Broad catch-all: models with "-thinking", "-reasoner", "reasoning" in ID
+        let broadPatterns = ["-thinking", "-reasoner", "reasoning"]
+        return broadPatterns.contains(where: { lower.contains($0) })
     }
 
     /// Whether to explicitly disable thinking mode (DeepSeek, Qwen, etc.).

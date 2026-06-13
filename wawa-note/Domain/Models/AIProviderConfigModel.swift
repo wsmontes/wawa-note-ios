@@ -72,4 +72,42 @@ final class AIProviderConfigModel {
         self.apiKeyKeychainIdentifier = apiKeyKeychainIdentifier
         self.notes = notes
     }
+
+    // MARK: - Validation
+
+    /// Validate the model's integrity. Returns array of validation errors (empty = valid).
+    /// Checks: name not empty, type is valid, baseURL is parseable, availableModelsJSON is valid.
+    func validate() -> [String] {
+        var errors: [String] = []
+
+        if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            errors.append("Provider name is empty")
+        }
+
+        if ProviderType(rawValue: typeRaw) == nil {
+            errors.append("Unknown provider type: '\(typeRaw)'")
+        }
+
+        if let urlStr = baseURLString, !urlStr.isEmpty {
+            guard URL(string: urlStr) != nil else {
+                errors.append("Invalid baseURL: '\(urlStr)'")
+            }
+        }
+
+        // Validate availableModelsJSON parses correctly
+        if let json = availableModelsJSON, !json.isEmpty {
+            guard let data = json.data(using: .utf8),
+                  (try? JSONDecoder().decode([String].self, from: data)) != nil else {
+                errors.append("availableModelsJSON is corrupted (not a valid JSON string array)")
+            }
+        }
+
+        return errors
+    }
+
+    /// Check if the API key exists in the Keychain for this provider.
+    func isAPIKeyPresent() -> Bool {
+        guard let identifier = apiKeyKeychainIdentifier else { return false }
+        return (try? SecureKeyStore().loadAPIKey(for: identifier)) != nil
+    }
 }

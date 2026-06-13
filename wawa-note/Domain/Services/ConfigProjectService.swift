@@ -155,7 +155,7 @@ final class ConfigProjectService {
         }
 
         // 5. Skills (from AnalysisSkillStore)
-        let skills = AnalysisSkillStore.shared.allSkills
+        let skills = AnalysisSkillStore.shared.skills(in: nil)
         for skill in skills {
             let skillDict: [String: Any] = [
                 "id": skill.id.uuidString,
@@ -211,28 +211,28 @@ final class ConfigProjectService {
         s["buildNumber"] = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
 
         // Transcription
-        s["transcriptionMode"] = defs.string(forKey: "transcription_mode") ?? "apple"
-        s["transcriptionAllowCloud"] = defs.bool(forKey: "transcription_allow_cloud")
+        s["transcriptionMode"] = defs.string(forKey: UserDefaultsKey.transcriptionMode) ?? "apple"
+        s["transcriptionAllowCloud"] = defs.bool(forKey: UserDefaultsKey.transcriptionAllowCloud)
 
         // Automation
-        s["autoTranscribe"] = defs.object(forKey: "automation_auto_transcribe") as? Bool ?? true
-        s["autoAnalyze"] = defs.object(forKey: "automation_auto_analyze") as? Bool ?? true
-        s["autoAnalysisModel"] = defs.string(forKey: "automation_auto_analysis_model") ?? ""
-        s["autoAnalysisProvider"] = defs.string(forKey: "automation_auto_analysis_provider") ?? ""
+        s["autoTranscribe"] = defs.object(forKey: UserDefaultsKey.autoTranscribe) as? Bool ?? true
+        s["autoAnalyze"] = defs.object(forKey: UserDefaultsKey.autoAnalyze) as? Bool ?? true
+        s["autoAnalysisModel"] = defs.string(forKey: UserDefaultsKey.autoAnalysisModel) ?? ""
+        s["autoAnalysisProvider"] = defs.string(forKey: UserDefaultsKey.autoAnalysisProvider) ?? ""
 
         // Audio
-        s["voiceProcessing"] = !defs.bool(forKey: "audio_raw_mode")
-        s["speakerphoneMode"] = defs.bool(forKey: "audio_speakerphone_mode")
+        s["voiceProcessing"] = !defs.bool(forKey: UserDefaultsKey.audioRawMode)
+        s["speakerphoneMode"] = defs.bool(forKey: UserDefaultsKey.audioSpeakerphoneMode)
 
         // Developer
-        s["developerModeEnabled"] = defs.bool(forKey: "developer_mode_enabled")
+        s["developerModeEnabled"] = defs.bool(forKey: UserDefaultsKey.developerModeEnabled)
 
         // Active provider
-        s["activeProviderId"] = defs.string(forKey: "active_provider_id") ?? "none"
+        s["activeProviderId"] = ActiveProviderManager.shared.getActiveProviderID() ?? "none"
 
         // Anarlog
-        s["anarlogAutoImport"] = defs.object(forKey: "anarlog_auto_import") as? Bool ?? true
-        s["anarlogAutoExport"] = defs.object(forKey: "anarlog_auto_export") as? Bool ?? false
+        s["anarlogAutoImport"] = defs.object(forKey: UserDefaultsKey.anarlogAutoImport) as? Bool ?? true
+        s["anarlogAutoExport"] = defs.object(forKey: UserDefaultsKey.anarlogAutoExport) as? Bool ?? false
 
         // AI Config summary
         let aiCfg = AIConfigService.shared.config
@@ -247,5 +247,149 @@ final class ConfigProjectService {
         s["summaryCacheHitRate"] = String(format: "%.1f%%", cacheStats.hitRate * 100)
 
         return s
+    }
+
+    // MARK: - Config Export/Import
+
+    /// Export full configuration as a portable JSON bundle (no API keys).
+    /// Returns JSON-serializable dictionary suitable for .wawaconfig export.
+    static func exportConfigBundle(context: ModelContext) -> [String: Any] {
+        var bundle: [String: Any] = [:]
+        bundle["version"] = 1
+        bundle["exportedAt"] = ISO8601DateFormatter().string(from: Date())
+
+        // Providers (without API keys)
+        let configs = (try? context.fetch(FetchDescriptor<AIProviderConfigModel>())) ?? []
+        bundle["providers"] = configs.map { config in
+            return [
+                "name": config.name,
+                "type": config.typeRaw,
+                "defaultModel": config.defaultModel,
+                "baseURL": config.baseURLString as Any,
+                "supportsStreaming": config.supportsStreaming,
+                "supportsTools": config.supportsTools,
+                "supportsAudio": config.supportsAudio,
+                "supportsEmbeddings": config.supportsEmbeddings,
+                "availableModels": config.availableModels,
+                "notes": config.notes as Any
+            ] as [String: Any]
+        }
+
+        // Prompts (user overrides only)
+        let userPrompts = PromptStore.shared.prompts(in: nil).filter { $0.isUserEdited }
+        bundle["prompts"] = userPrompts.map { prompt in
+            return [
+                "name": prompt.name,
+                "category": prompt.category,
+                "content": prompt.content,
+                "variables": prompt.variables
+            ] as [String: Any]
+        }
+
+        // Settings
+        bundle["settings"] = buildSettingsSnapshot()
+
+        // Skills (user overrides only)
+        let userSkills = AnalysisSkillStore.shared.allSkills.filter { $0.isUserEdited }
+        bundle["skills"] = userSkills.map { skill in
+            return [
+                "name": skill.name,
+                "displayName": skill.displayName,
+                "description": skill.description,
+                "category": skill.category,
+                "templateID": skill.templateID,
+                "defaultModel": skill.defaultModel,
+                "maxIterations": skill.maxIterations,
+                "allowedTools": skill.allowedTools
+            ] as [String: Any]
+        }
+
+        // Memories
+        let memories = AgentMemoryStore.shared.listAll()
+        if !memories.isEmpty,
+           let data = try? JSONEncoder().encode(memories),
+           let jsonArray = try? JSONSerialization.jsonObject(with: data) {
+            bundle["memories"] = jsonArray
+        }
+
+        // Active provider ID (for re-import)
+        bundle["activeProviderID"] = ActiveProviderManager.shared.getActiveProviderID() ?? ""
+
+        return bundle
+    }
+
+    /// Import configuration from a previously exported JSON bundle.
+    /// Providers are created without API keys (user must re-add keys in Settings).
+    /// Returns counts of imported items.
+    static func importConfigBundle(_ bundle: [String: Any], context: ModelContext) -> [String: Int] {
+        var counts: [String: Int] = ["providers": 0, "prompts": 0, "skills": 0, "memories": 0]
+
+        // Import providers
+        if let providers = bundle["providers"] as? [[String: Any]] {
+            for p in providers {
+                guard let name = p["name"] as? String, !name.isEmpty,
+                      let typeRaw = p["type"] as? String else { continue }
+                let existing = (try? context.fetch(FetchDescriptor<AIProviderConfigModel>())).flatMap { $0 } ?? []
+                if existing.contains(where: { $0.name == name && $0.typeRaw == typeRaw }) { continue }
+                let config = AIProviderConfigModel(name: name, type: ProviderType(rawValue: typeRaw) ?? .openAICompatible)
+                config.defaultModel = p["defaultModel"] as? String ?? ""
+                config.baseURLString = p["baseURL"] as? String
+                config.supportsStreaming = p["supportsStreaming"] as? Bool ?? true
+                config.supportsTools = p["supportsTools"] as? Bool ?? true
+                config.supportsAudio = p["supportsAudio"] as? Bool ?? false
+                config.supportsEmbeddings = p["supportsEmbeddings"] as? Bool ?? false
+                if let notes = p["notes"] as? String { config.notes = notes }
+                context.insert(config)
+                counts["providers"]! += 1
+            }
+        }
+
+        // Import prompts
+        if let prompts = bundle["prompts"] as? [[String: Any]] {
+            for p in prompts {
+                guard let name = p["name"] as? String,
+                      let content = p["content"] as? String else { continue }
+                PromptStore.shared.addOrUpdate(name: name, category: p["category"] as? String ?? "custom",
+                    content: content, variables: p["variables"] as? [String] ?? [])
+                counts["prompts"]! += 1
+            }
+        }
+
+        // Import skills
+        if let skills = bundle["skills"] as? [[String: Any]] {
+            for s in skills {
+                guard let name = s["name"] as? String,
+                      let displayName = s["displayName"] as? String else { continue }
+                AnalysisSkillStore.shared.addOrUpdate(name: name, displayName: displayName,
+                    description: s["description"] as? String ?? "",
+                    category: s["category"] as? String ?? "imported",
+                    templateID: s["templateID"] as? String ?? "",
+                    defaultModel: s["defaultModel"] as? String ?? "",
+                    maxIterations: s["maxIterations"] as? Int ?? 3,
+                    allowedTools: s["allowedTools"] as? [String] ?? [])
+                counts["skills"]! += 1
+            }
+        }
+
+        // Import memories
+        if let memories = bundle["memories"] as? [[String: Any]],
+           let data = try? JSONSerialization.data(withJSONObject: memories),
+           let decoded = try? JSONDecoder().decode([AgentMemory].self, from: data) {
+            for mem in decoded {
+                AgentMemoryStore.shared.write(pattern: mem.pattern, strategy: mem.strategy,
+                    itemType: mem.itemType, contentType: mem.contentType,
+                    language: mem.language)
+            }
+            counts["memories"]! = decoded.count
+        }
+
+        // Restore active provider
+        if let activeID = bundle["activeProviderID"] as? String, !activeID.isEmpty {
+            ActiveProviderManager.shared.setActiveProviderID(activeID)
+        }
+
+        try? context.save()
+        AppLog.event("config", "Imported config: \(counts["providers"]!)p/\(counts["prompts"]!)pr/\(counts["skills"]!)s/\(counts["memories"]!)m")
+        return counts
     }
 }

@@ -72,7 +72,7 @@ enum AnarlogConfigBridge {
 
         // Apply model preferences
         if let defaultProvider = imported.defaultProvider {
-            UserDefaults.standard.set(defaultProvider, forKey: "active_provider_id")
+            ActiveProviderManager.shared.setActiveProviderID(defaultProvider)
         }
 
         for (providerId, model) in imported.models {
@@ -85,7 +85,7 @@ enum AnarlogConfigBridge {
     /// Export Wawa Note config to anarlog format.
     static func exportConfig() throws -> AnarlogConfig {
         let keyStore = SecureKeyStore()
-        let activeProviderId = UserDefaults.standard.string(forKey: "active_provider_id") ?? "openai"
+        let activeProviderId = ActiveProviderManager.shared.getActiveProviderID() ?? "openai"
 
         var entries: [String: AnarlogProviderEntry] = [:]
 

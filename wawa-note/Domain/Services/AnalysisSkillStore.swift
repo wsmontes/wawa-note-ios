@@ -206,10 +206,24 @@ final class AnalysisSkillStore: ObservableObject {
     }
 
     func resetSkill(named name: String) {
+        guard let skill = skills[name] else {
+            logger.warning("resetSkill: '\(name)' not found")
+            return
+        }
+        // Check if this skill exists in built-ins — if not, it's user-created and should be removed
+        let builtInNames = builtInSkillNames
+        if !builtInNames.contains(name) && skill.isUserEdited {
+            skills.removeValue(forKey: name)
+            saveOverrides()
+            logger.info("Removed user-created skill: \(skill.displayName)")
+            return
+        }
+        // Reset built-in skill to its original state
         skills[name]?.isUserEdited = false
         saveOverrides()
         loadBuiltInSkills()
         applyUserOverrides()
+        logger.info("Reset skill to built-in: \(skill.displayName)")
     }
 
     /// List all built-in skill names (not user-created).
