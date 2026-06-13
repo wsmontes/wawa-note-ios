@@ -683,17 +683,17 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// Called before and after every risky operation (removeTap, installTap,
     /// engine stop/start, session configure/deactivate).
     private func logCrashDiagnostics(_ marker: String) {
-        let route = self.sessionManager.session.currentRoute
-        let inputs = route.inputs.map { "\($0.portName)(\($0.portType.rawValue))" }
-        let outputs = route.outputs.map { "\($0.portName)(\($0.portType.rawValue))" }
-        let available = self.sessionManager.session.availableInputs?.map { "\($0.portName)(\($0.portType.rawValue))" } ?? []
+        // Use the session manager's safe snapshot instead of accessing
+        // AVAudioSession directly — the session may be invalidated or
+        // in an inconsistent state during the crash we're diagnosing.
+        let routeSummary = sessionManager.routeSnapshot(label: marker)
         let intentStr: String = switch self.recordingIntent {
         case .none: "none"
         case .userWantsRecording: "wantsRecord"
         case .userPaused: "paused"
         case .userStopped: "stopped"
         }
-        let msg = "CrashDiag [\(marker)]: state=\(String(describing: self.state)) intent=\(intentStr) gen=\(self.routeRecoveryGeneration.uuidString.prefix(8)) tap=\(self.isTapInstalled) engRunning=\(self.engine.isRunning) restarting=\(self.isPhysicalRestartInProgress) inputs=[\(inputs.joined(separator: ", "))] outputs=[\(outputs.joined(separator: ", "))] avail=[\(available.joined(separator: ", "))] rate=\(self.sessionManager.sampleRate) mid=\(self.currentMeetingId?.uuidString.prefix(8) ?? "nil") file=\(self.fileWriter.currentFileURL?.lastPathComponent ?? "nil")"
+        let msg = "CrashDiag [\(marker)]: state=\(String(describing: self.state)) intent=\(intentStr) gen=\(self.routeRecoveryGeneration.uuidString.prefix(8)) tap=\(self.isTapInstalled) engRunning=\(self.engine.isRunning) restarting=\(self.isPhysicalRestartInProgress) \(routeSummary) mid=\(self.currentMeetingId?.uuidString.prefix(8) ?? "nil") file=\(self.fileWriter.currentFileURL?.lastPathComponent ?? "nil")"
         AppLog.audio.info("\(msg)")
     }
 
