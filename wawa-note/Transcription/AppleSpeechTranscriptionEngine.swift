@@ -347,18 +347,22 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
         AppLog.transcription.info("Transcribing on-device — locale=\(recognizer.locale.identifier) requiresOnDevice=\(forceOnDevice)")
 
-        return try await withCheckedThrowingContinuation { continuation in
-            var hasResumed = false
-            let task = recognizer.recognitionTask(with: request) { result, error in
-                guard !hasResumed else { return }
-                if let error {
-                    let nsError = error as NSError
-                    AppLog.transcription.error("On-device recognition failed: \(nsError.domain)/\(nsError.code) — \(error.localizedDescription)")
+        return try await withThrowingTaskGroup(of: Transcript.self) { group in
+            // Recognition task — may hang indefinitely if the recognizer
+            // never fires .isFinal or an error (network timeout, internal hang).
+            group.addTask {
+                try await withCheckedThrowingContinuation { continuation in
+                    var hasResumed = false
+                    let task = recognizer.recognitionTask(with: request) { result, error in
+                        guard !hasResumed else { return }
+                        if let error {
+                            let nsError = error as NSError
+                            AppLog.transcription.error("On-device recognition failed: \(nsError.domain)/\(nsError.code) — \(error.localizedDescription)")
 
-                    // kAFAssistantErrorDomain Code=1101 = local recognizer rejected audio format.
-                    // Retry once with cloud recognition if it was forced on-device.
-                    if nsError.domain.contains("AssistantError") && forceOnDevice {
-                        hasResumed = true
+                            // kAFAssistantErrorDomain Code=1101 = local recognizer rejected audio format.
+                            // Retry once with cloud recognition if it was forced on-device.
+                            if nsError.domain.contains("AssistantError") && forceOnDevice {
+                                hasResumed = true
                         AppLog.transcription.warning("Local recognizer rejected audio, falling back to cloud recognition")
                         let cloudRequest = SFSpeechURLRecognitionRequest(url: recognitionURL)
                         cloudRequest.shouldReportPartialResults = false
@@ -399,7 +403,21 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                 AppLog.transcription.info("On-device complete: \(transcript.segments.count) segments, lang=\(transcript.languageCode ?? recognizer.locale.identifier), locale=\(recognizer.locale.identifier)")
                 continuation.resume(returning: transcript)
             }
-            self.activeRecognitionTask = task
+                    self.activeRecognitionTask = task
+                }
+            }
+            // Timeout task — prevents the continuation from hanging forever
+            // if the recognizer never fires .isFinal or an error callback.
+            group.addTask {
+                try await Task.sleep(nanoseconds: 120_000_000_000)  // 2 minutes
+                throw TranscriptionError.recognitionFailed("Recognition timed out after 120s")
+            }
+            // First completed task wins; cancel the other
+            guard let result = try await group.next() else {
+                throw TranscriptionError.recognitionFailed("Recognition failed — no result")
+            }
+            group.cancelAll()
+            return result
         }
     }
 
