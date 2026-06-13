@@ -856,6 +856,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return .noUsableInput(takeRouteSnapshot(reason: reason))
         }
 
+        guard guardDiskSpaceForNewSegment(reason: reason) else { return .noUsableInput(takeRouteSnapshot(reason: reason)) }
+
         let nextIndex = nextSegmentIndexProvider?() ?? (fileWriter.segmentIndex + 1)
         do {
             // The old segment was already closed by checkpointCurrentSegment.
@@ -1044,6 +1046,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         let sessionRate = sessionManager.sampleRate
         guard let hwFmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sessionRate > 0 ? sessionRate : 44100, channels: 1, interleaved: false) else {
             AppLog.error("audio", "forceBuiltInMic: invalid audio format — rate=\(sessionRate)")
+        guard guardDiskSpaceForNewSegment(reason: "forceBuiltInMic") else { return }
+
             audioInterruptionReason = "Could not create audio format."
             transition(to: .waitingForUsableInput, reason: "invalid audio format")
             return
@@ -1321,6 +1325,21 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// Checks whether there's enough free disk space for a new audio segment.
+    /// If below the critical threshold, transitions to .failedFatal and returns
+    /// false so the caller can abort the route change without losing existing
+    /// segments (which are already safely checkpointed).
+    private func guardDiskSpaceForNewSegment(reason: String) -> Bool {
+        let store = FileArtifactStore()
+        guard let free = store.freeSpaceForCurrentRecording(), free > 5_000_000 else {
+            AppLog.error("audio", "CRITICAL: insufficient disk space for new segment (\(reason)) — stopping recording to preserve existing audio")
+            audioInterruptionReason = "Recording stopped — storage is full."
+            transition(to: .failedFatal("diskFull"), reason: "pre-segment disk check: \(reason)")
+            return false
+        }
+        return true
+    }
+
     /// Drains the pending route change queue after a physical restart completes.
     /// Multiple route changes can stack up during Bluetooth negotiation (e.g.
     /// AirPods connecting → disconnecting → connecting again in <2s). Each is
@@ -1519,6 +1538,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             transition(to: .waitingForUsableInput, reason: "invalid audio format")
             return .noUsableInput(takeRouteSnapshot(reason: reason))
         }
+
+        guard guardDiskSpaceForNewSegment(reason: reason) else { return .noUsableInput(takeRouteSnapshot(reason: reason)) }
 
         // 5. Open new segment with format matching the new route.
         let nextIndex = nextSegmentIndexProvider?() ?? (fileWriter.segmentIndex + 1)
