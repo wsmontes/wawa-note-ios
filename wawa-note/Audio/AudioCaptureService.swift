@@ -1132,6 +1132,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private var mediaServicesResetObserver: NSObjectProtocol?
     private var engineConfigChangeObserver: NSObjectProtocol?
     private var silenceHintObserver: NSObjectProtocol?
+    private var memoryWarningObserver: NSObjectProtocol?
 
     private func observeAudioNotifications() {
         interruptionObserver = NotificationCenter.default.addObserver(
@@ -1167,6 +1168,16 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             self?.handleSilenceHint(notification)
         }
 
+        // Memory pressure: the system may kill the app without further warning.
+        // Force an immediate checkpoint + sync flush so we don't lose audio.
+        memoryWarningObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleMemoryWarning()
+        }
+
         // CRITICAL: AVAudioEngineConfigurationChange fires BEFORE routeChangeNotification
         // when Bluetooth connects. iOS internally clears all taps and stops the engine.
         // Without this observer, isTapInstalled stays true → removeTap(onBus:) crashes.
@@ -1180,11 +1191,23 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         if let obs = mediaServicesResetObserver { NotificationCenter.default.removeObserver(obs) }
         if let obs = engineConfigChangeObserver { NotificationCenter.default.removeObserver(obs) }
         if let obs = silenceHintObserver { NotificationCenter.default.removeObserver(obs) }
+        if let obs = memoryWarningObserver { NotificationCenter.default.removeObserver(obs) }
         interruptionObserver = nil
         routeChangeObserver = nil
         mediaServicesResetObserver = nil
         engineConfigChangeObserver = nil
         silenceHintObserver = nil
+        memoryWarningObserver = nil
+    }
+
+    /// Memory pressure callback. Forces an immediate checkpoint + sync flush
+    /// so audio data is safely on disk before the system potentially kills us.
+    private func handleMemoryWarning() {
+        guard state == .recording || state == .validatingRoute else { return }
+        AppLog.audio.warning("Memory warning received — forcing checkpoint to protect audio data")
+        _ = checkpointCurrentSegment(reason: "memoryWarning")
+        // The checkpoint above closes and flushes the current segment file.
+        // The coordinator will immediately persist the updated manifest.
     }
 
     /// Handles AVAudioSession.silenceSecondaryAudioHintNotification.
