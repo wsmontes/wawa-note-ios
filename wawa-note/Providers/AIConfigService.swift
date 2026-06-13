@@ -71,7 +71,7 @@ struct AIConfig: Codable, Sendable {
 final class AIConfigService: @unchecked Sendable {
     static let shared = AIConfigService()
 
-    let config: AIConfig
+    private(set) var config: AIConfig
 
     private init() {
         if let url = Bundle.main.url(forResource: "ai_config", withExtension: "json") {
@@ -128,6 +128,24 @@ final class AIConfigService: @unchecked Sendable {
 
         if !warnings.isEmpty {
             AppLog.event("config", "ai_config.json loaded with \(warnings.count) warning(s)")
+        }
+    }
+
+    /// Reload the AI configuration from the bundle at runtime.
+    /// Call after overrides are modified (prompts, skills) to refresh cached config.
+    /// Preserves the current config on failure.
+    func reload() {
+        guard let url = Bundle.main.url(forResource: "ai_config", withExtension: "json") else {
+            AppLog.config.warning("reload: ai_config.json not found — keeping current config")
+            return
+        }
+        do {
+            let data = try Data(contentsOf: url)
+            let fresh = try JSONDecoder().decode(AIConfig.self, from: data)
+            config = fresh
+            AppLog.config.info("Reloaded AI config: \(fresh.providers.count) providers, \(fresh.features?.count ?? 0) features")
+        } catch {
+            AppLog.config.error("reload: failed to decode ai_config.json: \(error) — keeping current config")
         }
     }
 
