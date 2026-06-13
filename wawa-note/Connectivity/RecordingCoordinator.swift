@@ -572,6 +572,17 @@ final class RecordingCoordinator: ObservableObject {
                 }
             }
 
+            // After 3 failed retries, try forceBuiltInMicRecovery as a last resort.
+            // The iPhone built-in mic is the most reliable fallback — if it's available,
+            // we should try it before giving up and showing an error.
+            AppLog.audio.info("All retry attempts failed — attempting forceBuiltInMicRecovery")
+            await self.captureService.forceBuiltInMicRecovery()
+            if self.captureService.state == .recording || self.captureService.state == .validatingRoute {
+                self.commitUIRecordingState()
+                AppLog.audio.info("Recording resumed via built-in mic fallback")
+                return
+            }
+
             self.state = .waitingForUsableInput
             self.errorMessage = self.captureService.audioInterruptionReason
                 ?? "Could not resume recording. Try disconnecting Bluetooth or use iPhone mic."
