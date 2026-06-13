@@ -50,30 +50,14 @@ struct ProviderTemplate: Identifiable, Equatable {
     private static var byId: [String: ProviderTemplate] {
         Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })
     }
-    static var openAI: ProviderTemplate {
-        guard let t = byId["openai"] else { fatalError("OpenAI provider not found in ai_config.json") }
-        return t
-    }
-    static var anthropic: ProviderTemplate {
-        guard let t = byId["anthropic"] else { fatalError("Anthropic provider not found in ai_config.json") }
-        return t
-    }
-    static var gemini: ProviderTemplate {
-        guard let t = byId["gemini"] else { fatalError("Gemini provider not found in ai_config.json") }
-        return t
-    }
-    static var lmStudio: ProviderTemplate {
-        guard let t = byId["lmstudio"] else { fatalError("LM Studio provider not found in ai_config.json") }
-        return t
-    }
-    static var deepseek: ProviderTemplate {
-        guard let t = byId["deepseek"] else { fatalError("DeepSeek provider not found in ai_config.json") }
-        return t
-    }
-    static var ollama: ProviderTemplate {
-        guard let t = byId["ollama"] else { fatalError("Ollama provider not found in ai_config.json") }
-        return t
-    }
+    /// Returns nil if the provider template is not found in ai_config.json.
+    /// Use optional binding instead of force-unwrapping to avoid crashes.
+    static var openAI: ProviderTemplate? { byId["openai"] }
+    static var anthropic: ProviderTemplate? { byId["anthropic"] }
+    static var gemini: ProviderTemplate? { byId["gemini"] }
+    static var lmStudio: ProviderTemplate? { byId["lmstudio"] }
+    static var deepseek: ProviderTemplate? { byId["deepseek"] }
+    static var ollama: ProviderTemplate? { byId["ollama"] }
 
     // MARK: - Collections (loaded from config)
 

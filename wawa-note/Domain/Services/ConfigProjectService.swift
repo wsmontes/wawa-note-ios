@@ -266,6 +266,82 @@ final class ConfigProjectService {
         return s
     }
 
+    // MARK: - Reverse Flow (Config Project → App State)
+
+    /// Apply configuration from config project items back to the app's actual state.
+    /// This is the reverse of syncConfigProject: reads KnowledgeItems and updates
+    /// AIProviderConfigModel, PromptStore, UserDefaults, AgentMemoryStore, etc.
+    /// Returns counts of applied changes.
+    static func applyConfigFromProject(context: ModelContext) -> [String: Int] {
+        guard let project = findConfigProject(context: context) else {
+            AppLog.config.warning("applyConfigFromProject: config project not found")
+            return [:]
+        }
+        let psvc = ProjectService(context: context)
+        let items = (try? psvc.items(in: project.id)) ?? []
+        var counts: [String: Int] = ["providers": 0, "prompts": 0, "settings": 0, "memories": 0, "errors": 0]
+
+        for item in items {
+            guard let bodyData = item.bodyText?.data(using: .utf8) else { continue }
+
+            if item.title.hasPrefix("Provider: ") {
+                guard let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any],
+                      let name = json["name"] as? String else { counts["errors"]! += 1; continue }
+                let configs = (try? context.fetch(FetchDescriptor<AIProviderConfigModel>())) ?? []
+                if let existing = configs.first(where: { $0.name == name }) {
+                    if let newModel = json["defaultModel"] as? String { existing.defaultModel = newModel }
+                    if let newURL = json["baseURL"] as? String { existing.baseURLString = newURL }
+                    if let notes = json["notes"] as? String { existing.notes = notes }
+                    counts["providers"]! += 1
+                }
+            }
+
+            if item.title.hasPrefix("Prompt: ") {
+                // Parse the hybrid Markdown+JSON format
+                let parts = item.bodyText?.components(separatedBy: "\n# Content\n") ?? []
+                if parts.count >= 2,
+                   let metaJSON = parts[0].replacingOccurrences(of: "# Metadata\n", with: "").data(using: .utf8),
+                   let meta = try? JSONSerialization.jsonObject(with: metaJSON) as? [String: Any],
+                   let name = meta["name"] as? String {
+                    let content = parts[1...].joined(separator: "\n# Content\n") // rejoin if content contained '# Content'
+                    PromptStore.shared.addOrUpdate(name: name, category: meta["category"] as? String ?? "custom",
+                        content: content, variables: meta["variables"] as? [String] ?? [])
+                    counts["prompts"]! += 1
+                }
+            }
+
+            if item.title == "App Settings" {
+                guard let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any] else { continue }
+                let defs = UserDefaults.standard
+                if let v = json["autoTranscribe"] as? Bool { defs.set(v, forKey: UserDefaultsKey.autoTranscribe) }
+                if let v = json["autoAnalyze"] as? Bool { defs.set(v, forKey: UserDefaultsKey.autoAnalyze) }
+                if let v = json["autoAnalysisModel"] as? String { defs.set(v, forKey: UserDefaultsKey.autoAnalysisModel) }
+                if let v = json["autoAnalysisProvider"] as? String { defs.set(v, forKey: UserDefaultsKey.autoAnalysisProvider) }
+                if let v = json["voiceProcessing"] as? Bool { defs.set(!v, forKey: UserDefaultsKey.audioRawMode) }
+                if let v = json["speakerphoneMode"] as? Bool { defs.set(v, forKey: UserDefaultsKey.audioSpeakerphoneMode) }
+                if let v = json["developerModeEnabled"] as? Bool { defs.set(v, forKey: UserDefaultsKey.developerModeEnabled) }
+                counts["settings"]! += 1
+            }
+
+            if item.title.hasPrefix("Memory: ") {
+                guard let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any],
+                      let pattern = json["pattern"] as? String,
+                      let strategy = json["strategy"] as? String else { counts["errors"]! += 1; continue }
+                AgentMemoryStore.shared.write(pattern: pattern, strategy: strategy,
+                    itemType: json["itemType"] as? String,
+                    contentType: json["contentType"] as? String,
+                    language: json["language"] as? String,
+                    minDuration: json["minDuration"] as? Double,
+                    minChars: json["minChars"] as? Int)
+                counts["memories"]! += 1
+            }
+        }
+
+        try? context.save()
+        AppLog.event("config", "Applied from config project: \(counts["providers"]!)p/\(counts["prompts"]!)pr/\(counts["settings"]!)s/\(counts["memories"]!)m (\(counts["errors"]!) errors)")
+        return counts
+    }
+
     // MARK: - Config Export/Import
 
     /// Export full configuration as a portable JSON bundle (no API keys).
