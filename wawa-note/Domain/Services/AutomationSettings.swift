@@ -94,4 +94,39 @@ struct AutomationSettings: @unchecked Sendable {
         // Last resort: first available model
         return available.first
     }
+
+    /// Revalidate automation settings against current providers.
+    /// Call when providers change (add/remove/active provider change).
+    /// Resets autoAnalysisModel/Provider if they reference a missing provider or unavailable model.
+    func revalidateAutomationConfig(context: ModelContext) {
+        let configs = ActiveProviderManager.shared.allProviders(context: context)
+
+        // Validate autoAnalysisProvider exists
+        if !autoAnalysisProvider.isEmpty {
+            let exists = configs.contains { $0.typeRaw == autoAnalysisProvider || $0.providerConfigId == autoAnalysisProvider }
+            if !exists {
+                AppLog.config.warning("AutomationSettings: autoAnalysisProvider '\(autoAnalysisProvider)' not found — resetting")
+                autoAnalysisProvider = ""
+            }
+        }
+
+        // Validate autoAnalysisModel exists in at least one provider
+        if !autoAnalysisModel.isEmpty {
+            var found = false
+            for config in configs {
+                let models = config.availableModels
+                if models.isEmpty {
+                    // If availableModels not fetched, check AIConfigService
+                    let aiModels = AIConfigService.shared.availableModels(for: config.providerConfigId)
+                    if aiModels.contains(autoAnalysisModel) { found = true; break }
+                } else if models.contains(autoAnalysisModel) {
+                    found = true; break
+                }
+            }
+            if !found {
+                AppLog.config.warning("AutomationSettings: autoAnalysisModel '\(autoAnalysisModel)' not available in any provider — resetting")
+                autoAnalysisModel = ""
+            }
+        }
+    }
 }

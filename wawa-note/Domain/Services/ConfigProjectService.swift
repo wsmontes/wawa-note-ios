@@ -70,7 +70,7 @@ final class ConfigProjectService {
         let psvc = ProjectService(context: context)
 
         let existing = (try? psvc.items(in: project.id)) ?? []
-        let configPrefixes = ["Provider: ", "Prompt: ", "App Settings", "Agent Memories", "Skill: ", "Lens: "]
+        let configPrefixes = ["Provider: ", "Prompt: ", "App Settings", "Agent Memories", "Memory: ", "Skill: ", "Lens: "]
         var existingByTitle: [String: KnowledgeItem] = [:]
         for item in existing where configPrefixes.contains(where: { item.title.hasPrefix($0) || item.title == $0 }) {
             existingByTitle[item.title] = item
@@ -146,12 +146,28 @@ final class ConfigProjectService {
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
         upsertItem(title: "App Settings", body: settingsJSON, tags: ["config", "settings"])
 
-        // 4. Memories
+        // 4. Memories — individual items per memory for granular editing
         let memories = AgentMemoryStore.shared.listAll()
-        if !memories.isEmpty,
-           let data = try? JSONEncoder().encode(memories),
-           let json = String(data: data, encoding: .utf8) {
-            upsertItem(title: "Agent Memories", body: json, tags: ["config", "memories"])
+        for mem in memories {
+            let memDict: [String: Any] = [
+                "id": mem.id.uuidString,
+                "pattern": mem.pattern,
+                "strategy": mem.strategy,
+                "itemType": mem.itemType as Any,
+                "contentType": mem.contentType as Any,
+                "language": mem.language as Any,
+                "minDuration": mem.minDuration as Any,
+                "minChars": mem.minChars as Any,
+                "successCount": mem.successCount,
+                "failCount": mem.failCount,
+                "isStale": mem.isStale,
+                "relevance": mem.relevance,
+                "lastUsed": ISO8601DateFormatter().string(from: mem.lastUsed),
+                "createdAt": ISO8601DateFormatter().string(from: mem.createdAt)
+            ]
+            let memJSON = (try? JSONSerialization.data(withJSONObject: memDict, options: .prettyPrinted))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+            upsertItem(title: "Memory: \(mem.pattern)", body: memJSON, tags: ["config", "memory"])
         }
 
         // 5. Skills (from AnalysisSkillStore)
