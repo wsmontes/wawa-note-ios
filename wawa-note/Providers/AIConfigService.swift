@@ -110,9 +110,9 @@ final class AIConfigService: @unchecked Sendable {
             warnings.append("No providers defined — provider templates will be empty")
         }
         for (id, p) in config.providers {
-            if p.name.isEmpty { warnings.append("Provider '\(id)' has empty name") }
-            if p.models.isEmpty { warnings.append("Provider '\(id)' has no models listed") }
-            if p.defaultModel.isEmpty { warnings.append("Provider '\(id)' has no defaultModel") }
+            if p.displayName.isEmpty { warnings.append("Provider '\(id)' has empty displayName") }
+            if p.availableModels?.isEmpty ?? true { warnings.append("Provider '\(id)' has no availableModels listed") }
+            if p.defaultModel?.isEmpty ?? true { warnings.append("Provider '\(id)' has no defaultModel") }
         }
 
         if let features = config.features {
