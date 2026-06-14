@@ -26,8 +26,21 @@ struct KnowledgeDetailView: View {
     @State private var editedTitle = ""
     @State private var editedBody = ""
     @State private var backlinks: [(edge: GraphEdge, sourceItem: KnowledgeItem)] = []
-    @State private var isPipelineProcessing = false
     @State private var pipelineStage: String = ""
+    @State private var analysisAvailable = false
+
+    /// True while the item is in any post-recording processing state.
+    /// Derived from `item.status` (authoritative) and the queue entries
+    /// (@Published) so the view updates reactively without manual @State flips.
+    private var isPipelineProcessing: Bool {
+        processingQueue.entries.contains(where: {
+            $0.itemID == item.id && ($0.status == .queued || $0.status == .processing)
+        }) ||
+        item.status == .preparingAudio ||
+        item.status == .queuedForTranscription ||
+        item.status == .transcribing ||
+        item.status == .analyzing
+    }
     @State private var audioPlaybackURL: URL?
     @State private var isPreparingAudio = false
     @State private var audioAssetState: AudioAssetState = .unavailable
@@ -41,6 +54,17 @@ struct KnowledgeDetailView: View {
 
     private let fileStore = FileArtifactStore()
 
+    private var statusLabel: String {
+        if let p = transcriptionProgress { return p }
+        if !pipelineStage.isEmpty { return pipelineStage }
+        switch item.status {
+        case .preparingAudio:        return "Preparing audio…"
+        case .queuedForTranscription: return "Queued for transcription…"
+        case .transcribing:          return "Transcribing…"
+        default:                     return "Processing…"
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -53,7 +77,7 @@ struct KnowledgeDetailView: View {
                         HStack(spacing: 10) {
                             ProgressView()
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(transcriptionProgress ?? (pipelineStage.isEmpty ? "Processing..." : pipelineStage))
+                                Text(statusLabel)
                                     .font(.subheadline).foregroundStyle(.primary)
                                 if isAgentThinking {
                                     Text("Agent is thinking…").font(.caption2).foregroundStyle(.secondary)
@@ -260,7 +284,7 @@ struct KnowledgeDetailView: View {
         }
         .onAppear {
             chatState.context = .item(item.id)
-            isPipelineProcessing = contentPipeline.isProcessingItem(item.id)
+            analysisAvailable = AIConfigService.shared.isProviderConfigured(context: modelContext)
             // Load scanned pages ONCE to avoid blocking main thread on re-renders
             if item.type == .image, scannedPages.isEmpty {
                 scannedPages = loadScannedPages(count: item.imagePageCount ?? 1)
@@ -272,9 +296,12 @@ struct KnowledgeDetailView: View {
                 loadData()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .activeProviderChanged)) { _ in
+            analysisAvailable = AIConfigService.shared.isProviderConfigured(context: modelContext)
+            loadData()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .pipelineCompleted)) { n in
             if n.object as? String == item.id.uuidString {
-                isPipelineProcessing = false
                 pipelineStage = ""
                 Task { @MainActor in
                     loadRawAnalysisJSON()
@@ -284,9 +311,11 @@ struct KnowledgeDetailView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .contentPipelineStageChanged)) { n in
             guard n.object as? String == item.id.uuidString else { return }
+            if let stage = n.userInfo?["stage"] as? String {
+                pipelineStage = stage.capitalized
+            }
             if let tool = n.userInfo?["tool"] as? String {
                 pipelineStage = "Agent: \(tool)"
-                isPipelineProcessing = true
             }
             if let summary = n.userInfo?["summary"] as? String {
                 pipelineStage = summary
@@ -664,19 +693,31 @@ struct KnowledgeDetailView: View {
             // scrolling through the full text, especially for long transcripts.
             if transcript != nil && analysis == nil && !isAnalyzing && !isPipelineProcessing {
                 VStack(spacing: 12) {
-                    Image(systemName: "sparkles")
-                        .font(.largeTitle)
-                        .foregroundStyle(.secondary)
-                    Text("Ready for analysis")
-                        .font(.headline)
-                    if let error = analysisError {
-                        Text(error).font(.caption).foregroundStyle(.red)
+                    if analysisAvailable {
+                        Image(systemName: "sparkles")
+                            .font(.largeTitle)
+                            .foregroundStyle(.secondary)
+                        Text("Ready for analysis")
+                            .font(.headline)
+                        if let error = analysisError {
+                            Text(error).font(.caption).foregroundStyle(.red)
+                        }
+                        ActiveModelPicker(selectedModel: $selectedModel, label: "Model")
+                        Button("Analyze via Agent") {
+                            Task { await reprocessItem() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    } else {
+                        Image(systemName: "link.badge.plus")
+                            .font(.largeTitle)
+                            .foregroundStyle(.secondary)
+                        Text("Connect an AI Provider")
+                            .font(.headline)
+                        Text("Go to Settings → AI Services to connect an AI provider and analyze your content.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
                     }
-                    ActiveModelPicker(selectedModel: $selectedModel, label: "Model")
-                    Button("Analyze via Agent") {
-                        Task { await reprocessItem() }
-                    }
-                    .buttonStyle(.borderedProminent)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(24)
@@ -923,43 +964,21 @@ struct KnowledgeDetailView: View {
                     .font(.subheadline).fontWeight(.semibold).foregroundStyle(.secondary)
             }
 
-            switch value {
-            case let s as String:
+            if let s = value as? String {
                 Text(s).font(.body).textSelection(.enabled)
-            case let arr as [Any]:
+            } else if let arr = value as? [Any] {
                 ForEach(Array(arr.enumerated()), id: \.offset) { _, item in
-                    if let str = item as? String {
-                        HStack(spacing: 6) {
-                            Image(systemName: "circle.fill").font(.system(size: 5))
-                            Text(str).font(.body).textSelection(.enabled)
-                        }
-                    } else if let dict = item as? [String: Any] {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(dict.keys.sorted(), id: \.self) { k in
-                                if let v = dict[k] as? String, !v.isEmpty {
-                                    HStack(spacing: 6) {
-                                        Text(k.replacingOccurrences(of: "_", with: " ").capitalized + ":")
-                                            .font(.caption).foregroundStyle(.secondary)
-                                        Text(v).font(.body).textSelection(.enabled)
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.vertical, 4)
-                        .padding(.horizontal, 8)
-                        .background(Color(.tertiarySystemFill))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                    } else {
-                        Text(String(describing: item)).font(.body).textSelection(.enabled)
-                    }
+                    dynamicListItem(item)
                 }
-            case let n as NSNumber:
+            } else if let dict = value as? [String: Any] {
+                dynamicDictView(dict)
+            } else if let n = value as? NSNumber {
                 Text(n.stringValue).font(.body).textSelection(.enabled)
-            case let b as Bool:
+            } else if let b = value as? Bool {
                 Text(b ? "Yes" : "No").font(.body)
-            case is NSNull:
+            } else if value is NSNull {
                 Text("—").font(.caption).foregroundStyle(.tertiary)
-            default:
+            } else {
                 Text(String(describing: value)).font(.body).textSelection(.enabled)
             }
         }
@@ -967,6 +986,60 @@ struct KnowledgeDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func dynamicListItem(_ item: Any) -> AnyView {
+        if let str = item as? String {
+            return AnyView(HStack(spacing: 6) {
+                Image(systemName: "circle.fill").font(.system(size: 5))
+                Text(str).font(.body).textSelection(.enabled)
+            })
+        }
+        if let dict = item as? [String: Any] {
+            return AnyView(dynamicDictView(dict))
+        }
+        if let n = item as? NSNumber {
+            return AnyView(Text(n.stringValue).font(.body).textSelection(.enabled))
+        }
+        return AnyView(Text(String(describing: item)).font(.body).textSelection(.enabled))
+    }
+
+    private func dynamicDictView(_ dict: [String: Any]) -> AnyView {
+        AnyView(VStack(alignment: .leading, spacing: 4) {
+            ForEach(dict.keys.sorted(), id: \.self) { k in
+                if let v = dict[k] {
+                    if let str = v as? String, !str.isEmpty {
+                        HStack(spacing: 6) {
+                            Text(k.replacingOccurrences(of: "_", with: " ").capitalized + ":")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(str).font(.body).textSelection(.enabled)
+                        }
+                    } else if let nestedArr = v as? [Any] {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(k.replacingOccurrences(of: "_", with: " ").capitalized)
+                                .font(.caption).foregroundStyle(.secondary)
+                            ForEach(Array(nestedArr.enumerated()), id: \.offset) { _, nestedItem in
+                                dynamicListItem(nestedItem)
+                                    .padding(.leading, 8)
+                            }
+                        }
+                    } else if let nestedDict = v as? [String: Any] {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(k.replacingOccurrences(of: "_", with: " ").capitalized)
+                                .font(.caption).foregroundStyle(.secondary)
+                            dynamicDictView(nestedDict)
+                                .padding(.leading, 8)
+                        }
+                    } else {
+                        Text("\(k): \(String(describing: v))").font(.body).textSelection(.enabled)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .background(Color(.tertiarySystemFill))
+        .clipShape(RoundedRectangle(cornerRadius: 8)))
     }
 
     private func iconForKey(_ key: String) -> String {
@@ -1554,8 +1627,9 @@ struct KnowledgeDetailView: View {
         transcriptionProgress = "Transcribing..."
         transcriptionError = nil
 
-        // Delegate to canonical transcription service (handles manifest + legacy)
-        let extractionSvc = ContentExtractionService(modelContext: modelContext, fileStore: fileStore)
+        // Delegate to canonical transcription service (handles manifest + legacy).
+        // Pass selectedLocale so the user's language choice is honoured.
+        let extractionSvc = ContentExtractionService(modelContext: modelContext, fileStore: fileStore, preferredLocale: selectedLocale)
         if let text = await extractionSvc.extractTextFromAudio(item) {
             transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id)
             isTranscribing = false
@@ -1565,7 +1639,6 @@ struct KnowledgeDetailView: View {
 
             // Auto-run pipeline (agent-based) after transcription
             if (try? ProviderRouter.resolveActive(context: modelContext)) != nil {
-                isPipelineProcessing = true
                 processingQueue.enqueue(itemID: item.id, trigger: .directUserAction)
             }
             return
@@ -1579,16 +1652,23 @@ struct KnowledgeDetailView: View {
 
     // MARK: - Helpers
 
-    /// Load raw JSON from analysis.json or analysis.dynamic.json — no key expectations.
+    /// Load raw JSON from analysis files — no key expectations, renders anything.
     private func loadRawAnalysisJSON() {
         let dir = fileStore.itemDirectoryURL(for: item.id)
+
+        // Try analysis.json first (agent WriteAnalysisTool output)
         if let data = try? Data(contentsOf: dir.appendingPathComponent("analysis.json")),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            rawAnalysisJSON = json
-        } else if let data = try? Data(contentsOf: dir.appendingPathComponent("analysis.dynamic.json")),
-                  let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let results = dict["results"] as? [String: Any],
-                  let storage = results["storage"] as? [String: Any] {
+           var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            // Strip metadata wrapper added by WriteAnalysisTool
+            json.removeValue(forKey: "_metadata")
+            if !json.isEmpty { rawAnalysisJSON = json; return }
+        }
+
+        // Try analysis.dynamic.json (pipeline DynamicAnalysis output)
+        if let data = try? Data(contentsOf: dir.appendingPathComponent("analysis.dynamic.json")),
+           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let results = dict["results"] as? [String: Any],
+           let storage = results["storage"] as? [String: Any] {
             rawAnalysisJSON = storage
         }
     }
@@ -1645,6 +1725,10 @@ struct KnowledgeDetailView: View {
     // MARK: - Reprocess
 
     private func reprocessItem(confirmed: Bool = false) async {
+        guard AIConfigService.shared.isAnalysisAvailable(context: modelContext) else {
+            analysisError = "No AI provider with an API key is configured. Go to Settings → AI Services."
+            return
+        }
         // Check for user-owned fields before re-processing
         if !confirmed {
             let userOwned = ["title", "bodyText"].filter { item.provenance.isUserOwned(field: $0) }
@@ -1669,7 +1753,6 @@ struct KnowledgeDetailView: View {
 
         // Clear local state so UI refreshes
         analysis = nil
-        isPipelineProcessing = true
 
         // Re-run pipeline. If item belongs to a project, Phase 3 will
         // also re-ingest and update the project context.
@@ -1745,8 +1828,11 @@ struct KnowledgeDetailView: View {
     private var typeColor: Color { item.type.color }
 
     private func formatTime(_ seconds: Double) -> String {
-        let m = Int(seconds) / 60
-        let s = Int(seconds) % 60
+        let total = Int(seconds)
+        let h = total / 3600
+        let m = (total % 3600) / 60
+        let s = total % 60
+        if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
         return String(format: "%02d:%02d", m, s)
     }
 

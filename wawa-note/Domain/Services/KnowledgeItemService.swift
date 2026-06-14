@@ -115,21 +115,50 @@ final class KnowledgeItemService {
     }
 
     /// Batch delete multiple items efficiently (single save).
-    func deleteItems(_ items: [KnowledgeItem]) throws {
-        let ids = Set(items.map(\.id))
-        let annPred = FetchDescriptor<Annotation>(predicate: #Predicate { ids.contains($0.itemID) })
-        if let anns = try? context.fetch(annPred) { for ann in anns { context.delete(ann) } }
-        let edges = try context.fetch(FetchDescriptor<GraphEdge>(predicate: #Predicate {
-            ids.contains($0.fromID) || ids.contains($0.toID)
-        }))
-        for edge in edges { context.delete(edge) }
+    /// Files are deleted FIRST for each item. If any file deletion fails, the item
+    /// is skipped and remains in SwiftData — no orphaned files are created.
+    /// Returns the count of successfully deleted items and a list of UUIDs that failed.
+    @discardableResult
+    func deleteItems(_ items: [KnowledgeItem]) throws -> (deleted: Int, failed: [UUID]) {
+        var failedIDs: [UUID] = []
+        var deletedIDs: [UUID] = []
+        var deletedCount = 0
         for item in items {
-            try? fileStore.deleteMeetingDirectory(for: item.id)
+            // Delete files first — if this fails, the item stays in SwiftData
+            do {
+                try fileStore.deleteMeetingDirectory(for: item.id)
+            } catch {
+                AppLog.storage.error("KnowledgeItemService: batch delete file removal failed — \(item.id.uuidString): \(error.localizedDescription)")
+                failedIDs.append(item.id)
+                continue
+            }
             context.delete(item)
+            deletedIDs.append(item.id)
+            deletedCount += 1
         }
+
+        // Clean up annotations and graph edges ONLY for successfully deleted items.
+        // Doing this before file deletion would leave orphan records if any file
+        // deletion fails — the item stays in SwiftData but its relationships are gone.
+        let successIDs = Set(deletedIDs)
+        if !successIDs.isEmpty {
+            let annPred = FetchDescriptor<Annotation>(predicate: #Predicate { successIDs.contains($0.itemID) })
+            if let anns = try? context.fetch(annPred) { for ann in anns { context.delete(ann) } }
+            let edges = try context.fetch(FetchDescriptor<GraphEdge>(predicate: #Predicate {
+                successIDs.contains($0.fromID) || successIDs.contains($0.toID)
+            }))
+            for edge in edges { context.delete(edge) }
+        }
+
         try context.save()
-        for id in ids { SpotlightIndexService().deleteItem(id) }
-        AppLog.event("batch", "Batch deleted \(items.count) items")
+        for id in deletedIDs { SpotlightIndexService().deleteItem(id) }
+
+        if !failedIDs.isEmpty {
+            AppLog.storage.warning("KnowledgeItemService: batch delete — \(deletedCount) deleted, \(failedIDs.count) failed: \(failedIDs.map(\.uuidString).joined(separator: ", "))")
+        } else {
+            AppLog.event("batch", "Batch deleted \(deletedCount) items")
+        }
+        return (deletedCount, failedIDs)
     }
 
     // MARK: - Update

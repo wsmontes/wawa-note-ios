@@ -232,7 +232,9 @@ final class AudioSessionManager {
         }
     }
 
-    func hasMinimumDiskSpace(requiredBytes: Int64 = 50_000_000) -> Bool {
+    /// Disk space check — uses FileManager, not AVAudioSession, so it's safe
+    /// to call as a static method without an AVAudioSession instance.
+    static func hasMinimumDiskSpace(requiredBytes: Int64 = 50_000_000) -> Bool {
         do {
             let attrs = try FileManager.default.attributesOfFileSystem(forPath: NSHomeDirectory())
             if let freeSize = attrs[.systemFreeSize] as? Int64 {

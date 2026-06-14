@@ -4,6 +4,11 @@ import SwiftData
 enum ItemStatus: String, Codable, CaseIterable {
     case draft
     case recording
+    /// Audio segments written. Concatenation to audio.m4a is in progress.
+    case preparingAudio
+    /// audio.m4a is ready. Item is in the processing queue, waiting for its turn.
+    case queuedForTranscription
+    /// Legacy: used for items recorded before explicit queue statuses were added.
     case recorded
     case transcribing
     case transcribed
@@ -19,9 +24,9 @@ enum ItemStatus: String, Codable, CaseIterable {
     /// Transitions not listed here are illegal and indicate a bug.
     ///
     /// Flow:
-    ///   draft → recording → recorded → transcribing → transcribed
-    ///                                                   ↓
-    ///                                           pendingReview → analyzing → analyzed
+    ///   draft → recording → preparingAudio → queuedForTranscription → transcribing → transcribed
+    ///                                                                                     ↓
+    ///                                                                             pendingReview → analyzing → analyzed
     ///   Any active state → failed (terminal)
     ///   Any state → archived (terminal, manual only)
     var validNextStatuses: Set<ItemStatus> {
@@ -29,9 +34,13 @@ enum ItemStatus: String, Codable, CaseIterable {
         case .draft:
             [.recording]
         case .recording:
-            [.recorded, .failed]
-        case .recorded:
+            [.preparingAudio, .recorded, .failed]
+        case .preparingAudio:
+            [.queuedForTranscription, .failed]
+        case .queuedForTranscription:
             [.transcribing, .failed]
+        case .recorded:
+            [.transcribing, .queuedForTranscription, .failed]
         case .transcribing:
             [.transcribed, .failed]
         case .transcribed:
@@ -43,7 +52,7 @@ enum ItemStatus: String, Codable, CaseIterable {
         case .analyzed:
             [.failed] // re-analysis allowed
         case .failed:
-            [.recorded] // retry from recorded state
+            [.queuedForTranscription, .recorded] // retry
         case .archived:
             [] // terminal
         }
@@ -135,6 +144,14 @@ final class KnowledgeItem {
 
     // Legacy meeting fields
     var audioFileRelativePath: String?
+    /// Sample rate of the captured audio (e.g., 44100 for built-in mic, 8000 for Bluetooth HFP).
+    var audioSampleRate: Double?
+    /// Number of audio channels (1 = mono).
+    var audioChannelCount: Int?
+    /// Input port type used for capture (e.g., "builtInMic", "bluetoothHFP", "usbAudio").
+    var audioInputPortType: String?
+    /// Human-readable input port name (e.g., "iPhone", "AirPods Pro").
+    var audioInputPortName: String?
     var imageFileRelativePath: String?
     var imagePageCount: Int?
     var transcriptionEngineId: String?

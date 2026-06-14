@@ -211,9 +211,9 @@ final class ConfigProjectService {
         for (modelName, preset) in presets {
             let presetDict: [String: Any] = [
                 "model": modelName,
-                "temperature": preset.temperature as Any,
+                "supportsTemperature": preset.supportsTemperature as Any,
                 "maxOutputTokens": preset.maxOutputTokens as Any,
-                "responseFormat": preset.responseFormat?.rawValue as Any
+                "supportsJSONFormat": preset.supportsJSONFormat as Any
             ]
             let presetJSON = (try? JSONSerialization.data(withJSONObject: presetDict, options: .prettyPrinted))
                 .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
@@ -318,8 +318,12 @@ final class ConfigProjectService {
                    let meta = try? JSONSerialization.jsonObject(with: metaJSON) as? [String: Any],
                    let name = meta["name"] as? String {
                     let content = parts[1...].joined(separator: "\n# Content\n") // rejoin if content contained '# Content'
-                    PromptStore.shared.addOrUpdate(name: name, category: meta["category"] as? String ?? "custom",
-                        content: content, variables: meta["variables"] as? [String] ?? [])
+                    let store = PromptStore.shared
+                    if store.prompt(named: name) != nil {
+                        store.updatePrompt(named: name, content: content)
+                    } else {
+                        _ = store.createPrompt(name: name, category: meta["category"] as? String ?? "custom", content: content)
+                    }
                     counts["prompts"]! += 1
                 }
             }
@@ -397,7 +401,7 @@ final class ConfigProjectService {
         bundle["settings"] = buildSettingsSnapshot()
 
         // Skills (user overrides only)
-        let userSkills = AnalysisSkillStore.shared.allSkills.filter { $0.isUserEdited }
+        let userSkills = AnalysisSkillStore.shared.skills(in: nil).filter { $0.isUserEdited }
         bundle["skills"] = userSkills.map { skill in
             return [
                 "name": skill.name,
@@ -456,8 +460,12 @@ final class ConfigProjectService {
             for p in prompts {
                 guard let name = p["name"] as? String,
                       let content = p["content"] as? String else { continue }
-                PromptStore.shared.addOrUpdate(name: name, category: p["category"] as? String ?? "custom",
-                    content: content, variables: p["variables"] as? [String] ?? [])
+                let store = PromptStore.shared
+                if store.prompt(named: name) != nil {
+                    store.updatePrompt(named: name, content: content)
+                } else {
+                    _ = store.createPrompt(name: name, category: p["category"] as? String ?? "custom", content: content)
+                }
                 counts["prompts"]! += 1
             }
         }
@@ -467,13 +475,29 @@ final class ConfigProjectService {
             for s in skills {
                 guard let name = s["name"] as? String,
                       let displayName = s["displayName"] as? String else { continue }
-                AnalysisSkillStore.shared.addOrUpdate(name: name, displayName: displayName,
-                    description: s["description"] as? String ?? "",
-                    category: s["category"] as? String ?? "imported",
-                    templateID: s["templateID"] as? String ?? "",
-                    defaultModel: s["defaultModel"] as? String ?? "",
-                    maxIterations: s["maxIterations"] as? Int ?? 3,
-                    allowedTools: s["allowedTools"] as? [String] ?? [])
+                let skillStore = AnalysisSkillStore.shared
+                if let existing = skillStore.skill(named: name) {
+                    skillStore.updateSkill(named: name,
+                        systemPrompt: s["systemPrompt"] as? String,
+                        templateID: s["templateID"] as? String)
+                } else {
+                    let desc: String = s["description"] as? String ?? ""
+                    let cat: String = s["category"] as? String ?? "imported"
+                    let tid: String = s["templateID"] as? String ?? ""
+                    let sp: String = s["systemPrompt"] as? String ?? ""
+                    let dm: String = s["defaultModel"] as? String ?? ""
+                    let mi: Int = s["maxIterations"] as? Int ?? 3
+                    let at: [String] = s["allowedTools"] as? [String] ?? []
+                    let newSkill = AnalysisSkill(
+                        id: UUID(), name: name, displayName: displayName,
+                        description: desc, category: cat,
+                        templateID: tid, systemPrompt: sp,
+                        defaultModel: dm, maxIterations: mi,
+                        allowedTools: at, isUserEdited: true,
+                        updatedAt: Date()
+                    )
+                    skillStore.createSkill(newSkill)
+                }
                 counts["skills"]! += 1
             }
         }

@@ -60,6 +60,7 @@ else
 endif
 
 deploy: build install  ## Build + Install (no tests)
+	@rm -rf /private/tmp/wawa-*.logarchive 2>/dev/null || true
 
 # ══════════════════════════════════════════════════════════
 # Log Pipeline
@@ -110,7 +111,12 @@ clean:  ## Clean DerivedData
 clean-logs:  ## Clean old log files (>7 days)
 	@echo "🧹 Cleaning old logs..."
 	@find $(HOME)/Desktop/wawa-logs -name "wawa-*" -mtime +7 -delete 2>/dev/null || true
+	@rm -rf /private/tmp/wawa-*.logarchive 2>/dev/null || true
 	@echo "Done."
+
+clean-all: clean clean-logs  ## Clean DerivedData + log archives
+	@echo "🧹 Full cleanup complete."
+	@df -h / | grep -v Filesystem
 
 # ══════════════════════════════════════════════════════════
 # Help

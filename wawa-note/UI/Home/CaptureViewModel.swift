@@ -7,7 +7,6 @@ final class CaptureViewModel: ObservableObject {
     @Published var recordingState: RecordingUIState = .idle
     @Published var elapsedTimeFormatted: String = "00:00"
     @Published var audioLevel: Float = 0
-    @Published var liveTranscriptionText: String = ""
     @Published var isAutoPaused: Bool = false
     @Published var silenceDetected: Bool = false
     @Published var errorMessage: String?
@@ -15,6 +14,7 @@ final class CaptureViewModel: ObservableObject {
     @Published var pipelineStage: PipelineStage?
     @Published var currentInputPortName: String = ""
     @Published var currentInputIcon: String = "mic.fill"
+    @Published var sampleRateBadge: String = ""
 
     enum PipelineStage: String {
         case transcribing = "Transcribing..."
@@ -49,11 +49,6 @@ final class CaptureViewModel: ObservableObject {
             .sink { [weak self] in self?.audioLevel = $0 }
             .store(in: &cancellables)
 
-        coordinator.$liveTranscriptionText
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] in self?.liveTranscriptionText = $0 }
-            .store(in: &cancellables)
-
         coordinator.$isAutoPaused
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in self?.isAutoPaused = $0 }
@@ -84,12 +79,19 @@ final class CaptureViewModel: ObservableObject {
             .sink { [weak self] in self?.currentInputIcon = $0 }
             .store(in: &cancellables)
 
+        // Sample rate badge updates at observation timer rate (10Hz)
+        coordinator.$sampleRateBadge
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.sampleRateBadge = $0 }
+            .store(in: &cancellables)
+
         recordingState = coordinator.state
         elapsedTimeFormatted = coordinator.elapsedTimeFormatted
         audioLevel = coordinator.audioLevel
         savedItemId = coordinator.savedItemId
         currentInputPortName = coordinator.currentInputPortName
         currentInputIcon = coordinator.currentInputIcon
+        sampleRateBadge = coordinator.sampleRateBadge
     }
 
     func startRecording(title: String? = nil, projectID: UUID? = nil) {

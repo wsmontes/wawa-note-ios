@@ -85,40 +85,30 @@ struct ProviderCard: View {
 
 #Preview("Cloud - not connected") {
     List {
-        ProviderCard(
-            template: .openAI,
-            isConnected: false,
-            action: {}
-        )
-        ProviderCard(
-            template: .anthropic,
-            isConnected: false,
-            action: {}
-        )
+        if let t = ProviderTemplate.openAI {
+            ProviderCard(template: t, isConnected: false, action: {})
+        }
+        if let t = ProviderTemplate.anthropic {
+            ProviderCard(template: t, isConnected: false, action: {})
+        }
     }
 }
 
 #Preview("Cloud - connected") {
     List {
-        ProviderCard(
-            template: .openAI,
-            isConnected: true,
-            action: {}
-        )
+        if let t = ProviderTemplate.openAI {
+            ProviderCard(template: t, isConnected: true, action: {})
+        }
     }
 }
 
 #Preview("Local") {
     List {
-        ProviderCard(
-            template: .lmStudio,
-            isConnected: false,
-            action: {}
-        )
-        ProviderCard(
-            template: .ollama,
-            isConnected: true,
-            action: {}
-        )
+        if let t = ProviderTemplate.lmStudio {
+            ProviderCard(template: t, isConnected: false, action: {})
+        }
+        if let t = ProviderTemplate.ollama {
+            ProviderCard(template: t, isConnected: true, action: {})
+        }
     }
 }

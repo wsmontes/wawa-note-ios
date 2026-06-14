@@ -14,5 +14,10 @@
     "secrets": "Keychain"
   },
   "dependencies": "Swift Package Manager",
-  "testDevice": "iPhone 14 Plus"
+  "testDevice": "iPhone 14 Plus",
+  "permissions": {
+    "allow": [
+      "Bash(*ralph-loop*)"
+    ]
+  }
 }

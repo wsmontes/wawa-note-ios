@@ -3,15 +3,34 @@ import Foundation
 final class ContextWindowManager {
     let modelContextLimit: Int
     private let charsPerToken = 4
-    private let cjkCharsPerToken = 2
+    private let codeCharsPerToken = 3   // JSON/code: many special chars → ~3 chars/token
+    private let cjkCharsPerToken = 2    // CJK: 1-2 chars/token in most tokenizers
 
     init(modelContextLimit: Int) {
         self.modelContextLimit = modelContextLimit
     }
 
+    /// Improved token estimation using content heuristics.
+    /// Falls back to 4 chars/token for general text, with adjustments for:
+    /// - CJK text: ~2 chars/token
+    /// - JSON/code with high special-char density: ~3 chars/token
     func estimateTokens(_ text: String) -> Int {
+        guard !text.isEmpty else { return 0 }
+
+        // Detect content type for better ratio
+        let specialCharRatio = Double(text.filter { "{}[]\":,()<>/\\|;=+-*&^%$#@!~`".contains($0) }.count) / Double(max(1, text.count))
         let hasCJK = text.unicodeScalars.contains { $0.properties.isIdeographic }
-        let ratio = hasCJK ? cjkCharsPerToken : charsPerToken
+
+        let ratio: Int
+        if hasCJK {
+            ratio = cjkCharsPerToken
+        } else if specialCharRatio > 0.08 {
+            // High special-char density → likely JSON or code → 3 chars/token
+            ratio = codeCharsPerToken
+        } else {
+            ratio = charsPerToken
+        }
+
         return max(1, text.count / ratio)
     }
 

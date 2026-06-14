@@ -238,7 +238,6 @@ struct AnarlogDocument: Equatable {
         }
         output += "---\n"
         if !content.isEmpty {
-            output += "\n"
             output += content
         }
         // Ensure trailing newline

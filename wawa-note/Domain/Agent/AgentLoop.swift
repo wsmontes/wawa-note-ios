@@ -16,6 +16,7 @@ enum AgentStreamEvent {
     case textDelta(String)
     case toolCallStarted(name: String, id: String, arguments: String)
     case toolCallCompleted(name: String, id: String, summary: String)
+    case truncated(reason: String, progress: String)  // max iterations reached before task completion
     case finished(citations: [ChatCitation])
     case error(Error)
 }
@@ -70,7 +71,8 @@ final class AgentLoop: @unchecked Sendable {
                         tools: self.registry.allDefinitions(),
                         history: history,
                         provider: provider,
-                        continuation: continuation
+                        continuation: continuation,
+                        streamTimeout: 60  // chat: 60s without events = hang detected
                     )
                 } catch {
                     continuation.yield(.error(error))
@@ -112,7 +114,8 @@ final class AgentLoop: @unchecked Sendable {
                         continuation: continuation,
                         maxIterations: overrideIterations ?? self.maxIterations,
                         toolRegistry: AgentToolRegistry(tools: tools),
-                        deadline: startTime.addingTimeInterval(timeoutSeconds)
+                        deadline: startTime.addingTimeInterval(timeoutSeconds),
+                        streamTimeout: 300  // autonomous: 5min without events before timeout
                     )
                 } catch {
                     continuation.yield(.error(error))
@@ -134,7 +137,8 @@ final class AgentLoop: @unchecked Sendable {
         continuation: AsyncThrowingStream<AgentStreamEvent, Error>.Continuation,
         maxIterations: Int? = nil,
         toolRegistry customRegistry: AgentToolRegistry? = nil,
-        deadline: Date = Date.distantFuture
+        deadline: Date = Date.distantFuture,
+        streamTimeout: TimeInterval = 60   // per-iteration stream heartbeat (chat: 60s, autonomous: 300s)
     ) async throws {
         let effectiveRegistry = customRegistry ?? registry
         let iterations = maxIterations ?? self.maxIterations
@@ -143,6 +147,9 @@ final class AgentLoop: @unchecked Sendable {
         AppLog.event("agent", "User: \(initialMessage.prefix(200))")
         var allCitations: [ChatCitation] = []
 
+        var consecutiveFailures = 0
+        let maxConsecutiveFailures = 5
+
         for iteration in 0..<iterations {
             // Cooperative cancellation — allows ProcessingQueueService to cancel
             if Task.isCancelled { continuation.finish(); return }
@@ -150,6 +157,19 @@ final class AgentLoop: @unchecked Sendable {
             // The pipeline marks the item as .failed so the user can retry manually.
             guard Date() < deadline else {
                 AppLog.agent.error("Agent loop timeout — iteration \(iteration) — deadline reached")
+                continuation.finish()
+                return
+            }
+            // Circuit breaker: if the agent keeps hitting the same error on every
+            // tool call for N consecutive iterations, stop — continuing is wasteful
+            // (burns tokens without progress). The item is marked as .failed so the
+            // user can adjust inputs and retry manually.
+            guard consecutiveFailures < maxConsecutiveFailures else {
+                AppLog.agent.error("Agent circuit breaker tripped — \(consecutiveFailures) consecutive iterations with tool errors")
+                continuation.yield(.truncated(
+                    reason: "Agent stopped after \(consecutiveFailures) consecutive failed tool calls. Please review the inputs and retry.",
+                    progress: "\(iteration)/\(iterations) iterations"
+                ))
                 continuation.finish()
                 return
             }
@@ -170,27 +190,62 @@ final class AgentLoop: @unchecked Sendable {
                 ), at: 0)
             }
 
-            let request = buildRequest(systemPrompt: systemPrompt, contextMessages: adjusted, tools: tools, model: model)
+            // Capability check: only send tools if provider supports tool calling.
+            // Otherwise, the LLM gets a text-only prompt and uses text-based commands.
+            let effectiveTools = provider.capabilities.supportsToolCalling ? tools : []
+            let request = buildRequest(systemPrompt: systemPrompt, contextMessages: adjusted, tools: effectiveTools, model: model)
             let stream = provider.sendStreaming(request)
             var fullContent = ""
+            var thinkingContent = ""       // accumulated thinking/reasoning tokens
             var pendingToolCalls: [(id: String, name: String, arguments: String)] = []
             var currentTCID = ""
             var currentTCName: String?
             var currentTCArgs = ""
 
-            for try await event in stream {
-                switch event {
-                case .textDelta(let d): fullContent += d; continuation.yield(.textDelta(d))
-                case .toolCallDelta(let id, let name, let args):
-                    if !currentTCID.isEmpty && id != currentTCID, let n = currentTCName {
-                        pendingToolCalls.append((id: currentTCID, name: n, arguments: currentTCArgs)); currentTCArgs = ""
+            // ── Stream heartbeat ──────────────────────────────────
+            // If the provider stream doesn't emit any event for
+            // `streamTimeout` seconds, force-finish the iteration to
+            // prevent infinite hangs (e.g. network drop, server hang).
+            let lastEventLock = NSLock()
+            var lastStreamEvent = Date()
+            let streamTask = Task {
+                for try await event in stream {
+                    lastEventLock.withLock { lastStreamEvent = Date() }
+                    switch event {
+                    case .textDelta(let d): fullContent += d; continuation.yield(.textDelta(d))
+                    case .thinkingDelta(let t):
+                        thinkingContent += t
+                        continuation.yield(.textDelta("[thinking]\(t)[/thinking]"))
+                    case .toolCallDelta(let id, let name, let args):
+                        if !currentTCID.isEmpty && id != currentTCID, let n = currentTCName {
+                            pendingToolCalls.append((id: currentTCID, name: n, arguments: currentTCArgs)); currentTCArgs = ""
+                        }
+                        currentTCID = id
+                        if let n = name { currentTCName = n }
+                        if let a = args { currentTCArgs += a }
+                    case .finished: break
                     }
-                    currentTCID = id
-                    if let n = name { currentTCName = n }
-                    if let a = args { currentTCArgs += a }
-                case .finished: break
                 }
             }
+
+            // Heartbeat monitor — runs in parallel, cancels the stream
+            // if no event arrives within the timeout window.
+            let heartbeatTask = Task {
+                while !Task.isCancelled {
+                    let elapsed = Date().timeIntervalSince(lastEventLock.withLock { lastStreamEvent })
+                    if elapsed > streamTimeout {
+                        AppLog.agent.error("Agent stream heartbeat timeout — no event for \(Int(elapsed))s (limit: \(Int(streamTimeout))s)")
+                        streamTask.cancel()
+                        continuation.yield(.textDelta("\n\n[Response timed out after \(Int(elapsed))s of inactivity. Please retry.]"))
+                        return
+                    }
+                    try? await Task.sleep(nanoseconds: 5_000_000_000) // check every 5s
+                }
+            }
+
+            defer { heartbeatTask.cancel() }
+            try await streamTask.value
+            // ── End heartbeat ─────────────────────────────────────
             if !currentTCID.isEmpty, let n = currentTCName {
                 pendingToolCalls.append((id: currentTCID, name: n, arguments: currentTCArgs))
             }
@@ -202,48 +257,55 @@ final class AgentLoop: @unchecked Sendable {
                     toolCalls: pendingToolCalls.map { PersistedToolCall(id: $0.id, name: $0.name, arguments: $0.arguments, status: .running) },
                     isThinking: isThinking))
 
-                for tc in pendingToolCalls {
-                    continuation.yield(.toolCallStarted(name: tc.name, id: tc.id, arguments: tc.arguments))
-                    AppLog.event("agent", "Tool call: \(tc.name)(\(tc.arguments.prefix(120)))")
+                // Execute tool calls in parallel when multiple are requested.
+                // Sequential fallback for single tools (common case, avoids TaskGroup overhead).
+                if pendingToolCalls.count == 1, let tc = pendingToolCalls.first {
+                    await executeSingleTool(tc, registry: effectiveRegistry, messages: &messages,
+                        allCitations: &allCitations, continuation: continuation)
+                } else {
+                    await withTaskGroup(of: (Int, ToolResult?).self) { group in
+                        for (idx, tc) in pendingToolCalls.enumerated() {
+                            group.addTask {
+                                let result = await self.executeSingleToolSync(tc, registry: effectiveRegistry)
+                                return (idx, result)
+                            }
+                        }
+                        // Collect results in order, keyed by original index
+                        var results: [(Int, ToolResult?)] = []
+                        for await r in group { results.append(r) }
+                        results.sort(by: { $0.0 < $1.0 })
 
-                    guard let tool = effectiveRegistry.tool(named: tc.name) else {
-                        messages.append(ChatMessage(conversationId: UUID(), role: .tool,
-                            content: "TOOL ERROR: unknown tool '\(tc.name)'", toolCallId: tc.id))
-                        continuation.yield(.toolCallCompleted(name: tc.name, id: tc.id, summary: "Error"))
-                        continue
-                    }
-
-                    let args = parseArguments(tc.arguments, toolName: tc.name)
-                    let result: ToolResult
-                    do {
-                        // Circuit breaker: each tool call gets a 2-minute deadline.
-                        // A hung tool (ShellTool waiting on nonexistent file, write
-                        // blocking on full disk, etc.) won't freeze the entire agent.
-                        result = try await executeWithTimeout(seconds: 120) {
-                            try await tool.execute(args, context: self.toolContext)
+                        for (idx, resultOpt) in results {
+                            if let result = resultOpt {
+                                // Preserve the original tool-call ID so the provider
+                                // can match each result to its outstanding call.
+                                let tcId = pendingToolCalls[idx].id
+                                messages.append(ChatMessage(conversationId: UUID(), role: .tool,
+                                    content: (result.isError ? "TOOL ERROR: " : "") + result.content,
+                                    toolCallId: tcId, blocks: result.blocks))
+                                allCitations.append(contentsOf: result.citations)
+                            }
                         }
                     }
-                    catch {
-                        let errorMsg = error is TimeoutError
-                            ? "TOOL TIMEOUT: \(tc.name) exceeded 120s — hung or stuck"
-                            : "TOOL ERROR: \(tc.name): \(error.localizedDescription)"
-                        messages.append(ChatMessage(conversationId: UUID(), role: .tool,
-                            content: errorMsg, toolCallId: tc.id))
-                        continuation.yield(.toolCallCompleted(name: tc.name, id: tc.id, summary: error is TimeoutError ? "Timeout" : "Error"))
-                        continue
-                    }
-
-                    allCitations.append(contentsOf: result.citations)
-                    continuation.yield(.toolCallCompleted(name: tc.name, id: tc.id, summary: result.displaySummary))
-                    let resultPreview = result.content.prefix(150).replacingOccurrences(of: "\n", with: " ")
-                    AppLog.event("agent", "Tool result: \(tc.name) → \(result.isError ? "ERROR: " : "")\(resultPreview)")
-                    messages.append(ChatMessage(conversationId: UUID(), role: .tool,
-                        content: (result.isError ? "TOOL ERROR: " : "") + result.content, toolCallId: tc.id,
-                        blocks: result.blocks))
+                }
+                // Circuit breaker tracking: check whether all tool calls resulted
+                // in errors. If every tool this iteration returned TOOL ERROR,
+                // increment the failure counter. A single success resets it.
+                let toolMessages = messages.suffix(pendingToolCalls.count)
+                let allErrors = !toolMessages.isEmpty && toolMessages.allSatisfy { $0.content.hasPrefix("TOOL ERROR:") }
+                if allErrors {
+                    consecutiveFailures += 1
+                    AppLog.agent.warning("Circuit breaker: \(consecutiveFailures)/\(maxConsecutiveFailures) consecutive tool-error iterations")
+                } else if !toolMessages.isEmpty {
+                    consecutiveFailures = 0  // at least one tool succeeded
                 }
             } else {
                 AppLog.event("agent", "Response (no tool calls): \(fullContent.prefix(300))")
                 messages.append(ChatMessage(conversationId: UUID(), role: .assistant, content: fullContent, citations: allCitations))
+
+                // No tool calls in this iteration — the LLM is just talking.
+                // Reset the circuit breaker since no tool errors occurred.
+                consecutiveFailures = 0
 
                 // If the LLM responded with text but no tool calls, and we still have
                 // iterations left, push back — the agent MUST use tools to complete tasks.
@@ -256,30 +318,93 @@ final class AgentLoop: @unchecked Sendable {
                     continue
                 }
 
+                // Last iteration, no tool calls — the model chose to respond
+                // with text. This is a natural completion (the agent finished
+                // its work and is summarizing), not truncation.
                 continuation.yield(.finished(citations: allCitations))
                 continuation.finish()
                 return
             }
         }
-        continuation.yield(.finished(citations: allCitations))
+        // Loop exhausted all iterations without an early finish — task not completed.
+        let progress = "\(iterations)/\(iterations) iterations exhausted"
+        continuation.yield(.truncated(reason: "Agent exhausted all iterations without completing the task.", progress: progress))
         continuation.finish()
+    }
+
+    // MARK: - Sub-agent spawning
+
+    /// Spawns a sub-agent with a different provider and model for a focused task.
+    /// The sub-agent runs with fewer tools (typically just ls/cat/find/grep) and
+    /// returns its final text. Use this to delegate work to cheaper models.
+    /// - Parameters:
+    ///   - task: The task description for the sub-agent
+    ///   - provider: The provider to use (e.g. local Ollama for simple search)
+    ///   - model: The model to use (e.g. "llama-3.2-1b" for summarization)
+    ///   - maxIterations: Max tool-calling iterations (default 3 — keep it focused)
+    /// - Returns: The final text output from the sub-agent
+    func spawnSubAgent(
+        task: String,
+        provider: any AIProvider,
+        model: String,
+        maxIterations: Int = 3
+    ) async throws -> String {
+        // Sub-agents get a focused toolset — read-only VFS tools, no destructive ops
+        let safeTools: [any AgentTool] = registry.allTools().filter { tool in
+            let name = tool.name.lowercased()
+            // Allow: ls, cat, find, grep, cd, help, semantic
+            // Deny: touch, echo, rm, mv, analyze, export
+            return ["ls", "cat", "find", "grep", "cd", "help", "semantic"].contains(name)
+        }
+
+        let subAgent = AgentLoop(
+            registry: AgentToolRegistry(tools: safeTools),
+            toolContext: toolContext,
+            maxIterations: maxIterations,
+            mode: .fast,
+            executorModel: model,
+            advisorModel: model
+        )
+
+        var fullOutput = ""
+        let stream = subAgent.runAutonomous(
+            task: task,
+            systemPrompt: "You are a focused sub-agent. Execute the task using read-only tools. Return a concise result.",
+            tools: safeTools,
+            provider: provider,
+            maxIterations: maxIterations,
+            timeoutSeconds: 120
+        )
+
+        for try await event in stream {
+            if case .textDelta(let d) = event { fullOutput += d }
+        }
+
+        return fullOutput
     }
 
     // MARK: - Model resolution
 
-    /// Dynamic model routing based on mode and iteration phase.
-    /// Early iterations (tool calls, extraction) use executor model.
-    /// Later iterations (synthesis, analysis) use advisor model.
-    /// In .deep mode, advisor is used for all iterations.
-    /// In .fast mode, executor is used for all iterations.
-    /// In .auto mode, executor is used for iterations 0-2, advisor for 3+.
+    /// Dynamic model routing based on mode, iteration phase, AND budget state.
+    /// In .auto mode: executor for iterations 0-2, advisor for 3+.
+    /// When over budget, downgrades to executor (cheaper) model.
     private func resolveModel(for iteration: Int) -> String {
+        // Budget check: if over daily limit, always use executor (cheapest)
+        let budget = BudgetTracker.shared
+        if budget.isOverBudget {
+            AppLog.agent.warning("Budget: over daily limit — downgrading to executor model")
+            return executorModel
+        }
+
         switch mode {
         case .deep: return advisorModel
         case .fast: return executorModel
         case .auto:
-            // First 3 iterations: cheap model for tool calls and extraction
-            // Later iterations: expensive model for synthesis and complex reasoning
+            // When budget is <25%, use executor for all iterations
+            if case .economy = budget.recommendedTier {
+                return executorModel
+            }
+            // Standard: executor for first 3 iterations, advisor for synthesis
             return iteration < 3 ? executorModel : advisorModel
         }
     }
@@ -443,6 +568,86 @@ final class AgentLoop: @unchecked Sendable {
         return AIRequest(model: model, messages: aiMessages,
             temperature: params.temperature, maxTokens: params.maxTokens,
             tools: hasTools ? tools : nil, toolChoice: hasTools ? "auto" : nil)
+    }
+
+    // MARK: - Tool execution helpers
+
+    private func executeSingleTool(
+        _ tc: (id: String, name: String, arguments: String),
+        registry: AgentToolRegistry,
+        messages: inout [ChatMessage],
+        allCitations: inout [ChatCitation],
+        continuation: AsyncThrowingStream<AgentStreamEvent, Error>.Continuation
+    ) async {
+        continuation.yield(.toolCallStarted(name: tc.name, id: tc.id, arguments: tc.arguments))
+        AppLog.event("agent", "Tool call: \(tc.name)(\(tc.arguments.prefix(120)))")
+
+        guard let tool = registry.tool(named: tc.name) else {
+            messages.append(ChatMessage(conversationId: UUID(), role: .tool,
+                content: "TOOL ERROR: unknown tool '\(tc.name)'", toolCallId: tc.id))
+            continuation.yield(.toolCallCompleted(name: tc.name, id: tc.id, summary: "Error"))
+            return
+        }
+
+        let args = parseArguments(tc.arguments, toolName: tc.name)
+
+        // Validate arguments against tool schema BEFORE execution
+        if let validationError = tool.validateArguments(args) {
+            AppLog.agent.warning("Tool arg validation failed for \(tc.name): \(validationError)")
+            messages.append(ChatMessage(conversationId: UUID(), role: .tool,
+                content: "ARGUMENT ERROR: \(validationError). Please correct your arguments and try again.", toolCallId: tc.id))
+            continuation.yield(.toolCallCompleted(name: tc.name, id: tc.id, summary: "Invalid args"))
+            return
+        }
+
+        let result: ToolResult
+        do {
+            result = try await executeWithTimeout(seconds: 120) {
+                try await tool.execute(args, context: self.toolContext)
+            }
+        } catch {
+            let errorMsg = error is TimeoutError
+                ? "TOOL TIMEOUT: \(tc.name) exceeded 120s — hung or stuck"
+                : "TOOL ERROR: \(tc.name): \(error.localizedDescription)"
+            messages.append(ChatMessage(conversationId: UUID(), role: .tool, content: errorMsg, toolCallId: tc.id))
+            continuation.yield(.toolCallCompleted(name: tc.name, id: tc.id, summary: error is TimeoutError ? "Timeout" : "Error"))
+            return
+        }
+
+        allCitations.append(contentsOf: result.citations)
+        continuation.yield(.toolCallCompleted(name: tc.name, id: tc.id, summary: result.displaySummary))
+        let resultPreview = result.content.prefix(150).replacingOccurrences(of: "\n", with: " ")
+        AppLog.event("agent", "Tool result: \(tc.name) → \(result.isError ? "ERROR: " : "")\(resultPreview)")
+        messages.append(ChatMessage(conversationId: UUID(), role: .tool,
+            content: (result.isError ? "TOOL ERROR: " : "") + result.content, toolCallId: tc.id,
+            blocks: result.blocks))
+    }
+
+    /// Synchronous wrapper for parallel execution — returns result instead of appending to messages.
+    private func executeSingleToolSync(
+        _ tc: (id: String, name: String, arguments: String),
+        registry: AgentToolRegistry
+    ) async -> ToolResult? {
+        guard let tool = registry.tool(named: tc.name) else {
+            return ToolResult(content: "TOOL ERROR: unknown tool '\(tc.name)'", isError: true,
+                displaySummary: "Error")
+        }
+        let args = parseArguments(tc.arguments, toolName: tc.name)
+        if let validationError = tool.validateArguments(args) {
+            return ToolResult(content: "ARGUMENT ERROR: \(validationError)", isError: true,
+                displaySummary: "Invalid args")
+        }
+        do {
+            return try await executeWithTimeout(seconds: 120) {
+                try await tool.execute(args, context: self.toolContext)
+            }
+        } catch {
+            let msg = error is TimeoutError
+                ? "TOOL TIMEOUT: \(tc.name) exceeded 120s"
+                : "TOOL ERROR: \(tc.name): \(error.localizedDescription)"
+            return ToolResult(content: msg, isError: true,
+                displaySummary: error is TimeoutError ? "Timeout" : "Error")
+        }
     }
 
     private func parseArguments(_ json: String, toolName: String) -> [String: any Sendable] {

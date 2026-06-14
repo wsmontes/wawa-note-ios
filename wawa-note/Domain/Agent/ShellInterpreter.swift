@@ -380,6 +380,7 @@ enum ShellInterpreter {
             return ok(lines.joined(separator: "\n"))
 
         case .inbox:
+            if let err = checkSandboxGlobal(ctx) { return err }
             let allItems = (try? KnowledgeItemService(context: ctx.modelContext).allItems()) ?? []
             var items = allItems.filter { $0.inboxDate != nil }
             if let tag = tagFilter { items = items.filter { $0.tags.contains(tag) } }
@@ -614,6 +615,7 @@ enum ShellInterpreter {
             return ok(lines.joined(separator: "\n"))
 
         case .projectItem(_, _, let itemID):
+            if let err = checkSandbox(itemID, ctx) { return err }
             guard let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) else {
                 return shellErr("cat: item not found")
             }
@@ -648,6 +650,7 @@ enum ShellInterpreter {
             return ok("Task: \(task.title)\nStatus: \(task.statusRaw)  Priority: \(task.priorityRaw)\n\(owner)\n\(due)")
 
         case .inboxItem(let id):
+            if let err = checkSandbox(id, ctx) { return err }
             guard let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: id) else {
                 return shellErr("cat: /inbox/\(id.uuidString.prefix(8)).json: not found")
             }
@@ -791,10 +794,17 @@ enum ShellInterpreter {
             return ok(lines.joined(separator: "\n"), blocks: cards)
         }
 
-        // Default: items
+        // Default: items (sandboxed: restrict to current item)
+        if let err = checkSandboxGlobal(ctx) { return err }
         let tagFilter = cmd.flags["tag"]; let typeFilter = cmd.flags["type"]; let projectFilter = cmd.flags["project"]
         let sinceDays = Int(cmd.flags["since"] ?? "0") ?? 0
-        let allItems = (try? KnowledgeItemService(context: ctx.modelContext).allItems()) ?? []
+        let allItems: [KnowledgeItem] = {
+            if let sandboxed = ctx.sandboxedItemID,
+               let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: sandboxed) {
+                return [item]
+            }
+            return (try? KnowledgeItemService(context: ctx.modelContext).allItems()) ?? []
+        }()
         var results = allItems
         if let tag = tagFilter { results = results.filter { $0.tags.contains(tag) } }
         if let type = typeFilter { results = results.filter { $0.typeRaw == type } }
@@ -868,8 +878,15 @@ enum ShellInterpreter {
             }
         }
 
-        // Default: full-text search across all items
-        let allItems = (try? KnowledgeItemService(context: ctx.modelContext).allItems()) ?? []
+        // Default: full-text search across all items (sandboxed: current item only)
+        if let err = checkSandboxGlobal(ctx) { return err }
+        let allItems: [KnowledgeItem] = {
+            if let sandboxed = ctx.sandboxedItemID,
+               let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: sandboxed) {
+                return [item]
+            }
+            return (try? KnowledgeItemService(context: ctx.modelContext).allItems()) ?? []
+        }()
         let results = SearchService(fileStore: ctx.fileStore).searchNow(query: query, in: allItems)
             .prefix(limit)
         if results.isEmpty { return ok("grep: no matches for '\(query)'") }
@@ -1762,6 +1779,23 @@ enum ShellInterpreter {
             out += "\n\nConsole:\n" + result.logs.map { "  > \($0)" }.joined(separator: "\n")
         }
         return ok(out)
+    }
+
+    // MARK: - Sandbox
+
+    /// Returns an error if the given item ID is not the sandboxed item.
+    /// When sandboxedItemID is set, all VFS operations are restricted to that item.
+    private static func checkSandbox(_ itemID: UUID, _ ctx: ToolContext) -> ToolResult? {
+        guard let sandboxed = ctx.sandboxedItemID, sandboxed != itemID else { return nil }
+        let target = itemID.uuidString.prefix(8)
+        let allowed = sandboxed.uuidString.prefix(8)
+        return shellErr("Access denied: item \(target) is outside the current analysis scope (\(allowed)). Only the item being analyzed can be accessed.")
+    }
+
+    /// Returns an error if the agent is sandboxed and tries to list/access other items.
+    private static func checkSandboxGlobal(_ ctx: ToolContext) -> ToolResult? {
+        guard ctx.sandboxedItemID != nil else { return nil }
+        return shellErr("Access denied: browsing other items is not allowed during item analysis. Use 'extract <item-id>' to get the content of the item being analyzed, or 'cat' to read files within it.")
     }
 
     // MARK: - Helpers

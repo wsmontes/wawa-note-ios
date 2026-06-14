@@ -65,4 +65,68 @@ protocol AgentTool: Sendable {
     var description: String { get }
     var parameters: AIToolParameters { get }
     @MainActor func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult
+
+    /// Validates arguments against the tool's JSON Schema.
+    /// Returns nil if valid, or an error message describing the first violation.
+    func validateArguments(_ args: [String: any Sendable]) -> String?
+}
+
+extension AgentTool {
+    func validateArguments(_ args: [String: any Sendable]) -> String? {
+        let schema = parameters
+
+        // Check required fields
+        for req in schema.required {
+            if args[req] == nil {
+                return "Missing required parameter '\(req)' for tool '\(name)'"
+            }
+        }
+
+        // Check types
+        for (key, prop) in schema.properties {
+            guard let value = args[key] else { continue }
+
+            let actualType = swiftTypeName(of: value)
+            let expectedType = prop.type
+
+            if !typeMatches(actual: actualType, expected: expectedType) {
+                return "Parameter '\(key)' for tool '\(name)': expected \(expectedType), got \(actualType)"
+            }
+
+            // Check enum constraints
+            if let allowed = prop.enum {
+                if let strValue = value as? String, !allowed.contains(strValue) {
+                    return "Parameter '\(key)' for tool '\(name)': value '\(strValue)' not in allowed values: \(allowed.joined(separator: ", "))"
+                }
+            }
+        }
+
+        return nil  // Valid
+    }
+
+    private func swiftTypeName(of value: Any) -> String {
+        switch value {
+        case is String: return "string"
+        case is Int, is Int64: return "integer"
+        case is Double, is Float: return "number"
+        case is Bool: return "boolean"
+        case is [Any]: return "array"
+        case is [String: Any]: return "object"
+        default: return "unknown"
+        }
+    }
+
+    private func typeMatches(actual: String, expected: String) -> Bool {
+        // JSON Schema types: string, integer, number, boolean, array, object
+        // Swift types that map to each:
+        switch expected {
+        case "string": return actual == "string"
+        case "integer": return actual == "integer"
+        case "number": return actual == "integer" || actual == "number"
+        case "boolean": return actual == "boolean"
+        case "array": return actual == "array"
+        case "object": return actual == "object"
+        default: return true  // Unknown type — be permissive
+        }
+    }
 }

@@ -632,7 +632,7 @@ struct ChatView: View {
 
         let engine = RemoteTranscriptionEngine(baseURL: baseURL, apiKey: apiKey)
         do {
-            let transcript = try await engine.transcribeFile(audioURL)
+            let transcript = try await engine.transcribeFile(audioURL, meetingId: UUID())
             guard !Task.isCancelled else { return nil }
             return transcript.segments.map(\.text).joined(separator: " ")
         } catch { return nil }

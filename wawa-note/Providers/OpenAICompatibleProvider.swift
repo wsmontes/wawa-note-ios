@@ -210,8 +210,15 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
             // else: reasoning models don't support response_format, omit silently
         }
 
-        // Explicitly disable thinking mode (DeepSeek, Qwen, etc.)
-        if preset?.explicitlyDisableThinking == true {
+        // Stop sequences (for local models that don't stop naturally)
+        if let stop = request.stop, !stop.isEmpty {
+            body["stop"] = stop
+        }
+
+        // Thinking budget tokens (Claude, DeepSeek)
+        if let thinkingBudget = request.thinkingBudgetTokens {
+            body["thinking"] = ["type": "enabled", "budget_tokens": thinkingBudget]
+        } else if preset?.explicitlyDisableThinking == true {
             body["thinking"] = ["type": "disabled"]
         }
 
@@ -241,6 +248,15 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
             if let tc = request.toolChoice { body["tool_choice"] = tc }
         }
 
+        // OpenRouter-specific fields: provider routing + fallback configuration
+        let isOR = baseURL.absoluteString.contains("openrouter.ai")
+        if isOR {
+            // Provider routing: prefer Anthropic for quality, OpenAI for speed
+            body["provider"] = ["order": ["Anthropic", "OpenAI", "Google"], "allow_fallbacks": true]
+            // Include model in transforms for pricing-aware routing
+            body["transforms"] = ["pricing"]  // request pricing info in response
+        }
+
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -248,6 +264,7 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
             urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
         urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
+        applyOpenRouterHeaders(&urlRequest)
 
         AppLog.provider.info("POST \(url.absoluteString)")
 
@@ -284,6 +301,11 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
 
         let msg = decoded.choices.first?.message
         let text = msg?.effectiveContent ?? ""
+        // Preserve reasoning_content for DeepSeek/thinking models
+        let reasoningContent: String? = {
+            if let rc = msg?.reasoningContent, !rc.isEmpty, rc != text { return rc }
+            return nil
+        }()
         let finishReason = decoded.choices.first?.finishReason
 
         let toolCalls: [AIToolCall]? = msg?.toolCalls?.compactMap { tc -> AIToolCall? in
@@ -292,7 +314,8 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
         }
 
         AppLog.provider.info("Response: \(text.prefix(100))...")
-        return AIResponse(id: decoded.id, model: decoded.model, content: text, usage: usage, toolCalls: toolCalls, finishReason: finishReason)
+        return AIResponse(id: decoded.id, model: decoded.model, content: text,
+            reasoningContent: reasoningContent, usage: usage, toolCalls: toolCalls, finishReason: finishReason)
     }
 
     // MARK: - Embeddings
@@ -301,6 +324,13 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
         guard capabilities.supportsEmbeddings else {
             throw ProviderError.embeddingNotSupported
         }
+
+        // Detect Ollama — uses /api/embed with a different format
+        let isOllama = baseURL.absoluteString.contains("11434") || providerType == .localNetwork
+        if isOllama {
+            return try await ollamaEmbed(text: text, model: model)
+        }
+
         let endpoint = baseURL.appendingPathComponent("embeddings")
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
@@ -321,6 +351,136 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
             throw ProviderError.decodingFailed
         }
         return embedding.map { Float($0) }
+    }
+
+    // MARK: - Ollama-specific embeddings
+
+    private func ollamaEmbed(text: String, model: String) async throws -> [Float] {
+        let endpoint = baseURL.appendingPathComponent("api/embed")
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let ollamaBody: [String: Any] = ["model": model, "input": text]
+        request.httpBody = try JSONSerialization.data(withJSONObject: ollamaBody)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw ProviderError.requestFailed(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        // Decode the embedding response, which differs by provider:
+        // • OpenAI-compatible: {"data": [{"embedding": [...]}]}
+        // • Ollama:            {"embeddings": [[...]]}  (array of vectors, one per input)
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw ProviderError.decodingFailed
+        }
+
+        // OpenAI-compatible shape (most providers)
+        if let data = json["data"] as? [[String: Any]],
+           let first = data.first,
+           let embedding = first["embedding"] as? [Double] {
+            return embedding.map { Float($0) }
+        }
+
+        // Ollama shape: {"embeddings": [[0.1, ...]]}
+        if let embeddings = json["embeddings"] as? [[Double]],
+           let embedding = embeddings.first {
+            return embedding.map { Float($0) }
+        }
+
+        // Legacy Ollama shape (single vector)
+        if let embedding = json["embedding"] as? [Double] {
+            return embedding.map { Float($0) }
+        }
+
+        throw ProviderError.decodingFailed
+    }
+
+    // MARK: - Model warm-up (local providers)
+
+    /// Sends a lightweight request to preload the model into memory.
+    /// Local models (Ollama, LM Studio) take 2-10s to load on first inference.
+    /// Call this when connecting to a local provider to eliminate first-request latency.
+    func warmUp() async {
+        guard providerType.isLocal else { return }
+        AppLog.provider.info("Warming up local model \(self.model)...")
+        let start = CFAbsoluteTimeGetCurrent()
+        do {
+            let request = AIRequest(model: model, messages: [
+                AIMessage(role: .user, content: [.text("Hi")])
+            ], maxTokens: 1)
+            _ = try await send(request)
+            let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
+            AppLog.provider.info("Warm-up complete in \(String(format: "%.0f", elapsed))ms")
+        } catch {
+            AppLog.provider.warning("Warm-up failed: \(error.localizedDescription) — model may load on first real request")
+        }
+    }
+
+    // MARK: - Ollama model info
+
+    /// Queries Ollama's `/api/show` to get model details (quantization, context window, etc.)
+    struct OllamaModelDetail: Sendable {
+        let quantization: String?       // e.g. "Q4_K_M"
+        let contextWindow: Int?         // e.g. 8192
+        let parameterSize: String?      // e.g. "8B"
+        let family: String?            // e.g. "llama"
+        var description: String {
+            var parts: [String] = []
+            if let fam = family { parts.append(fam) }
+            if let size = parameterSize { parts.append(size) }
+            if let quant = quantization { parts.append(quant) }
+            if let ctx = contextWindow { parts.append("\(ctx) ctx") }
+            return parts.joined(separator: ", ")
+        }
+    }
+
+    func fetchOllamaModelDetail(model: String) async throws -> OllamaModelDetail {
+        let endpoint = baseURL.appendingPathComponent("api/show")
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["name": model])
+        request.timeoutInterval = 10
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw ProviderError.requestFailed(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw ProviderError.decodingFailed
+        }
+
+        let details = json["details"] as? [String: Any]
+        let modelInfo = json["model_info"] as? [String: Any]
+
+        // Extract quantization from details.family or model_info
+        let quant: String? = {
+            if let fam = details?["family"] as? String, fam.contains("Q") { return fam }
+            if let fam = modelInfo?["general.quantization_version"] as? String { return fam }
+            // Parse from parameter key like "Q4_K_M" in model_info keys
+            if let keys = modelInfo?.keys {
+                for key in keys {
+                    if key.contains("Q") && (key.contains("_K") || key.contains("_0")) {
+                        return key.components(separatedBy: ".").last
+                    }
+                }
+            }
+            return nil
+        }()
+
+        // Context window from model_info
+        let contextWindow: Int? = {
+            if let ctx = modelInfo?["llama.context_length"] as? Int { return ctx }
+            if let ctx = modelInfo?["general.context_length"] as? Int { return ctx }
+            return (details?["parameter_size"] as? String)?.contains("70B") == true ? 32768 : nil
+        }()
+
+        let parameterSize = details?["parameter_size"] as? String
+        let family = details?["family"] as? String
+
+        AppLog.provider.info("Ollama model \(model): \(OllamaModelDetail(quantization: quant, contextWindow: contextWindow, parameterSize: parameterSize, family: family).description)")
+        return OllamaModelDetail(quantization: quant, contextWindow: contextWindow, parameterSize: parameterSize, family: family)
     }
 
     // MARK: - Model discovery
@@ -346,6 +506,25 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
         return decoded.modelIDs.sorted()
     }
 
+    // MARK: - OpenRouter helpers
+
+    /// Configures OpenRouter-specific headers (HTTP-Referer, X-Title).
+    /// Call before making requests to OpenRouter.
+    func applyOpenRouterHeaders(_ request: inout URLRequest) {
+        guard baseURL.absoluteString.contains("openrouter.ai") else { return }
+        request.setValue("wawa-note://", forHTTPHeaderField: "HTTP-Referer")
+        request.setValue("Wawa Note", forHTTPHeaderField: "X-Title")
+    }
+
+    /// Extracts OpenRouter cost from response JSON.
+    /// OpenRouter returns `usage.cost` (USD) in every response chunk.
+    static func extractOpenRouterCost(from dict: [String: Any]) -> Double? {
+        if let usage = dict["usage"] as? [String: Any], let cost = usage["cost"] as? Double {
+            return cost
+        }
+        return nil
+    }
+
     // MARK: - Image helpers
 
     /// Converts a local file:// URL to a base64 data URL the remote API can read.
@@ -365,5 +544,71 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
         }()
         let base64 = data.base64EncodedString()
         return "data:\(mime);base64,\(base64)"
+    }
+}
+
+// MARK: - OpenRouter model cache
+
+/// Caches OpenRouter's /models response (300+ models with pricing).
+/// TTL: 1 hour. Stores pricing, context window, and quality metrics.
+struct OpenRouterModelEntry: Codable, Sendable {
+    let id: String
+    let name: String
+    let pricing: OpenRouterPricing?
+    let contextLength: Int?
+    let architecture: String?  // e.g. "llama", "claude", "gpt"
+
+    struct OpenRouterPricing: Codable, Sendable {
+        let prompt: String?     // USD per 1M tokens
+        let completion: String?
+    }
+}
+
+final class OpenRouterModelCache: @unchecked Sendable {
+    static let shared = OpenRouterModelCache()
+    private let defaults = UserDefaults.standard
+    private let cacheKey = "openrouter_models_cache"
+    private let ttlKey = "openrouter_models_ttl"
+    private let ttl: TimeInterval = 3600
+
+    private init() {}
+
+    var models: [OpenRouterModelEntry] {
+        guard let ttlDate = defaults.object(forKey: ttlKey) as? Date, Date() < ttlDate,
+              let data = defaults.data(forKey: cacheKey),
+              let entries = try? JSONDecoder().decode([OpenRouterModelEntry].self, from: data) else {
+            return []
+        }
+        return entries
+    }
+
+    func cacheModels(_ entries: [OpenRouterModelEntry]) {
+        guard let data = try? JSONEncoder().encode(entries) else { return }
+        defaults.set(data, forKey: cacheKey)
+        defaults.set(Date().addingTimeInterval(ttl), forKey: ttlKey)
+        AppLog.provider.info("OpenRouter: cached \(entries.count) models with pricing")
+    }
+
+    /// Rank models by cost/quality ratio (cheapest with best context window wins).
+    func bestValue(limit: Int = 10) -> [OpenRouterModelEntry] {
+        models.sorted { a, b in
+            let aCost = parseCost(a.pricing?.completion) ?? 999
+            let bCost = parseCost(b.pricing?.completion) ?? 999
+            let aCtx = a.contextLength ?? 0
+            let bCtx = b.contextLength ?? 0
+            if aCost != bCost { return aCost < bCost }
+            return aCtx > bCtx
+        }
+    }
+
+    /// Best quality models (highest context window, regardless of cost).
+    func bestQuality(limit: Int = 10) -> [OpenRouterModelEntry] {
+        models.sorted { ($0.contextLength ?? 0) > ($1.contextLength ?? 0) }
+    }
+
+    private func parseCost(_ costStr: String?) -> Double? {
+        // OpenRouter pricing: "0.0000015" (USD per token, not per 1M)
+        guard let s = costStr, let cost = Double(s) else { return nil }
+        return cost * 1_000_000  // Convert to per-1M-tokens for display
     }
 }

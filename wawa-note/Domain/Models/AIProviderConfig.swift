@@ -5,28 +5,27 @@ enum ProviderType: String, Codable, CaseIterable {
     case openAI
     case anthropic
     case gemini
-    case localNetwork
-    case appleLocal
+    case localNetwork      // legacy — mapped to .local in routing
+    case appleLocal         // legacy — mapped to .local in routing
+    case local             // unified local type (replaces localNetwork + appleLocal)
 
     /// Human-readable display name suitable for user-facing UI.
-    /// Names follow the content guidelines: recognizable brand names
-    /// that a non-technical user can understand without prior knowledge.
     var displayName: String {
         switch self {
         case .openAICompatible: "Custom (OpenAI Compatible)"
         case .openAI: "ChatGPT by OpenAI"
         case .anthropic: "Claude by Anthropic"
         case .gemini: "Google Gemini"
+        case .local: "Local Model"
         case .localNetwork: "Local Model"
         case .appleLocal: "On-Device (Apple)"
         }
     }
 
     /// Whether this provider type requires an internet connection.
-    /// Local providers work offline; all others need network access.
     var isLocal: Bool {
         switch self {
-        case .localNetwork, .appleLocal: true
+        case .localNetwork, .appleLocal, .local: true
         default: false
         }
     }
@@ -35,7 +34,15 @@ enum ProviderType: String, Codable, CaseIterable {
     var requiresAPIKey: Bool {
         switch self {
         case .openAI, .openAICompatible, .anthropic, .gemini: true
-        case .localNetwork, .appleLocal: false
+        case .localNetwork, .appleLocal, .local: false
+        }
+    }
+
+    /// Normalized type for routing — legacy local types map to unified `.local`.
+    var normalizedForRouting: Self {
+        switch self {
+        case .localNetwork, .appleLocal: .local
+        default: self
         }
     }
 }

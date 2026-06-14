@@ -20,6 +20,17 @@ final class ToolContext: @unchecked Sendable {
     var activeProjectColorHex: String?
     var projectColorHexes: [UUID: String] = [:]
 
+    /// When set, the agent is sandboxed to this item's folder.
+    /// Commands (ls, find, grep, cat, touch, echo) are restricted to the
+    /// item's own directory. Cross-item access is blocked.
+    /// Nil = no sandbox (chat mode, project-level analysis).
+    var sandboxedItemID: UUID?
+
+    /// The project's framework for schema validation during write_analysis.
+    /// When set, WriteAnalysisTool validates output against this schema and
+    /// returns specific fix instructions to the agent on mismatch.
+    var activeFramework: ProjectFramework?
+
     // Planning & agent iteration tracking
     var isPlanning: Bool = false
     var planTaskIDs: [UUID] = []
@@ -33,7 +44,8 @@ final class ToolContext: @unchecked Sendable {
          activeProjectID: UUID? = nil, activeProjectName: String? = nil,
          activeProjectSlug: String? = nil,
          activeItemID: UUID? = nil, contextKey: String? = nil, contextDisplayName: String? = nil,
-         activeProjectColorHex: String? = nil, projectColorHexes: [UUID: String] = [:]) {
+         activeProjectColorHex: String? = nil, projectColorHexes: [UUID: String] = [:],
+         sandboxedItemID: UUID? = nil, activeFramework: ProjectFramework? = nil) {
         self.modelContext = modelContext
         self.fileStore = fileStore
         self.activeProjectID = activeProjectID
@@ -44,5 +56,7 @@ final class ToolContext: @unchecked Sendable {
         self.contextDisplayName = contextDisplayName
         self.activeProjectColorHex = activeProjectColorHex
         self.projectColorHexes = projectColorHexes
+        self.sandboxedItemID = sandboxedItemID
+        self.activeFramework = activeFramework
     }
 }

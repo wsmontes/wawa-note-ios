@@ -50,12 +50,30 @@ final class ProviderConnectViewModel: ObservableObject {
         connectionPhase = .scanningLocal
 
         Task {
-            let found = await probeLocalEndpoint()
-            await MainActor.run {
-                if found {
-                    connectionPhase = .localFound(endpoint: template.baseURL)
-                } else {
-                    connectionPhase = .localNotFound
+            // Use LocalProviderScanner for multi-port localhost probing
+            let discovered = await LocalProviderScanner.shared.quickScan()
+            if let match = discovered.first(where: { $0.id == template.id || $0.name.lowercased() == template.id }) {
+                await MainActor.run {
+                    connectionPhase = .localFound(endpoint: match.baseURL.absoluteString)
+                    if !match.models.isEmpty {
+                        let staticModels = AIConfigService.shared.availableModels(for: template.id)
+                        var merged = Set(staticModels)
+                        match.models.forEach { merged.insert($0) }
+                        availableModels = Array(merged).sorted()
+                        if let firstModel = availableModels.first {
+                            selectedModel = firstModel
+                        }
+                    }
+                }
+            } else {
+                // Fallback: probe single endpoint as before
+                let found = await probeLocalEndpoint()
+                await MainActor.run {
+                    if found {
+                        connectionPhase = .localFound(endpoint: template.baseURL)
+                    } else {
+                        connectionPhase = .localNotFound
+                    }
                 }
             }
         }
@@ -93,8 +111,11 @@ final class ProviderConnectViewModel: ObservableObject {
 
         do {
             let models: [String]
-            // Use the provider's fetchModels if key is in keychain, else use static list
-            if apiKey.isEmpty && template.requiresAuth {
+
+            // Check cache first (1h TTL)
+            if let cached = ModelCache.shared.getCachedModels(for: template.id) {
+                models = cached
+            } else if apiKey.isEmpty && template.requiresAuth {
                 models = AIConfigService.shared.availableModels(for: template.id)
             } else {
                 if template.requiresAuth && !apiKey.isEmpty {
@@ -109,6 +130,8 @@ final class ProviderConnectViewModel: ObservableObject {
                 )
                 let provider = try router.provider(for: testConfig)
                 models = try await provider.fetchModels()
+                // Cache the fetched models
+                ModelCache.shared.cacheModels(models, for: template.id)
                 // Clean up temp keychain entry if pre-connect
                 if savedProvider == nil && template.requiresAuth {
                     try? keychain.deleteAPIKey(for: fetchKeychainId)
@@ -118,7 +141,14 @@ final class ProviderConnectViewModel: ObservableObject {
             let staticModels = AIConfigService.shared.availableModels(for: template.id)
             var merged = Set(staticModels)
             models.forEach { merged.insert($0) }
-            availableModels = Array(merged).sorted()
+            // Highlight recommended models first, then alphabetically
+            let recommended = AIConfigService.shared.config.defaultModels
+            let recSet = Set([recommended?.analysis, recommended?.chat, recommended?.transcription].compactMap { $0 })
+            availableModels = Array(merged).sorted { a, b in
+                let aRec = recSet.contains(a); let bRec = recSet.contains(b)
+                if aRec != bRec { return aRec }
+                return a < b
+            }
             if availableModels.isEmpty {
                 modelFetchError = "No models available."
             } else if selectedModel.isEmpty || !availableModels.contains(selectedModel) {
@@ -239,6 +269,16 @@ final class ProviderConnectViewModel: ObservableObject {
             }
             savedProvider.availableModels = models
             try? context.save()
+
+            // Auto-populate AI settings with this provider's models.
+            // The user just connected a provider — its models should immediately
+            // be available across all AI fields (analysis, chat, etc.) instead
+            // of showing empty selections or stale defaults.
+            let bestModel = savedProvider.defaultModel.isEmpty ? models.first : savedProvider.defaultModel
+            if let model = bestModel, !model.isEmpty {
+                AutomationSettings.shared.autoAnalysisModel = model
+                AutomationSettings.shared.autoAnalysisProvider = savedProvider.typeRaw
+            }
 
             connectionPhase = .success
 
@@ -705,9 +745,13 @@ struct ProviderConnectView: View {
 // MARK: - Preview
 
 #Preview("Cloud - idle") {
-    ProviderConnectView(template: .openAI)
+    if let t = ProviderTemplate.openAI {
+        ProviderConnectView(template: t)
+    }
 }
 
 #Preview("Local - idle") {
-    ProviderConnectView(template: .lmStudio)
+    if let t = ProviderTemplate.lmStudio {
+        ProviderConnectView(template: t)
+    }
 }

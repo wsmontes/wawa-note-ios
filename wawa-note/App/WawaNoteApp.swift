@@ -21,32 +21,28 @@ struct WawaNoteApp: App {
 
     init() {
         let isTesting = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
-        do {
-            let schema = Schema([
-                AIProviderConfigModel.self,
-                KnowledgeItem.self,
-                Folder.self,
-                Annotation.self,
-                Project.self,
-                TaskItem.self,
-                Person.self,
-                GraphEdge.self,
-                Entity.self,
-                AgentSuggestion.self,
-                QueueEntry.self,
-                ProjectFrame.self,
-                ChangeRecord.self,
-                ProjectSnapshot.self
-            ])
-            if isTesting {
-                // In-memory store for tests — no disk I/O, fast setup
-                let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
-                modelContainer = try ModelContainer(for: schema, configurations: config)
-            } else {
-                modelContainer = try ModelContainer(for: schema)
-            }
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
+        let schema = Schema([
+            AIProviderConfigModel.self,
+            KnowledgeItem.self,
+            Folder.self,
+            Annotation.self,
+            Project.self,
+            TaskItem.self,
+            Person.self,
+            GraphEdge.self,
+            Entity.self,
+            AgentSuggestion.self,
+            QueueEntry.self,
+            ProjectFrame.self,
+            ChangeRecord.self,
+            ProjectSnapshot.self
+        ])
+        if isTesting {
+            // In-memory store for tests — no disk I/O, fast setup
+            let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+            modelContainer = try! ModelContainer(for: schema, configurations: config)
+        } else {
+            modelContainer = Self.createModelContainer(schema: schema)
         }
 
         ingestionState = ProjectIngestionState()
@@ -146,6 +142,80 @@ struct WawaNoteApp: App {
         let center = UNUserNotificationCenter.current()
         center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
             AppLog.general.info("Notification permission: \(granted ? "granted" : "denied")")
+        }
+    }
+
+    // MARK: - Resilient ModelContainer
+
+    /// Creates a ModelContainer with recovery from incompatible store migrations.
+    /// If the on-disk store cannot be loaded (schema change, corruption, etc.),
+    /// the old store is deleted and a fresh container is created automatically.
+    private static func createModelContainer(schema: Schema) -> ModelContainer {
+        let config = ModelConfiguration(schema: schema)
+        return createModelContainer(schema: schema, config: config)
+    }
+
+    private static func createModelContainer(schema: Schema, config: ModelConfiguration) -> ModelContainer {
+        do {
+            return try ModelContainer(for: schema, configurations: config)
+        } catch {
+            AppLog.warn("general", "⚠️ ModelContainer load failed — recreating store. Error: \(error)")
+
+            // Delete stores in all possible locations (app container + App Group)
+            Self.destroyAllStores()
+
+            // Retry with fresh store
+            let freshConfig = ModelConfiguration(schema: schema)
+            do {
+                return try ModelContainer(for: schema, configurations: freshConfig)
+            } catch {
+                fatalError("Could not create ModelContainer after store recreation: \(error)")
+            }
+        }
+    }
+
+    /// Deletes default.store files from both the app container and App Group container.
+    private static func destroyAllStores() {
+        var searchDirs: [URL] = []
+
+        // App container Application Support
+        if let appSupport = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            searchDirs.append(appSupport)
+        }
+
+        // App Group container
+        if let groupURL = FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: "group.com.wawa-note") {
+            searchDirs.append(groupURL.appendingPathComponent("Library/Application Support"))
+        }
+
+        for dir in searchDirs {
+            Self.destroyStore(at: dir.appendingPathComponent("default.store"))
+        }
+    }
+
+    /// Deletes all files associated with a Core Data / SwiftData SQLite store.
+    /// SwiftData uses `.store` extension; Core Data uses `.sqlite`.
+    /// We handle both and remove the store file, -shm, and -wal companions.
+    private static func destroyStore(at url: URL) {
+        // The store URL points to e.g. .../default.store or .../default.sqlite
+        // Companion files: default.store-shm, default.store-wal
+        let storeDir = url.deletingLastPathComponent()
+        let storeFileName = url.lastPathComponent  // "default.store"
+
+        let companions = [
+            storeFileName,                   // default.store
+            storeFileName + "-shm",          // default.store-shm
+            storeFileName + "-wal",          // default.store-wal
+        ]
+
+        for fileName in companions {
+            let fileURL = storeDir.appendingPathComponent(fileName)
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                try? FileManager.default.removeItem(at: fileURL)
+                AppLog.general.info("Removed stale store file: \(fileName)")
+            }
         }
     }
 

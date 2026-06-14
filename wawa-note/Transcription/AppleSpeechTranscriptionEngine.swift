@@ -213,7 +213,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
     // MARK: - File Transcription
 
-    func transcribeFile(_ audioFileURL: URL) async throws -> Transcript {
+    func transcribeFile(_ audioFileURL: URL, meetingId: UUID) async throws -> Transcript {
         isCancelled = false
         usedCloudFallback = false
 
@@ -249,7 +249,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         AppLog.transcription.info("Starting on-device transcription: \(String(format: "%.0f", duration))s, locale=\(recognizer.locale.identifier)")
 
         if duration <= Self.maxLocalDuration {
-            return try await transcribeDirect(url: audioFileURL, recognizer: recognizer)
+            return try await transcribeDirect(url: audioFileURL, recognizer: recognizer, meetingId: meetingId)
         }
 
         // Chunking for long files (>50s)
@@ -273,7 +273,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             onProgress?(.transcribing(chunk: i + 1, totalChunks: chunks.count))
             AppLog.transcription.info("On-device chunk \(i+1)/\(chunks.count)")
 
-            let transcript = try await transcribeDirect(url: chunk.url, recognizer: recognizer)
+            let transcript = try await transcribeDirect(url: chunk.url, recognizer: recognizer, meetingId: meetingId)
             languageCode = transcript.languageCode ?? languageCode
 
             let chunkText = transcript.segments.map(\.text).joined(separator: " ")
@@ -323,7 +323,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
     /// Transcribe a single audio URL with guaranteed on-device processing.
     /// Guideline: "No fallback com SFSpeechRecognizer, sempre setar requiresOnDeviceRecognition = true."
-    private func transcribeDirect(url: URL, recognizer: SFSpeechRecognizer) async throws -> Transcript {
+    private func transcribeDirect(url: URL, recognizer: SFSpeechRecognizer, meetingId: UUID) async throws -> Transcript {
         // Decode AAC/M4A → PCM WAV. AAC bitstream causes recognizer to skip first seconds.
         let recognitionURL = try prepareForRecognition(url)
         let request = SFSpeechURLRecognitionRequest(url: recognitionURL)
@@ -347,22 +347,33 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
         AppLog.transcription.info("Transcribing on-device — locale=\(recognizer.locale.identifier) requiresOnDevice=\(forceOnDevice)")
 
-        return try await withThrowingTaskGroup(of: Transcript.self) { group in
-            // Recognition task — may hang indefinitely if the recognizer
-            // never fires .isFinal or an error (network timeout, internal hang).
-            group.addTask {
-                try await withCheckedThrowingContinuation { continuation in
-                    var hasResumed = false
-                    let task = recognizer.recognitionTask(with: request) { result, error in
-                        guard !hasResumed else { return }
-                        if let error {
-                            let nsError = error as NSError
-                            AppLog.transcription.error("On-device recognition failed: \(nsError.domain)/\(nsError.code) — \(error.localizedDescription)")
+        return try await withCheckedThrowingContinuation { continuation in
+            var hasResumed = false
+            var recognitionTask: SFSpeechRecognitionTask?
 
-                            // kAFAssistantErrorDomain Code=1101 = local recognizer rejected audio format.
-                            // Retry once with cloud recognition if it was forced on-device.
-                            if nsError.domain.contains("AssistantError") && forceOnDevice {
-                                hasResumed = true
+            // Timeout: SFSpeechRecognizer may never call the completion handler
+            // (known iOS behavior with certain audio formats or durations > 5 min).
+            // Using DispatchWorkItem for timeout to avoid Sendable issues with
+            // non-Sendable CheckedContinuation in unstructured Tasks.
+            let timeoutWorkItem = DispatchWorkItem {
+                guard !hasResumed else { return }
+                hasResumed = true
+                recognitionTask?.cancel()
+                continuation.resume(throwing: TranscriptionError.recognitionFailed("Recognition timed out after 120s"))
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 120, execute: timeoutWorkItem)
+
+            recognitionTask = recognizer.recognitionTask(with: request) { result, error in
+                guard !hasResumed else { return }
+                if let error {
+                    timeoutWorkItem.cancel()
+                    let nsError = error as NSError
+                    AppLog.transcription.error("On-device recognition failed: \(nsError.domain)/\(nsError.code) — \(error.localizedDescription)")
+
+                    // kAFAssistantErrorDomain Code=1101 = local recognizer rejected audio format.
+                    // Retry once with cloud recognition if it was forced on-device.
+                    if nsError.domain.contains("AssistantError") && forceOnDevice {
+                        hasResumed = true
                         AppLog.transcription.warning("Local recognizer rejected audio, falling back to cloud recognition")
                         let cloudRequest = SFSpeechURLRecognitionRequest(url: recognitionURL)
                         cloudRequest.shouldReportPartialResults = false
@@ -384,7 +395,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                             guard let cloudResult = cloudResult, cloudResult.isFinal else { return }
                             cloudHasResumed = true
                             self.usedCloudFallback = true
-                            let transcript = self.buildTranscript(from: cloudResult, recognizer: recognizer)
+                            let transcript = self.buildTranscript(from: cloudResult, recognizer: recognizer, meetingId: meetingId)
                             AppLog.transcription.info("Cloud fallback succeeded: \(transcript.segments.count) segments")
                             continuation.resume(returning: transcript)
                         }
@@ -393,42 +404,30 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                     }
 
                     hasResumed = true
+                    timeoutWorkItem.cancel()
                     continuation.resume(throwing: TranscriptionError.recognitionFailed("\(nsError.domain)/\(nsError.code): \(error.localizedDescription)"))
                     return
                 }
 
                 guard let result = result, result.isFinal else { return }
                 hasResumed = true
-                let transcript = self.buildTranscript(from: result, recognizer: recognizer)
+                timeoutWorkItem.cancel()
+                let transcript = self.buildTranscript(from: result, recognizer: recognizer, meetingId: meetingId)
                 AppLog.transcription.info("On-device complete: \(transcript.segments.count) segments, lang=\(transcript.languageCode ?? recognizer.locale.identifier), locale=\(recognizer.locale.identifier)")
                 continuation.resume(returning: transcript)
             }
-                    self.activeRecognitionTask = task
-                }
-            }
-            // Timeout task — prevents the continuation from hanging forever
-            // if the recognizer never fires .isFinal or an error callback.
-            group.addTask {
-                try await Task.sleep(nanoseconds: 120_000_000_000)  // 2 minutes
-                throw TranscriptionError.recognitionFailed("Recognition timed out after 120s")
-            }
-            // First completed task wins; cancel the other
-            guard let result = try await group.next() else {
-                throw TranscriptionError.recognitionFailed("Recognition failed — no result")
-            }
-            group.cancelAll()
-            return result
+            self.activeRecognitionTask = recognitionTask
         }
     }
 
     /// Build a Transcript from an SFSpeechRecognitionResult.
-    private func buildTranscript(from result: SFSpeechRecognitionResult, recognizer: SFSpeechRecognizer) -> Transcript {
+    private func buildTranscript(from result: SFSpeechRecognitionResult, recognizer: SFSpeechRecognizer, meetingId: UUID) -> Transcript {
         let fullText = result.bestTranscription.formattedString
         let detectedLang = detectLanguage(fullText)
 
         let segments = result.bestTranscription.segments.map { segment in
             TranscriptSegment(
-                meetingId: UUID(),
+                meetingId: meetingId,
                 startTime: segment.timestamp,
                 endTime: segment.timestamp + segment.duration,
                 text: segment.substring,
@@ -439,20 +438,21 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         }
 
         return Transcript(
+            meetingId: meetingId,
             languageCode: detectedLang ?? recognizer.locale.identifier,
             segments: segments,
             sourceEngineId: "apple-speech"
         )
     }
 
-    /// Decodes compressed audio (AAC/M4A) to 16kHz 16-bit mono PCM WAV.
-    /// Uses AVAudioFile (read) → AVAudioConverter → AVAudioFile (write).
+    /// Decodes AAC/M4A to 16kHz 16-bit mono PCM WAV for SFSpeechRecognizer.
+    /// SFSpeechRecognizer requires PCM input — AAC bitstream causes sync loss.
     /// WAV and other uncompressed formats pass through unchanged.
     private func prepareForRecognition(_ url: URL) throws -> URL {
         let ext = url.pathExtension.lowercased()
         guard ext == "m4a" || ext == "mp4" else { return url }
 
-        AppLog.transcription.info("Decoding to PCM: \(url.lastPathComponent)")
+        AppLog.transcription.info("Decoding AAC to PCM: \(url.lastPathComponent)")
 
         let inputFile = try AVAudioFile(forReading: url)
         let inputFormat = inputFile.processingFormat

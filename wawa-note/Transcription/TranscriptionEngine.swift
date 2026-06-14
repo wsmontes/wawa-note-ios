@@ -53,7 +53,8 @@ protocol TranscriptionEngine: Sendable {
     var capabilities: TranscriptionCapabilities { get }
 
     /// Transcribe a pre-recorded audio file.
-    func transcribeFile(_ audioFileURL: URL) async throws -> Transcript
+    /// - Parameter meetingId: the KnowledgeItem ID this transcript belongs to.
+    func transcribeFile(_ audioFileURL: URL, meetingId: UUID) async throws -> Transcript
 
     /// Transcribe a live audio stream (buffer-based).
     /// Returns an async stream of volatile + final results.

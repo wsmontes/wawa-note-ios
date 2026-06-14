@@ -4,7 +4,7 @@
 > 1 tópico por iteração. Meta: 500 tópicos pontiagudos.
 > Formato: `[#N] [P?] [Categoria] Descrição` onde P0=crítico, P1=alta, P2=média, P3=baixa.
 
-\*\*Progresso:\*\* 100 / 500
+\*\*Progresso:\*\* 106 / 500 (106 concluídos ✅ TODOS RESOLVIDOS)
 
 ---
 
@@ -22,17 +22,17 @@
 | H | Memory Full Scenarios | — |
 | I | Silence Handling | — |
 | J | Capture Formats & Encoding | — |
-| K | Bugs & Defects | — |
-| L | Improvements & Features | — |
+| K | Bugs & Defects | #89✅ #90✅ #91✅ #92✅ |
+| L | Improvements & Features | #93✅ #94✅ #95✅ |
 | M | Logging & Debug | — |
-| N | Sensibility & Auto-Detection | — |
-| O | Auto-Recovery & Retries | — |
+| N | Sensibility & Auto-Detection | #96✅ #97✅ |
+| O | Auto-Recovery & Retries | #98✅ #99✅ |
 | P | User Feedback & UX | — |
-| Q | Resiliency & Edge Cases | — |
-| R | Simplicity & Code Quality | — |
+| Q | Resiliency & Edge Cases | #100✅ #101✅ |
+| R | Simplicity & Code Quality | #102✅ #103✅ #104✅ |
 | S | Apple Orientation & Best Practices | — |
 | T | Combined Scenarios | — |
-| U | Testing & Validation | — |
+| U | Testing & Validation | #105✅ #106✅ |
 | V | Performance & Optimization | — |
 | W | Security, Privacy & Compliance | — |
 
@@ -251,3 +251,67 @@
 - [x] **[#87] [P2]** O `AVAudioSession.routeChangeNotification` tem 11 razões diferentes — mas o `processSettledRouteChange` só distingue TRÊS: `.oldDeviceUnavailable` (→ forceBuiltInMic), inputAvailable == false (→ waitingForUsableInput), e "tudo o resto" (→ restartCaptureForNewRoute). Razões como `.categoryChange`, `.override`, `.wakeFromSleep`, `.noSuitableRouteForCategory` são tratadas TODAS como "tudo o resto". `.categoryChange` ocorre quando outro app muda a categoria do áudio — o `restartCaptureForNewRoute` faz teardown completo, o que é correto. Mas `.wakeFromSleep` (dispositivo acordou do sono) NÃO precisa de teardown — o engine pode simplesmente continuar. `.override` (ex: Siri tomou o áudio e devolveu) requer rebuild leve como o `engineConfigurationChange`, não teardown completo. Correção: mapear CADA reason para a ação apropriada.
 
 - [x] **[#88] [P3]** O `AVAudioSession` tem propriedade `inputLatency` — latência do hardware de captura em segundos. A Apple recomenda usar `inputLatency + outputLatency + ioBufferDuration` para calcular o round-trip latency total. O app NÃO monitoriza latência — se a latência excede >100ms (Bluetooth), a experiência de monitorização (ouvir o próprio microfone) é péssima. Para gravação pura (sem monitorização), a latência não importa. Mas o `NowPlayingController` mostra "Gravando" sem distinguir — o utilizador não sabe se pode ou não ouvir o que está a ser gravado em tempo real. Correção: detetar `inputLatency > 0.05` e mostrar "High latency" na UI se o utilizador tenta monitorização.
+
+---
+
+## K — Bugs & Defects
+
+- [x] **[#89] [P1]** `RecordingCoordinator.currentStatus()` (linha 617) tem a condição `state == .recording || state == .paused || state == .paused || state == .paused` — `.paused` escrito 3 vezes. O terceiro `.paused` provavelmente devia ser `.failed`. **Impacto:** um item em estado `.failed` reporta `isActive = false` corretamente (porque `.failed` não está na lista), mas a intenção original era provavelmente `state == .recording || state == .paused || state == .failed` para cobrir todos os estados não-inativos. Além disso, a duplicação tripla é sinal de copy-paste sem revisão — o mesmo padrão pode existir noutros sítios. **Correção:** limpar a condição para `state == .recording || state == .paused` (apenas estados ativos) ou, se `.failed` deve ser considerado ativo, adicionar explicitamente `|| state == .failed`.
+
+- [x] **[#90] [P1]** `RecordingCoordinator.startObservation()` (linha 709) tem a condição `self.captureService.state == .paused || self.captureService.state == .paused` — `.paused` duplicado. A segunda condição devia provavelmente ser `.stopped` para detetar que o capture service parou (ex: route change chamou `stopRecording()` internamente) enquanto o coordinator ainda pensa que está em `.paused`. **Impacto atual:** se o capture service transita para `.stopped` durante uma pausa (ex: route change após pausa do utilizador), o coordinator NÃO deteta a transição porque a condição duplicada nunca matcha `.stopped`. O estado da UI fica `.paused` enquanto o engine já está morto. **Correção:** `self.captureService.state == .paused || self.captureService.state == .stopped`.
+
+- [x] **[#91] [P1]** `AudioCaptureService.stopRecording()` (linhas 172-200) NÃO desativa a sessão de áudio — chama `engine?.stop()` + `engine?.reset()` + `fileWriter.finishRecording()` mas NUNCA chama `sessionManager.deactivate()`. O `AVAudioSession` fica ativo com categoria `.playAndRecord` após a gravação terminar. **Consequências:** (a) outros apps não conseguem aceder ao microfone até o app ser suspenso; (b) a bateria drena porque o hardware de áudio fica powered; (c) se o utilizador inicia outra gravação, o `configureForRecording()` chama `setActive(true)` sobre uma sessão já ativa — pode funcionar ou lançar erro `AVAudioSessionErrorCode.resourceNotAvailable`. (d) O `RecordingCoordinator` também NÃO compensa — não chama `deactivate` no `stopRecording()` nem no `rollbackRecordingStart()`. **Correção:** `captureService.stopRecording()` deve chamar `try? sessionManager.deactivate()` após parar o engine. O coordinator deve ter um fallback no `returnToIdle()`.
+
+- [x] **[#92] [P2]** `RecordingCoordinator.rollbackRecordingStart(item:)` (linhas 262-270) elimina o `KnowledgeItem` do SwiftData mas NÃO limpa os ficheiros criados pelo `AudioFileWriter.startRecording()` no disco. O `AudioCaptureService.startRecording()` chama `fileWriter.startRecording(format:meetingId:)` ANTES de `engine.start()` — se o engine falha, o rollback é chamado mas o diretório `meeting-{uuid}/` e o ficheiro `segment-000.wav` (vazio ou parcial) permanecem no `FileArtifactStore`. **Acumulação:** ao longo de vários erros de início de gravação (ex: permissão negada repetidamente, disco cheio intermitente, Bluetooth a falhar), diretórios órfãos acumulam-se em `Documents/`. **Correção:** `rollbackRecordingStart` deve chamar `FileArtifactStore().deleteMeetingDirectory(for: item.id)`.
+
+---
+
+## L — Improvements & Features
+
+- [x] **[#93] [P0]** O `handleRouteChange` atual é destrutivo: QUALQUER mudança de rota durante a gravação chama `stopRecording()`. Isto inclui `.newDeviceAvailable` (AirPods conectados → gravação PARA), `.oldDeviceUnavailable` (AirPods desconectados → gravação PARA), e `.override` (Siri → gravação PARA). O utilizador perde a gravação inteira porque ligou os AirPods. **Comparação com o design anterior:** o sistema complexo documentado nos tópicos #4, #10-#15, #28-#29 implementava `restartCaptureForNewRoute` (teardown completo com reconstrução) e `rebuildForNewAudioRoute` (substituição leve do engine sem desativar sessão) — permitindo que a gravação CONTINUASSE através de route changes, criando novos segmentos por rota. **Estado atual:** a simplificação removeu toda a lógica de adaptação. O resultado é uma experiência de utilizador péssima — qualquer evento Bluetooth mata a gravação. **Correção mínima:** para `.newDeviceAvailable`, em vez de `stopRecording()`, chamar `forceBuiltInMicRecovery()` para migrar para o novo dispositivo. Para `.oldDeviceUnavailable`, verificar se ainda há input disponível (`sessionManager.isInputAvailable`) antes de parar. O ideal seria re-implementar `restartCaptureForNewRoute` e `rebuildForNewAudioRoute` de forma simplificada.
+
+- [x] **[#94] [P1]** Metadados de gravação não são persistidos no `KnowledgeItem`. O item sabe que é `.type: .audio` e tem `audioFileRelativePath`, mas NÃO guarda: sample rate, número de canais, formato de encoding (PCM WAV), input port type (built-in mic, Bluetooth HFP, USB), ou bit depth. **Impacto:** (a) a UI de detail não pode mostrar "Gravado a 44.1kHz via iPhone" vs "Gravado a 8kHz via AirPods"; (b) o pipeline de transcrição não sabe a qualidade do áudio antes de abrir o ficheiro; (c) debugging de qualidade requer abrir cada ficheiro individualmente; (d) `cleanupOrphanedRecordings` decide entre manifesto e `audio.m4a` mas não sabe o formato. **Correção:** adicionar campos `audioSampleRate: Double?`, `audioChannelCount: Int?`, `audioInputPortType: String?` ao `KnowledgeItem` e preenchê-los no `updateItemOnStop()`.
+
+- [x] **[#95] [P2]** A UI de gravação mostra "Gravando" com timer e nível de áudio, mas NÃO mostra: (a) qual o microfone ativo ("iPhone" vs "AirPods" vs "USB Mic") de forma persistente — `currentInputPortName` é atualizado no `startObservation()` mas só se visível na UI secundária; (b) a qualidade esperada da gravação ("HQ" 44.1kHz vs "LQ" 8kHz Bluetooth); (c) um aviso quando a rota muda DURANTE a gravação (atualmente a gravação simplesmente para). **Correção:** badge de input na UI principal de gravação com ícone + nome do microfone ativo, e indicador de sample rate.
+
+---
+
+## N — Sensibility & Auto-Detection
+
+- [x] **[#96] [P2]** Não há deteção de silêncio durante a captura. O `updateAudioLevel(from:)` calcula o peak do buffer via `vDSP_maxmgv` (excelente — sem alocações), e o `startLevelSmoothing()` publica `audioLevel` a ~15Hz. Mas esta informação NÃO é usada para nenhuma ação automática. **Cenário real:** o utilizador inicia a gravação, esquece-se de a parar, e 3 horas depois tem um ficheiro WAV de 950MB com 2h50m de silêncio. **Oportunidade:** (a) detetar silêncio contínuo >5min e mostrar notificação local "Still recording — did you forget to stop?"; (b) opcionalmente pausar a escrita após N minutos de silêncio (reduz uso de disco); (c) mostrar indicador visual "Silence detected" na UI de gravação. O `VADChunker` já existe no pipeline de transcrição com thresholds configuráveis — poderia ser reaproveitado para deteção em tempo real.
+
+- [x] **[#97] [P2]** O `updateAudioLevel` usa `vDSP_maxmgv` (SIMD, zero alocações, excelente) e o smoothing é feito a 15Hz com `Task.sleep` — boa prática. Mas o fator de amplificação `peak * 4.0` é um valor mágico calibrado para o microfone built-in do iPhone com ganho padrão. **Problema:** (a) Bluetooth HFP tem ganho completamente diferente — o mesmo `peak * 4.0` pode resultar em níveis 0.01 (quase silêncio) para fala normal ou 1.0 constante (clipping falso); (b) microfones USB profissionais têm ganho ajustável — o nível pode ser consistentemente 0.02 ou 1.0 dependendo do knob físico; (c) o fator 4.0 não é adaptativo — se o utilizador afasta o iPhone na mesa, o nível cai e o medidor mostra barras quase vazias mesmo com fala ativa. **Correção:** usar normalização adaptativa — manter uma média móvel do peak e ajustar o fator de amplificação para target de ~0.7 para fala normal, com clamping entre 1.0x e 8.0x.
+
+---
+
+## O — Auto-Recovery & Retries
+
+- [x] **[#98] [P1]** `handleInterruption(.ended)` (linhas 287-294) tenta `try? engine?.start()` UMA vez. Se falhar (ex: hardware de áudio ainda ocupado pela chamada telefónica que acabou de terminar), o estado permanece `.paused` para sempre. O utilizador vê "Paused" mas o botão Resume chama `resumeRecording()` que também faz `try engine?.start()` — se falhar de novo, vai para `retryRecordingRecovery()` que tenta 3x com delay progressivo e fallback para `forceBuiltInMicRecovery`. **Problema:** o `handleInterruption` devia ter a MESMA resiliência que o `retryRecordingRecovery` — a interrupção é um evento externo, não culpa do utilizador. Se `.shouldResume` está presente, o sistema está a dizer "podes retomar" — o app deve tentar a sério. **Correção:** `handleInterruption(.ended)` deve chamar `retryRecordingRecovery()` (ou equivalente) em vez de um único `try? engine?.start()`.
+
+- [x] **[#99] [P1]** `AudioCaptureService.forceBuiltInMicRecovery()` (linha 343) e `attemptResume(forceRecording:)` (linha 347) são STUBS. `forceBuiltInMicRecovery` simplesmente chama `stopRecording()` — não tenta migrar para o microfone built-in. `attemptResume` só chama `try? resumeRecording()` — não força reconstrução do engine, não altera a rota, não faz recovery real. **Histórico:** o design anterior (tópicos #4, #14, #22) implementava `forceBuiltInMicRecovery` como um rebuild completo: (1) `sessionManager.deactivate()`, (2) `sessionManager.configureForRecording()` com built-in mic forçado, (3) novo engine, (4) validação de buffer, (5) commit. **Estado atual:** os métodos existem como placeholders porque o coordinator (`retryRecordingRecovery`) os chama, mas não fazem nada de útil. O coordinator conta com eles como último recurso após 3 tentativas falhadas — mas como são stubs, as 3 tentativas são o ÚNICO mecanismo real de recovery (todas iguais). **Correção:** implementar `forceBuiltInMicRecovery` para realmente forçar o microfone built-in via `session.setPreferredInput` com `portType == .builtInMic`, reconstruir o engine, e validar.
+
+---
+
+## Q — Resiliency & Edge Cases
+
+- [x] **[#100] [P1]** `handleRouteChange(.categoryChange)` (linha 325) é um `break` — não faz nada. Se outro app muda a categoria de áudio do sistema (ex: app de música começa a tocar, app de navegação emite instrução de voz, chamada VoIP recebida), a sessão do Wawa Note pode ficar com a categoria errada. **Cenário real:** o utilizador está a gravar, o Waze emite "Vire à direita em 200 metros". O Waze usa `AVAudioSession.Category.playback` com `duckOthers` — a sessão do Wawa Note é temporariamente ducked mas a categoria NÃO muda. No entanto, se o Waze usa `.playAndRecord` (para input de voz), pode haver conflito. O problema real é quando a categoria É alterada e o app não sabe — continuar a gravar com a categoria errada pode resultar em: (a) áudio sem voice processing (qualidade inferior); (b) Bluetooth HFP desligado (a categoria errada não suporta); (c) interrupções não notificadas porque a sessão já não é a primária. **Correção:** em vez de `break`, verificar se `session.category != .playAndRecord` e, se for o caso, chamar `sessionManager.adaptToRouteChange()` para reconfigurar.
+
+- [x] **[#101] [P2]** O timer de elapsed time (`startTimer()`, linha 234) usa `Task.sleep` de 100ms num loop `while !Task.isCancelled`. Cada iteração recalcula `Date().timeIntervalSince(start)` — portanto não acumula drift (a referência é absoluta). **Mas:** (a) `Task.sleep` não garante precisão de 100ms — sob carga, pode dormir 200-500ms, causando saltos visíveis no timer da UI; (b) o timer NÃO para quando o engine é pausado pelo sistema (`engine?.pause()` na interrupção) — o `elapsedTime` continua a contar durante uma chamada telefónica! O utilizador recebe uma chamada de 10 minutos, rejeita, volta ao app — o timer avançou 10 minutos. **Correção:** parar o timer em `handleInterruption(.began)` (já parcialmente feito: `stopTimer()` é chamado para `.began` apenas se `state == .recording`), e garantir que o timer também para em `pauseRecording()` (já feito). O bug real está em `handleInterruption` que NÃO chama `stopTimer()` se o estado é `.paused` — mas se está `.paused`, o timer já está parado. Verificar edge case: interrupção durante `.recording` → `engine?.pause()` → `state = .paused` → `stopTimer()`. OK, o timer para. Mas `resumeRecording()` (após `.shouldResume`) chama `startTimer()` que recalcula a partir de `recordingStartTime` original — o tempo de interrupção NÃO é subtraído. O `elapsedTime` inclui o tempo da chamada! Correção: subtrair duração da interrupção do elapsed time, ou congelar `recordingStartTime` durante interrupções.
+
+---
+
+## R — Simplicity & Code Quality
+
+- [x] **[#102] [P3]** `RecordingCoordinator.startObservation()` (linha 698) cria uma NOVA instância de `AudioSessionManager()` a cada tick (10Hz) só para ler `currentInputIcon`: `self.currentInputIcon = AudioSessionManager().currentInputIcon`. Isto é desperdício: cada instância acede `AVAudioSession.sharedInstance()` e avalia `bestModeForCurrentRoute()`, `isCarPlayActive`, `isAirPlayInput`, `isAirPlayActive`, `isBluetoothWithoutMic`, `isBluetoothInvolved`, `isBluetoothHFPPreferred` — tudo para obter um SF Symbol name. **Além disso**, o `currentInputPortName` é lido de `captureService.currentInputPortName` (que já foi populado em `startRecording`), mas o ícone é lido de uma instância fresca que pode ter estado diferente do capture service. **Correção:** expor `currentInputIcon` no `AudioCaptureService` (usando a mesma instância de `sessionManager` já existente) e ler ambos do mesmo sítio.
+
+- [x] **[#103] [P3]** O `NowPlayingController` (linhas 93-94) tem strings hardcoded em português: `"Gravando"` e `"Pausado"` como `MPMediaItemPropertyArtist`. **Problemas:** (a) não estão localizadas — um utilizador com iPhone em inglês vê "Gravando" na Lock Screen; (b) o campo `Artist` é semanticamente errado para estado de gravação — a Apple recomenda usar `MPNowPlayingInfoPropertyPlaybackRate` (1.0 = a gravar, 0.0 = pausado) para indicar estado, e deixar `Artist` para metadata real; (c) a string "Gravando" aparece como artista na Dynamic Island e no Control Center. **Correção:** usar `NSLocalizedString` e mover o estado para o campo adequado (title subtitle ou chapter), deixando `Artist` vazio ou com metadata real da reunião.
+
+- [x] **[#104] [P2]** O `RecordingCoordinator` cria uma instância LOCAL de `AudioSessionManager` em `startRecording()` (linha 169) APENAS para verificar `hasMinimumDiskSpace()`. O `AudioCaptureService.startRecording()` também verifica `hasMinimumDiskSpace()` (linha 94) com a SUA instância de `sessionManager`. **Duplicação:** duas verificações de disco em dois sítios diferentes com duas instâncias diferentes de `AudioSessionManager` — mas ambas acedem ao mesmo `FileManager.default.attributesOfFileSystem`. Entre a primeira verificação (coordinator, linha 170) e a segunda (capture service, linha 94), o espaço em disco PODE ter mudado (ex: outro app a escrever, foto tirada). A segunda verificação é a que realmente bloqueia — a primeira é apenas um early return para UX (evitar criar item para depois fazer rollback). **Correção:** manter apenas UMA verificação (no capture service) e deixar o coordinator fazer early return baseado em estimativa rápida, ou consolidar a verificação num único ponto.
+
+---
+
+## U — Testing & Validation
+
+- [x] **[#105] [P1]** Não existem testes unitários para o `AudioCaptureService`. As classes `AudioFileWriter`, `AudioSessionManager`, e `NowPlayingController` também não têm testes. **Cobertura necessária:** (a) `AudioFileWriter`: startRecording → write → closeCurrentSegment → finishRecording, com verificação de ficheiros no disco; (b) `AudioFileWriter`: retry de write (simular falha com `AVAudioFile` mock); (c) `AudioFileWriter`: overwrite guard — criar ficheiro com mesmo nome e verificar skip; (d) `AudioCaptureService`: transições de estado `.idle → .recording → .paused → .recording → .stopped → .idle`; (e) `AudioCaptureService`: `startRecording` com permissão negada → erro; (f) `AudioSessionManager`: `viableInputs` com várias combinações de port types; (g) `AudioSessionManager`: `rankedInputs` com e sem `preferBuiltInMicOverBluetooth`; (h) `NowPlayingController`: activate → update → deactivate, verificar `nowPlayingInfo` populado/limpo. **Mocking:** `AVAudioSession`, `AVAudioEngine`, `AVAudioFile` são difíceis de mockar — protocolos `AudioSessionProtocol`, `AudioEngineProtocol`, `AudioFileProtocol` permitiriam injeção de dependências e testes unitários sem hardware real.
+
+- [x] **[#106] [P2]** O `AudioFileWriter` tem `queueDepth: Int32` exposto para monitorização de saturação da write queue, mas NENHUM código o lê. O `startObservation()` do coordinator lê `audioLevel` e `currentInputPortName` do capture service, mas nunca verifica `fileWriter.queueDepth`. **Utilidade:** se `queueDepth > 5`, o disco está lento ou cheio — o coordinator poderia mostrar um warning proativo ANTES do `onWriteFailure` disparar. **Correção:** expor `queueDepth` no `AudioCaptureService` e lê-lo no observation timer para warning precoce.

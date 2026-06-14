@@ -1,6 +1,11 @@
 import Foundation
 import SwiftData
 
+extension Notification.Name {
+    /// Posted when the active AI provider changes (connected, switched, or removed).
+    static let activeProviderChanged = Notification.Name("ActiveProviderChanged")
+}
+
 // MARK: - Task-based routing
 
 enum ProviderTaskType: String, Codable, CaseIterable {
@@ -25,6 +30,7 @@ final class ActiveProviderManager: @unchecked Sendable {
 
     func setActiveProviderID(_ id: String) {
         defaults.set(id, forKey: key)
+        NotificationCenter.default.post(name: .activeProviderChanged, object: nil)
     }
 
     func getActiveProvider(context: ModelContext) -> AIProviderConfigModel? {

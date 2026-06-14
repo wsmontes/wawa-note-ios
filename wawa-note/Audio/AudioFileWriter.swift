@@ -18,6 +18,10 @@ struct ClosedSegmentInfo: Sendable {
 /// Thread-safe audio file writer. All operations (write, close, open, finish)
 /// are serialized through a single internal queue. This prevents races between
 /// the audio tap's write callbacks and lifecycle operations (route change, stop).
+///
+/// Write retries use `queue.asyncAfter` instead of `Thread.sleep` so the serial
+/// queue is never blocked — subsequent writes can still be processed while a
+/// previous write is retrying.
 final class AudioFileWriter: @unchecked Sendable {
     private let fileManager: FileManager
     private let fileStore: FileArtifactStore
@@ -30,6 +34,13 @@ final class AudioFileWriter: @unchecked Sendable {
     private var _segmentIndex: Int = 0
     private var _writeErrorCount: Int = 0
     private var _lastWriteError: Error?
+
+    /// Maximum number of write retries for transient errors.
+    private static let maxRetries = 3
+    /// Backoff delays for retries 1, 2, 3 (retry 4 = final attempt, no delay).
+    private static let retryDelays: [TimeInterval] = [0.1, 0.2, 0.4]
+    /// Maximum indices to scan forward when avoiding segment overwrite.
+    private static let maxOverwriteScanIndices = 10
 
     /// Diagnostic counter: number of queued writes waiting to be processed.
     /// Incremented before dispatch, decremented after completion. A value >5
@@ -137,21 +148,7 @@ final class AudioFileWriter: @unchecked Sendable {
             if let dest = wb.floatChannelData {
                 dest[0].initialize(from: samples, count: frameLength)
             }
-            for attempt in 0...3 {
-                do {
-                    try file.write(from: wb)
-                    return
-                } catch {
-                    if attempt == 3 {
-                        self._writeErrorCount += 1
-                        self._lastWriteError = error
-                        AppLog.error("audio", "Write failed #\(self._writeErrorCount): \(error.localizedDescription)")
-                        self.onWriteFailure?(error)
-                        return
-                    }
-                    Thread.sleep(forTimeInterval: [0.1, 0.2, 0.4][attempt])
-                }
-            }
+            self._writeWithRetry(buffer: wb, file: file)
         }
     }
 
@@ -162,21 +159,7 @@ final class AudioFileWriter: @unchecked Sendable {
         queue.async { [weak self] in
             defer { self?.queueDepth &-= 1 }
             guard let self, let file = self._audioFile else { return }
-            for attempt in 0...3 {
-                do {
-                    try file.write(from: buffer)
-                    return
-                } catch {
-                    if attempt == 3 {
-                        self._writeErrorCount += 1
-                        self._lastWriteError = error
-                        AppLog.error("audio", "Write failed #\(self._writeErrorCount): \(error.localizedDescription)")
-                        self.onWriteFailure?(error)
-                        return
-                    }
-                    Thread.sleep(forTimeInterval: [0.1, 0.2, 0.4][attempt])
-                }
-            }
+            self._writeWithRetry(buffer: buffer, file: file)
         }
     }
 
@@ -199,6 +182,8 @@ final class AudioFileWriter: @unchecked Sendable {
 
     /// Write a crash recovery checkpoint so an interrupted recording can be resumed.
     /// Called periodically from the capture service during active recording.
+    /// Uses rotation: writes to .NEW, validates, then renames — the previous
+    /// checkpoint is preserved as .BAK.
     func writeCheckpoint(meetingId: UUID, segmentIndex: Int, format: AVAudioFormat) {
         queue.async { [weak self] in
             guard let self else { return }
@@ -210,32 +195,71 @@ final class AudioFileWriter: @unchecked Sendable {
                 "timestamp": Date().timeIntervalSince1970,
                 "fileName": self._currentFileURL?.lastPathComponent ?? "unknown"
             ]
-            guard let data = try? JSONSerialization.data(withJSONObject: checkpoint) else { return }
+            guard let data = try? JSONSerialization.data(withJSONObject: checkpoint) else {
+                AppLog.error("audio", "Checkpoint: failed to serialize checkpoint JSON")
+                return
+            }
+
+            // Ensure configs directory exists before writing
+            do {
+                try self.fileStore.createConfigsDirectory()
+            } catch {
+                AppLog.error("audio", "Checkpoint: cannot create configs directory — \(error.localizedDescription)")
+                return
+            }
+
             let url = self.fileStore.configsDirectoryURL().appendingPathComponent("recording_checkpoint.json")
-            try? data.write(to: url, options: .atomic)
+            do {
+                try self.fileStore.atomicWriteWithBackup(data: data, url: url)
+            } catch {
+                AppLog.error("audio", "Checkpoint: write failed — \(error.localizedDescription)")
+            }
         }
     }
 
     /// Check if a crash recovery checkpoint exists from a previous session.
     /// Returns (meetingId, segmentIndex, sampleRate) if found, nil otherwise.
+    /// Only recovers checkpoints less than 1 hour old.
     static func loadCrashCheckpoint(fileStore: FileArtifactStore = FileArtifactStore()) -> (UUID, Int, Double)? {
         let url = fileStore.configsDirectoryURL().appendingPathComponent("recording_checkpoint.json")
-        guard let data = try? Data(contentsOf: url),
-              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let meetingIdStr = dict["meetingId"] as? String,
-              let meetingId = UUID(uuidString: meetingIdStr),
-              let segmentIndex = dict["segmentIndex"] as? Int,
-              let sampleRate = dict["sampleRate"] as? Double,
-              let timestamp = dict["timestamp"] as? TimeInterval else { return nil }
-        // Only recover if checkpoint is less than 24h old
-        guard Date().timeIntervalSince1970 - timestamp < 86400 else { return nil }
-        return (meetingId, segmentIndex, sampleRate)
+        let bakURL = url.appendingPathExtension("BAK")
+
+        // Try primary first, then backup
+        for candidateURL in [url, bakURL] {
+            guard FileManager.default.fileExists(atPath: candidateURL.path),
+                  let data = try? Data(contentsOf: candidateURL),
+                  let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let meetingIdStr = dict["meetingId"] as? String,
+                  let meetingId = UUID(uuidString: meetingIdStr),
+                  let segmentIndex = dict["segmentIndex"] as? Int,
+                  let sampleRate = dict["sampleRate"] as? Double,
+                  let timestamp = dict["timestamp"] as? TimeInterval else { continue }
+
+            // Only recover if checkpoint is less than 1 hour old
+            guard Date().timeIntervalSince1970 - timestamp < 3600 else {
+                AppLog.audio.info("Checkpoint expired: \(Int((Date().timeIntervalSince1970 - timestamp) / 60))min old — discarding")
+                return nil
+            }
+
+            return (meetingId, segmentIndex, sampleRate)
+        }
+        return nil
     }
 
     /// Remove the checkpoint file after successful recording stop.
     static func clearCrashCheckpoint(fileStore: FileArtifactStore = FileArtifactStore()) {
         let url = fileStore.configsDirectoryURL().appendingPathComponent("recording_checkpoint.json")
-        try? FileManager.default.removeItem(at: url)
+        let bakURL = url.appendingPathExtension("BAK")
+        let newURL = url.appendingPathExtension("NEW")
+        for u in [url, bakURL, newURL] {
+            if FileManager.default.fileExists(atPath: u.path) {
+                do {
+                    try FileManager.default.removeItem(at: u)
+                } catch {
+                    AppLog.warn("audio", "clearCrashCheckpoint: cannot remove \(u.lastPathComponent) — \(error.localizedDescription)")
+                }
+            }
+        }
     }
 
     func cleanupAbandonedRecording(for meetingId: UUID) {
@@ -247,11 +271,62 @@ final class AudioFileWriter: @unchecked Sendable {
 
     // MARK: - Private (must be called on `queue`)
 
+    /// Single retry-with-backoff write routine used by both `write(samples:)` and `write(buffer:)`.
+    /// Distinguishes permanent errors (disk full) from transient errors — disk full aborts
+    /// immediately without retry. Uses `queue.asyncAfter` to avoid blocking the serial queue.
+    private func _writeWithRetry(buffer: AVAudioPCMBuffer, file: AVAudioFile, attempt: Int = 0) {
+        do {
+            try file.write(from: buffer)
+            return
+        } catch {
+            // Permanent errors: disk full — abort immediately, no retry
+            if isDiskFullError(error) {
+                _writeErrorCount += 1
+                _lastWriteError = error
+                AppLog.error("audio", "Write failed — disk full (permanent): \(error.localizedDescription)")
+                onWriteFailure?(AudioFileWriterError.diskFull)
+                return
+            }
+
+            // Transient errors: retry with backoff
+            if attempt >= Self.maxRetries {
+                _writeErrorCount += 1
+                _lastWriteError = error
+                AppLog.error("audio", "Write failed #\(_writeErrorCount) after \(attempt) retries: \(error.localizedDescription)")
+                onWriteFailure?(error)
+                return
+            }
+
+            let delay = Self.retryDelays[attempt]
+            AppLog.warn("audio", "Write attempt \(attempt + 1) failed — retrying in \(Int(delay * 1000))ms: \(error.localizedDescription)")
+            // Synchronous retry on the serial queue: use async with a sleep to
+            // keep writes ordered. Unlike asyncAfter, this ensures no later
+            // buffer can jump ahead of the retry.
+            queue.async { [weak self] in
+                Thread.sleep(forTimeInterval: delay)
+                guard let self, self._audioFile != nil else {
+                    AppLog.error("audio", "Write retry dropped — recording stopped before retry fired")
+                    return
+                }
+                self._writeWithRetry(buffer: buffer, file: file, attempt: attempt + 1)
+            }
+        }
+    }
+
+    /// Check whether an error indicates the disk is full (permanent, not retryable).
+    private func isDiskFullError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileWriteOutOfSpaceError { return true }
+        if nsError.domain == NSPOSIXErrorDomain && nsError.code == 28 /* ENOSPC */ { return true }
+        if nsError.domain == AVFoundationErrorDomain && nsError.code == -11837 /* disk full */ { return true }
+        return false
+    }
+
     private func _closeCurrentSegment() -> ClosedSegmentInfo? {
         guard _audioFile != nil, let meetingId = _currentMeetingId else { return nil }
         let idx = _segmentIndex
         // Use the actual file name from _openSegment (may be .wav for low sample rates).
-        let fileName = _currentFileURL?.lastPathComponent ?? String(format: "segment-%03d.m4a", idx)
+        let fileName = _currentFileURL?.lastPathComponent ?? String(format: "segment-%03d.wav", idx)
         let size = _fileSize
         let endedAt = Date()
         _audioFile = nil
@@ -288,24 +363,37 @@ final class AudioFileWriter: @unchecked Sendable {
 
         // CRITICAL: never overwrite an existing segment file. Once a segment is
         // closed and checkpointed, its audio belongs to the user. Overwriting it
-        // is irreversible data loss. If the file already exists, scan forward
-        // until we find a free index.
+        // is irreversible data loss. If the file already exists with data, scan
+        // forward up to maxOverwriteScanIndices to find a free index.
         if fileManager.fileExists(atPath: fileURL.path) {
             let existingSize = (try? fileManager.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0
             if existingSize > 0 {
                 let segIdx = self._segmentIndex
                 AppLog.audio.warning("Segment \(segIdx): \(fileName) already exists (\(existingSize) bytes) — refusing to overwrite")
                 var nextIdx = segIdx + 1
-                var nextURL: URL
-                var nextName: String
-                repeat {
-                    nextName = String(format: "segment-%03d.\(ext)", nextIdx)
-                    nextURL = segmentsDir.appendingPathComponent(nextName)
-                    if !self.fileManager.fileExists(atPath: nextURL.path) { break }
+                var found = false
+                let scanLimit = segIdx + Self.maxOverwriteScanIndices
+                while nextIdx <= scanLimit {
+                    let nextName = String(format: "segment-%03d.\(ext)", nextIdx)
+                    let nextURL = segmentsDir.appendingPathComponent(nextName)
+                    if !self.fileManager.fileExists(atPath: nextURL.path) {
+                        found = true
+                        break
+                    }
                     let sz = (try? self.fileManager.attributesOfItem(atPath: nextURL.path)[.size] as? Int64) ?? 0
-                    if sz == 0 { break }
+                    if sz == 0 {
+                        // 0-byte file: safe to reuse ONLY if not referenced in manifest
+                        found = true
+                        break
+                    }
                     nextIdx += 1
-                } while nextIdx < segIdx + 1000
+                }
+
+                guard found else {
+                    AppLog.audio.error("Segment: cannot find free index within \(Self.maxOverwriteScanIndices) slots — aborting")
+                    throw AudioFileWriterError.fileCreationFailed
+                }
+
                 AppLog.audio.warning("Segment: skipping from index \(segIdx) to \(nextIdx) to avoid overwrite")
                 self._segmentIndex = nextIdx
                 let finalName = String(format: "segment-%03d.\(ext)", self._segmentIndex)

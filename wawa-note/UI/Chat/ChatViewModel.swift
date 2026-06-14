@@ -473,8 +473,26 @@ final class ChatViewModel: ObservableObject {
         let advModel = selectedModel.isEmpty ? (activeDefaultModel ?? ChatViewModel.defaultChatModel) : selectedModel
         let loop = AgentLoop(registry: registry, toolContext: toolContext, mode: mode, executorModel: execModel, advisorModel: advModel)
 
+        // Prevent the app from suspending the AgentLoop when backgrounded.
+        // beginBackgroundTask gives us ~30s to finish the current iteration
+        // and save progress before iOS suspends the app (see [#3]).
+        var bgTaskID: UIBackgroundTaskIdentifier = .invalid
+        bgTaskID = UIApplication.shared.beginBackgroundTask(withName: "chat.agentLoop") {
+            AppLog.event("chat", "Background task expiring — cancelling AgentLoop")
+            self.streamTask?.cancel()
+            if bgTaskID != .invalid {
+                UIApplication.shared.endBackgroundTask(bgTaskID)
+                bgTaskID = .invalid
+            }
+        }
+
         streamTask = Task { @MainActor [weak self] in
             guard let self else { return }
+            defer {
+                if bgTaskID != .invalid {
+                    UIApplication.shared.endBackgroundTask(bgTaskID)
+                }
+            }
             do {
                 let stream = loop.runStreaming(userMessage: text, history: messages, provider: provider)
 
@@ -519,6 +537,21 @@ final class ChatViewModel: ObservableObject {
                                 activeProjectColorHex = nil
                             }
                         }
+                        streamingText = ""
+                        activeToolCalls = []
+                        state = .idle
+                    case .truncated(let reason, let progress):
+                        guard !wasCancelled else { break }
+                        // Agent was cut off by iteration limit — persist partial
+                        // work and show "Continue?" prompt to the user.
+                        let truncatedMsg = ChatMessage(
+                            conversationId: conversationId,
+                            role: .assistant,
+                            content: fullContent + "\n\n⚠️ \(reason) (\(progress))",
+                            projectColorHex: activeProjectColorHex
+                        )
+                        messages.append(truncatedMsg)
+                        try? chatService.appendMessage(truncatedMsg)
                         streamingText = ""
                         activeToolCalls = []
                         state = .idle
@@ -763,8 +796,26 @@ final class ChatViewModel: ObservableObject {
         let advModel = selectedModel.isEmpty ? (activeDefaultModel ?? ChatViewModel.defaultChatModel) : selectedModel
         let loop = AgentLoop(registry: registry, toolContext: toolContext, mode: mode, executorModel: execModel, advisorModel: advModel)
 
+        // Prevent the app from suspending the AgentLoop when backgrounded.
+        // beginBackgroundTask gives us ~30s to finish the current iteration
+        // and save progress before iOS suspends the app (see [#3]).
+        var bgTaskID: UIBackgroundTaskIdentifier = .invalid
+        bgTaskID = UIApplication.shared.beginBackgroundTask(withName: "chat.agentLoop") {
+            AppLog.event("chat", "Background task expiring — cancelling AgentLoop")
+            self.streamTask?.cancel()
+            if bgTaskID != .invalid {
+                UIApplication.shared.endBackgroundTask(bgTaskID)
+                bgTaskID = .invalid
+            }
+        }
+
         streamTask = Task { @MainActor [weak self] in
             guard let self else { return }
+            defer {
+                if bgTaskID != .invalid {
+                    UIApplication.shared.endBackgroundTask(bgTaskID)
+                }
+            }
             do {
                 let stream = loop.runStreaming(userMessage: text, history: messages, provider: provider)
 
@@ -806,6 +857,19 @@ final class ChatViewModel: ObservableObject {
                                 activeProjectColorHex = nil
                             }
                         }
+                        streamingText = ""
+                        activeToolCalls = []
+                        state = .idle
+                    case .truncated(let reason, let progress):
+                        guard !wasCancelled else { break }
+                        let truncatedMsg = ChatMessage(
+                            conversationId: conversationId,
+                            role: .assistant,
+                            content: fullContent + "\n\n⚠️ \(reason) (\(progress))",
+                            projectColorHex: activeProjectColorHex
+                        )
+                        messages.append(truncatedMsg)
+                        try? chatService.appendMessage(truncatedMsg)
                         streamingText = ""
                         activeToolCalls = []
                         state = .idle

@@ -12,6 +12,7 @@ private struct AnthropicRequest: Encodable {
     let stopSequences: [String]?
     let tools: [AnthropicTool]?
     let toolChoice: AnthropicToolChoice?
+    let stream: Bool?
 
     struct AnthropicTool: Encodable {
         let name: String
@@ -153,6 +154,7 @@ private struct AnthropicRequest: Encodable {
         case stopSequences = "stop_sequences"
         case tools
         case toolChoice = "tool_choice"
+        case stream
     }
 }
 
@@ -247,93 +249,65 @@ final class AnthropicProvider: AIProvider, @unchecked Sendable {
         self.session = session
     }
 
-    func send(_ request: AIRequest) async throws -> AIResponse {
-        let url = baseURL.appendingPathComponent("messages")
+    // MARK: - Request body builder (shared by send + sendStreaming)
 
-        // Extract system prompt from messages (Anthropic uses top-level system field)
+    private func buildRequestBody(_ request: AIRequest, stream: Bool = false) throws -> AnthropicRequest {
         let systemPrompt = request.messages
             .filter { $0.role == .system }
             .compactMap { msg in msg.content.compactMap { block -> String? in
-                if case .text(let t) = block { return t }
-                return nil
+                if case .text(let t) = block { return t }; return nil
             }.joined(separator: "\n") }
-            .joined(separator: "\n\n")
-            .nilIfEmpty
+            .joined(separator: "\n\n").nilIfEmpty
 
-        // Non-system messages (must start with user, alternate user/assistant)
         let conversationMessages = request.messages.filter { $0.role != .system }
-
         let messages: [AnthropicRequest.Message] = conversationMessages.isEmpty
             ? [AnthropicRequest.Message(role: "user", content: .string("Hello"))]
             : conversationMessages.flatMap { msg -> [AnthropicRequest.Message] in
                 let textContent = msg.content.compactMap { block -> String? in
-                    if case .text(let t) = block { return t }
-                    return nil
+                    if case .text(let t) = block { return t }; return nil
                 }.joined(separator: "\n")
-
-                // Handle tool calls in assistant messages
                 if msg.role == .assistant, let tcs = msg.toolCalls, !tcs.isEmpty {
                     var blocks: [AnthropicRequest.Message.ContentBlock] = []
                     if !textContent.isEmpty {
-                        blocks.append(AnthropicRequest.Message.ContentBlock(
-                            type: "text", text: textContent,
-                            id: nil, name: nil, inputJSON: nil, toolUseId: nil, content: nil))
+                        blocks.append(AnthropicRequest.Message.ContentBlock(type: "text", text: textContent, id: nil, name: nil, inputJSON: nil, toolUseId: nil, content: nil))
                     }
                     for tc in tcs {
-                        blocks.append(AnthropicRequest.Message.ContentBlock(
-                            type: "tool_use", text: nil,
-                            id: tc.id, name: tc.name, inputJSON: tc.arguments,
-                            toolUseId: nil, content: nil))
+                        blocks.append(AnthropicRequest.Message.ContentBlock(type: "tool_use", text: nil, id: tc.id, name: tc.name, inputJSON: tc.arguments, toolUseId: nil, content: nil))
                     }
                     return [AnthropicRequest.Message(role: "assistant", content: .blocks(blocks))]
                 }
-
-                // Handle tool result messages — proper tool_result content block
                 if msg.role == .tool {
                     let toolResultText = msg.content.compactMap { block -> String? in
-                        if case .text(let t) = block { return t }
-                        return nil
+                        if case .text(let t) = block { return t }; return nil
                     }.joined(separator: "\n")
-                    let toolCallId = msg.toolCallId ?? ""
-                    let resultBlock = AnthropicRequest.Message.ContentBlock(
-                        type: "tool_result", text: nil,
-                        id: nil, name: nil, inputJSON: nil,
-                        toolUseId: toolCallId, content: toolResultText)
-                    return [AnthropicRequest.Message(role: "user", content: .blocks([resultBlock]))]
+                    return [AnthropicRequest.Message(role: "user", content: .blocks([
+                        AnthropicRequest.Message.ContentBlock(type: "tool_result", text: nil, id: nil, name: nil, inputJSON: nil, toolUseId: msg.toolCallId ?? "", content: toolResultText)
+                    ]))]
                 }
-
                 let roleString = msg.role == .assistant ? "assistant" : "user"
                 return [AnthropicRequest.Message(role: roleString, content: .string(textContent))]
             }
 
         let effectiveModel = request.model.isEmpty ? model : request.model
         let maxTokens = request.maxTokens ?? 4096
-
         let anthropicTools: [AnthropicRequest.AnthropicTool]? = request.tools?.map { tool in
             let props = tool.parameters.properties.mapValues { p in
                 AnthropicRequest.AnthropicTool.InputSchema.PropertyDef(type: p.type, description: p.description, enum: p.enum)
             }
-            return AnthropicRequest.AnthropicTool(
-                name: tool.name,
-                description: tool.description,
-                inputSchema: AnthropicRequest.AnthropicTool.InputSchema(
-                    type: tool.parameters.type,
-                    properties: props.isEmpty ? nil : props,
-                    required: tool.parameters.required.isEmpty ? nil : tool.parameters.required
-                )
-            )
+            return AnthropicRequest.AnthropicTool(name: tool.name, description: tool.description,
+                inputSchema: AnthropicRequest.AnthropicTool.InputSchema(type: tool.parameters.type,
+                    properties: props.isEmpty ? nil : props, required: tool.parameters.required.isEmpty ? nil : tool.parameters.required))
         }
 
-        let body = AnthropicRequest(
-            model: effectiveModel,
-            maxTokens: maxTokens,
-            system: systemPrompt,
-            messages: messages,
-            temperature: request.temperature,
-            stopSequences: nil,
-            tools: anthropicTools,
-            toolChoice: (anthropicTools != nil) ? AnthropicRequest.AnthropicToolChoice(type: "auto") : nil
-        )
+        return AnthropicRequest(model: effectiveModel, maxTokens: maxTokens, system: systemPrompt,
+            messages: messages, temperature: request.temperature, stopSequences: nil,
+            tools: anthropicTools, toolChoice: (anthropicTools != nil) ? AnthropicRequest.AnthropicToolChoice(type: "auto") : nil,
+            stream: stream ? true : nil)
+    }
+
+    func send(_ request: AIRequest) async throws -> AIResponse {
+        let url = baseURL.appendingPathComponent("messages")
+        let body = try buildRequestBody(request, stream: false)
 
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
@@ -349,7 +323,6 @@ final class AnthropicProvider: AIProvider, @unchecked Sendable {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ProviderError.requestFailed(statusCode: -1)
         }
-
         guard (200...299).contains(httpResponse.statusCode) else {
             let bodyStr = String(data: data, encoding: .utf8) ?? "<no body>"
             AppLog.provider.error("Anthropic returned \(httpResponse.statusCode): \(bodyStr.prefix(500))")
@@ -357,17 +330,11 @@ final class AnthropicProvider: AIProvider, @unchecked Sendable {
         }
 
         let decoded: AnthropicResponse
-        do {
-            decoded = try JSONDecoder().decode(AnthropicResponse.self, from: data)
-        } catch {
-            AppLog.provider.error("Failed to decode Anthropic response: \(error)")
-            throw ProviderError.decodingFailed
-        }
+        do { decoded = try JSONDecoder().decode(AnthropicResponse.self, from: data) }
+        catch { AppLog.provider.error("Failed to decode Anthropic response: \(error)"); throw ProviderError.decodingFailed }
 
-        let text = decoded.content
-            .filter { $0.type == "text" }
-            .compactMap(\.text)
-            .joined(separator: "\n")
+        let text = decoded.content.filter { $0.type == "text" }.compactMap(\.text).joined(separator: "\n")
+        let thinkingText = decoded.content.filter { $0.type == "thinking" }.compactMap(\.text).joined(separator: "\n").nilIfEmpty
 
         let toolCalls: [AIToolCall]? = {
             let toolBlocks = decoded.content.filter { $0.type == "tool_use" }
@@ -376,32 +343,96 @@ final class AnthropicProvider: AIProvider, @unchecked Sendable {
                 guard let id = block.id, let name = block.name else { return nil }
                 let args: String
                 if let input = block.input {
-                    // AnyDecodable.values come from JSONSerialization, so they are
-                    // already JSON-compatible (String, Int, Double, Bool, NSArray, NSDictionary).
-                    // Using "\($0.value)" would produce Swift debug descriptions for nested
-                    // objects/arrays instead of valid JSON.
                     let raw: [String: Any] = input.mapValues { $0.value }
-                    if let data = try? JSONSerialization.data(withJSONObject: raw),
-                       let jsonStr = String(data: data, encoding: .utf8) {
-                        args = jsonStr
-                    } else {
-                        args = "{}"
-                    }
-                } else {
-                    args = "{}"
-                }
+                    if let data = try? JSONSerialization.data(withJSONObject: raw), let js = String(data: data, encoding: .utf8) { args = js } else { args = "{}" }
+                } else { args = "{}" }
                 return AIToolCall(id: id, name: name, arguments: args)
             }
         }()
 
-        let usage = AIUsage(
-            promptTokens: decoded.usage.inputTokens,
-            completionTokens: decoded.usage.outputTokens,
-            totalTokens: (decoded.usage.inputTokens ?? 0) + (decoded.usage.outputTokens ?? 0)
-        )
+        let usage = AIUsage(promptTokens: decoded.usage.inputTokens, completionTokens: decoded.usage.outputTokens,
+            totalTokens: (decoded.usage.inputTokens ?? 0) + (decoded.usage.outputTokens ?? 0))
 
         AppLog.provider.info("Anthropic response: \(text.prefix(100))... tool_calls: \(toolCalls?.count ?? 0)")
-        return AIResponse(id: decoded.id, model: decoded.model, content: text, usage: usage, toolCalls: toolCalls, finishReason: decoded.stopReason)
+        return AIResponse(id: decoded.id, model: decoded.model, content: text,
+            reasoningContent: thinkingText, usage: usage, toolCalls: toolCalls, finishReason: decoded.stopReason)
+    }
+
+    // MARK: - Streaming (SSE)
+
+    func sendStreaming(_ request: AIRequest) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    let url = baseURL.appendingPathComponent("messages")
+                    let body = try buildRequestBody(request, stream: true)
+
+                    var urlRequest = URLRequest(url: url)
+                    urlRequest.httpMethod = "POST"
+                    urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    urlRequest.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+                    urlRequest.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+                    urlRequest.httpBody = try JSONEncoder().encode(body)
+
+                    AppLog.provider.info("POST \(url.absoluteString) (streaming)")
+
+                    let (bytes, response) = try await session.bytes(for: urlRequest)
+                    guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                        var errorBody = ""
+                        for try await byte in bytes { errorBody.append(Character(UnicodeScalar(byte))) }
+                        continuation.finish(throwing: ProviderError.apiError(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0, body: errorBody))
+                        return
+                    }
+
+                    var currentToolID = ""; var currentToolName: String?; var currentToolArgs = ""
+                    var finishReason: String?
+
+                    for try await line in bytes.lines {
+                        guard line.hasPrefix("data: ") else { continue }
+                        let jsonStr = String(line.dropFirst(6))
+                        guard let data = jsonStr.data(using: .utf8),
+                              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                              let type = obj["type"] as? String else { continue }
+
+                        switch type {
+                        case "content_block_delta":
+                            if let delta = obj["delta"] as? [String: Any] {
+                                let deltaType = delta["type"] as? String ?? ""
+                                if deltaType == "thinking_delta", let thinking = delta["thinking"] as? String {
+                                    continuation.yield(.thinkingDelta(thinking))
+                                } else if let textDelta = delta["text"] as? String {
+                                    continuation.yield(.textDelta(textDelta))
+                                } else if deltaType == "input_json_delta",
+                                          let partial = delta["partial_json"] as? String {
+                                    currentToolArgs += partial
+                                    if currentToolID.isEmpty, let index = obj["index"] as? Int { currentToolID = "tc_\(index)" }
+                                    continuation.yield(.toolCallDelta(id: currentToolID, name: currentToolName, arguments: partial))
+                                }
+                            }
+                        case "content_block_start":
+                            if let block = obj["content_block"] as? [String: Any] {
+                                if block["type"] as? String == "tool_use" {
+                                    currentToolID = block["id"] as? String ?? currentToolID
+                                    currentToolName = block["name"] as? String ?? currentToolName
+                                    currentToolArgs = ""
+                                }
+                                // Thinking block detection — no delta needed, just note it started
+                            }
+                        case "message_delta":
+                            if let delta = obj["delta"] as? [String: Any] { finishReason = delta["stop_reason"] as? String }
+                        case "message_stop":
+                            continuation.yield(.finished(finishReason.flatMap { AIFinishReason(rawValue: $0) }))
+                            continuation.finish(); return
+                        default: break
+                        }
+                    }
+                    continuation.yield(.finished(finishReason.flatMap { AIFinishReason(rawValue: $0) }))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
     }
 
     func fetchModels() async throws -> [String] {

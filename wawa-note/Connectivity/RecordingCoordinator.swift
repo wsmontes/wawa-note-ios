@@ -19,7 +19,6 @@ final class RecordingCoordinator: ObservableObject {
     @Published private(set) var audioLevel: Float = 0
     @Published private(set) var isClipping: Bool = false
     @Published private(set) var clipCount: Int = 0
-    @Published private(set) var liveTranscriptionText: String = ""
     @Published private(set) var isAutoPaused: Bool = false
     @Published private(set) var silenceDetected: Bool = false
     @Published private(set) var errorMessage: String?
@@ -41,6 +40,7 @@ final class RecordingCoordinator: ObservableObject {
 
     private var recordingStartDate: Date?
     private var pausedDuration: TimeInterval = 0
+    private var wasUserPaused = false   // true when pauseRecording() was called by the user
     private var pauseStartDate: Date?
     private var recordingTitle: String = ""
     private var observationTimer: Timer?
@@ -59,6 +59,24 @@ final class RecordingCoordinator: ObservableObject {
         let m = Int(effective) / 60
         let s = Int(effective) % 60
         return String(format: "%02d:%02d", m, s)
+    }
+
+    /// Human-readable sample rate with quality indicator for the recording UI.
+    /// Updated each observation tick from captureService.captureSampleRate.
+    /// Examples: "44.1 kHz · HQ", "8 kHz · LQ", ""
+    @Published private(set) var sampleRateBadge: String = ""
+
+    private func updateSampleRateBadge() {
+        let rate = captureService.captureSampleRate
+        guard rate > 0 else { sampleRateBadge = ""; return }
+        let khz = rate / 1000
+        let quality: String
+        switch rate {
+        case ..<12000:  quality = "LQ"       // Bluetooth HFP 8kHz
+        case ..<24000:  quality = "MQ"       // 16-22kHz
+        default:        quality = "HQ"       // 44.1-48kHz built-in/USB
+        }
+        sampleRateBadge = "\(String(format: "%.1f", khz)) kHz · \(quality)"
     }
 
     init(
@@ -167,8 +185,7 @@ final class RecordingCoordinator: ObservableObject {
 
         AppLog.event("audio", "Recording requested — title=\(title ?? "nil") projectID=\(projectID?.uuidString.prefix(8) ?? "nil")")
 
-        let sessionManager = AudioSessionManager()
-        guard sessionManager.hasMinimumDiskSpace() else {
+        guard AudioSessionManager.hasMinimumDiskSpace() else {
             AppLog.warn("audio", "Recording blocked: insufficient disk space")
             errorMessage = "Not enough storage space to record. Please free up some space."
             notifyStatusChange()
@@ -191,128 +208,118 @@ final class RecordingCoordinator: ObservableObject {
         let recordingTitle = title ?? "Recording \(Date().formatted(date: .abbreviated, time: .shortened))"
         self.recordingTitle = recordingTitle
 
-        // Transition state synchronously so stopRecording() works immediately
-        // (even during the async permission-check gap below). If the Task fails,
-        // state is rolled back in the catch blocks.
+        let context = modelContext
+
+        let item = KnowledgeItem(type: .audio, title: recordingTitle, status: .recording)
+        item.scheduledDate = scheduledDate
+        item.calendarEventIdentifier = calendarEventIdentifier
+        if let projectID { item.projectID = projectID; item.inboxDate = nil }
+        context.insert(item)
+
+        do {
+            try context.save()
+        } catch {
+            AppLog.error("audio", "Failed to save knowledge item for recording: \(error.localizedDescription)")
+            errorMessage = "Could not save recording. Try again."
+            notifyStatusChange()
+            return
+        }
+
+        let itemId = item.id
+        savedItemId = itemId
+
+        // Create manifest with placeholder segment — guarantees valid manifest
+        // before stopRecording(), even if onSegmentCreated hasn't fired yet.
+        // The capture service's onSegmentClosed at stop will finalize metadata.
+        let placeholder = RecordingSegment(
+            id: UUID(), index: 0,
+            fileName: "segment-000.wav",
+            startedAt: Date(),
+            inputPortName: "",
+            inputPortType: AudioSessionManager().bestAvailableInput?.portType.rawValue ?? "unknown",
+            routeChangeReason: "initial",
+            sampleRate: nil
+        )
+        manifest = RecordingManifest(
+            recordingId: itemId, title: recordingTitle,
+            startedAt: Date(), segments: [placeholder]
+        )
+        saveManifest(manifest!, meetingId: itemId)
+
         state = .recording
         UIApplication.shared.isIdleTimerDisabled = true
         startObservation()
         activateLockScreenControls()
         notifyStatusChange()
 
-        // Item creation + save + engine start are deferred into a Task so we
-        // can request mic permission first if needed (.undetermined). Creating
-        // the item first and rolling back on denial would flash in the UI.
         Task { @MainActor [weak self] in
             guard let self else { return }
-
-            // Request permission if not yet determined — shows native dialog.
-            if micPermission == .undetermined {
-                let granted: Bool = await withCheckedContinuation { continuation in
-                    AVAudioSession.sharedInstance().requestRecordPermission { granted in
-                        continuation.resume(returning: granted)
-                    }
-                }
-                guard granted else {
-                    AppLog.warn("audio", "Recording blocked: user denied microphone permission")
-                    self.errorMessage = "Microphone access is required to record audio."
-                    self.rollbackRecordingStart()
-                    return
-                }
-                AppLog.audio.info("Microphone permission granted — proceeding")
-            }
-
-            let context = self.modelContext
-
-            let item = KnowledgeItem(type: .audio, title: recordingTitle, status: .recording)
-            item.scheduledDate = scheduledDate
-            item.calendarEventIdentifier = calendarEventIdentifier
-            if let projectID { item.projectID = projectID; item.inboxDate = nil }
-            context.insert(item)
-
-            do {
-                try context.save()
-            } catch {
-                AppLog.error("audio", "Failed to save knowledge item for recording: \(error.localizedDescription)")
-                self.errorMessage = "Could not save recording. Try again."
-                self.rollbackRecordingStart()
-                return
-            }
-
-            let itemId = item.id
-            self.savedItemId = itemId
-
             do {
                 try await self.captureService.startRecording(meetingId: itemId)
                 self.recordingStartDate = Date()
                 self.captureContextSafely(for: itemId)
-                // First segment — read actual file name from the writer (may be .wav for
-                // low sample rates like Bluetooth HFP 8kHz). The writer is the source of truth.
-                let writer = self.captureService.fileWriter
-                let segIndex = writer.segmentIndex
-                let segFileName = writer.currentFileURL?.lastPathComponent ?? String(format: "segment-%03d.m4a", segIndex)
-                let firstSegment = RecordingSegment(
-                    id: UUID(), index: segIndex,
-                    fileName: segFileName,
-                    startedAt: Date(),
-                    inputPortName: self.captureService.currentInputPortName,
-                    inputPortType: AudioSessionManager().bestAvailableInput?.portType.rawValue ?? "unknown",
-                    routeChangeReason: "initial",
-                    sampleRate: nil
-                )
-                self.manifest = RecordingManifest(
-                    recordingId: itemId, title: recordingTitle,
-                    startedAt: Date(), segments: [firstSegment]
-                )
-                // Persist immediately — survives crash during recording
-                self.saveManifest(self.manifest!, meetingId: itemId)
 
                 AppLog.event("audio", "Recording started — itemID=\(itemId.uuidString.prefix(8)) input=\(self.captureService.currentInputPortName)")
             } catch AudioCaptureError.permissionDenied {
                 AppLog.warn("audio", "Recording blocked: microphone permission denied")
                 self.errorMessage = "Microphone access is off. Turn it on in Settings to record audio."
-                self.rollbackItem(item, context: context)
-                self.rollbackRecordingStart()
+                self.rollbackRecordingStart(item: item)
             } catch AudioCaptureError.diskFull {
                 AppLog.error("audio", "Recording failed: disk full")
                 self.errorMessage = "Not enough storage. Free up space and try again."
-                self.rollbackItem(item, context: context)
-                self.rollbackRecordingStart()
+                self.rollbackRecordingStart(item: item)
             } catch {
                 let detail = error.localizedDescription
                 AppLog.error("audio", "Recording start failed: \(detail)")
                 self.errorMessage = "Could not start recording. Reason: \(detail)"
-                self.rollbackItem(item, context: context)
-                self.rollbackRecordingStart()
+                self.rollbackRecordingStart(item: item)
             }
         }
     }
 
-    /// Reverts the synchronous pre-conditions set at the start of
-    /// startRecording() when the async portion fails.
-    private func rollbackRecordingStart() {
+    private func rollbackRecordingStart(item: KnowledgeItem) {
         state = .idle
         UIApplication.shared.isIdleTimerDisabled = false
         observationTimer?.invalidate()
         observationTimer = nil
         nowPlayingController.deactivate()
+        // Clean up files created by AudioFileWriter.startRecording() before the
+        // engine start failed. Without this, orphaned meeting directories with
+        // empty/partial segment files accumulate in the store.
+        try? FileArtifactStore().deleteMeetingDirectory(for: item.id)
+        rollbackItem(item, context: modelContext)
         notifyStatusChange()
     }
 
+    /// Delete an item and its files. Files are deleted FIRST so that if removal
+    /// fails, the SwiftData record remains intact — the item can still be recovered.
+    /// Matches the canonical order in KnowledgeItemService.deleteItem().
     func deleteItem(_ itemId: UUID) {
+        // 1. Delete files from disk FIRST — if this fails, abort
+        let store = FileArtifactStore()
+        do {
+            try store.deleteMeetingDirectory(for: itemId)
+        } catch {
+            AppLog.storage.error("RecordingCoordinator: deleteItem file removal failed — \(itemId.uuidString): \(error.localizedDescription)")
+            // Don't proceed — the SwiftData record is still valid
+            return
+        }
+
+        // 2. Only after successful file removal, clean up SwiftData
         let context = modelContext
         let descriptor = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.id == itemId })
         if let item = try? context.fetch(descriptor).first {
-            // Cascade delete annotations
             let annPred = FetchDescriptor<Annotation>(predicate: #Predicate { $0.itemID == itemId })
             if let anns = try? context.fetch(annPred) {
                 for ann in anns { context.delete(ann) }
             }
             context.delete(item)
-            try? context.save()
+            do {
+                try context.save()
+            } catch {
+                AppLog.storage.error("RecordingCoordinator: deleteItem SwiftData save failed — \(itemId.uuidString): \(error.localizedDescription)")
+            }
         }
-        let store = FileArtifactStore()
-        try? store.deleteMeetingDirectory(for: itemId)
     }
 
     func createItemFromImport(
@@ -334,11 +341,12 @@ final class RecordingCoordinator: ObservableObject {
     func pauseRecording() {
         // Pause in any active state — the capture service handles the transition.
         // Guard only against truly inactive states (idle, stopped).
-        let isFailed: Bool = if case .failedFatal = state { true } else { false }
+        let isFailed: Bool = if case .failed = state { true } else { false }
         guard state != .idle, state != .stopped, !isFailed else { return }
 
         captureService.pauseRecording()
-        state = .pausedByUser
+        wasUserPaused = true
+        state = .paused
         pauseStartDate = Date()
         observationTimer?.invalidate()
         nowPlayingTimer?.invalidate()
@@ -347,27 +355,37 @@ final class RecordingCoordinator: ObservableObject {
     }
 
     func resumeRecording() {
-        guard state == .pausedByUser || state == .interruptedBySystem || state == .waitingForUsableInput || state == .reconfiguringRoute || state == .validatingRoute else { return }
-        if state == .interruptedBySystem || state == .waitingForUsableInput {
-            // Route-loss / interruption recovery — force recording intent
+        guard state == .paused else { return }
+        wasUserPaused = false
+        // Try a simple engine resume first (user-initiated pause path).
+        // If the engine is no longer running (route-loss / interruption), fall
+        // back to retryRecordingRecovery() which retries up to 3 times.
+        do {
+            try captureService.resumeRecording()
+        } catch {
+            AppLog.warn("audio", "Simple resume threw — falling back to force recovery: \(error)")
             retryRecordingRecovery()
             return
         }
-        captureService.resumeRecording()
-        // Only transition to .recording if the capture service actually recovered
         if captureService.state == .recording {
             commitUIRecordingState()
         } else {
-            // Recovery failed — stay interrupted, timer remains frozen
-            notifyStatusChange()
+            // Engine didn't transition to .recording — route may have changed.
+            // Force recovery handles Bluetooth re-establishment.
+            retryRecordingRecovery()
         }
     }
 
     func stopRecording() {
         // Accept ANY active state. Only refuse idle and stopped.
+        wasUserPaused = false
         guard state != .idle, state != .stopped else { return }
         let itemId = savedItemId
         AppLog.event("audio", "Stopping recording — elapsed=\(elapsedTimeFormatted) pausedDur=\(Int(pausedDuration))s itemID=\(itemId?.uuidString.prefix(8) ?? "nil")")
+        // Capture audio metadata BEFORE stopRecording() deactivates the session.
+        let capturedSampleRate = captureService.captureSampleRate
+        let capturedInputPortType = captureService.captureInputPortType
+        let capturedInputPortName = captureService.currentInputPortName
         captureService.stopRecording()
         state = .stopped
         // Restore auto-lock — no longer recording.
@@ -393,7 +411,11 @@ final class RecordingCoordinator: ObservableObject {
         }
 
         // Update item — validates audio, marks as recorded or failed
-        updateItemOnStop()
+        updateItemOnStop(
+            sampleRate: capturedSampleRate,
+            inputPortType: capturedInputPortType,
+            inputPortName: capturedInputPortName
+        )
         notifyStatusChange()
 
         // Trigger pipeline AFTER concatenation and validation complete.
@@ -401,15 +423,22 @@ final class RecordingCoordinator: ObservableObject {
         // but the pipeline is gated behind concat so audio.m4a is ready.
         if let itemId, let manifest = finalizedManifest {
             Task {
-                // 1. Concatenate segments into audio.m4a (await, not fire-and-forget)
-                await AudioSegmentConcatenator.concatenate(manifest: manifest, meetingId: itemId)
+                // 1. Concatenate segments into audio.m4a (AAC)
+                let concatOK = await AudioSegmentConcatenator.concatenate(manifest: manifest, meetingId: itemId)
 
-                // 2. Debug validation report — mandatory until route switching is stable
+                // 2. Debug validation report
                 logRecordingArtifactReport(itemId: itemId)
 
-                // 3. Route through ProcessingQueue when available — enables retry with
-                //    backoff, offline queueing, and cancellation. Direct call is the
-                //    fallback for backwards compatibility.
+                guard concatOK else {
+                    AppLog.audio.error("RecordingCoordinator: concatenation failed — marking item as failed")
+                    updateItemStatus(itemId: itemId, to: .failed)
+                    return
+                }
+
+                // 3. Mark as queued so the detail view shows the right status
+                updateItemStatus(itemId: itemId, to: .queuedForTranscription)
+
+                // 4. Route through ProcessingQueue when available
                 if let queue = processingQueue {
                     AppLog.event("audio", "Enqueuing item \(itemId.uuidString.prefix(8)) into ProcessingQueue")
                     queue.enqueue(itemID: itemId, trigger: .newCapture)
@@ -424,12 +453,20 @@ final class RecordingCoordinator: ObservableObject {
     // MARK: - Segments
 
     /// Save the manifest to disk. Called after each segment and at stop.
+    /// Errors are logged but not propagated — a failed manifest write should not
+    /// tear down the recording session. The manifest is re-saved at stop, giving
+    /// another chance to persist.
     private func saveManifest(_ manifest: RecordingManifest, meetingId: UUID) {
         let store = FileArtifactStore()
-        try? store.writeRecordingManifest(manifest, for: meetingId)
+        do {
+            try store.writeRecordingManifest(manifest, for: meetingId)
+        } catch {
+            AppLog.storage.error("RecordingCoordinator: saveManifest failed — \(meetingId.uuidString): \(error.localizedDescription)")
+        }
     }
 
     func returnToIdle() {
+        wasUserPaused = false
         state = .idle
         elapsedTime = 0
         pausedDuration = 0
@@ -440,6 +477,7 @@ final class RecordingCoordinator: ObservableObject {
         silenceDetected = false
         savedItemId = nil
         errorMessage = nil
+        manifest = nil
         captureService.resetToIdle()
     }
 
@@ -462,52 +500,20 @@ final class RecordingCoordinator: ObservableObject {
         notifyStatusChange()
     }
 
-    /// Mirror the capture service's real state. The capture service owns the
-    /// source of truth for recording state — this coordinator mirrors it for UI.
+    /// Mirror the capture service's state. Simple 4-state mapping.
     private func syncCaptureState(_ captureState: AudioCaptureState) {
         switch captureState {
         case .recording:
-            // Only auto-transition from non-user-paused states.
-            let shouldAutoResume = state == .waitingForUsableInput
-                || state == .interruptedBySystem
-                || state == .reconfiguringRoute
-                || state == .validatingRoute
-            if shouldAutoResume {
+            if state == .paused || state == .stopped {
                 commitUIRecordingState()
             }
-        case .reconfiguringRoute, .validatingRoute:
-            if state == .recording || state == .pausedByUser || state == .reconfiguringRoute {
-                // Stop timer but keep logical recording alive
-                if pauseStartDate == nil { pauseStartDate = Date() }
-                observationTimer?.invalidate()
-                nowPlayingTimer?.invalidate()
-                state = captureState == .validatingRoute ? .validatingRoute : .reconfiguringRoute
-                nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: false)
-                notifyStatusChange()
-            }
-        case .waitingForUsableInput:
-            if state == .recording || state == .pausedByUser || state == .reconfiguringRoute {
-                if pauseStartDate == nil { pauseStartDate = Date() }
-                observationTimer?.invalidate()
-                nowPlayingTimer?.invalidate()
-                state = .waitingForUsableInput
-                nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: false)
-                notifyStatusChange()
-            }
-        case .interruptedBySystem:
-            if state == .recording || state == .pausedByUser {
-                state = .interruptedBySystem
-                if pauseStartDate == nil { pauseStartDate = Date() }
-                observationTimer?.invalidate()
-                nowPlayingTimer?.invalidate()
-                nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: false)
-                notifyStatusChange()
-            }
-        case .pausedByUser:
+        case .paused:
             if state == .recording {
-                state = .pausedByUser
+                state = .paused
                 if pauseStartDate == nil { pauseStartDate = Date() }
                 observationTimer?.invalidate()
+                nowPlayingTimer?.invalidate()
+                nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: false)
                 notifyStatusChange()
             }
         case .stopped:
@@ -515,16 +521,7 @@ final class RecordingCoordinator: ObservableObject {
                 state = .stopped
                 observationTimer?.invalidate()
                 nowPlayingTimer?.invalidate()
-                notifyStatusChange()
-            }
-        case .failedFatal(let message):
-            let isAlreadyFailed: Bool = if case .failedFatal = state { true } else { false }
-            if !isAlreadyFailed || errorMessage != message {
-                state = .failedFatal(message)
-                errorMessage = message
-                observationTimer?.invalidate()
-                nowPlayingTimer?.invalidate()
-                nowPlayingController.update(title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: false)
+                nowPlayingController.deactivate()
                 notifyStatusChange()
             }
         case .idle:
@@ -577,13 +574,13 @@ final class RecordingCoordinator: ObservableObject {
             // we should try it before giving up and showing an error.
             AppLog.audio.info("All retry attempts failed — attempting forceBuiltInMicRecovery")
             await self.captureService.forceBuiltInMicRecovery()
-            if self.captureService.state == .recording || self.captureService.state == .validatingRoute {
+            if self.captureService.state == .recording || self.captureService.state == .paused {
                 self.commitUIRecordingState()
                 AppLog.audio.info("Recording resumed via built-in mic fallback")
                 return
             }
 
-            self.state = .waitingForUsableInput
+            self.state = .paused
             self.errorMessage = self.captureService.audioInterruptionReason
                 ?? "Could not resume recording. Try disconnecting Bluetooth or use iPhone mic."
             self.notifyStatusChange()
@@ -592,15 +589,15 @@ final class RecordingCoordinator: ObservableObject {
 
     /// Attempt to recover from audio interruptions when the app returns to the foreground.
     func onAppForeground() {
-        guard state == .interruptedBySystem || state == .waitingForUsableInput else { return }
-        AppLog.event("audio", "App returned to foreground while interrupted — attempting recovery")
-        captureService.resumeRecording()
+        guard state == .paused, !wasUserPaused else { return }
+        AppLog.event("audio", "App returned to foreground — attempting recovery from system interruption")
+        try? captureService.resumeRecording()
         if captureService.state == .recording {
             state = .recording
             startObservation()
             notifyStatusChange()
-        } else if captureService.state == .pausedByUser {
-            state = .pausedByUser
+        } else if captureService.state == .paused {
+            state = .paused
             notifyStatusChange()
         }
     }
@@ -621,16 +618,12 @@ final class RecordingCoordinator: ObservableObject {
             for item in orphans {
                 AppLog.audio.info("Recovering interrupted recording: \(item.id)")
                 item.status = .recorded
-                // Prefer manifest for new segmented recordings, fall back to audio.m4a
                 let store = FileArtifactStore()
-                if store.recordingManifestExists(for: item.id) {
-                    item.audioFileRelativePath = AppFileConstants.manifestFileName
-                } else if store.audioFileExists(for: item.id) {
-                    item.audioFileRelativePath = AppFileConstants.audioFileName
-                } else {
+                guard store.audioFileExists(for: item.id) || store.recordingManifestExists(for: item.id) else {
                     item.status = .failed
                     continue
                 }
+                item.audioFileRelativePath = AppFileConstants.audioFileName
                 recoveredIds.append(item.id)
             }
             try bgContext.save()
@@ -676,7 +669,7 @@ final class RecordingCoordinator: ObservableObject {
             audioLevel: audioLevel,
             errorMessage: errorMessage,
             recordingTitle: recordingTitle,
-            isActive: state == .recording || state == .pausedByUser || state == .interruptedBySystem || state == .waitingForUsableInput
+            isActive: state == .recording || state == .paused
         )
     }
 
@@ -684,13 +677,9 @@ final class RecordingCoordinator: ObservableObject {
         switch state {
         case .idle: return "idle"
         case .recording: return "recording"
-        case .pausedByUser: return "paused"
-        case .reconfiguringRoute: return "reconfiguring"
-        case .validatingRoute: return "validating"
-        case .waitingForUsableInput: return "waitingForInput"
-        case .interruptedBySystem: return "interrupted"
-        case .failedFatal: return "failed"
+        case .paused: return "paused"
         case .stopped: return "stopped"
+        case .failed: return "failed"
         }
     }
 
@@ -722,7 +711,7 @@ final class RecordingCoordinator: ObservableObject {
                 guard let self else { return }
                 if self.state == .recording {
                     self.pauseRecording()
-                } else if self.state == .pausedByUser {
+                } else if self.state == .paused {
                     self.resumeRecording()
                 }
             }
@@ -758,26 +747,20 @@ final class RecordingCoordinator: ObservableObject {
             } else if level < 0.85 && self.isClipping {
                 self.isClipping = false
             }
-            // Sync auto-pause / silence state from capture service
-            if self.isAutoPaused != self.captureService.isAutoPaused {
-                self.isAutoPaused = self.captureService.isAutoPaused
-            }
-            if self.silenceDetected != self.captureService.silenceDetected {
-                self.silenceDetected = self.captureService.silenceDetected
-            }
             // Sync input port info (may change on route switch)
             // Segments are handled by onRouteChangeNewSegment callback
             let portName = self.captureService.currentInputPortName
             if self.currentInputPortName != portName, !portName.isEmpty {
                 self.currentInputPortName = portName
-                self.currentInputIcon = AudioSessionManager().currentInputIcon
+                self.currentInputIcon = self.captureService.currentInputPortIcon
             }
-            // When the engine is stopped to save battery during a long pause,
-            // deactivate lock screen controls — there's no engine to resume.
-            if self.captureService.engineStoppedForPauseTimeout && self.state == .pausedByUser {
-                self.nowPlayingController.deactivate()
+            // Sync silence detection (from adaptive threshold in capture service)
+            let captureSilent = self.captureService.silenceDetected
+            if self.silenceDetected != captureSilent {
+                self.silenceDetected = captureSilent
             }
-
+            // Refresh sample rate badge (may change on route switch)
+            self.updateSampleRateBadge()
             if self.captureService.state == .stopped {
                 self.state = .stopped
                 self.nowPlayingController.deactivate()
@@ -785,8 +768,8 @@ final class RecordingCoordinator: ObservableObject {
                 self.observationTimer = nil
                 self.nowPlayingTimer?.invalidate()
                 self.nowPlayingTimer = nil
-            } else if (self.captureService.state == .interruptedBySystem || self.captureService.state == .waitingForUsableInput) && self.state != .waitingForUsableInput && self.state != .interruptedBySystem {
-                self.state = .waitingForUsableInput
+            } else if self.captureService.state == .paused && self.state != .paused {
+                self.state = .paused
                 self.pauseStartDate = Date()  // Freeze elapsed time
                 self.notifyStatusChange()
             }
@@ -796,7 +779,7 @@ final class RecordingCoordinator: ObservableObject {
         nowPlayingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self else { return }
             // Timer.scheduledTimer fires on main run loop — already on main thread.
-            guard self.state == .recording || self.state == .pausedByUser else { return }
+            guard self.state == .recording || self.state == .paused else { return }
             let effective = self.elapsedTime - self.pausedDuration
             self.nowPlayingController.update(
                 title: self.recordingTitle,
@@ -865,7 +848,18 @@ final class RecordingCoordinator: ObservableObject {
         return false
     }
 
-    private func updateItemOnStop() {
+    private func updateItemStatus(itemId: UUID, to status: ItemStatus) {
+        let descriptor = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.id == itemId })
+        guard let item = try? modelContext.fetch(descriptor).first else { return }
+        item.status = status
+        try? modelContext.save()
+    }
+
+    private func updateItemOnStop(
+        sampleRate: Double,
+        inputPortType: String,
+        inputPortName: String
+    ) {
         let context = modelContext
         guard let itemId = savedItemId else { return }
 
@@ -876,13 +870,15 @@ final class RecordingCoordinator: ObservableObject {
         let hasAudio = hasValidAudioData(meetingId: itemId)
 
         if hasAudio {
-            item.status = .recorded
+            item.status = .preparingAudio
             item.durationSeconds = effectiveDuration
-            // Prefer manifest for segmented recordings, audio.m4a for legacy
-            item.audioFileRelativePath = FileArtifactStore().recordingManifestExists(for: itemId)
-                ? AppFileConstants.manifestFileName
-                : AppFileConstants.audioFileName
-            AppLog.audio.info("Item finalized: \(item.id) hasAudio=true duration=\(effectiveDuration)s")
+            item.audioFileRelativePath = AppFileConstants.audioFileName
+            // Persist audio capture metadata for UI display and diagnostics
+            item.audioSampleRate = sampleRate > 0 ? sampleRate : nil
+            item.audioChannelCount = 1 // Always mono in current implementation
+            item.audioInputPortType = inputPortType
+            item.audioInputPortName = inputPortName.isEmpty ? nil : inputPortName
+            AppLog.audio.info("Item finalized: \(item.id) hasAudio=true duration=\(effectiveDuration)s sampleRate=\(Int(sampleRate))Hz input=\(inputPortType)")
         } else {
             // No valid audio data found — mark as failed, don't pretend it was recorded
             item.status = .failed

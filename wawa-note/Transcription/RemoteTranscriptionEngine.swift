@@ -59,7 +59,7 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
 
     // MARK: - Transcribe
 
-    func transcribeFile(_ audioFileURL: URL) async throws -> Transcript {
+    func transcribeFile(_ audioFileURL: URL, meetingId: UUID) async throws -> Transcript {
         isCancelled = false
 
         let durationSeconds = getDuration(audioFileURL)
@@ -69,7 +69,7 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
 
         if durationSeconds <= chunker.chunkDuration && mb < 25 {
             onProgress?(.transcribing(chunk: 1, totalChunks: 1))
-            return try await transcribeSingle(url: audioFileURL, prompt: nil)
+            return try await transcribeSingle(url: audioFileURL, prompt: nil, meetingId: meetingId)
         }
 
         let total = Int(ceil(durationSeconds / chunker.chunkDuration))
@@ -94,7 +94,7 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
             let prompt = i > 0 ? String(previousText.suffix(500)) : nil
             AppLog.transcription.info("Chunk \(i+1)/\(chunks.count)")
 
-            let transcript = try await transcribeSingle(url: chunk.url, prompt: prompt)
+            let transcript = try await transcribeSingle(url: chunk.url, prompt: prompt, meetingId: meetingId)
             languageCode = transcript.languageCode ?? languageCode
 
             let chunkText = transcript.segments.map(\.text).joined(separator: " ")
@@ -145,7 +145,7 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
     private static let maxRetries = 3
     private static let baseDelayMs: UInt64 = 1_000_000_000 // 1 second
 
-    private func transcribeSingle(url: URL, prompt: String?) async throws -> Transcript {
+    private func transcribeSingle(url: URL, prompt: String?, meetingId: UUID) async throws -> Transcript {
         let endpoint = baseURL.appendingPathComponent("audio/transcriptions")
         let boundary = UUID().uuidString
         let model = AIConfigService.shared.modelFor(feature: "transcription")
@@ -203,7 +203,7 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
                 return Transcript(
                     languageCode: json["language"] as? String,
                     segments: [TranscriptSegment(
-                        meetingId: UUID(), startTime: 0,
+                        meetingId: meetingId, startTime: 0,
                         text: text.trimmingCharacters(in: .whitespacesAndNewlines),
                         sourceEngineId: id
                     )],

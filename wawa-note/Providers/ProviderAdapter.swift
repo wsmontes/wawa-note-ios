@@ -40,6 +40,8 @@ final class ProviderAdapter: @unchecked Sendable {
             return ProviderHint(tactic: .promptedJSON, supportsJSONSchema: false, supportsSystemPrompt: true)
         case .gemini:
             return ProviderHint(tactic: .bestEffort, supportsJSONSchema: false, supportsSystemPrompt: true)
+        @unknown default:
+            return ProviderHint(tactic: .nativeJSON, supportsJSONSchema: true, supportsSystemPrompt: true)
         }
     }
 
@@ -69,16 +71,19 @@ final class ProviderAdapter: @unchecked Sendable {
             }
         }
 
-        // Multi-model routing based on provider type
+        // Multi-model routing based on provider type.
+        // The config fallback may be empty when no provider is configured —
+        // callers should gate analysis on isAnalysisAvailable() before reaching here.
         let model: String = {
             let configFallback = AIConfigService.shared.modelFor(feature: "analysis")
+            let model: String? = template.model ?? (configFallback.isEmpty ? nil : configFallback)
+            // Safety net: if nothing is configured at all, use the provider type's
+            // sensible default. This should never be reached when UI gating works correctly.
+            if let m = model, !m.isEmpty { return m }
             switch provider.providerType {
-            case .anthropic:
-                return template.model ?? configFallback ?? "claude-sonnet-4-6"
-            case .gemini:
-                return template.model ?? configFallback ?? "gemini-2.5-flash"
-            case .openAI, .openAICompatible, .localNetwork, .appleLocal:
-                return template.model ?? configFallback ?? "gpt-5.5"
+            case .anthropic: return "claude-sonnet-4-6"
+            case .gemini:     return "gemini-2.5-flash"
+            default:          return "gpt-5.5"
             }
         }()
 

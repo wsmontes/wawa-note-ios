@@ -18,13 +18,25 @@ import ImageIO
 final class ContentExtractionService {
     private let modelContext: ModelContext
     private let fileStore: FileArtifactStore
+    /// Preferred BCP-47 locale tag (e.g. "pt-BR") for on-device transcription.
+    /// Passed through to AppleSpeechTranscriptionEngine as the first candidate.
+    /// Ignored when the remote Whisper engine is selected.
+    private let preferredLocale: String?
 
-    init(modelContext: ModelContext, fileStore: FileArtifactStore = FileArtifactStore()) {
+    init(modelContext: ModelContext, fileStore: FileArtifactStore = FileArtifactStore(), preferredLocale: String? = nil) {
         self.modelContext = modelContext
         self.fileStore = fileStore
+        self.preferredLocale = preferredLocale
     }
 
     // MARK: - Audio → text
+
+    /// Returns the duration of a local audio file using AVURLAsset.
+    /// Returns 0 when the file cannot be read or has no duration property.
+    private static func audioDuration(url: URL) -> Double {
+        let secs = CMTimeGetSeconds(AVURLAsset(url: url).duration)
+        return (secs.isNaN || secs.isInfinite || secs <= 0) ? 0 : secs
+    }
 
     /// Returns existing transcript text if available, otherwise transcribes and returns text.
     /// Never returns nil as long as a transcript exists on disk — extraction failure
@@ -34,113 +46,96 @@ final class ContentExtractionService {
         let id = item.id
         AppLog.provider.info("ContentExtraction: transcribing item \(id.uuidString.prefix(8)) — type=audio duration=\(item.durationSeconds.map { "\(Int($0))s" } ?? "nil")")
 
+        // ── Diagnostic logging: final audio state ──────────────────
+        let audioURL = fileStore.audioFileURL(for: item.id)
+        let audioExists = FileManager.default.fileExists(atPath: audioURL.path)
+        let audioSize = audioExists ? (try? FileManager.default.attributesOfItem(atPath: audioURL.path)[.size] as? Int) ?? 0 : 0
+        let audioDuration = audioExists ? Self.audioDuration(url: audioURL) : 0
+        let hasManifest = fileStore.recordingManifestExists(for: item.id)
+        let manifest: RecordingManifest? = hasManifest ? try? fileStore.readRecordingManifest(for: item.id) : nil
+        let segmentCount = manifest?.segments.count ?? 0
+        let segmentDetails: [String] = manifest?.segments.sorted(by: { $0.index < $1.index }).map { seg in
+            let segURL = fileStore.segmentURL(for: item.id, fileName: seg.fileName)
+            let segExists = FileManager.default.fileExists(atPath: segURL.path)
+            let segSize = segExists ? (try? FileManager.default.attributesOfItem(atPath: segURL.path)[.size] as? Int) ?? 0 : 0
+            let segDur = segExists ? Self.audioDuration(url: segURL) : 0
+            return "seg[\(seg.index)]=\(seg.fileName) exists=\(segExists) size=\(segSize) dur=\(String(format: "%.1f", segDur))s"
+        } ?? []
+        let sumSegmentDurations = segmentDetails.isEmpty ? 0.0 :
+            (manifest?.segments.compactMap { seg -> Double? in
+                let url = fileStore.segmentURL(for: item.id, fileName: seg.fileName)
+                guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+                let d = Self.audioDuration(url: url)
+                return d > 0 ? d : nil
+            }.reduce(0, +) ?? 0)
+        let engineInfo = resolveTranscriptionEngine()
+        let engineLabel = engineInfo.map { $0.id } ?? "none"
+
+        AppLog.audio.info("""
+            Transcription diagnostics for \(id.uuidString.prefix(8)):
+            • finalAudioURL: \(audioURL.path)
+            • audioExists: \(audioExists)
+            • audioSize: \(audioSize) bytes
+            • audioDuration: \(String(format: "%.1f", audioDuration))s
+            • hasConsolidatedAudio: \(audioExists)
+            • manifestExists: \(hasManifest)
+            • segments: \(segmentCount)
+            • segmentDetails: \(segmentDetails.joined(separator: ", "))
+            • sumSegmentDurations: \(String(format: "%.1f", sumSegmentDurations))s
+            • engine: \(engineLabel)
+            """)
+
         // Reuse existing transcript when available
         if let existing = loadExistingTranscriptText(for: item.id) {
             AppLog.provider.info("ContentExtraction: reusing existing transcript for item \(id)")
             return existing
         }
 
-        let engine = resolveTranscriptionEngine()
-        let engineLabel = engine.map { $0.id } ?? "none"
-        let isSegmented = fileStore.recordingManifestExists(for: item.id)
-            && (try? fileStore.readRecordingManifest(for: item.id))?.segments.isEmpty == false
-        let pathLabel = isSegmented ? "segmented" : "singleFile"
-
-        AppLog.provider.info("ContentExtraction: path=\(pathLabel) engine=\(engineLabel)")
-
-        let result: String?
-        if isSegmented, let manifest = try? fileStore.readRecordingManifest(for: item.id) {
-            result = await transcribeSegmented(manifest: manifest, item: item)
-        } else {
-            result = await transcribeSingleFile(item: item)
-        }
-
-        let elapsed = Int(Date().timeIntervalSince(startTime) * 1000)
-        let chars = result?.count ?? 0
-        AppLog.provider.info("ContentExtraction: transcription finished — path=\(pathLabel) engine=\(engineLabel) elapsed=\(elapsed)ms chars=\(chars)")
-
-        return result
-    }
-
-    /// Transcribe a segmented recording — all segments in order with merged timestamps.
-    private func transcribeSegmented(manifest: RecordingManifest, item: KnowledgeItem) async -> String? {
-        let engine = resolveTranscriptionEngine()
-        guard let engine else { return nil }
-
-        var allSegments: [TranscriptSegment] = []
-        var timeOffset: Double = 0
-        var hadError = false
-
-        for segment in manifest.segments.sorted(by: { $0.index < $1.index }) {
-            let segURL = fileStore.segmentURL(for: item.id, fileName: segment.fileName)
-            guard FileManager.default.fileExists(atPath: segURL.path) else {
-                AppLog.provider.warning("ContentExtraction: segment \(segment.index) file not found: \(segURL.path)")
-                hadError = true
-                continue
-            }
-
-            // Apple Speech natively supports M4A, WAV, CAF, MP3.
-            // AAC/M4A is decoded to PCM WAV by AppleSpeechTranscriptionEngine.prepareForRecognition()
-            // before recognition — AVAssetExportPresetPassthrough was removed (produced corrupt
-            // WAV with AAC bitstream, causing recognizer to skip first seconds of audio).
-            do {
-                let result = try await engine.transcribeFile(segURL)
-                // Offset segment timestamps — accumulate across segments
-                let shifted = result.segments.map { seg -> TranscriptSegment in
-                    var s = seg
-                    s.startTime += timeOffset
-                    if let end = s.endTime { s.endTime = end + timeOffset }
-                    s.meetingId = item.id
-                    return s
-                }
-                allSegments.append(contentsOf: shifted)
-
-                // Accumulate time offset for next segment
-                if let lastSeg = result.segments.last, let end = lastSeg.endTime {
-                    timeOffset += end
-                }
-                AppLog.provider.info("ContentExtraction: segment \(segment.index) transcribed — \(result.segments.count) segments, offset=\(timeOffset)s")
-            } catch {
-                AppLog.provider.error("ContentExtraction: segment \(segment.index) transcription failed: \(error)")
-                hadError = true
-            }
-        }
-
-        // All segments failed — mark item as failed so the UI can offer retry
-        guard !allSegments.isEmpty else {
-            AppLog.provider.error("ContentExtraction: all \(manifest.segments.count) segments failed transcription")
+        // ── Pre-transcription validation ───────────────────────────
+        // audio.m4a (AAC) is produced by AudioSegmentConcatenator post-stop.
+        // All engines receive the same file:
+        // - Apple: prepareForRecognition decodes AAC→16kHz WAV for SFSpeechRecognizer
+        // - Whisper: AAC bytes sent directly via HTTP multipart
+        guard audioExists else {
+            AppLog.audio.error("Transcription validation FAILED: final audio missing — marking as failed")
             if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: item.id) {
                 fresh.status = .failed
                 try? modelContext.save()
             }
             return nil
         }
-
-        // Save unified transcript (partial if some segments failed)
-        let unified = Transcript(
-            meetingId: item.id,
-            languageCode: nil,
-            segments: allSegments,
-            sourceEngineId: "segmented-\(engine.id)"
-        )
-
-        do {
-            try fileStore.createMeetingDirectory(for: item.id)
-            try fileStore.writeArtifact(unified, fileName: "transcript.json", meetingId: item.id)
-            item.status = .transcribed
-            item.transcriptionEngineId = resolvedEngineId(engine)
-            try modelContext.save()
-            NotificationCenter.default.post(name: .transcriptReady, object: item.id.uuidString)
-            if hadError {
-                AppLog.provider.warning("ContentExtraction: partial transcript saved — \(allSegments.count)/\(manifest.segments.count) segments succeeded")
-            } else {
-                AppLog.provider.info("ContentExtraction: unified transcript saved — \(allSegments.count) segments total")
+        guard audioSize > 4096 else {
+            AppLog.audio.error("Transcription validation FAILED: audio too small (\(audioSize) bytes) — marking as failed")
+            if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: item.id) {
+                fresh.status = .failed
+                try? modelContext.save()
             }
-        } catch {
-            AppLog.provider.error("ContentExtraction: failed to save unified transcript: \(error)")
+            return nil
         }
+        guard audioDuration >= 1.0 else {
+            AppLog.audio.error("Transcription validation FAILED: audio too short (\(String(format: "%.1f", audioDuration))s) — marking as failed")
+            if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: item.id) {
+                fresh.status = .failed
+                try? modelContext.save()
+            }
+            return nil
+        }
+        if hasManifest, let m = manifest, !m.segments.isEmpty, sumSegmentDurations > 0 {
+            let ratio = audioDuration / sumSegmentDurations
+            if ratio < 0.3 || ratio > 2.5 {
+                AppLog.audio.warning("Transcription validation: consolidated audio duration (\(String(format: "%.1f", audioDuration))s) deviates from segment sum (\(String(format: "%.1f", sumSegmentDurations))s) — ratio=\(String(format: "%.2f", ratio))")
+            }
+        }
+        AppLog.audio.info("Transcription validation PASSED for \(id.uuidString.prefix(8))")
+        // ── End validation ──────────────────────────────────────────
 
-        return allSegments.map(\.text).joined(separator: "\n")
+        let result = await transcribeSingleFile(item: item)
+
+        let elapsed = Int(Date().timeIntervalSince(startTime) * 1000)
+        let chars = result?.count ?? 0
+        AppLog.provider.info("ContentExtraction: transcription finished — engine=\(engineLabel) elapsed=\(elapsed)ms chars=\(chars)")
+
+        return result
     }
 
     /// Resolve which transcription engine to use based on settings and provider config.
@@ -155,15 +150,15 @@ final class ContentExtractionService {
             return settings.useRemoteWhisper && (supportsTranscription || typeSupports)
         }()
 
-        if canUseRemoteWhisper {
-            let baseURL = config!.baseURL!
+        if canUseRemoteWhisper, let config {
+            let baseURL = config.baseURL!
             var apiKey = ""
-            if let keyId = config!.apiKeyKeychainIdentifier {
+            if let keyId = config.apiKeyKeychainIdentifier {
                 apiKey = (try? SecureKeyStore().loadAPIKey(for: keyId)) ?? ""
             }
             return RemoteTranscriptionEngine(baseURL: baseURL, apiKey: apiKey)
         }
-        return AppleSpeechTranscriptionEngine()
+        return AppleSpeechTranscriptionEngine(preferredLocale: preferredLocale)
     }
 
     /// Returns the effective engine ID, appending "-cloud" when the Apple engine
@@ -175,7 +170,8 @@ final class ContentExtractionService {
         return engine.id
     }
 
-    /// Transcribe a single audio.m4a file (legacy path).
+    /// Transcribe the consolidated audio.m4a (AAC) via the selected engine.
+    /// Apple engines decode AAC→WAV internally; Whisper sends AAC directly.
     private func transcribeSingleFile(item: KnowledgeItem) async -> String? {
         let audioURL = fileStore.audioFileURL(for: item.id)
         guard FileManager.default.fileExists(atPath: audioURL.path) else {
@@ -186,11 +182,20 @@ final class ContentExtractionService {
         let engine = resolveTranscriptionEngine()
         guard let engine else { return nil }
 
-        // Apple Speech natively supports M4A, WAV, CAF, MP3 — no conversion needed.
         do {
-            var result = try await engine.transcribeFile(audioURL)
-            result.meetingId = item.id
-            result.segments = result.segments.map { var f = $0; f.meetingId = item.id; return f }
+            var result = try await engine.transcribeFile(audioURL, meetingId: item.id)
+
+            // ── Post-transcription diagnostics ────────────────────
+            let transcriptChars = result.segments.map(\.text).joined(separator: " ").count
+            let langCode = result.languageCode ?? "nil"
+            AppLog.audio.info("""
+                Transcription result for \(item.id.uuidString.prefix(8)):
+                • engine: \(self.resolvedEngineId(engine))
+                • transcriptSegments: \(result.segments.count)
+                • transcriptTextLength: \(transcriptChars) chars
+                • languageCode: \(langCode)
+                """)
+            // ── End diagnostics ───────────────────────────────────
 
             try fileStore.createMeetingDirectory(for: item.id)
             try fileStore.writeArtifact(result, fileName: "transcript.json", meetingId: item.id)
@@ -555,52 +560,6 @@ final class ContentExtractionService {
         return segments
     }
 
-    // MARK: - Audio conversion for transcription
-
-    /// Best-effort audio conversion for transcription engines. Uses passthrough
-    /// to avoid re-encoding — when it fails (AAC can't go into WAV), callers fall
-    /// back to the original file which engines handle natively.
-    ///
-    /// Uses AVURLAsset.load(.duration) — the async replacement for the deprecated
-    /// synchronous AVAsset.duration. Freshly-written segment files may not have
-    /// fully indexed metadata when the sync API is called, returning .invalid or
-    /// .zero, which produces silent transcription output.
-    func convertToTranscriptionFormat(_ sourceURL: URL) async throws -> URL {
-        let asset = AVURLAsset(url: sourceURL)
-        let tempURL = fileStore.itemDirectoryURL(for: UUID())
-            .appendingPathComponent("transcription_input.wav")
-        try? FileManager.default.createDirectory(at: tempURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-
-        guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough) else {
-            throw NSError(domain: "ContentExtraction", code: 1, userInfo: [NSLocalizedDescriptionKey: "Cannot create export session"])
-        }
-
-        export.outputURL = tempURL
-        export.outputFileType = .wav
-        export.audioMix = nil
-
-        // Only set timeRange if async duration loading succeeds. If it fails,
-        // leave it at the default (entire asset) — safer than a zero-length range
-        // that silently produces empty transcription.
-        if let rawDuration = try? await asset.load(.duration),
-           rawDuration.isValid, rawDuration > .zero {
-            export.timeRange = CMTimeRange(start: .zero, duration: rawDuration)
-        }
-
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            export.exportAsynchronously {
-                continuation.resume()
-            }
-        }
-
-        if export.status == .completed {
-            AppLog.provider.info("ContentExtraction: converted \(sourceURL.lastPathComponent) → WAV for transcription")
-            return tempURL
-        }
-
-        throw NSError(domain: "ContentExtraction", code: 6,
-            userInfo: [NSLocalizedDescriptionKey: export.error?.localizedDescription ?? "Export failed: \(export.status.rawValue)"])
-    }
 }
 
 // MARK: - Source Context

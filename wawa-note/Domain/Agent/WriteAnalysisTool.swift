@@ -6,6 +6,13 @@ import Foundation
 /// The JSON is stored as-is — the UI renders dynamically from the template
 /// sections, so any template works without key normalization.
 ///
+/// Safety guarantees:
+/// - Validates itemId is a valid UUID
+/// - Creates a backup of the previous analysis before overwriting
+/// - Enforces a maximum JSON size (1 MB) to prevent runaway writes
+/// - Uses atomicWriteWithBackup for corruption-resistant persistence
+/// - Adds provenance metadata (writtenBy, timestamp) to the stored JSON
+///
 /// Usage: write_analysis(itemId, analysisJson)
 struct WriteAnalysisTool: AgentTool {
     let name = "write_analysis"
@@ -29,6 +36,11 @@ struct WriteAnalysisTool: AgentTool {
         required: ["itemId", "analysisJson"]
     )
 
+    /// Maximum allowed size for analysis JSON in bytes (1 MB).
+    /// Larger payloads are rejected to prevent runaway LLM output from
+    /// filling the disk with repetitive or hallucinated content.
+    private static let maxAnalysisSize = 1_048_576 // 1 MB
+
     @MainActor
     func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
         guard let itemIdStr = arguments["itemId"] as? String,
@@ -45,7 +57,15 @@ struct WriteAnalysisTool: AgentTool {
                               isError: true, displaySummary: "Missing JSON")
         }
 
-        // Validate JSON
+        // Reject oversized payloads before any file I/O
+        guard jsonStr.utf8.count <= Self.maxAnalysisSize else {
+            let sizeMB = Double(jsonStr.utf8.count) / 1_048_576.0
+            AppLog.provider.error("write_analysis: analysisJson too large — \(String(format: "%.1f", sizeMB)) MB (max 1 MB)")
+            return ToolResult(content: "Error: analysisJson exceeds 1 MB maximum. Please reduce the content size.",
+                              isError: true, displaySummary: "Content too large")
+        }
+
+        // Validate JSON structure
         guard let data = jsonStr.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               !json.isEmpty else {
@@ -55,21 +75,66 @@ struct WriteAnalysisTool: AgentTool {
                               isError: true, displaySummary: "Invalid JSON")
         }
 
-        // Write as-is — no key normalization. The template defines the section names,
-        // the LLM uses them as keys, the UI renders dynamically from the template.
+        // Add provenance metadata so consumers know who wrote this and when
+        var enrichedJSON = json
+        enrichedJSON["_metadata"] = [
+            "writtenBy": "WriteAnalysisTool",
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "sectionCount": json.count
+        ]
+
         let fileStore = FileArtifactStore()
         do {
             try fileStore.createMeetingDirectory(for: itemId)
 
-            // Write the original JSON for DynamicAnalysis rendering
-            let prettyData = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
-            let url = fileStore.itemDirectoryURL(for: itemId).appendingPathComponent("analysis.json")
-            try prettyData.write(to: url, options: .atomic)
+            let prettyData = try JSONSerialization.data(withJSONObject: enrichedJSON, options: [.prettyPrinted, .sortedKeys])
+            let url = fileStore.itemDirectoryURL(for: itemId).appendingPathComponent(AppFileConstants.analysisFileName)
 
-            AppLog.provider.info("write_analysis: saved \(json.count) sections to \(url.path)")
+            // Use atomicWriteWithBackup for corruption-resistant persistence.
+            // If this write fails, the previous analysis.json (and .BAK) remain intact.
+            try fileStore.atomicWriteWithBackup(data: prettyData, url: url)
+
+            // Verify the write by reading back and comparing sizes.
+            // Prevents silent failures (e.g. disk full, truncated write, APFS corruption).
+            guard let verifyData = try? Data(contentsOf: url),
+                  abs(verifyData.count - prettyData.count) <= 1 else {
+                AppLog.provider.error("write_analysis: read-back verification failed — size mismatch")
+                return ToolResult(content: "Error: analysis write verification failed — the file may be corrupted. Please retry.",
+                                  isError: true, displaySummary: "Write verification failed")
+            }
+
+            AppLog.provider.info("write_analysis: saved \(json.count) sections (\(prettyData.count) bytes) to \(url.path)")
+
+            // ── Framework schema validation ──────────────────────────
+            // If a framework is active, validate the output and return
+            // specific fix instructions so the agent can correct its output
+            // in the next iteration without restarting the pipeline.
+            var validationNote = ""
+            if let fw = context.activeFramework {
+                let errors = FrameworkService.validateAnalysis(json: json, against: fw)
+                if let errors {
+                    let errorList = errors.components(separatedBy: "\n").prefix(5).joined(separator: "\n")
+                    validationNote = """
+
+                    ⚠️ SCHEMA VALIDATION ISSUES (fix and call write_analysis again):
+                    Framework: \(fw.name)
+                    \(errorList)
+
+                    Required fields: \((fw.itemAnalysis.outputSchema.required ?? Array(fw.itemAnalysis.outputSchema.properties.keys)).joined(separator: ", "))
+
+                    Fix your analysis JSON to include all required fields with correct types, then call write_analysis again.
+                    """
+                    AppLog.provider.warning("write_analysis: schema validation failed — \(fw.name): \(errors)")
+                } else {
+                    AppLog.provider.info("write_analysis: schema validation passed — \(fw.name)")
+                }
+            }
+            // ── End schema validation ──────────────────────────────────
+
+            let successMsg = "Analysis written (\(json.count) sections, \(prettyData.count) bytes) to analysis.json.\(validationNote)"
             return ToolResult(
-                content: "Analysis written (\(json.count) sections) to analysis.json",
-                displaySummary: "Analysis saved"
+                content: successMsg,
+                displaySummary: validationNote.isEmpty ? "Analysis saved" : "Analysis saved — needs fixes"
             )
         } catch {
             AppLog.provider.error("write_analysis: write failed: \(error.localizedDescription)")

@@ -191,10 +191,54 @@ final class AIConfigService: @unchecked Sendable {
 
     func modelFor(feature: String) -> String {
         if let m = config.features?[feature]?.model { return m }
-        if feature == "analysis" { return config.defaultModels?.analysis ?? "gpt-5.5" }
-        if feature == "chat" { return config.defaultModels?.chat ?? "gpt-5.5" }
+        if feature == "analysis" { return config.defaultModels?.analysis ?? "" }
+        if feature == "chat" { return config.defaultModels?.chat ?? "" }
         if feature == "transcription" { return config.defaultModels?.transcription ?? "whisper-1" }
-        return "gpt-5.5"
+        return ""
+    }
+
+    /// Resolves a model for a feature that is ACTUALLY available from the
+    /// user's configured provider. Uses the provider's own model list (from
+    /// SwiftData), NOT the static ai_config.json. Returns nil only when
+    /// no provider is configured at all.
+    func resolvedModelFor(feature: String, context: ModelContext) -> String? {
+        guard let active = ActiveProviderManager.shared.getActiveProvider(context: context) else {
+            return nil
+        }
+        // Build available list from the provider's own configuration
+        var available = active.availableModels
+        if available.isEmpty {
+            // Fall back to static config for built-in providers
+            available = availableModels(for: active.typeRaw)
+        }
+        // If still empty, at least include the default model
+        if available.isEmpty, !active.defaultModel.isEmpty {
+            available = [active.defaultModel]
+        }
+        guard !available.isEmpty else { return nil }
+
+        let configuredModel = modelFor(feature: feature)
+        if !configuredModel.isEmpty, available.contains(configuredModel) {
+            return configuredModel
+        }
+        let dm = active.defaultModel
+        if !dm.isEmpty, available.contains(dm) {
+            return dm
+        }
+        return available.first
+    }
+
+    /// Whether a provider is configured (regardless of API key or network status).
+    func isProviderConfigured(context: ModelContext) -> Bool {
+        ActiveProviderManager.shared.getActiveProvider(context: context) != nil
+    }
+
+    /// Whether analysis can actually run right now (provider + API key).
+    func isAnalysisAvailable(context: ModelContext) -> Bool {
+        guard let active = ActiveProviderManager.shared.getActiveProvider(context: context),
+              active.isAPIKeyPresent() else { return false }
+        return !active.defaultModel.isEmpty || !active.availableModels.isEmpty
+            || !availableModels(for: active.typeRaw).isEmpty
     }
 
     func presetFor(model: String) -> AIConfig.ModelPreset? {

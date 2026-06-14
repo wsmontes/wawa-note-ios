@@ -5,13 +5,9 @@ import SwiftData
 enum RecordingUIState: Equatable {
     case idle
     case recording
-    case pausedByUser
-    case reconfiguringRoute
-    case validatingRoute
-    case waitingForUsableInput
-    case interruptedBySystem
-    case failedFatal(String)
+    case paused
     case stopped
+    case failed(String)
 }
 
 @MainActor
@@ -30,7 +26,6 @@ final class RecordingViewModel: ObservableObject {
     var audioLevel: Float { coordinator.audioLevel }
     var isClipping: Bool { coordinator.isClipping }
     var clipCount: Int { coordinator.clipCount }
-    var liveTranscriptionText: String { coordinator.liveTranscriptionText }
     var errorMessage: String? { coordinator.errorMessage }
     var savedItemId: UUID? { coordinator.savedItemId }
 

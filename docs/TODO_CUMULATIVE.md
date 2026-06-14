@@ -9,18 +9,18 @@
 
 ### Audio & Recording
 
-- [ ] **Crash: BUG IN CLIENT OF LIBDISPATCH ao iniciar gravação.** `MPNowPlayingInfoCenter` sendo chamado de thread não-main. `nowPlayingTimer` (`Timer.scheduledTimer`) pode estar sendo criado em background thread após `await captureService.startRecording()`. Reproduzível, root cause não confirmada.
-- [ ] **Crash: SWIFT TASK CONTINUATION MISUSE em transcribeDirect.** `SFSpeechRecognizer.recognitionTask` entrega erro E resultado final no mesmo callback → `continuation.resume()` chamado 2x. Corrigido com flag `hasResumed`, mas cloud fallback tem o mesmo risco.
+- [x] **Crash: BUG IN CLIENT OF LIBDISPATCH ao iniciar gravação.** ✅ JÁ CORRIGIDO — `NowPlayingController` é `@MainActor`; `startObservation()` tem `guard Thread.isMainThread` + `DispatchQueue.main.async` re-dispatch (linhas 674-676). Ambos os timers são criados com segurança de thread.
+- [x] **Crash: SWIFT TASK CONTINUATION MISUSE em transcribeDirect.** ✅ JÁ CORRIGIDO — `transcribeDirect` (linha 351) e cloud fallback (linha 370) ambos têm `hasResumed`/`cloudHasResumed` flags + `shouldReportPartialResults = false`. Sem risco de double-resume.
 - [ ] **AAC M4A causa gaps de 40-90s no SFSpeechRecognizer.** `AudioFileWriter._openSegment()` escreve AAC M4A para sample rates >=16kHz. O `SFSpeechRecognizer` perde sincronização com o bitstream AAC. Solução parcial implementada (`prepareForRecognition` via `AVAudioConverter` → PCM WAV) mas ainda **não validada com sucesso**.
 
 ### Data Layer
 
-- [ ] **Crash CoreData: `KnowledgeItem.tags: [String]`.** `"Could not materialize Objective-C class named 'Array' from declared attribute value type 'Array<String>'"`. SwiftData não suporta `[String]` como atributo direto — precisa de `@Attribute(.transformable)` ou relação separada.
+- [x] **Crash CoreData: `KnowledgeItem.tags: [String]`.** `"Could not materialize Objective-C class named 'Array' from declared attribute value type 'Array<String>'"`. ✅ FIXED 2026-06-12 — `KnowledgeItem.tags` já usava `@Transient` + `_tagsJSON`; **`ProjectFrame.filterTags` e `filterItemTypes`** eram `[String]` diretos num `@Model` (verdadeiro crash). Convertidos para `_filterTagsJSON`/`_filterItemTypesJSON` + `@Transient` computed properties.
 
 ### Security
 
-- [ ] **Áudio e transcrições armazenados localmente sem criptografia.** `FileArtifactStore` usa `FileManager` direto — arquivos legíveis por qualquer processo com acesso ao container do app.
-- [ ] **SecureKeyStore accessibility.** Se configurado como `kSecAttrAccessibleWhenUnlocked`, keys não disponíveis em background. Deveria ser `kSecAttrAccessibleAfterFirstUnlock` para permitir pipeline em background.
+- [x] **Áudio e transcrições armazenados localmente sem criptografia.** ✅ JÁ CORRIGIDO — `FileArtifactStore` aplica `FileProtectionType.completeUnlessOpen` em 7 pontos (base + items + configs + chat + media + exports + meeting dirs) + `isExcludedFromBackup` + sentinel write validation. `try?` substituído por `do/catch` + `AppLog.storage.error`.
+- [x] **SecureKeyStore accessibility.** ✅ JÁ CORRIGIDO — `SecureKeyStore.saveAPIKey()` usa `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` (linha 35), permitindo acesso em background. Documentado com comentário.
 
 ---
 
@@ -32,23 +32,23 @@
 - [ ] **`AudioCaptureService` — 1551 linhas.** Máquina de estado + captura + recovery + escrita + checkpoints. Extrair `AudioRouteManager`.
 - [ ] **`prepareForRecognition` frágil — 3 versões em 1 dia.** Passou por `AVAudioConverter` → `AVAssetReader+CMBlockBuffer` → `AVAudioConverter`. Precisa de teste unitário.
 - [ ] **`AudioChunker` produz AAC M4A → `prepareForRecognition` decodifica de volta.** Round-trip inútil. Chunker deveria produzir PCM WAV direto, eliminando `prepareForRecognition`.
-- [ ] **Pipeline disparado diretamente em `stopRecording()` — não passa pelo `ProcessingQueue`.** Se o pipeline falha, não tem retry automático. Só `reprocessItem()` manual da UI tenta de novo.
-- [ ] **Sem timeout ou cancelamento do pipeline.** Se o agente entra em loop ou a API fica pendurada, o item fica preso até o app ser morto.
+- [x] **Pipeline disparado diretamente em `stopRecording()` — não passa pelo `ProcessingQueue`.** ✅ JÁ CORRIGIDO — `stopRecording()` (linhas 391-397) prefere `processingQueue.enqueue()` com fallback direto apenas se queue for nil (defensivo). Queue é injected no coordinator via `WawaNoteApp.init()`.
+- [x] **Sem timeout ou cancelamento do pipeline.** ✅ JÁ CORRIGIDO — `Task.isCancelled` check (linha 109), 120s safety timeout (linha 493), `ProcessingQueueService.cancel()` (linha 2663), `beginBackgroundTask()`/`endBackgroundTask()`.
 - [ ] **`RecordingCoordinator.startRecording()` cria `KnowledgeItem` antes de saber se o microfone funciona.** Se `captureService.startRecording()` falha, item é rollback — mas usuário vê o item piscar na UI.
-- [ ] **`cleanupOrphanedRecordings()` marca itens como `.recorded`/`.failed` mas NÃO dispara pipeline.** Itens recuperados de crash ficam sem transcrição/análise.
+- [x] **`cleanupOrphanedRecordings()` marca itens como `.recorded`/`.failed` mas NÃO dispara pipeline.** ✅ JÁ CORRIGIDO — `cleanupOrphanedRecordings()` (linhas 599-617) concatena segmentos E enqueues via `processingQueue` para itens recuperados. Pipeline é disparado automaticamente.
 - [ ] **Sem feedback visual durante transcrição.** `isTranscribing` nunca era setado para `true`. Parcialmente corrigido, mas `isPipelineProcessing` depende de notificação que pode chegar antes do `.onAppear`.
 - [ ] **3 caminhos de transcrição sem tracing centralizado.** `transcribeSegmented`, `transcribeSingleFile`, `transcribeFile` (chunked) — cada um com logging e error handling diferente. Sem visibilidade de qual caminho foi usado, com qual formato, ou quanto tempo levou.
-- [ ] **`ContentPipelineService` bloqueia MainActor.** `process()` é `@MainActor` — bloqueia UI durante chunking e transcrição.
+- [x] **`ContentPipelineService` bloqueia MainActor.** ✅ MITIGADO — `process()` usa `Task { @MainActor in` com `await` para heavy work (chunking, API). Suspende sem bloquear. `Task.isCancelled` check + 120s safety timeout.
 
 ### Agent System & Chat
 
 - [ ] **AgentLoop sem visibilidade de tool calls no chat.** Usuário vê o texto final mas não sabe quais tools foram chamadas, com quais argumentos, ou o resultado.
 - [ ] **Sem streaming de pensamento (thinking) do modelo.** `thinkingActive` existe mas não é exposto na UI do chat.
-- [ ] **AgentLoop sem circuit breaker.** Se o agente falha 5x no mesmo tool call, continua tentando até `maxIterations: 15`.
+- [x] **AgentLoop sem circuit breaker.** ✅ CORRIGIDO 2026-06-12 — `consecutiveFailures` counter (max: 5) adicionado ao `run()` loop. Incrementa quando TODOS os tool calls da iteração resultam em `TOOL ERROR:`. Reseta quando pelo menos um tool call succeeds. Loop termina com `.truncated` quando threshold é excedido.
 - [ ] **AgentLoop sem salvamento intermediário.** Se crasha na iteração 14 de 15, todo o progresso é perdido.
 - [ ] **`WriteAnalysisTool` sem rollback se validação falha.** JSON parcial pode ser persistido.
 - [ ] **System prompts hardcoded em cada serviço.** `ContentPipelineService`, `ContentExtractionService`, `ChatViewModel` — cada um com seu próprio prompt, sem revisão centralizada e versionamento.
-- [ ] **`AIConfigService.requestParams()` detecta reasoning models por nome hardcoded.** Novos modelos (Claude Opus 4.8, GPT-5) não serão detectados até atualizar código.
+- [x] **`AIConfigService.requestParams()` detecta reasoning models por nome hardcoded.** ✅ CORRIGIDO 2026-06-12 — `isReasoningModel()` melhorado com prefix/family matching (ex: `hasPrefix("o1")`, `contains("-r1")`) + catch-all `-thinking`/`-reasoner`/`reasoning`. False positives são menos danosos que false negatives.
 - [ ] **Sem tracking de custos de API.** Usuário não sabe quanto gastou em tokens. Sem budget ou alerta de consumo.
 
 ### Data Layer & Models
@@ -87,8 +87,8 @@
 - [ ] **API keys em plaintext na memória.** `RemoteTranscriptionEngine` recebe `apiKey` como parâmetro — se um dump de memória for capturado, a key está exposta.
 - [ ] **Transcripts e análises em JSON plaintext no disco.** Se o dispositivo for comprometido, todo o conteúdo das reuniões está legível.
 - [ ] **Sem política de retenção de dados.** Áudios, transcrições e análises ficam no disco indefinidamente.
-- [ ] **Sem `PrivacyInfo.xcprivacy` (Privacy Manifest).** Requerido pela Apple para apps que usam APIs de áudio, speech recognition, e rede.
-- [ ] **Debug logs ativos em build de Release.** Logs de transcrição, pipeline, e provider expõem dados sensíveis.
+- [x] **Sem `PrivacyInfo.xcprivacy` (Privacy Manifest).** ✅ JÁ EXISTE — `Resources/PrivacyInfo.xcprivacy` presente no bundle.
+- [x] **Debug logs ativos em build de Release.** ✅ MITIGADO — `AppLog` usa `OSLog` que suprime debug-level em Release automaticamente. Logs sensíveis usam níveis `.debug`.
 
 ### Testing
 
@@ -104,8 +104,8 @@
 
 - [ ] **`AudioSessionManager` prioriza AirPlay > Bluetooth HFP > built-in.** Bluetooth HFP tem qualidade péssima (8kHz). Deveria ter opção de preferir built-in.
 - [ ] **`AudioFileWriter` usa AAC para >=16kHz com bitrate adaptativo não documentado.** 24-96kbps dependendo do sample rate — sem evidência de que o SFSpeechRecognizer lida bem com todas as variantes.
-- [ ] **`RecordingManifest` persiste no disco sem validação de integridade.** Crash no meio do write → JSON truncado → manifesto ilegível (retorna nil silenciosamente).
-- [ ] **`AudioSegmentConcatenator` só loga `.completed` — falhas silenciosas.** `try?` em file copy, remove, export. Se a concatenação falha, o pipeline recebe `audio.m4a` incompleto.
+- [x] **`RecordingManifest` persiste no disco sem validação de integridade.** ✅ JÁ CORRIGIDO — `atomicWriteWithBackup` (.NEW→rename, .BAK backup). `readRecordingManifest` tem fallback .BAK + size>0 check + auto-restore do backup. `recordingManifestExists` valida `minimumValidFileSize`.
+- [x] **`AudioSegmentConcatenator` só loga `.completed` — falhas silenciosas.** ✅ JÁ CORRIGIDO — 6 paths de error logging: single-segment copy, invalid duration, insertTimeRange, export session creation, skipped segments warning, export failure (status + error). `try?` residual só em cleanup de ficheiro temporário.
 - [ ] **`hasValidAudioData()` itera segmentos do manifesto checando arquivos no disco.** Se o manifesto está corrompido, áudio é considerado inválido mesmo existindo.
 - [ ] **Crash recovery (`writeCheckpoint`) rejeita checkpoints >24h.** Se o usuário gravou ontem à noite e o app crashou, checkpoint é ignorado hoje de manhã.
 - [ ] **`forceBuiltInMicRecovery()` — em caso de falha, estado fica `.failedFatal`.** Usuário perde a gravação inteira em vez de continuar com o que tinha.
@@ -118,7 +118,7 @@
 - [ ] **Tools registradas estaticamente em `ContentPipelineService`.** `ShellTool()` e `WriteAnalysisTool()` são hardcoded. Novas tools exigem mudança de código.
 - [ ] **Sem tool de busca semântica.** `SemanticSearchService` e `EmbeddingService` existem mas não estão expostos como tools do agente.
 - [ ] **`ShellTool` executado sem sandbox.** Comandos shell do agente rodam com acesso total ao filesystem do app.
-- [ ] **`ProviderRouter.resolveActive()` retorna nil se nenhum provider configurado — sem fallback ou sugestão.**
+- [x] **`ProviderRouter.resolveActive()` retorna nil se nenhum provider configurado — sem fallback ou sugestão.** ✅ JÁ CORRIGIDO — `resolveActive` throws `providerNotFound`. `resolveBestAvailable` faz fallback offline→local. `resolveWithFallback` tenta chain. `NetworkMonitor` usado para deteção de conectividade.
 - [ ] **Sem cache de respostas do agente.** Mesmo item analisado 2x com mesmo prompt = 2 chamadas de API.
 - [ ] **Sem validação de output do agente antes de persistir.** `WriteAnalysisTool` escreve JSON sem garantir schema válido.
 
@@ -195,7 +195,7 @@
 
 ### Error Handling & Resilience
 
-- [ ] **`RecordingManifest` escrito como JSON atômico sem `atomic write`.** Crash no meio do write → JSON truncado.
+- [x] **`RecordingManifest` escrito como JSON atômico sem `atomic write`.** ✅ JÁ CORRIGIDO — `atomicWriteWithBackup()`: write→.NEW (atomic), rotate existing→.BAK, rename .NEW→final. Significativamente mais robusto que `.atomicWrite` simples.
 - [ ] **Sem checksum ou hash dos arquivos de áudio.** Arquivo corrompido só detectado quando transcrição falha.
 - [ ] **`ContentPipelineService.process()` pode rodar por minutos no background sem `UIApplication.beginBackgroundTask`.** Se o app vai para background, pipeline é suspenso.
 - [ ] **Sem `BGTaskScheduler` para pipeline.** Transcrição/Análise não continuam em background.
@@ -216,8 +216,8 @@
 - [ ] **Sem rotação de API keys.** Keys ficam no Keychain até o usuário mudar manualmente.
 - [ ] **Sem validação de URL do provider.** Provider malicioso com URL parecida pode receber dados.
 - [ ] **`RemoteTranscriptionEngine` envia áudio completo para servidor externo sem informar o usuário.** Nenhum aviso "seu áudio será enviado para servidores externos".
-- [ ] **Sem `NWPathMonitor` ou detecção de offline.** App não sabe se está online.
-- [ ] **Sem retry com backoff para chamadas de API.** Falha de rede → `maxAttempts = 2` sem delay.
+- [x] **Sem `NWPathMonitor` ou detecção de offline.** ✅ JÁ CORRIGIDO — `NetworkMonitor.shared` com `NWPathMonitor` usado em `resolveBestAvailable()` e `ProviderFailoverService`.
+- [x] **Sem retry com backoff para chamadas de API.** ✅ JÁ CORRIGIDO — `RetryPolicy` com backoff exponencial + jitter implementado. `ProviderError.rateLimited(retryAfter:)` usa `Retry-After` header.
 
 ### AI Best Practices
 

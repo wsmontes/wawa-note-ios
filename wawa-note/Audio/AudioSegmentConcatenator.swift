@@ -3,10 +3,19 @@ import OSLog
 
 // MARK: - Segment concatenator (non-MainActor)
 
-/// Concatenates recording segments into a single audio.m4a for legacy compatibility.
+/// Concatenates recording segments into a single audio.m4a (AAC).
 /// Used by AudioAssetResolver (on-demand playback) and RecordingCoordinator (post-stop).
+///
+/// Single segment: WAV → AAC via AVAssetExportSession (proper transcode).
+/// Multi segment: WAVs → composition → AAC via AVAssetExportSession.
+///
+/// All engines receive the same AAC/M4A file:
+/// - Apple on-device/cloud: prepareForRecognition decodes AAC→16kHz WAV for SFSpeechRecognizer
+/// - Whisper: AAC bytes sent directly via HTTP multipart
 enum AudioSegmentConcatenator {
-    static func concatenate(manifest: RecordingManifest, meetingId: UUID) async {
+    /// Concatenate segments into audio.m4a. Returns true on success.
+    @discardableResult
+    static func concatenate(manifest: RecordingManifest, meetingId: UUID) async -> Bool {
         let store = FileArtifactStore()
         let sortedSegments = manifest.segments.sorted { $0.index < $1.index }
 
@@ -15,19 +24,37 @@ enum AudioSegmentConcatenator {
             return FileManager.default.fileExists(atPath: url.path) ? url : nil
         }
 
-        guard urls.count > 1 else {
-            if let src = urls.first {
-                let dest = store.audioFileURL(for: meetingId)
-                _ = try? FileManager.default.removeItem(at: dest)
-                do {
-                    try FileManager.default.copyItem(at: src, to: dest)
-                } catch {
-                    AppLog.audio.error("SegmentConcatenator: single-segment copy failed — src=\(src.lastPathComponent) error=\(error.localizedDescription)")
-                }
-            }
-            return
+        guard !urls.isEmpty else {
+            AppLog.audio.error("SegmentConcatenator: no segment files found for meeting \(meetingId.uuidString.prefix(8))")
+            return false
         }
 
+        let destURL = store.audioFileURL(for: meetingId)
+        _ = try? FileManager.default.removeItem(at: destURL)
+
+        // Single segment: use AVAssetExportSession directly on the WAV source.
+        // This properly encodes WAV/PCM → AAC/M4A in one pass.
+        if urls.count == 1, let src = urls.first {
+            let asset = AVURLAsset(url: src)
+            guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+                AppLog.audio.error("SegmentConcatenator: single-segment export session creation failed")
+                return false
+            }
+            export.outputURL = destURL
+            export.outputFileType = .m4a
+            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                export.exportAsynchronously { c.resume() }
+            }
+            if export.status == .completed {
+                AppLog.event("audio", "Single segment exported → audio.m4a")
+                return true
+            } else {
+                AppLog.audio.error("SegmentConcatenator: single-segment export failed — status=\(export.status.rawValue) error=\(export.error?.localizedDescription ?? "nil")")
+                return false
+            }
+        }
+
+        // Multi segment: build AVMutableComposition, then export as AAC/M4A.
         let composition = AVMutableComposition()
         var cursor = CMTime.zero
         var skippedCount = 0
@@ -56,11 +83,9 @@ enum AudioSegmentConcatenator {
             }
         }
 
-        let destURL = store.audioFileURL(for: meetingId)
-        _ = try? FileManager.default.removeItem(at: destURL)
         guard let export = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetAppleM4A) else {
-            AppLog.audio.error("SegmentConcatenator: AVAssetExportSession creation failed — no output")
-            return
+            AppLog.audio.error("SegmentConcatenator: multi-segment export session creation failed")
+            return false
         }
         export.outputURL = destURL
         export.outputFileType = .m4a
@@ -72,9 +97,10 @@ enum AudioSegmentConcatenator {
             if skippedCount > 0 {
                 AppLog.audio.warning("SegmentConcatenator: \(skippedCount)/\(urls.count) segments skipped during concat")
             }
+            return true
         } else {
-            let statusCode = export.status.rawValue
-            AppLog.audio.error("SegmentConcatenator: export failed — status=\(statusCode) error=\(export.error?.localizedDescription ?? "nil")")
+            AppLog.audio.error("SegmentConcatenator: multi-segment export failed — status=\(export.status.rawValue) error=\(export.error?.localizedDescription ?? "nil")")
+            return false
         }
     }
 }

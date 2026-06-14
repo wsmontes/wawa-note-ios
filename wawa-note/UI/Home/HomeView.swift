@@ -130,6 +130,10 @@ final class HomeViewModel: ObservableObject {
                 // Import image files directly
                 await importImageFile(url, deleteSource: deleteSource, modelContext: ctx, pipeline: pipeline)
             } else {
+                // Unrecognized file — remove from shared directory so it isn't
+                // rediscovered on every scan. Log for diagnostics.
+                AppLog.general.warning("HomeView: unrecognized file in shared directory — removing: \(url.lastPathComponent)")
+                if deleteSource { try? FileManager.default.removeItem(at: url) }
                 continue
             }
 
@@ -142,12 +146,21 @@ final class HomeViewModel: ObservableObject {
 
     private func importAudioFile(_ url: URL, importer: any FormatImporter, deleteSource: Bool, modelContext: ModelContext, pipeline: ContentPipelineService) async {
         guard let coord = coordinator else { return }
-        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("import_\(UUID().uuidString)_\(url.lastPathComponent)")
+        // Ensure temp file is always cleaned up, regardless of exit path
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+        // Clean up stale temp file from a previous run (different UUID, so no collision)
         try? FileManager.default.removeItem(at: tempURL)
-        do { try FileManager.default.copyItem(at: url, to: tempURL) } catch { return }
+        do { try FileManager.default.copyItem(at: url, to: tempURL) } catch {
+            AppLog.general.error("HomeView: importAudioFile copy failed — \(error.localizedDescription)")
+            return
+        }
 
         let meta: ImportMetadata
-        do { meta = try await importService.extractMetadata(url: tempURL) } catch { return }
+        do { meta = try await importService.extractMetadata(url: tempURL) } catch {
+            AppLog.general.error("HomeView: importAudioFile metadata extraction failed — \(error.localizedDescription)")
+            return
+        }
 
         let itemId = await MainActor.run {
             let item = coord.createItemFromImport(title: meta.suggestedTitle, date: meta.creationDate ?? Date(), duration: meta.duration)
@@ -160,10 +173,10 @@ final class HomeViewModel: ObservableObject {
 
         do {
             try await importService.storeAudio(sourceURL: tempURL, itemID: itemId, using: artifactStore)
-            try? FileManager.default.removeItem(at: tempURL)
             if deleteSource { try? FileManager.default.removeItem(at: url) }
             processingQueue?.enqueue(itemID: itemId, trigger: .newCapture)
         } catch {
+            AppLog.general.error("HomeView: importAudioFile storeAudio failed — \(error.localizedDescription)")
             await MainActor.run { coord.deleteItem(itemId) }
         }
     }
@@ -233,6 +246,14 @@ final class HomeViewModel: ObservableObject {
     }
 }
 
+/// Color the quality badge: green for HQ (44.1-48kHz), yellow for MQ (16-22kHz),
+/// orange for LQ (8kHz Bluetooth HFP).
+private func qualityBadgeColor(_ badge: String) -> Color {
+    if badge.contains("HQ") { return .green }
+    if badge.contains("MQ") { return .yellow }
+    return .orange
+}
+
 // MARK: - HomeView
 
 struct HomeView: View {
@@ -266,7 +287,7 @@ struct HomeView: View {
     var body: some View {
         ZStack {
             switch captureVM.recordingState {
-            case .recording, .pausedByUser, .interruptedBySystem, .waitingForUsableInput, .reconfiguringRoute, .validatingRoute:
+            case .recording, .paused:
                 recordingPanel
             case .stopped:
                 defaultSurface
@@ -626,26 +647,40 @@ struct HomeView: View {
 
     private var recordingPanel: some View {
         let isActive = captureVM.recordingState == .recording
-        let isPaused = captureVM.recordingState == .pausedByUser
-        let isWaiting = captureVM.recordingState == .waitingForUsableInput
-        let isSwitching = captureVM.recordingState == .reconfiguringRoute || captureVM.recordingState == .validatingRoute
-        let isSystemInterrupted = captureVM.recordingState == .interruptedBySystem
+        let isPaused = captureVM.recordingState == .paused
+        let isWaiting = false  // simplified — no longer a separate state
+        let isSwitching = false
+        let isSystemInterrupted = false
         let isTroubled = isWaiting || isSwitching || isSystemInterrupted
         return VStack(spacing: 0) {
             Spacer()
             ScrollingWaveformView(level: captureVM.audioLevel, isRunning: isActive)
                 .frame(height: 64).padding(.horizontal, 16)
             Spacer().frame(height: 16)
-            // Audio source indicator
-            HStack(spacing: 4) {
+            // Audio source indicator with quality badge
+            HStack(spacing: 6) {
                 Image(systemName: captureVM.currentInputIcon)
                     .font(.caption2)
                 Text(captureVM.currentInputPortName)
                     .font(.caption2)
+                if !captureVM.sampleRateBadge.isEmpty {
+                    Text(captureVM.sampleRateBadge)
+                        .font(.caption2).fontWeight(.medium)
+                        .foregroundStyle(qualityBadgeColor(captureVM.sampleRateBadge))
+                }
             }
             .foregroundStyle(.secondary)
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(.ultraThinMaterial, in: Capsule())
+            // Silence detection warning
+            if captureVM.silenceDetected {
+                HStack(spacing: 4) {
+                    Image(systemName: "mic.slash").font(.caption2)
+                    Text("Silence detected — mic muted?").font(.caption2)
+                }
+                .foregroundStyle(.orange)
+                .padding(.top, 4)
+            }
             Spacer().frame(height: 16)
             Text(captureVM.elapsedTimeFormatted)
                 .font(.system(.largeTitle, design: .monospaced).weight(.thin))
@@ -676,16 +711,6 @@ struct HomeView: View {
             } else {
                 Text(isPaused ? "Paused" : "Recording")
                     .font(.subheadline).foregroundStyle(isPaused ? .orange : .secondary)
-            }
-            if !captureVM.liveTranscriptionText.isEmpty && isActive {
-                Text(captureVM.liveTranscriptionText)
-                    .font(.system(.caption, design: .serif))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-                    .padding(.top, 8)
-                    .animation(.easeInOut(duration: 0.3), value: captureVM.liveTranscriptionText)
             }
             if let error = captureVM.errorMessage {
                 Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 32).multilineTextAlignment(.center)
@@ -765,7 +790,7 @@ struct HomeView: View {
 
         // ImageAnalysisService handles both OCR and LLM vision in one call.
         if let provider = try? ProviderRouter.resolveActive(context: modelContext) {
-            let model = AIConfigService.shared.featureConfig(for: "analysis")?.model ?? "gpt-5.5"
+            let model = AIConfigService.shared.featureConfig(for: "analysis")?.model ?? ""
             let auth = FieldAuthorityService.shared
             if auth.canModify(field: "bodyText", of: item, by: .system) {
                 item.bodyText = try? await ImageAnalysisService().analyzeImage(
@@ -917,7 +942,7 @@ final class ScannerViewModel: ObservableObject {
 
         // Page 1: ImageAnalysisService handles OCR + LLM vision together (no duplication)
         if let provider = try? ProviderRouter.resolveActive(context: context) {
-            let model = AIConfigService.shared.featureConfig(for: "analysis")?.model ?? "gpt-5.5"
+            let model = AIConfigService.shared.featureConfig(for: "analysis")?.model ?? ""
             let firstPageURL = dir.appendingPathComponent("scan_0.jpg")
             if let analysis = try? await ImageAnalysisService().analyzeImage(firstPageURL, llmProvider: provider, model: model),
                !analysis.isEmpty {

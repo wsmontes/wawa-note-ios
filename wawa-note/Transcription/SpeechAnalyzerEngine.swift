@@ -96,7 +96,7 @@ final class SpeechAnalyzerEngine: TranscriptionEngine, @unchecked Sendable {
 
     // MARK: - File Transcription
 
-    func transcribeFile(_ audioFileURL: URL) async throws -> Transcript {
+    func transcribeFile(_ audioFileURL: URL, meetingId: UUID) async throws -> Transcript {
         isCancelled = false
 
         let availability = checkAvailability()

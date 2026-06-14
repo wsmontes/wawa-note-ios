@@ -88,16 +88,14 @@ final class AIProviderConfigModel {
             errors.append("Unknown provider type: '\(typeRaw)'")
         }
 
-        if let urlStr = baseURLString, !urlStr.isEmpty {
-            guard URL(string: urlStr) != nil else {
-                errors.append("Invalid baseURL: '\(urlStr)'")
-            }
+        if let urlStr = baseURLString, !urlStr.isEmpty, URL(string: urlStr) == nil {
+            errors.append("Invalid baseURL: '\(urlStr)'")
         }
 
         // Validate availableModelsJSON parses correctly
         if let json = availableModelsJSON, !json.isEmpty {
-            guard let data = json.data(using: .utf8),
-                  (try? JSONDecoder().decode([String].self, from: data)) != nil else {
+            if let data = json.data(using: .utf8),
+               (try? JSONDecoder().decode([String].self, from: data)) == nil {
                 errors.append("availableModelsJSON is corrupted (not a valid JSON string array)")
             }
         }

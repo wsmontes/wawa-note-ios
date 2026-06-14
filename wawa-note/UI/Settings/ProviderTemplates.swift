@@ -26,7 +26,7 @@ struct ProviderTemplate: Identifiable, Equatable {
     // MARK: - Load from config
 
     static func fromConfig(_ p: AIConfig.ProviderConfig) -> ProviderTemplate {
-        let model = p.defaultModel ?? "gpt-5.5"
+        let model = p.defaultModel ?? ""
         let isLocal = p.category == "local"
 
         return ProviderTemplate(

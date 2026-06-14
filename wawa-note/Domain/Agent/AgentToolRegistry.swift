@@ -15,6 +15,10 @@ final class AgentToolRegistry: @unchecked Sendable {
         tools[name]
     }
 
+    func allTools() -> [any AgentTool] {
+        Array(tools.values)
+    }
+
     func allDefinitions() -> [AIToolDefinition] {
         tools.values.map { tool in
             AIToolDefinition(

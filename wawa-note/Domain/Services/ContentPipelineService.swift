@@ -16,7 +16,7 @@ enum PipelineTemplate {
     /// The standard content processing pipeline: Extract → Analyze → Ingest.
     /// Uses the virtual filesystem shell (run_command) for all operations.
     static let standard: String = """
-    You are a content processing agent in Wawa Note. Process the item described in the first message.
+    You are a content analysis agent in Wawa Note. Process the item described in the first message.
 
     ## TOOLS
 
@@ -30,35 +30,70 @@ enum PipelineTemplate {
     Use run_command: `extract <item-id>`
     If empty or fails, report and stop.
 
-    ### Step 2: ANALYZE
-    Review the content and produce a JSON analysis. Then use write_analysis with these EXACT field names:
-    - itemId: the item's UUID
-    - analysisJson: JSON with these fields (use null or [] for empty fields):
-      {
-        "short_summary": "one-line summary (REQUIRED)",
-        "detailed_summary": "detailed summary text",
-        "decisions": [{"title": "...", "details": "..."}],
-        "action_items": [{"task": "...", "owner": "...", "due_date": "..."}],
-        "risks": [{"risk": "...", "details": "..."}],
-        "open_questions": [{"question": "..."}],
-        "important_dates": [{"date": "...", "meaning": "..."}],
-        "mentioned_people": ["name"],
-        "mentioned_systems": ["name"],
-        "mentioned_organizations": ["name"],
-        "mentioned_locations": ["name"]
-      }
+    ### Step 2: ANALYZE (adaptive)
+    Review the content and decide which sections are relevant. Not all content needs the same sections — a casual note and a formal meeting have different needs.
 
-    ### Step 3: DONE
-    Respond with a brief text summary. Stop making tool calls.
+    Produce a JSON object with sections YOU choose. Use write_analysis:
+    - itemId: the item's UUID
+    - analysisJson: a JSON object where each key is a section name and each value is the section content
+
+    ## SECTION GUIDELINES
+
+    Choose sections that MATCH the content. Common examples:
+    - "summary": always include — one paragraph capturing the essence
+    - "key_points": main takeaways as a list of strings
+    - "decisions": [{"decision": "...", "context": "..."}] — only if decisions were made
+    - "action_items": [{"task": "...", "owner": "...", "deadline": "..."}] — only if tasks assigned
+    - "risks": [{"risk": "...", "mitigation": "..."}] — only if risks discussed
+    - "open_questions": ["..."] — only if questions raised
+    - "people_mentioned": ["name"] — only if people named
+    - "topics_discussed": ["topic"] — list of subjects
+    - "sentiment": "positive/neutral/negative" — overall tone
+    - "custom_sections": {} — any other relevant groupings you identify
 
     ## RULES
     - ALWAYS start with extract
-    - ALWAYS use write_analysis to save your results (never just describe them)
-    - short_summary is REQUIRED
-    - Empty fields: use null or []
+    - ALWAYS use write_analysis — never just describe results
+    - "summary" is the only REQUIRED section. All others are OPTIONAL.
+    - ONLY include sections that have meaningful content. Skip empty ones entirely (don't use null).
+    - You may add custom sections beyond the examples above if the content warrants it.
     - Be specific — reference what was actually said
-    - Use EXACT field names as specified above (snake_case)
+    - Use snake_case for section keys
     """
+
+    /// Build a framework-aware prompt that includes the project's schema sections.
+    static func forFramework(_ framework: ProjectFramework) -> String {
+        let props = framework.itemAnalysis.outputSchema.properties
+        let sectionList = props.keys.sorted().map { "  - \"\($0)\"" }.joined(separator: "\n")
+        let desc = framework.description
+
+        return """
+        You are a content analysis agent in Wawa Note. Process the item described in the first message.
+
+        ## FRAMEWORK: \(framework.name)
+        \(desc)
+
+        ## TOOLS
+        - run_command: extract, ls, cat, grep, echo
+        - write_analysis: save your structured analysis
+
+        ## STEPS
+        1. EXTRACT: use `extract <item-id>`
+        2. ANALYZE: decide which sections apply, produce JSON, call write_analysis
+
+        ## AVAILABLE SECTIONS (choose which apply):
+        \(sectionList)
+
+        ## RULES
+        - ALWAYS start with extract
+        - Include a "summary" section with a one-paragraph synthesis
+        - ONLY include sections that have meaningful content from the source
+        - Skip sections where nothing relevant was found — omit them entirely
+        - You may add up to 3 custom sections beyond the available list if the content warrants it
+        - Be specific and reference what was actually said
+        - Use the exact section key names from the available list
+        """
+    }
 
     /// Lightweight pipeline: extract and analyze only. No project ingestion.
     static let extractAndAnalyze: String = """
@@ -199,11 +234,14 @@ final class ContentPipelineService: ObservableObject {
                 return
             }
             let project = item.projectID.flatMap { pid in try? ProjectService(context: modelContext).fetch(id: pid) }
+            let resolvedFramework = project.flatMap { FrameworkService.shared.resolve(for: $0) }
             let toolContext = ToolContext(
                 modelContext: modelContext, fileStore: fileStore,
                 activeProjectID: item.projectID,
                 activeProjectName: project?.name,
-                activeProjectSlug: project?.slug
+                activeProjectSlug: project?.slug,
+                sandboxedItemID: itemID,  // Agent restricted to this item's folder
+                activeFramework: resolvedFramework  // Schema for write_analysis validation
             )
 
             let tools: [any AgentTool] = [
@@ -214,23 +252,23 @@ final class ContentPipelineService: ObservableObject {
             let registry = AgentToolRegistry(tools: tools)
             let config = AIConfigService.shared
             let activeProviderConfig = ActiveProviderManager.shared.getActiveProvider(context: modelContext)
-            let availableModels = activeProviderConfig.flatMap { config.availableModels(for: $0.typeRaw) } ?? []
+            let availableModels = activeProviderConfig.flatMap { config.availableModels(for: $0.typeRaw) }
 
-            // Resolve executor model: validate against active provider's available models
-            let executorModel: String = {
-                if let m = activeProviderConfig?.defaultModel, availableModels.contains(m) { return m }
-                if let m = config.featureConfig(for: "agent")?.model, availableModels.contains(m) { return m }
-                if let first = availableModels.first { return first }
-                return activeProviderConfig?.defaultModel ?? config.modelFor(feature: "chat") ?? "gpt-5-nano"
-            }()
+            // Resolve models from ACTUAL provider availability — no hardcoded fallbacks.
+            // If no provider is configured, both resolve to nil and analysis is skipped.
+            let resolvedAnalysisModel = config.resolvedModelFor(feature: "analysis", context: modelContext)
+            let resolvedChatModel = config.resolvedModelFor(feature: "chat", context: modelContext)
+            let executorModel = resolvedChatModel ?? availableModels?.first ?? ""
+            let advisorModel = resolvedAnalysisModel ?? resolvedChatModel ?? availableModels?.first ?? ""
 
-            // Resolve advisor model (for analysis): validate against available models
-            let advisorModel: String = {
-                if let m = config.featureConfig(for: "analysis")?.model, availableModels.contains(m) { return m }
-                if let m = activeProviderConfig?.defaultModel, availableModels.contains(m) { return m }
-                if let first = availableModels.first { return first }
-                return activeProviderConfig?.defaultModel ?? config.modelFor(feature: "chat") ?? "gpt-5-nano"
-            }()
+            guard !executorModel.isEmpty, !advisorModel.isEmpty else {
+                AppLog.provider.error("ContentPipeline: no available model for analysis — skipping")
+                if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+                    fresh.status = .transcribed
+                    try? modelContext.save()
+                }
+                return
+            }
 
             let loop = AgentLoop(
                 registry: registry, toolContext: toolContext,
@@ -374,9 +412,10 @@ final class ContentPipelineService: ObservableObject {
                             let fileURL = store.itemDirectoryURL(for: itemID).appendingPathComponent("analysis.json")
                             if let data = try? Data(contentsOf: fileURL),
                                let validationError = FrameworkService.validateAnalysis(data: data, against: framework) {
-                                AppLog.provider.warning("Pipeline attempt \(attemptCount): analysis.json failed schema validation: \(validationError)")
-                                lastError = "Analysis failed schema validation: \(validationError)"
-                                failed = true
+                                // WriteAnalysisTool already gave the agent feedback during the loop.
+                                // If we still have validation errors here, the agent couldn't fix them.
+                                // Accept the output anyway — partial analysis is better than none.
+                                AppLog.provider.warning("Pipeline: analysis.json has residual schema issues after agent feedback loop: \(validationError)")
                             }
                         }
                         // Create DynamicAnalysis from the raw JSON (any keys work)
@@ -533,15 +572,18 @@ final class LensCatalogService {
     func lenses(in category: LensCategory) -> [Lens] { allLenses.filter { $0.category == category } }
     func resolve(id: String) -> Lens? { allLenses.first { $0.id == id } }
 
-    /// Active frameworks — Meeting, Research, and Blank are the core three.
-    /// Brainstorm, Journal, Coaching, Legal, and Product are deferred per the
-    /// scope discipline review (2026-06-11). Their framework definitions remain
-    /// in FrameworkService for future activation when users request them.
+    /// All 8 built-in frameworks, each with its own schema and render hints.
+    /// The agent chooses which sections to fill based on content.
     private var frameworkLenses: [Lens] {
         [
             Lens(id: "builtin/meeting", name: "Meeting Analysis", description: "Decisions, actions, risks, dates, entities", icon: "mic.fill", category: .domain, framework: FrameworkService.meetingFramework),
             Lens(id: "builtin/research", name: "Research", description: "Hypotheses, findings, themes, sources", icon: "magnifyingglass", category: .domain, framework: FrameworkService.researchFramework),
-            Lens(id: "builtin/blank", name: "Blank Slate", description: "Minimal — AI adapts to your content", icon: "doc.fill", category: .custom, framework: FrameworkService.blankFramework)
+            Lens(id: "builtin/brainstorm", name: "Brainstorm", description: "Ideas, themes, questions, creative exploration", icon: "lightbulb.fill", category: .domain, framework: FrameworkService.brainstormFramework),
+            Lens(id: "builtin/journal", name: "Journal", description: "Themes, mood, people, places, reflections", icon: "book.fill", category: .personal, framework: FrameworkService.journalFramework),
+            Lens(id: "builtin/coaching", name: "Coaching", description: "Competencies, commitments, breakthroughs", icon: "figure.mind.and.body", category: .domain, framework: FrameworkService.coachingFramework),
+            Lens(id: "builtin/legal", name: "Legal Brief", description: "Citations, statutes, depositions, privilege", icon: "building.columns.fill", category: .domain, framework: FrameworkService.legalFramework),
+            Lens(id: "builtin/product", name: "Product Spec", description: "User stories, requirements, bugs, constraints", icon: "hammer.fill", category: .domain, framework: FrameworkService.productFramework),
+            Lens(id: "builtin/blank", name: "Adaptive", description: "AI chooses sections based on content — no fixed template", icon: "doc.fill", category: .custom, framework: FrameworkService.blankFramework)
         ]
     }
 
@@ -637,12 +679,14 @@ final class FrameworkService {
     /// Returns nil on success, or an error message describing what's wrong.
     static func validateAnalysis(json: [String: Any], against framework: ProjectFramework) -> String? {
         let schema = framework.itemAnalysis.outputSchema
-        let required = schema.required ?? Array(schema.properties.keys)
+        // Only enforce required fields if the schema explicitly lists them.
+        // When required is nil, all properties are optional (adaptive mode).
+        let required = schema.required ?? []
 
         // Check required fields are present
         for field in required {
             if json[field] == nil {
-                return "Missing required field '\(field)'. Required fields: \(required.joined(separator: ", "))"
+                return "Missing required field '\(field)'. Required: \(required.joined(separator: ", "))."
             }
         }
 

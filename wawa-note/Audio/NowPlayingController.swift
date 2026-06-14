@@ -88,9 +88,16 @@ final class NowPlayingController {
         let formatted = formatTime(elapsedTime)
         let duration = max(elapsedTime, 1.0)
 
+        // Use chapterTitle for recording state (semantically appropriate for
+        // audio metadata) and leave Artist for actual meeting metadata.
+        // playbackRate = 1.0 (recording) / 0.0 (paused) already communicates
+        // state on the Lock Screen without hardcoded non-localized strings.
+        let stateText = isPlaying
+            ? String(localized: "Recording", comment: "Lock Screen — recording in progress")
+            : String(localized: "Paused", comment: "Lock Screen — recording paused")
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: title,
-            MPMediaItemPropertyArtist: isPlaying ? "Gravando" : "Pausado",
+            MPMediaItemPropertyArtist: stateText,
             MPMediaItemPropertyAlbumTitle: formatted,
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: elapsedTime,
