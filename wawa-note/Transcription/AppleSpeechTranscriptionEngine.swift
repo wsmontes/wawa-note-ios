@@ -327,7 +327,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         // Decode AAC/M4A → PCM WAV. AAC bitstream causes recognizer to skip first seconds.
         let recognitionURL = try prepareForRecognition(url)
         let request = SFSpeechURLRecognitionRequest(url: recognitionURL)
-        request.shouldReportPartialResults = false
+        request.shouldReportPartialResults = true
         request.addsPunctuation = true
 
         // On-device recognition: requires model download. Disable for testing.
@@ -350,6 +350,14 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         return try await withCheckedThrowingContinuation { continuation in
             var hasResumed = false
             var recognitionTask: SFSpeechRecognitionTask?
+
+            // iOS 17/18 on-device bug: SFSpeechRecognizer discards previous
+            // transcription after pauses (~1.5-2s), treating pause boundaries as
+            // utterance resets. The final result only contains the LAST utterance.
+            // Workaround: enable partial results, detect resets by watching for
+            // the formattedString to shrink, and accumulate segments across resets.
+            var accumulatedSegments: [SFTranscriptionSegment] = []
+            var previousResult: SFSpeechRecognitionResult?
 
             // Timeout: SFSpeechRecognizer may never call the completion handler
             // (known iOS behavior with certain audio formats or durations > 5 min).
@@ -409,10 +417,29 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                     return
                 }
 
-                guard let result = result, result.isFinal else { return }
+                guard let result = result else { return }
+
+                // ── Accumulation workaround for iOS 17/18 reset bug ──────
+                // When SFSpeechRecognizer resets at an utterance boundary,
+                // bestTranscription.formattedString shrinks (previous text
+                // discarded). Save the previous utterance before it's lost.
+                if let prev = previousResult {
+                    let prevLen = prev.bestTranscription.formattedString.count
+                    let currLen = result.bestTranscription.formattedString.count
+                    if currLen < prevLen {
+                        accumulatedSegments.append(contentsOf: prev.bestTranscription.segments)
+                    }
+                }
+                previousResult = result
+
+                guard result.isFinal else { return }
+
+                // Save the final utterance
+                accumulatedSegments.append(contentsOf: result.bestTranscription.segments)
+
                 hasResumed = true
                 timeoutWorkItem.cancel()
-                let transcript = self.buildTranscript(from: result, recognizer: recognizer, meetingId: meetingId)
+                let transcript = self.buildTranscript(from: accumulatedSegments, recognizer: recognizer, meetingId: meetingId)
                 AppLog.transcription.info("On-device complete: \(transcript.segments.count) segments, lang=\(transcript.languageCode ?? recognizer.locale.identifier), locale=\(recognizer.locale.identifier)")
                 continuation.resume(returning: transcript)
             }
@@ -441,6 +468,33 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             meetingId: meetingId,
             languageCode: detectedLang ?? recognizer.locale.identifier,
             segments: segments,
+            sourceEngineId: "apple-speech"
+        )
+    }
+
+    /// Build a Transcript from accumulated SFTranscriptionSegments (iOS 17/18
+    /// on-device workaround). Computes the full text from all segments and
+    /// detects language once.
+    private func buildTranscript(from segments: [SFTranscriptionSegment], recognizer: SFSpeechRecognizer, meetingId: UUID) -> Transcript {
+        let fullText = segments.map(\.substring).joined(separator: " ")
+        let detectedLang = detectLanguage(fullText)
+
+        let transcriptSegments = segments.map { segment in
+            TranscriptSegment(
+                meetingId: meetingId,
+                startTime: segment.timestamp,
+                endTime: segment.timestamp + segment.duration,
+                text: segment.substring,
+                confidence: Double(segment.confidence),
+                languageCode: detectedLang,
+                sourceEngineId: "apple-speech"
+            )
+        }
+
+        return Transcript(
+            meetingId: meetingId,
+            languageCode: detectedLang ?? recognizer.locale.identifier,
+            segments: transcriptSegments,
             sourceEngineId: "apple-speech"
         )
     }
