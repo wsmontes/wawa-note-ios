@@ -985,5 +985,68 @@ final class TranscriptionSettingsTests: XCTestCase {
     }
 }
 
+// MARK: - ModelPolicyRules Tests
+
+@MainActor
+final class ModelPolicyRulesTests: XCTestCase {
+    func testTierSelectionDeep() {
+        let rules = makeSampleRules()
+        XCTAssertEqual(rules.tier(for: 0.75), "deep")
+    }
+
+    func testTierSelectionFast() {
+        let rules = makeSampleRules()
+        XCTAssertEqual(rules.tier(for: 0.30), "fast")
+    }
+
+    func testTierSelectionEconomy() {
+        let rules = makeSampleRules()
+        XCTAssertEqual(rules.tier(for: 0.10), "economy")
+    }
+
+    func testTierSelectionLocal() {
+        let rules = makeSampleRules()
+        XCTAssertEqual(rules.tier(for: 0.01), "local")
+    }
+
+    func testModelForFeatureChatDeep() {
+        let rules = makeSampleRules()
+        XCTAssertEqual(rules.model(for: "chat", tier: "deep"), "claude-sonnet-4-6")
+    }
+
+    func testModelForUnknownFeatureFallsBackToChat() {
+        let rules = makeSampleRules()
+        XCTAssertEqual(rules.model(for: "nonexistent", tier: "fast"), "gpt-5.1-mini")
+    }
+
+    func testModelForUnknownTierFallsBackToNil() {
+        let rules = makeSampleRules()
+        XCTAssertNil(rules.model(for: "chat", tier: "unknown"))
+    }
+
+    private func makeSampleRules() -> ModelPolicyRules {
+        ModelPolicyRules(
+            budget: ModelPolicyRules.BudgetRules(dailyUSD: 1.0, thresholds: [
+                ModelPolicyRules.BudgetThreshold(minPercent: 0.50, tier: "deep"),
+                ModelPolicyRules.BudgetThreshold(minPercent: 0.25, tier: "fast"),
+                ModelPolicyRules.BudgetThreshold(minPercent: 0.05, tier: "economy"),
+                ModelPolicyRules.BudgetThreshold(minPercent: 0.00, tier: "local")
+            ]),
+            tiers: [
+                "deep": ModelPolicyRules.TierConfig(label: "Deep", prefer: ["claude-opus-4-8"]),
+                "fast": ModelPolicyRules.TierConfig(label: "Fast", prefer: ["claude-sonnet-4-6"]),
+                "economy": ModelPolicyRules.TierConfig(label: "Economy", prefer: ["claude-haiku-4-5"]),
+                "local": ModelPolicyRules.TierConfig(label: "Local", prefer: ["phi-4-mini"])
+            ],
+            features: [
+                "chat": ["deep": "claude-sonnet-4-6", "fast": "gpt-5.1-mini", "economy": "claude-haiku-4-5", "local": "phi-4-mini"],
+                "analysis": ["deep": "claude-opus-4-8", "fast": "claude-sonnet-4-6", "economy": "gpt-5.1-mini", "local": "phi-4-mini"]
+            ],
+            offlineFallback: ModelPolicyRules.OfflineFallbackConfig(enabled: true),
+            userOverride: ModelPolicyRules.UserOverrideConfig(enabled: true)
+        )
+    }
+}
+
 // NowPlayingController tests require MediaPlayer framework linkage in test target.
 // TODO: Add MediaPlayer to test target's framework search paths and re-enable.
