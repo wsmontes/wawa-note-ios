@@ -43,29 +43,123 @@ actor AIService {
 
     func send(feature: String, messages: [AIMessage],
               tools: [AIToolDefinition]? = nil,
-              responseFormat: ResponseFormat? = nil) async throws -> AIResponse
+              responseFormat: ResponseFormat? = nil,
+              override: ModelOverride? = nil) async throws -> AIResponse
 
-    func sendStreaming(feature: String, messages: [AIMessage], ...) -> AsyncThrowingStream<AIStreamEvent, Error>
+    func sendStreaming(feature: String, messages: [AIMessage],
+                       tools: [AIToolDefinition]? = nil,
+                       override: ModelOverride? = nil) -> AsyncThrowingStream<AIStreamEvent, Error>
 
     func embed(text: String, model: String) async throws -> [Float]
 }
 ```
 
-**AIFeatureRequest** substitui `AIRequest` — `temperature` e `maxTokens` não são expostos ao caller. Vêm sempre do `AIConfigProvider`.
+**AIFeatureRequest** substitui `AIRequest` — `temperature` e `maxTokens` não são expostos diretamente. Vêm do config, mas podem ser sobrescritos por um `ModelOverride` opcional.
 
 | Campo | AIRequest (atual) | AIFeatureRequest (novo) |
 |---|---|---|
-| `temperature` | Optional — caller decide | Não existe — vem do config |
-| `maxTokens` | Optional — caller decide | Não existe — vem do config |
+| `temperature` | Optional — caller decide | Via config + opcionalmente sobrescrito |
+| `maxTokens` | Optional — caller decide | Via config + opcionalmente sobrescrito |
 | `model` | String obrigatória | String opcional (override) |
 | `feature` | Não existe | String — ex: "chat", "analysis" |
+| `override` | Não existe | `ModelOverride?` — cascade de sobreposição |
 
-Fluxo interno do `send()`:
-1. `modelPolicy.selectModel(for: feature, budget:)` → escolhe modelo
-2. `configProvider.requestParams(for: feature, model:)` → temperature, maxTokens
-3. `providerResolver.resolve(for: feature, preference:)` → `any AIProvider`
+**`ModelOverride`** — struct imutável que permite qualquer ponta do sistema sobrescrever aspectos específicos da configuração, sem afetar o default:
+
+```swift
+struct ModelOverride: Sendable {
+    var model: String?        // força modelo específico
+    var tier: String?         // força tier ("deep", "fast", "economy", "local")
+    var temperature: Double?  // sobrescreve temperature
+    var maxTokens: Int?       // sobrescreve maxTokens
+    var providerID: String?   // força provider específico
+}
+```
+
+**Cascata de resolução** — do mais específico ao mais geral:
+
+```
+Override da ponta (card, sessão, pipeline run)
+  ↓ se nil
+Override do projeto (project ai_config.json)
+  ↓ se nil
+Config global (ai_config.json → model_policy + features)
+```
+
+Fluxo interno do `send()` com override:
+1. `modelPolicy.selectModel(for: feature, budget:, override:)` → override.tier ou override.model vencem sobre budget tier
+2. `configProvider.requestParams(for: feature, model:, override:)` → override.temperature/maxTokens vencem sobre feature config
+3. `providerResolver.resolve(for: feature, preference:, override:)` → override.providerID vence sobre active provider
 4. Constrói `AIRequest` interno (caller nunca vê)
 5. `provider.send(request)` com retry + circuit breaker
+
+### 1.1 Cascata de Override — Exemplos Concretos
+
+A configuração padrão vive no `ai_config.json`, mas **qualquer ponta do sistema pode sobrescrever**:
+
+```
+┌──────────────────────────────────────────────────────┐
+│ Card de processamento do projeto "Alpha"             │
+│ override: { tier: "deep", temperature: 0.2 }         │
+│ → Força Opus, baixa temperatura, resto via config    │
+└────────────────────┬─────────────────────────────────┘
+                     │
+┌────────────────────▼─────────────────────────────────┐
+│ ai_config.json do projeto "Alpha"                    │
+│ model_policy.features.analysis.deep = "gemini-2.5-pro"│
+│ → Projeto prefere Gemini, card não especificou modelo │
+└────────────────────┬─────────────────────────────────┘
+                     │
+┌────────────────────▼─────────────────────────────────┐
+│ ai_config.json global                                │
+│ model_policy.features.analysis.deep = "claude-opus-4-8"│
+│ features.analysis.temperature = 0.4                  │
+└──────────────────────────────────────────────────────┘
+```
+
+**Exemplo 1: Card força tier, resto default**
+```swift
+// Card de análise do projeto quer Deep, mas aceita o modelo que o config definir
+aiservice.send(
+    feature: "analysis",
+    messages: [...],
+    override: ModelOverride(tier: "deep")
+)
+// → tier "deep" → usa model_policy.features.analysis.deep
+// → temperature e maxTokens do features.analysis
+```
+
+**Exemplo 2: Card força modelo específico + parâmetros**
+```swift
+// Card quer exatamente Claude Opus com temperatura baixa
+aiservice.send(
+    feature: "analysis",
+    messages: [...],
+    override: ModelOverride(model: "claude-opus-4-8", temperature: 0.2, maxTokens: 8000)
+)
+// → ignora model_policy inteiro pra essa chamada
+// → usa os parâmetros exatos do override
+```
+
+**Exemplo 3: Chat normal, sem override (95% dos casos)**
+```swift
+aiservice.send(feature: "chat", messages: [...])
+// → tier via budget, modelo via model_policy, params via features
+// → zero atrito pro caso comum
+```
+
+**Exemplo 4: Projeto define preferências no seu próprio JSON**
+```json
+// project/Alpha/ai_config.json (override parcial)
+{
+  "model_policy": {
+    "features": {
+      "analysis": { "deep": "gemini-2.5-pro" }
+    }
+  }
+}
+```
+O `JSONConfigProvider` faz merge: project JSON sobrepõe global JSON. O card não precisa saber disso — o `AIService` resolve a cascata.
 
 ### 2. Protocolos Internos
 
@@ -73,7 +167,7 @@ Três protocolos injetáveis no `AIService`, cada um com implementação padrão
 
 ```swift
 protocol AIConfigProvider: Sendable {
-    func requestParams(for feature: String, model: String) -> AIFeatureParams
+    func requestParams(for feature: String, model: String, override: ModelOverride?) -> AIFeatureParams
     func modelFor(feature: String) -> String
     func presetFor(model: String) -> ModelPreset?
     var providerTemplates: [ProviderTemplate] { get }
@@ -82,13 +176,13 @@ protocol AIConfigProvider: Sendable {
 }
 
 protocol ProviderResolver: Sendable {
-    func resolve(for feature: String, preference: ProviderPreference) async throws -> any AIProvider
+    func resolve(for feature: String, preference: ProviderPreference, override: ModelOverride?) async throws -> any AIProvider
     var activeProviderID: String { get async }
     func setActiveProvider(_ id: String) async
 }
 
 protocol ModelPolicy: Sendable {
-    func selectModel(for feature: String, budget: BudgetState, userTier: String?) -> ModelSelection
+    func selectModel(for feature: String, budget: BudgetState, userTier: String?, override: ModelOverride?) -> ModelSelection
     func availableModels() async -> [String]
 }
 ```
@@ -179,7 +273,40 @@ Nenhuma regra de seleção de modelo no Swift. O `TieredModelPolicy` é um motor
 }
 ```
 
-O Swift só faz lookups: `thresholds[budget%]` → tier → `features[feature][tier]` → model string → provider prefix.
+O Swift só faz lookups com override opcional:
+
+```swift
+func selectModel(for feature: String, budget: BudgetState,
+                 userTier: String?, override: ModelOverride?) -> ModelSelection {
+
+    // 1. Override da ponta vence tudo
+    if let model = override?.model {
+        return ModelSelection(model: model, tier: override?.tier ?? "manual",
+                              reason: "override: model explícito")
+    }
+
+    // 2. Override de tier vence budget
+    let tierKey: String
+    if let forced = override?.tier ?? userTier {
+        tierKey = forced
+    } else {
+        tierKey = rules.budget.thresholds
+            .first(where: { budget.remainingPercent >= $0.minPercent })?.tier
+            ?? rules.budget.thresholds.last!.tier
+    }
+
+    // 3. Offline? → tier "local"
+    let effectiveTier = network.isConnected ? tierKey : "local"
+
+    // 4. Resolve modelo da feature table
+    let model = rules.features[feature]?[effectiveTier]
+        ?? rules.features["chat"]?[effectiveTier]
+        ?? rules.tiers[effectiveTier]?.prefer.first
+        ?? "gpt-5.1-mini"
+
+    return ModelSelection(model: model, tier: effectiveTier, reason: "config(budget: \(budget.remainingPercent))")
+}
+```
 
 ### 5. Provider Templates — Data-Driven UI
 
