@@ -51,3 +51,51 @@ extension ModelPolicyRules {
             ?? tiers[tier]?.prefer.first
     }
 }
+
+// MARK: - ModelPolicy Protocol
+
+protocol ModelPolicy: Sendable {
+    func selectModel(
+        for feature: String,
+        budget: BudgetState,
+        userTier: String?,
+        override: ModelOverride?
+    ) -> ModelSelection
+
+    func availableModels() async -> [String]
+}
+
+// MARK: - Config Types (populated by JSON config parsing)
+
+struct ProviderTemplateConfig: Codable, Sendable {
+    var id: String
+    var displayName: String
+    var providerType: String
+    var template: [String: String]
+}
+
+struct APITemplate: Codable, Sendable {
+    var id: String
+    var baseURL: String
+    var authType: String
+    var headers: [String: String]?
+}
+
+// MARK: - AIConfigProvider Protocol
+
+protocol AIConfigProvider: Sendable {
+    func requestParams(for feature: String, model: String, override: ModelOverride?) -> AIFeatureParams
+    func modelFor(feature: String) -> String
+    func presetFor(model: String) -> AIConfig.ModelPreset?
+    var providerTemplates: [ProviderTemplateConfig] { get }
+    var apiTemplates: [APITemplate] { get }
+    var modelPolicyRules: ModelPolicyRules { get }
+    var agentModes: [String: AgentModeConfig] { get }
+}
+
+struct AgentModeConfig: Codable, Sendable {
+    var feature: String
+    var tools: [String]
+    var systemPrompt: String?
+    var modelTier: String?
+}
