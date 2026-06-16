@@ -387,5 +387,129 @@
       "systemPrompt": "You are a chronologist. Build a coherent timeline from the provided items.",
       "userPrompt": "Build a timeline from:\n\n{content}\n\nReturn JSON:\n- timeline: array of {date, event, source_items, significance (low/medium/high)}\n- gaps: array of strings (missing periods or unclear sequences)"
     }
+  },
+  "provider_templates": {
+    "openai": {
+      "id": "openai",
+      "displayName": "OpenAI",
+      "icon": "brain.head.profile",
+      "type": "openAI",
+      "baseURL": "https://api.openai.com/v1",
+      "auth": "api_key_bearer",
+      "authHeader": "Authorization",
+      "authPrefix": "Bearer ",
+      "defaultModels": ["gpt-5.5", "gpt-5.1-mini"],
+      "autoDiscover": false,
+      "description": "GPT models via OpenAI API",
+      "requiresAuth": true
+    },
+    "anthropic": {
+      "id": "anthropic",
+      "displayName": "Anthropic",
+      "icon": "brain",
+      "type": "anthropic",
+      "baseURL": "https://api.anthropic.com/v1",
+      "auth": "api_key_header",
+      "authHeader": "x-api-key",
+      "authPrefix": "",
+      "defaultModels": ["claude-sonnet-4-6", "claude-haiku-4-5"],
+      "autoDiscover": false,
+      "description": "Claude models via Anthropic API",
+      "requiresAuth": true
+    },
+    "gemini": {
+      "id": "gemini",
+      "displayName": "Gemini",
+      "icon": "sparkles",
+      "type": "gemini",
+      "baseURL": "https://generativelanguage.googleapis.com/v1beta",
+      "auth": "api_key_query",
+      "authHeader": "",
+      "authPrefix": "",
+      "defaultModels": ["gemini-2.5-flash"],
+      "autoDiscover": false,
+      "description": "Gemini models via Google AI",
+      "requiresAuth": true
+    },
+    "ollama": {
+      "id": "ollama",
+      "displayName": "Ollama",
+      "icon": "desktopcomputer",
+      "type": "local",
+      "baseURL": "http://localhost:11434",
+      "auth": "none",
+      "defaultModels": ["llama-3.2-3b"],
+      "autoDiscover": true,
+      "discoveryPort": 11434,
+      "description": "Local models via Ollama",
+      "requiresAuth": false
+    },
+    "lmstudio": {
+      "id": "lmstudio",
+      "displayName": "LM Studio",
+      "icon": "cpu",
+      "type": "local",
+      "baseURL": "http://localhost:1234/v1",
+      "auth": "none",
+      "defaultModels": [],
+      "autoDiscover": true,
+      "discoveryPort": 1234,
+      "description": "Local models via LM Studio",
+      "requiresAuth": false
+    }
+  },
+  "api_templates": {},
+  "model_policy": {
+    "budget": {
+      "dailyUSD": 1.00,
+      "thresholds": [
+        { "minPercent": 0.50, "tier": "deep" },
+        { "minPercent": 0.25, "tier": "fast" },
+        { "minPercent": 0.05, "tier": "economy" },
+        { "minPercent": 0.00, "tier": "local" }
+      ]
+    },
+    "tiers": {
+      "deep":    { "label": "Deep",    "prefer": ["claude-opus-4-8", "gpt-5.5", "gemini-2.5-pro"] },
+      "fast":    { "label": "Fast",    "prefer": ["claude-sonnet-4-6", "gpt-5.1-mini", "gemini-2.5-flash"] },
+      "economy": { "label": "Economy", "prefer": ["claude-haiku-4-5", "gpt-5.1-nano", "gemini-2.0-flash-lite"] },
+      "local":   { "label": "Local",   "prefer": ["llama-3.2-3b", "phi-4-mini", "qwen2.5-3b"] }
+    },
+    "features": {
+      "chat":       { "deep": "claude-sonnet-4-6",  "fast": "gpt-5.1-mini",      "economy": "claude-haiku-4-5",   "local": "phi-4-mini" },
+      "agent":      { "deep": "claude-opus-4-8",    "fast": "claude-sonnet-4-6",  "economy": "gpt-5.1-mini",       "local": "llama-3.2-3b" },
+      "analysis":   { "deep": "claude-opus-4-8",    "fast": "claude-sonnet-4-6",  "economy": "gpt-5.1-mini",       "local": "phi-4-mini" },
+      "vision":     { "deep": "claude-sonnet-4-6",  "fast": "gpt-5.1-mini",       "economy": "claude-haiku-4-5",   "local": "phi-4-mini" },
+      "transcription": { "deep": "whisper-1",       "fast": "whisper-1",           "economy": "whisper-1",          "local": "apple-on-device" },
+      "project_ingestion": { "deep": "claude-opus-4-8", "fast": "claude-sonnet-4-6", "economy": "gpt-5.1-mini",  "local": "llama-3.2-3b" }
+    },
+    "offlineFallback": { "enabled": true },
+    "userOverride": { "enabled": true }
+  },
+  "agent_modes": {
+    "chat": {
+      "feature": "chat",
+      "tools": ["shell"],
+      "systemPrompt": "chat_system",
+      "modelTier": "auto"
+    },
+    "analysis": {
+      "feature": "analysis",
+      "tools": ["shell", "write_analysis", "select_schema", "select_skill", "set_title", "write_speakers"],
+      "systemPrompt": "analysis_system",
+      "modelTier": "deep"
+    },
+    "project_ingestion": {
+      "feature": "project_ingestion",
+      "tools": ["shell", "write_analysis", "select_schema"],
+      "systemPrompt": "project_ingestion_system",
+      "modelTier": "deep"
+    },
+    "graph_discovery": {
+      "feature": "analysis",
+      "tools": ["shell"],
+      "systemPrompt": "graph_discovery_system",
+      "modelTier": "fast"
+    }
   }
 }
