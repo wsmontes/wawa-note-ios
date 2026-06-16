@@ -48,7 +48,7 @@ actor AIService {
 
         // 2. Model selection via policy
         let budgetState = BudgetState.from(budget)
-        let selection = modelPolicy.selectModel(
+        let selection = await modelPolicy.selectModel(
             for: feature,
             budget: budgetState,
             userTier: nil,
@@ -107,7 +107,7 @@ actor AIService {
             Task {
                 do {
                     let budgetState = BudgetState.from(budget)
-                    let selection = modelPolicy.selectModel(
+                    let selection = await modelPolicy.selectModel(
                         for: feature, budget: budgetState,
                         userTier: nil, override: override
                     )

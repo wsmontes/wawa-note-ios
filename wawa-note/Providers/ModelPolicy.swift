@@ -60,7 +60,7 @@ protocol ModelPolicy: Sendable {
         budget: BudgetState,
         userTier: String?,
         override: ModelOverride?
-    ) -> ModelSelection
+    ) async -> ModelSelection
 
     func availableModels() async -> [String]
 }
@@ -149,4 +149,83 @@ struct AgentModeConfig: Codable, Sendable {
     var tools: [String]
     var systemPrompt: String?
     var modelTier: String?
+}
+
+// MARK: - TieredModelPolicy
+
+actor TieredModelPolicy: ModelPolicy {
+    let rules: ModelPolicyRules
+    let network: NetworkMonitor
+    let providerResolver: any ProviderResolver
+
+    init(
+        rules: ModelPolicyRules,
+        network: NetworkMonitor = .shared,
+        providerResolver: any ProviderResolver
+    ) {
+        self.rules = rules
+        self.network = network
+        self.providerResolver = providerResolver
+    }
+
+    func selectModel(
+        for feature: String,
+        budget: BudgetState,
+        userTier: String?,
+        override: ModelOverride?
+    ) -> ModelSelection {
+        // 1. Override model wins everything
+        if let model = override?.model {
+            return ModelSelection(
+                model: model,
+                tier: override?.tier ?? "manual",
+                provider: providerTypeFor(model: model),
+                reason: "override: model"
+            )
+        }
+
+        // 2. Override tier wins over budget
+        let tierKey: String
+        if let forced = override?.tier ?? userTier {
+            tierKey = forced
+        } else {
+            tierKey = rules.tier(for: budget.remainingPercent)
+        }
+
+        // 3. Offline? → tier "local"
+        let effectiveTier = network.isAvailable ? tierKey : "local"
+
+        // 4. Resolve model from feature table
+        let model = rules.model(for: feature, tier: effectiveTier)
+            ?? rules.tiers[effectiveTier]?.prefer.first
+            ?? "gpt-5.1-mini"
+
+        return ModelSelection(
+            model: model,
+            tier: effectiveTier,
+            provider: providerTypeFor(model: model),
+            reason: "config(budget: \(String(format: "%.0f", budget.remainingPercent * 100))%)"
+        )
+    }
+
+    func availableModels() async -> [String] {
+        guard let provider = try? await providerResolver.resolve(
+            for: "chat", preference: .any, override: nil
+        ) else { return [] }
+        return (try? await provider.fetchModels()) ?? []
+    }
+
+    private func providerTypeFor(model: String) -> ProviderType {
+        let lower = model.lowercased()
+        if lower.hasPrefix("gpt-") || lower.hasPrefix("o1") || lower.hasPrefix("o3") {
+            return .openAI
+        }
+        if lower.hasPrefix("claude-") {
+            return .anthropic
+        }
+        if lower.hasPrefix("gemini-") {
+            return .gemini
+        }
+        return .openAICompatible
+    }
 }
