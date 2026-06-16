@@ -1,0 +1,313 @@
+<h2>UI para AI Services — Proposta Visual</h2>
+<p class="subtitle">Adicionar providers e modelos sem editar JSON. Tudo persiste no ai_config.json.</p>
+
+<div class="section">
+  <h3>📱 Tela 1: AI Services (Settings)</h3>
+  <p style="font-size:12px;color:#6b7280">Lista de providers configurados + budget + tiers. Substitui a atual ProviderPickerView.</p>
+</div>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">AI Services — Lista de Providers</div>
+    <div class="mockup-body" style="max-width:320px;margin:0 auto;font-family:-apple-system,sans-serif">
+      <div style="background:#f9fafb;border-radius:12px;padding:12px">
+        <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:8px">🔮 Active Providers</div>
+
+        <div style="background:#fff;border-radius:8px;padding:10px;margin-bottom:6px;border:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between">
+          <div>
+            <div style="font-size:13px;font-weight:600">OpenAI</div>
+            <div style="font-size:10px;color:#6b7280">gpt-5.5 · gpt-5.1-mini · whisper-1</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:4px">
+            <span style="width:6px;height:6px;background:#10b981;border-radius:50%"></span>
+            <span style="font-size:10px;color:#6b7280">✓</span>
+          </div>
+        </div>
+
+        <div style="background:#fff;border-radius:8px;padding:10px;margin-bottom:6px;border:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between">
+          <div>
+            <div style="font-size:13px;font-weight:600">Anthropic</div>
+            <div style="font-size:10px;color:#6b7280">claude-opus-4-8 · claude-sonnet-4-6</div>
+          </div>
+          <span style="width:6px;height:6px;background:#10b981;border-radius:50%"></span>
+        </div>
+
+        <div style="background:#fff;border-radius:8px;padding:10px;margin-bottom:6px;border:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between">
+          <div>
+            <div style="font-size:13px;font-weight:600">Ollama (local)</div>
+            <div style="font-size:10px;color:#6b7280">llama-3.2-3b · phi-4-mini</div>
+          </div>
+          <span style="width:6px;height:6px;background:#10b981;border-radius:50%"></span>
+        </div>
+
+        <div style="background:#fff;border-radius:8px;padding:8px;border:1px dashed #d1d5db;text-align:center;cursor:pointer">
+          <span style="font-size:18px;color:#6b7280">+</span>
+          <span style="font-size:11px;color:#6b7280;display:block">Add Provider</span>
+        </div>
+      </div>
+
+      <div style="background:#f9fafb;border-radius:12px;padding:12px;margin-top:8px">
+        <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:8px">💰 Budget</div>
+        <div style="background:#fff;border-radius:8px;padding:10px;border:1px solid #e5e7eb">
+          <div style="display:flex;justify-content:space-between;font-size:12px">
+            <span>Daily limit</span><span style="font-weight:600">$1.00</span>
+          </div>
+          <div style="height:4px;background:#e5e7eb;border-radius:2px;margin:6px 0">
+            <div style="width:34%;height:4px;background:#f59e0b;border-radius:2px"></div>
+          </div>
+          <div style="font-size:10px;color:#6b7280">$0.34 spent today</div>
+        </div>
+      </div>
+
+      <div style="background:#f9fafb;border-radius:12px;padding:12px;margin-top:8px">
+        <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:8px">🎯 Model Tiers</div>
+        <div style="display:flex;gap:6px">
+          <div style="flex:1;background:#fff;border-radius:6px;padding:8px;text-align:center;border:1px solid #e5e7eb">
+            <div style="font-size:10px;color:#6b7280">Deep</div>
+            <div style="font-size:10px;font-weight:600">Claude Opus</div>
+            <div style="font-size:9px;color:#6b7280">> 50%</div>
+          </div>
+          <div style="flex:1;background:#fff;border-radius:6px;padding:8px;text-align:center;border:1px solid #e5e7eb">
+            <div style="font-size:10px;color:#6b7280">Fast</div>
+            <div style="font-size:10px;font-weight:600">GPT-5.1 Mini</div>
+            <div style="font-size:9px;color:#6b7280">25-50%</div>
+          </div>
+          <div style="flex:1;background:#fff;border-radius:6px;padding:8px;text-align:center;border:1px solid #e5e7eb">
+            <div style="font-size:10px;color:#6b7280">Economy</div>
+            <div style="font-size:10px;font-weight:600">Haiku 4.5</div>
+            <div style="font-size:9px;color:#6b7280">5-25%</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">Tier Editor — Assign Models per Feature</div>
+    <div class="mockup-body" style="max-width:320px;margin:0 auto;font-family:-apple-system,sans-serif">
+      <div style="background:#f9fafb;border-radius:12px;padding:12px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px">
+          <span style="font-size:14px">←</span>
+          <span style="font-size:13px;font-weight:600">Tier: Deep</span>
+        </div>
+        <div style="font-size:10px;color:#6b7280;margin-bottom:10px">Budget: > 50% remaining</div>
+
+        <div style="font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:6px">Features → Model</div>
+
+        <div style="background:#fff;border-radius:6px;padding:8px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;border:1px solid #e5e7eb">
+          <span style="font-size:11px">Chat</span>
+          <span style="font-size:10px;background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:4px">claude-sonnet-4-6 ▼</span>
+        </div>
+        <div style="background:#fff;border-radius:6px;padding:8px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;border:1px solid #e5e7eb">
+          <span style="font-size:11px">Agent</span>
+          <span style="font-size:10px;background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:4px">claude-opus-4-8 ▼</span>
+        </div>
+        <div style="background:#fff;border-radius:6px;padding:8px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;border:1px solid #e5e7eb">
+          <span style="font-size:11px">Analysis</span>
+          <span style="font-size:10px;background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:4px">claude-opus-4-8 ▼</span>
+        </div>
+        <div style="background:#fff;border-radius:6px;padding:8px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;border:1px solid #e5e7eb">
+          <span style="font-size:11px">Vision</span>
+          <span style="font-size:10px;background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:4px">gpt-5.1-mini ▼</span>
+        </div>
+        <div style="background:#fff;border-radius:6px;padding:8px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;border:1px solid #e5e7eb">
+          <span style="font-size:11px">Transcription</span>
+          <span style="font-size:10px;background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:4px">whisper-1 ▼</span>
+        </div>
+        <div style="background:#fff;border-radius:6px;padding:8px;display:flex;justify-content:space-between;align-items:center;border:1px solid #e5e7eb">
+          <span style="font-size:11px">Project Ingestion</span>
+          <span style="font-size:10px;background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:4px">claude-opus-4-8 ▼</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:16px">
+  <h3>➕ Tela 2: Add Provider — Flow em 2 passos</h3>
+</div>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">Passo 1: Escolher template</div>
+    <div class="mockup-body" style="max-width:320px;margin:0 auto;font-family:-apple-system,sans-serif">
+      <div style="background:#f9fafb;border-radius:12px;padding:12px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px">Add AI Provider</div>
+        <div style="font-size:10px;color:#6b7280;margin-bottom:10px">Choose a provider template</div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          <div style="background:#fff;border-radius:8px;padding:10px;text-align:center;border:1px solid #e5e7eb">
+            <div style="font-size:16px">🤖</div>
+            <div style="font-size:11px;font-weight:600">OpenAI</div>
+            <div style="font-size:9px;color:#6b7280">Cloud · API Key</div>
+          </div>
+          <div style="background:#fff;border-radius:8px;padding:10px;text-align:center;border:1px solid #e5e7eb">
+            <div style="font-size:16px">🧠</div>
+            <div style="font-size:11px;font-weight:600">Anthropic</div>
+            <div style="font-size:9px;color:#6b7280">Cloud · API Key</div>
+          </div>
+          <div style="background:#fff;border-radius:8px;padding:10px;text-align:center;border:1px solid #e5e7eb">
+            <div style="font-size:16px">🔷</div>
+            <div style="font-size:11px;font-weight:600">Gemini</div>
+            <div style="font-size:9px;color:#6b7280">Cloud · API Key</div>
+          </div>
+          <div style="background:#fff;border-radius:8px;padding:10px;text-align:center;border:1px solid #e5e7eb">
+            <div style="font-size:16px">🦙</div>
+            <div style="font-size:11px;font-weight:600">Ollama</div>
+            <div style="font-size:9px;color:#6b7280">Local · Auto-detect</div>
+          </div>
+          <div style="background:#fff;border-radius:8px;padding:10px;text-align:center;border:1px solid #e5e7eb">
+            <div style="font-size:16px">🖥️</div>
+            <div style="font-size:11px;font-weight:600">LM Studio</div>
+            <div style="font-size:9px;color:#6b7280">Local · Auto-detect</div>
+          </div>
+          <div style="background:#fff;border-radius:8px;padding:10px;text-align:center;border:1px solid #e5e7eb">
+            <div style="font-size:16px">🔌</div>
+            <div style="font-size:11px;font-weight:600">Custom</div>
+            <div style="font-size:9px;color:#6b7280">OpenAI-compatível</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">Passo 2: Conectar + Fetch Models</div>
+    <div class="mockup-body" style="max-width:320px;margin:0 auto;font-family:-apple-system,sans-serif">
+      <div style="background:#f9fafb;border-radius:12px;padding:12px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px">
+          <span style="font-size:14px">←</span>
+          <span style="font-size:13px;font-weight:600">Connect OpenAI</span>
+        </div>
+
+        <div style="background:#fff;border-radius:8px;padding:10px;margin-bottom:8px;border:1px solid #e5e7eb">
+          <div style="font-size:10px;color:#6b7280">API Key</div>
+          <div style="font-size:11px;font-family:monospace">sk-••••••••••••••••••••</div>
+        </div>
+
+        <div style="background:#fff;border-radius:8px;padding:10px;margin-bottom:8px;border:1px solid #e5e7eb">
+          <div style="font-size:10px;color:#6b7280">Base URL (optional)</div>
+          <div style="font-size:11px;color:#9ca3af">https://api.openai.com/v1</div>
+        </div>
+
+        <div style="background:#eff6ff;border-radius:6px;padding:8px;margin-bottom:8px;text-align:center;font-size:10px;color:#1e40af">
+          ⬇️ Fetching available models...
+        </div>
+
+        <div style="background:#fff;border-radius:8px;padding:10px;margin-bottom:4px;border:1px solid #e5e7eb">
+          <div style="font-size:10px;color:#6b7280">Available Models (fetched from API)</div>
+          <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px">
+            <span style="font-size:9px;background:#d1fae5;color:#065f46;padding:2px 6px;border-radius:4px">gpt-5.5 ✓</span>
+            <span style="font-size:9px;background:#d1fae5;color:#065f46;padding:2px 6px;border-radius:4px">gpt-5.1-mini ✓</span>
+            <span style="font-size:9px;background:#e5e7eb;color:#6b7280;padding:2px 6px;border-radius:4px">gpt-5.1-nano</span>
+            <span style="font-size:9px;background:#e5e7eb;color:#6b7280;padding:2px 6px;border-radius:4px">whisper-1</span>
+            <span style="font-size:9px;background:#e5e7eb;color:#6b7280;padding:2px 6px;border-radius:4px">text-embedding-3</span>
+          </div>
+          <div style="font-size:9px;color:#6b7280;margin-top:4px">Tap to enable/disable models</div>
+        </div>
+
+        <div style="background:#10b981;color:#fff;border-radius:8px;padding:10px;text-align:center;font-size:12px;font-weight:600">
+          Save Provider
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:16px">
+  <h3>🔄 Fluxo completo: Add Provider → JSON → Runtime</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Tudo converge no ai_config.json</div>
+  <div class="mockup-body">
+    <pre style="font-size:10.5px;line-height:1.5;margin:0;white-space:pre;background:#f5f5f5;padding:10px">
+<strong style="color:#6b7280">UI Action: User taps "Save Provider"</strong>
+         │
+         ▼
+<strong style="color:#1a56db">AIConfigPersistence</strong> (actor)
+  ├─ writeProviderConfig(provider) → atualiza ai_config.json (providers: { ... })
+  ├─ writeModelPolicy(policy)      → atualiza ai_config.json (model_policy: { ... })
+  ├─ writeFeatureMapping(map)      → atualiza ai_config.json (features: { ... })
+  └─ reload()                      → notifica AIService para recarregar config
+         │
+         ▼
+<strong style="color:#047857">JSONConfigProvider.reload()</strong>
+  → Relê ai_config.json
+  → Atualiza ModelPolicyRules, ProviderConfigs, FeatureConfigs
+  → Novos providers/modelos disponíveis IMEDIATAMENTE (sem restart)
+         │
+         ▼
+<strong style="color:#b45309">AIService</strong>
+  → Próxima chamada send() já usa o novo provider/modelo
+
+<strong style="color:#6b7280;margin-top:8px">Para ADICIONAR um provider NOVO que não existe no template:</strong>
+  1. User escolhe "Custom" no template picker
+  2. Preenche: nome, base URL, API key, path
+  3. App testa conexão (fetchModels no endpoint)
+  4. User seleciona quais modelos usar
+  5. Salva → ai_config.json atualizado → disponível
+
+<strong style="color:#6b7280">Para NOVOS MODELOS de um provider existente:</strong>
+  1. Settings → Provider → "Refresh Models" (refetch do endpoint)
+  2. Novos modelos aparecem na lista
+  3. User ativa/desativa cada um
+  4. User pode assignar a features/tiers via Tier Editor
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section" style="margin-top:16px">
+  <h3>📐 ai_config.json como fonte da verdade — estrutura final</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Blocos que a UI edita visualmente</div>
+  <div class="mockup-body">
+    <pre style="font-size:10px;line-height:1.4;margin:0;white-space:pre;background:#f5f5f5;padding:10px">
+{
+  "<strong>providers</strong>": {           ← UI: Provider List → Add/Edit/Delete
+    "openai": {
+      "type": "openAI", "base_url": "https://api.openai.com/v1",
+      "models": ["gpt-5.5", "gpt-5.1-mini", "whisper-1", "text-embedding-3-small"],
+      "enabled": true
+    },
+    "ollama": {
+      "type": "local", "base_url": "http://localhost:11434",
+      "models": ["llama-3.2-3b", "phi-4-mini"],
+      "enabled": true
+    }
+  },
+
+  "<strong>model_policy</strong>": {       ← UI: Tier Editor + Budget slider
+    "budget": { "daily_usd": 1.00, "thresholds": [...] },
+    "tiers": {
+      "deep":    { "prefer": ["claude-opus-4-8", "gpt-5.5", "gemini-2.5-pro"] },
+      "fast":    { "prefer": ["claude-sonnet-4-6", "gpt-5.1-mini", ...] },
+      "economy": { "prefer": ["claude-haiku-4-5", "gpt-5.1-nano", ...] },
+      "local":   { "prefer": ["llama-3.2-3b", "phi-4-mini", ...] }
+    },
+    "features": {
+      "chat":     { "deep": "claude-sonnet-4-6", "fast": "gpt-5.1-mini", ... },
+      "agent":    { "deep": "claude-opus-4-8",   "fast": "claude-sonnet-4-6", ... }
+    }
+  },
+
+  "<strong>features</strong>": {          ← UI: Feature Config (temperature, prompts)
+    "analysis": { "temperature": 0.4, "max_tokens": 4096, ... },
+    "chat":     { "temperature": 0.7, "max_tokens": 2048, ... }
+  },
+
+  "<strong>agent_modes</strong>": {       ← UI: Agent Config (tools, system prompts)
+    "chat":     { "tools": ["shell"], ... },
+    "analysis": { "tools": ["shell", "write_analysis", ...], ... }
+  }
+}
+    </pre>
+  </div>
+</div>
+</div>
+</div>
+
+<div style="margin-top:16px">
+  <p style="color:#6b7280;font-size:13px">📌 UI proposta: 3 telas (Provider List, Tier Editor, Add Provider Wizard). Tudo que a UI salva vai pro ai_config.json. O AIService recarrega sem restart.</p>
+</div>

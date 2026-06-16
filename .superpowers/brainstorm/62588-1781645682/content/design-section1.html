@@ -1,0 +1,163 @@
+<h2>Design — Seção 1: Arquitetura Central</h2>
+<p class="subtitle">AIService como fachada única + protocolos internos para flexibilidade</p>
+
+<div class="section">
+  <h3>🎯 Princípio: Um ponto de entrada. Zero bypass por construção.</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Nova Arquitetura Proposta</div>
+  <div class="mockup-body">
+    <pre style="font-size:12px;line-height:1.5;margin:0;white-space:pre;background:#f5f5f5;padding:14px;border-radius:6px;overflow-x:auto">
+┌─────────────────────────────────────────────────────────┐
+│              <strong style="color:#1a56db">AIService</strong> (actor, injetado via DI)              │
+│  ÚNICO ponto de entrada para qualquer chamada AI         │
+│                                                         │
+│  func send(feature: String, messages: [...], tools?: ..) │
+│  func sendStreaming(feature: String, ...) → AsyncStream  │
+│  func embed(text: String, model: String) → [Float]       │
+│                                                         │
+│  <em style="color:#6b7280">temperature, maxTokens NUNCA são passados pelo caller.</em>      │
+│  <em style="color:#6b7280">Vêm SEMPRE do ai_config.json via AIConfigProvider.</em>        │
+└──────────┬──────────────┬──────────────┬────────────────┘
+           │              │              │
+    ┌──────▼──────┐ ┌─────▼─────┐ ┌──────▼──────┐
+    │<strong>AIConfig</strong>    │ │<strong>Provider</strong>  │ │<strong>Model</strong>      │
+    │<strong>Provider</strong>   │ │<strong>Resolver</strong>  │ │<strong>Policy</strong>     │
+    │ (protocol)  │ │ (protocol) │ │ (protocol)  │
+    │             │ │            │ │             │
+    │ requestParams│ │ resolve()  │ │ select()    │
+    │ modelFor()  │ │ health     │ │ budget tier │
+    │ presetFor() │ │ fallback   │ │ auto/deep   │
+    └──────┬──────┘ └─────┬──────┘ └──────┬──────┘
+           │              │              │
+    ┌──────▼──────┐ ┌─────▼─────┐ ┌──────▼──────┐
+    │JSONConfig   │ │HealthAware│ │TieredModel  │
+    │Provider     │ │Resolver   │ │Policy       │
+    │(ai_config)  │ │(pool+ping)│ │(budget+tier)│
+    └─────────────┘ └───────────┘ └─────────────┘
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section">
+  <h3>📐 O tipo central: AIFeatureRequest (substitui AIRequest)</h3>
+
+<div class="mockup">
+  <div class="mockup-header">AIRequest antigo → AIFeatureRequest novo</div>
+  <div class="mockup-body">
+    <table style="width:100%;font-size:11px;border-collapse:collapse">
+      <thead>
+        <tr style="background:#e5e7eb">
+          <th style="padding:6px 8px;text-align:left;width:50%">❌ AIRequest (atual — bypass possível)</th>
+          <th style="padding:6px 8px;text-align:left;width:50%">✅ AIFeatureRequest (novo — bypass impossível)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="padding:5px 8px;vertical-align:top;font-family:monospace;font-size:11px">
+            model: String<br>
+            messages: [AIMessage]<br>
+            <span style="color:#d97706">temperature: Double?</span><br>
+            <span style="color:#d97706">maxTokens: Int?</span><br>
+            responseFormat: ResponseFormat?<br>
+            tools: [AIToolDefinition]?<br>
+            toolChoice: String?
+          </td>
+          <td style="padding:5px 8px;vertical-align:top;font-family:monospace;font-size:11px">
+            <strong>feature: String</strong><br>
+            messages: [AIMessage]<br>
+            model: String? <em style="color:#6b7280">(override opcional)</em><br>
+            responseFormat: ResponseFormat?<br>
+            tools: [AIToolDefinition]?<br>
+            toolChoice: String?<br>
+            <em style="color:#047857">// temperature e maxTokens vêm do config</em><br>
+            <em style="color:#047857">// SEMPRE. O caller não decide.</em>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+</div>
+
+<div class="section">
+  <h3>🔌 Protocolos internos (trocáveis, testáveis)</h3>
+
+<div class="mockup">
+  <div class="mockup-header">3 protocolos + 1 type</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.4;margin:0;white-space:pre;background:#f5f5f5;padding:10px">
+<strong style="color:#1a56db">protocol AIConfigProvider: Sendable</strong> {
+    func requestParams(for feature: String, model: String) -> AIFeatureParams
+    func modelFor(feature: String) -> String
+    func resolvedModelFor(feature: String, context: ModelContext) -> String?
+    func presetFor(model: String) -> ModelPreset?
+}
+
+<strong style="color:#047857">protocol ProviderResolver: Sendable</strong> {
+    func resolve(for feature: String, context: ProviderContext) throws -> any AIProvider
+    func resolveStreaming(for feature: String, context: ProviderContext) throws -> any AIProvider
+    var activeProviderID: String { get }
+}
+
+<strong style="color:#b45309">protocol ModelPolicy: Sendable</strong> {
+    func selectModel(for feature: String, budget: BudgetTracker, context: ModelContext) -> String
+    func availableModels(for provider: any AIProvider) async -> [String]
+}
+
+<strong style="color:#6b7280">struct AIServiceConfig: Sendable</strong> {
+    var retryPolicy: RetryPolicy
+    var circuitBreaker: CircuitBreaker?
+    var defaultFeature: String  // fallback feature
+}
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section">
+  <h3>🏗️ AIService — implementação esqueleto</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Como o AIService monta a request</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.5;margin:0;white-space:pre;background:#f5f5f5;padding:10px">
+actor AIService {
+    let configProvider: AIConfigProvider
+    let providerResolver: ProviderResolver
+    let modelPolicy: ModelPolicy
+    let retryConfig: RetryPolicy
+
+    func send(feature: String, messages: [AIMessage], ...) async throws -> AIResponse {
+        // 1. Model selection via policy
+        let model = modelPolicy.selectModel(for: feature, budget: budget)
+
+        // 2. Params from config (temperature, maxTokens) — SEMPRE
+        let params = configProvider.requestParams(for: feature, model: model)
+
+        // 3. Provider resolved with health + fallback
+        let provider = try providerResolver.resolve(for: feature, context: ctx)
+
+        // 4. Build internal AIRequest (callers never see this)
+        let internalRequest = AIRequest(
+            model: model, messages: messages,
+            temperature: params.temperature,
+            maxTokens: params.maxTokens, ...
+        )
+
+        // 5. Send with retry + circuit breaker
+        return try await retryPolicy.execute {
+            try await provider.send(internalRequest)
+        }
+    }
+}
+    </pre>
+  </div>
+</div>
+</div>
+</div>
+
+<div style="margin-top:16px">
+  <p style="color:#6b7280;font-size:13px">📌 Esta seção cobre a arquitetura central. As próximas seções: (2) AgentOrchestrator unificado, (3) ModelPolicy + Budget, (4) Plano de migração.</p>
+</div>

@@ -1,0 +1,186 @@
+<h2>Design — Seção 2: AgentOrchestrator Unificado</h2>
+<p class="subtitle">AgentLoop + ContentPipelineService convergem num único orquestrador</p>
+
+<div class="section">
+  <h3>🔀 Problema atual: 2 AgentLoops, 2 inicializações diferentes</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Hoje: Duplicação de lógica de setup</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.4;margin:0;white-space:pre;background:#fef2f2;padding:10px">
+<strong style="color:#dc2626">ChatViewModel.sendMessage()</strong>          <strong style="color:#dc2626">ContentPipelineService.runAnalysis()</strong>
+  AgentLoop(                                 AgentLoop(
+    provider: resolveActive(),                 provider: resolveActive(),
+    model: config.modelFor("chat"),             model: config.resolvedModelFor("analysis"),
+    systemPrompt: "...")                        systemPrompt: "...")
+  .runStreaming(                             .runAutonomous(
+    userMessage: msg,                          item: item,
+    history: chatHistory,                      project: project,
+    shell: ShellTool())                        shell: ShellTool(),
+                                               selectSchema: SelectSchemaTool(),
+                                               writeAnalysis: WriteAnalysisTool(),
+                                               ... 5+ tools ...)
+    </pre>
+  </div>
+</div>
+
+<div class="section" style="margin-top:12px">
+  <h3>✅ Proposta: AgentOrchestrator com modos</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Novo: Um orquestrador, dois modos, tools por contexto</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.5;margin:0;white-space:pre;background:#ecfdf5;padding:12px">
+<strong style="color:#047857">AgentOrchestrator</strong> (actor)
+├─ aiService: AIService
+├─ toolRegistry: AgentToolRegistry
+├─ contextManager: ContextWindowManager
+│
+├─ <strong>runInteractive(session:history:context:)</strong> → AsyncStream&lt;AgentEvent&gt;
+│   Modo chat. Tools: ShellTool + contexto do projeto/item ativo.
+│
+├─ <strong>runAutonomous(task:item:project:)</strong> → AgentResult
+│   Modo pipeline. Tools: ShellTool + WriteAnalysis + SelectSchema +
+│                        SelectSkill + SetTitle + WriteSpeakers.
+│
+└─ <strong>tools(for: AgentMode)</strong> → [AgentTool]
+    Resolve tools baseado no modo + schema do projeto.
+
+<strong style="color:#1a56db">enum AgentMode: String, Codable</strong> {
+    case chat
+    case analysis          // pipeline de ingestão
+    case projectIngestion   // ingestão em projeto
+    case graphDiscovery     // descoberta de conexões
+}
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section">
+  <h3>🧩 Tools são resolvidas por modo — configurável via ai_config.json</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Novo bloco no ai_config.json: agent_modes</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.4;margin:0;white-space:pre;background:#f5f5f5;padding:10px">
+{
+  "agent_modes": {
+    "chat": {
+      "feature": "chat",
+      "tools": ["shell"],
+      "system_prompt": "chat_system",
+      "model_tier": "auto"
+    },
+    "analysis": {
+      "feature": "analysis",
+      "tools": ["shell", "write_analysis", "select_schema",
+                "select_skill", "set_title", "write_speakers"],
+      "system_prompt": "analysis_system",
+      "model_tier": "deep"
+    },
+    "project_ingestion": {
+      "feature": "project_ingestion",
+      "tools": ["shell", "write_analysis", "select_schema"],
+      "system_prompt": "project_ingestion_system",
+      "model_tier": "deep"
+    }
+  }
+}
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section">
+  <h3>📞 Como ChatViewModel e Pipeline passam a usar</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Call sites simplificados</div>
+  <div class="mockup-body">
+    <table style="width:100%;font-size:11px;border-collapse:collapse">
+      <thead>
+        <tr style="background:#e5e7eb">
+          <th style="padding:6px 8px;text-align:left;width:50%">Antes (20+ linhas de setup)</th>
+          <th style="padding:6px 8px;text-align:left;width:50%">Depois (3 linhas)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="padding:5px 8px;vertical-align:top;font-family:monospace;font-size:10px">
+let config = AIConfigService.shared<br>
+let provider = ProviderRouter.resolveActive()<br>
+let model = config.modelFor(feature: "chat")<br>
+let params = config.requestParams(for: "chat")<br>
+let loop = AgentLoop(provider: provider,<br>
+&nbsp;&nbsp;model: model, systemPrompt: "...",<br>
+&nbsp;&nbsp;tools: [ShellTool()])<br>
+loop.runStreaming(userMessage: msg, ...)
+          </td>
+          <td style="padding:5px 8px;vertical-align:top;font-family:monospace;font-size:10px">
+<strong style="color:#047857">orchestrator.runInteractive(</strong><br>
+<strong style="color:#047857">&nbsp;&nbsp;session: session,</strong><br>
+<strong style="color:#047857">&nbsp;&nbsp;history: chatHistory,</strong><br>
+<strong style="color:#047857">&nbsp;&nbsp;context: toolContext</strong><br>
+<strong style="color:#047857">)</strong>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+</div>
+
+<div class="section">
+  <h3>🏗️ AgentOrchestrator — esqueleto</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Implementação</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.5;margin:0;white-space:pre;background:#f5f5f5;padding:10px">
+actor AgentOrchestrator {
+    let aiService: AIService
+    let toolRegistry: AgentToolRegistry
+    let contextManager: ContextWindowManager
+    let configProvider: AIConfigProvider
+
+    func runInteractive(
+        session: ChatSession,
+        history: [AIMessage],
+        context: ToolContext
+    ) -> AsyncThrowingStream&lt;AgentEvent, Error&gt; {
+        let mode = AgentMode.chat
+        let tools = toolRegistry.tools(for: mode)
+        let systemPrompt = configProvider.systemPrompt(for: mode.rawValue)
+        let messages = contextManager.buildMessages(system: systemPrompt, history: history)
+
+        return aiService.sendStreaming(
+            feature: mode.featureKey,
+            messages: messages,
+            tools: tools,
+            toolChoice: "auto"
+        )
+        // Tool loop é interno ao AgentOrchestrator
+        // Caller só vê a stream de eventos (texto, tool_call, tool_result)
+    }
+
+    func runAutonomous(
+        task: AgentTask,
+        item: KnowledgeItem,
+        project: Project?
+    ) async throws -> AgentResult {
+        let mode = task.mode  // .analysis, .projectIngestion, .graphDiscovery
+        let tools = toolRegistry.tools(for: mode)
+        // ... loop autônomo com max iterations ...
+    }
+}
+    </pre>
+  </div>
+</div>
+</div>
+</div>
+</div>
+
+<div style="margin-top:16px">
+  <p style="color:#6b7280;font-size:13px">📌 Seção 2 cobre a unificação AgentLoop + Pipeline. Próxima: (3) ModelPolicy + Budget tracking.</p>
+</div>

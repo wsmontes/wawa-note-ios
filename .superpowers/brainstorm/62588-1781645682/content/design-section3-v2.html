@@ -1,0 +1,156 @@
+<h2>Design — Seção 3 (revisada): ModelPolicy 100% JSON-Driven</h2>
+<p class="subtitle">Nenhuma regra de seleção de modelo no código Swift. Tudo no ai_config.json.</p>
+
+<div class="section" style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:8px;padding:12px">
+  <h3 style="margin:0 0 4px 0;color:#047857">🔑 Princípio: O Swift lê regras do JSON. Não toma decisões.</h3>
+  <p style="margin:0;font-size:13px">O <code>TieredModelPolicy</code> vira um motor de rules evaluation. As regras (thresholds, tiers, modelos, fallbacks) são declaradas no JSON.</p>
+</div>
+
+<div class="section" style="margin-top:16px">
+  <h3>📐 O bloco completo no ai_config.json</h3>
+
+<div class="mockup">
+  <div class="mockup-header">model_policy — regras declarativas para seleção de modelo</div>
+  <div class="mockup-body">
+    <pre style="font-size:10.5px;line-height:1.45;margin:0;white-space:pre;background:#f5f5f5;padding:12px">
+{
+  "<strong style="color:#1a56db">model_policy</strong>": {
+
+    "<strong>budget</strong>": {
+      "daily_usd": 1.00,
+      "thresholds": [
+        { "min_percent": 0.50, "tier": "deep" },
+        { "min_percent": 0.25, "tier": "fast" },
+        { "min_percent": 0.05, "tier": "economy" },
+        { "min_percent": 0.00, "tier": "local" }
+      ]
+    },
+
+    "<strong>tiers</strong>": {
+      "deep":    { "label": "Máxima capacidade", "prefer": ["claude-opus-4-8", "gpt-5.5", "gemini-2.5-pro"] },
+      "fast":    { "label": "Rápido",            "prefer": ["claude-sonnet-4-6", "gpt-5.1-mini", "gemini-2.5-flash"] },
+      "economy": { "label": "Econômico",         "prefer": ["claude-haiku-4-5", "gpt-5.1-nano", "gemini-2.0-flash-lite"] },
+      "local":   { "label": "On-device",         "prefer": ["llama-3.2-3b", "phi-4-mini", "qwen2.5-3b"] }
+    },
+
+    "<strong>features</strong>": {
+      "chat":       { "deep": "claude-sonnet-4-6",  "fast": "gpt-5.1-mini",      "economy": "claude-haiku-4-5",   "local": "phi-4-mini" },
+      "agent":      { "deep": "claude-opus-4-8",    "fast": "claude-sonnet-4-6",  "economy": "gpt-5.1-mini",       "local": "llama-3.2-3b" },
+      "analysis":   { "deep": "claude-opus-4-8",    "fast": "claude-sonnet-4-6",  "economy": "gpt-5.1-mini",       "local": "phi-4-mini" },
+      "vision":     { "deep": "claude-sonnet-4-6",  "fast": "gpt-5.1-mini",       "economy": "claude-haiku-4-5",   "local": "phi-4-mini" },
+      "transcription": { "deep": "whisper-1",       "fast": "whisper-1",           "economy": "whisper-1",          "local": "apple-on-device" },
+      "project_ingestion": { "deep": "claude-opus-4-8", "fast": "claude-sonnet-4-6", "economy": "gpt-5.1-mini",  "local": "llama-3.2-3b" }
+    },
+
+    "<strong>offline_fallback</strong>": {
+      "enabled": true,
+      "prefer_local_provider": true,
+      "timeout_seconds": 5.0
+    },
+
+    "<strong>user_override</strong>": {
+      "enabled": true,
+      "description": "Permite que o usuário force um tier específico via UI (Auto/Deep/Fast)"
+    }
+  }
+}
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section" style="margin-top:12px">
+  <h3>⚙️ TieredModelPolicy — agora só um motor de rules</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Swift: zero decisões hardcoded</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.5;margin:0;white-space:pre;background:#f5f5f5;padding:10px">
+actor TieredModelPolicy: ModelPolicy {
+    let rules: ModelPolicyRules     // ← carregado do JSON
+    let budget: BudgetTracker
+    let network: NetworkMonitor
+
+    func selectModel(for feature: String, budget: BudgetState,
+                     userTier: String? = nil) -> ModelSelection {
+
+        // 1. Resolve o tier: user override > budget threshold > fallback
+        let tierKey: String
+        if let forced = userTier, rules.userOverride.enabled {
+            tierKey = forced
+        } else {
+            tierKey = rules.budget.thresholds
+                .first(where: { budget.remainingPercent >= $0.minPercent })?
+                .tier ?? rules.budget.thresholds.last!.tier
+        }
+
+        // 2. Offline? → tier "local"
+        let effectiveTier = network.isConnected ? tierKey : "local"
+
+        // 3. Resolve modelo da feature table
+        let model = rules.features[feature]?[effectiveTier]
+            ?? rules.features["chat"]?[effectiveTier]
+            ?? rules.tiers[effectiveTier]?.prefer.first
+            ?? "gpt-5.1-mini"
+
+        // 4. Resolve provider pelo prefixo do modelo
+        let provider = resolveProvider(for: model)
+
+        return ModelSelection(model: model, tier: effectiveTier,
+                              provider: provider, reason: reason)
+    }
+}
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section" style="margin-top:12px">
+  <h3>📊 Comparação: Antes vs Depois</h3>
+
+  <table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:8px">
+    <thead>
+      <tr style="background:#e5e7eb">
+        <th style="padding:6px 8px;text-align:left">O que</th>
+        <th style="padding:6px 8px;text-align:left;width:45%">Antes (hardcoded)</th>
+        <th style="padding:6px 8px;text-align:left;width:45%">Depois (JSON-driven)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="padding:4px 8px">Thresholds de budget</td>
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px;color:#dc2626">switch { > 0.50: .premium, ... }</td>
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px;color:#047857">thresholds: [{min_percent: 0.50, tier: "deep"}, ...]</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 8px">Modelos por tier</td>
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px;color:#dc2626">enum ModelTier { case premium, standard, economy }</td>
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px;color:#047857">tiers: { "deep": { prefer: [...] }, ... }</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 8px">Feature → modelo</td>
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px;color:#dc2626">case "analysis": return "claude-sonnet-4-6"</td>
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px;color:#047857">features.analysis.deep = "claude-opus-4-8"</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 8px">Provider por modelo</td>
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px;color:#dc2626">if model.hasPrefix("gpt-") → .openAI</td>
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px;color:#6b7280">Igual (prefix matching é OK — é structural)</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 8px">Offline fallback</td>
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px;color:#dc2626">Código em ProviderRouter</td>
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px;color:#047857">offline_fallback.enabled + tier "local"</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 8px">User override (Auto/Deep/Fast)</td>
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px;color:#dc2626">AgLoop.resolveModel misturado</td>
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px;color:#047857">user_override.enabled + userTier param</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div style="margin-top:16px">
+  <p style="color:#6b7280;font-size:13px">📌 Seção 3 revisada: 100% JSON-driven. O Swift só aplica as regras, não as define. Próxima: (4) ProviderResolver simplificado + plano de migração.</p>
+</div>

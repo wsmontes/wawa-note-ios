@@ -1,0 +1,235 @@
+<h2>Design — Seção 4: ProviderResolver Simplificado + Migração</h2>
+<p class="subtitle">De 3 classes + singleton para 1 protocolo + 1 implementação</p>
+
+<div class="section">
+  <h3>🔀 Antes: 5 tipos para resolver provider</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Stack atual — muito indireção para uma decisão simples</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.4;margin:0;white-space:pre;background:#fef2f2;padding:10px">
+ActiveProviderManager (singleton)
+├─ activeProviderID (UserDefaults)
+├─ getProviderFor(task:) → task-based routing
+├─ bestProviderFor(model:) → prefix heuristics
+├─ ProviderHealthMonitor → ping a cada 30s, healthy/degraded/unhealthy
+├─ ProviderPool → primary/secondary/local com health-aware resolution
+└─ routingRules → regras de roteamento por task type
+
+ProviderRouter (static factory)
+├─ resolveActive(context:) → ActiveProviderManager → provider(for:)
+├─ resolveBestAvailable(context:) → offline-aware
+├─ resolveWithFallback(context:preferredTypes:) → fallback chain
+└─ provider(for:) → switch config.type → Anthropic/Gemini/OpenAICompat <strong style="color:#dc2626">← 5 arquivos</strong>
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section" style="margin-top:12px">
+  <h3>✅ Depois: 1 protocolo + 1 implementação</h3>
+
+<div class="mockup">
+  <div class="mockup-header">HealthAwareResolver — consolida tudo</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.5;margin:0;white-space:pre;background:#ecfdf5;padding:12px">
+
+<strong style="color:#1a56db">protocol ProviderResolver: Sendable</strong> {
+    func resolve(for feature: String, preference: ProviderPreference) async throws -> any AIProvider
+    var activeProviderID: String { get async }
+    func setActiveProvider(_ id: String) async
+}
+
+<strong style="color:#047857">enum ProviderPreference</strong> {
+    case any                  // qualquer provider saudável
+    case localPreferred       // prefere local se disponível
+    case localRequired        // exige local (offline)
+    case specific(String)     // provider ID específico
+}
+
+<strong style="color:#b45309">actor HealthAwareResolver: ProviderResolver</strong> {
+    // Internamente absorve:
+    // - ActiveProviderManager → active provider ID store
+    // - ProviderRouter → factory switch
+    // - ProviderHealthMonitor → health pings
+    // - ProviderPool → tiered fallback
+
+    func resolve(for feature: String, preference: ProviderPreference) async throws → any AIProvider {
+        // 1. Health check cache (evita ping a cada chamada)
+        // 2. Match preference (local vs remote)
+        // 3. Factory: config.type → Anthropic / Gemini / OpenAICompat
+        // 4. Fallback chain se provider unhealthy
+    }
+}
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section" style="margin-top:12px">
+  <h3>📊 O que acontece com cada arquivo atual</h3>
+
+  <table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:8px">
+    <thead>
+      <tr style="background:#e5e7eb">
+        <th style="padding:6px 8px;text-align:left">Arquivo atual</th>
+        <th style="padding:6px 8px;text-align:left">Destino</th>
+        <th style="padding:6px 8px;text-align:center">Ação</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px">ProviderRouter.swift</td>
+        <td style="padding:4px 8px;font-size:10px">Absorvido por HealthAwareResolver (factory switch + resolve logic)</td>
+        <td style="padding:4px 8px;text-align:center;color:#dc2626">🗑️ Remove</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px">ActiveProviderManager.swift</td>
+        <td style="padding:4px 8px;font-size:10px">Reduzido a ~20 linhas: store do active provider ID em UserDefaults</td>
+        <td style="padding:4px 8px;text-align:center;color:#d97706">✂️ Simplifica</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px">ProviderAdapter.swift</td>
+        <td style="padding:4px 8px;font-size:10px">Mantido — response normalization é ortogonal a routing</td>
+        <td style="padding:4px 8px;text-align:center;color:#047857">✅ Mantém</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px">ProviderHealthMonitor</td>
+        <td style="padding:4px 8px;font-size:10px">Internal ao HealthAwareResolver (nested actor)</td>
+        <td style="padding:4px 8px;text-align:center;color:#d97706">🔀 Move</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px">ProviderPool</td>
+        <td style="padding:4px 8px;font-size:10px">Internal ao HealthAwareResolver (lógica de fallback)</td>
+        <td style="padding:4px 8px;text-align:center;color:#d97706">🔀 Move</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px">AIConfigService.swift</td>
+        <td style="padding:4px 8px;font-size:10px">Vira JSONConfigProvider implementando AIConfigProvider</td>
+        <td style="padding:4px 8px;text-align:center;color:#d97706">✂️ Refatora</td>
+      </tr>
+      <tr style="background:#dbeafe">
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px" colspan="3"><strong>Novos arquivos:</strong></td>
+      </tr>
+      <tr>
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px">AIService.swift</td>
+        <td style="padding:4px 8px;font-size:10px" colspan="2">Fachada única — send(), sendStreaming(), embed()</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px">AgentOrchestrator.swift</td>
+        <td style="padding:4px 8px;font-size:10px" colspan="2">Unifica AgentLoop + ContentPipelineService</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px">ModelPolicy.swift</td>
+        <td style="padding:4px 8px;font-size:10px" colspan="2">Protocol + TieredModelPolicy + ModelPolicyRules (Codable)</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 8px;font-family:monospace;font-size:10px">ProviderResolver.swift</td>
+        <td style="padding:4px 8px;font-size:10px" colspan="2">Protocol + HealthAwareResolver</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="section" style="margin-top:12px">
+  <h3>🗺️ Plano de Migração (5 fases, sem quebrar nada)</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Cada fase é independente e testável</div>
+  <div class="mockup-body">
+
+    <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-top:8px">
+
+      <div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:10px">
+        <h4 style="margin:0 0 4px 0;color:#1e40af">Fase 1: Novos protocolos + tipos (zero breaking)</h4>
+        <ul style="margin:0;padding-left:16px;font-size:11px">
+          <li>Criar <code>AIService.swift</code>, <code>ModelPolicy.swift</code>, <code>ProviderResolver.swift</code></li>
+          <li>Criar <code>AIFeatureRequest</code> (não substitui AIRequest ainda)</li>
+          <li>Adicionar <code>model_policy</code> ao <code>ai_config.json</code></li>
+          <li><strong>Validar:</strong> build compila, testes passam</li>
+        </ul>
+      </div>
+
+      <div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:10px">
+        <h4 style="margin:0 0 4px 0;color:#1e40af">Fase 2: Implementações concretas</h4>
+        <ul style="margin:0;padding-left:16px;font-size:11px">
+          <li><code>JSONConfigProvider</code> — adapter sobre AIConfigService existente</li>
+          <li><code>HealthAwareResolver</code> — absorve ProviderRouter + ActiveProviderManager</li>
+          <li><code>TieredModelPolicy</code> — motor de rules do JSON</li>
+          <li><code>AgentOrchestrator</code> — unifica AgentLoop + Pipeline</li>
+          <li><strong>Validar:</strong> build compila, coexistência com código antigo</li>
+        </ul>
+      </div>
+
+      <div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:10px">
+        <h4 style="margin:0 0 4px 0;color:#1e40af">Fase 3: Migrar call sites (um por um)</h4>
+        <ul style="margin:0;padding-left:16px;font-size:11px">
+          <li>Ordem: (1) ChatViewModel, (2) ContentPipelineService, (3) AnalysisService, (4) AnalysisSkillService, (5) GraphEdgeService, (6) ProjectIngestionPipeline, (7) ProjectConversionService, (8) ContentExtractionService, (9) ShellInterpreter</li>
+          <li>Cada migração: substituir ProviderRouter + AIConfigService → AIService.send()</li>
+          <li>Cada bypass é automaticamente corrigido na migração</li>
+          <li><strong>Validar:</strong> testes + build após cada call site</li>
+        </ul>
+      </div>
+
+      <div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:10px">
+        <h4 style="margin:0 0 4px 0;color:#1e40af">Fase 4: Remover código antigo</h4>
+        <ul style="margin:0;padding-left:16px;font-size:11px">
+          <li>🗑️ <code>ProviderRouter.swift</code></li>
+          <li>🗑️ <code>ActiveProviderManager.swift</code> (simplificar para store)</li>
+          <li>🗑️ <code>AgentLoop.resolveModel()</code></li>
+          <li>🗑️ <code>ModelResolver</code> (classe não usada)</li>
+          <li>🗑️ <code>AIRequest</code> (substituído por AIFeatureRequest)</li>
+          <li><strong>Validar:</strong> build compila, todos os 27 testes passam</li>
+        </ul>
+      </div>
+
+      <div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:10px">
+        <h4 style="margin:0 0 4px 0;color:#1e40af">Fase 5: Device validation</h4>
+        <ul style="margin:0;padding-left:16px;font-size:11px">
+          <li>Build → Deploy → Test no iPhone 14 Plus</li>
+          <li>Testar: chat streaming, pipeline de ingestão, análise, visão, embeddings</li>
+          <li>Testar: offline fallback, budget thresholds, user tier override</li>
+          <li>Testar: troca de provider ativo, adição de novo provider</li>
+          <li><strong>Validar:</strong> `make all` passa no device</li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="section" style="margin-top:12px">
+  <h3>📁 Estrutura final de Providers/</h3>
+
+<div class="mockup">
+  <div class="mockup-header">8 arquivos → 6 arquivos (remove 3, adiciona 1)</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.4;margin:0;white-space:pre;background:#f5f5f5;padding:10px">
+Providers/
+├─ <strong style="color:#047857">AIService.swift</strong>              ← NOVO: fachada única
+├─ <strong style="color:#047857">AIConfigProvider.swift</strong>       ← NOVO: protocol + JSONConfigProvider
+├─ <strong style="color:#047857">ModelPolicy.swift</strong>            ← NOVO: protocol + TieredModelPolicy + Rules
+├─ <strong style="color:#047857">ProviderResolver.swift</strong>      ← NOVO: protocol + HealthAwareResolver
+├─ AIProvider.swift                ← mantido: protocol + tipos
+├─ ProviderAdapter.swift           ← mantido: response normalization
+├─ AnthropicProvider.swift         ← mantido: implementação externa
+├─ GeminiProvider.swift            ← mantido: implementação externa
+├─ OpenAICompatibleProvider.swift  ← mantido: implementação externa
+├─ SecureKeyStore.swift            ← mantido: storage
+
+<strong style="color:#dc2626">🗑️ Remove:</strong>
+├─ ProviderRouter.swift
+├─ ActiveProviderManager.swift (→ ActiveProviderStore 20 linhas)
+
+<strong style="color:#d97706">✂️ Refatora:</strong>
+└─ AIConfigService.swift → JSONConfigProvider (implementa AIConfigProvider)
+    </pre>
+  </div>
+</div>
+</div>
+</div>
+
+<div style="margin-top:16px">
+  <p style="color:#6b7280;font-size:13px">📌 Seção 4 (final): ProviderResolver + plano de migração. Design completo.</p>
+</div>

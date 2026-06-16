@@ -1,0 +1,184 @@
+<h2>Provider Templates 100% Data-Driven</h2>
+<p class="subtitle">Adicionar entrada no JSON → botão aparece na UI. Zero Swift.</p>
+
+<div class="section">
+  <h3>📝 O JSON define os botões</h3>
+
+<div class="mockup">
+  <div class="mockup-header">ai_config.json → provider_templates</div>
+  <div class="mockup-body">
+    <pre style="font-size:10.5px;line-height:1.5;margin:0;white-space:pre;background:#f5f5f5;padding:12px">
+{
+  "<strong style="color:#1a56db">provider_templates</strong>": {
+    "openai": {
+      "display_name": "OpenAI",
+      "icon": "openai",                  <em style="color:#6b7280">// SF Symbol ou asset catalog</em>
+      "type": "openAI",
+      "base_url": "https://api.openai.com/v1",
+      "auth": "api_key_header",          <em style="color:#6b7280">// api_key_header | api_key_bearer | api_key_query</em>
+      "auth_header": "Authorization",
+      "auth_prefix": "Bearer ",
+      "default_models": ["gpt-5.5", "gpt-5.1-mini"],
+      "description": "GPT models via OpenAI API"
+    },
+    "anthropic": {
+      "display_name": "Anthropic",
+      "icon": "anthropic",
+      "type": "anthropic",
+      "base_url": "https://api.anthropic.com/v1",
+      "auth": "api_key_header",
+      "auth_header": "x-api-key",
+      "auth_prefix": "",
+      "default_models": ["claude-sonnet-4-6", "claude-opus-4-8"],
+      "description": "Claude models via Anthropic API"
+    },
+    "<strong style="color:#047857">deepseek</strong>": {              ← <strong style="color:#047857">NOVA entrada = NOVO botão</strong>
+      "display_name": "DeepSeek",
+      "icon": "deepseek",
+      "type": "openAICompatible",
+      "base_url": "https://api.deepseek.com/v1",
+      "auth": "api_key_bearer",
+      "auth_header": "Authorization",
+      "auth_prefix": "Bearer ",
+      "default_models": ["deepseek-chat", "deepseek-reasoner"],
+      "description": "DeepSeek V3 and R1 models"
+    },
+    "<strong style="color:#047857">mistral</strong>": {               ← <strong style="color:#047857">NOVA entrada = NOVO botão</strong>
+      "display_name": "Mistral",
+      "icon": "mistral",
+      "type": "openAICompatible",
+      "base_url": "https://api.mistral.ai/v1",
+      "auth": "api_key_bearer",
+      "auth_header": "Authorization",
+      "auth_prefix": "Bearer ",
+      "default_models": ["mistral-large", "mistral-small"],
+      "description": "Mistral models via La Plateforme"
+    },
+    "ollama": {
+      "display_name": "Ollama",
+      "icon": "ollama",
+      "type": "local",
+      "base_url": "http://localhost:11434",
+      "auth": "none",
+      "auto_discover": true,
+      "discovery_port": 11434,
+      "description": "Local models via Ollama"
+    }
+  }
+}
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section" style="margin-top:12px">
+  <h3>🎨 A UI renderiza a partir do JSON</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Add Provider — grid dinâmico</div>
+  <div class="mockup-body" style="max-width:340px;margin:0 auto;font-family:-apple-system,sans-serif">
+    <div style="font-size:13px;font-weight:600;margin-bottom:8px">Add AI Provider</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px;text-align:center;font-size:11px">🤖<br>OpenAI<br><span style="font-size:9px;color:#6b7280">Cloud</span></div>
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px;text-align:center;font-size:11px">🧠<br>Anthropic<br><span style="font-size:9px;color:#6b7280">Cloud</span></div>
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px;text-align:center;font-size:11px">🔷<br>Gemini<br><span style="font-size:9px;color:#6b7280">Cloud</span></div>
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px;text-align:center;font-size:11px">🦙<br>Ollama<br><span style="font-size:9px;color:#6b7280">Local</span></div>
+      <div style="background:#dbeafe;border:2px solid #3b82f6;border-radius:8px;padding:10px;text-align:center;font-size:11px;font-weight:600">🆕<br>DeepSeek<br><span style="font-size:9px;color:#1e40af">Cloud</span></div>
+      <div style="background:#dbeafe;border:2px solid #3b82f6;border-radius:8px;padding:10px;text-align:center;font-size:11px;font-weight:600">🆕<br>Mistral<br><span style="font-size:9px;color:#1e40af">Cloud</span></div>
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px;text-align:center;font-size:11px">🖥️<br>LM Studio<br><span style="font-size:9px;color:#6b7280">Local</span></div>
+      <div style="background:#fff;border:1px dashed #d1d5db;border-radius:8px;padding:10px;text-align:center;font-size:11px;color:#6b7280">🔌<br>Custom<br><span style="font-size:9px">OpenAI-compat</span></div>
+    </div>
+    <div style="font-size:9px;color:#6b7280;margin-top:8px;text-align:center">
+      DeepSeek e Mistral apareceram sem 1 linha de Swift.<br>Só adicionar no JSON.
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="section" style="margin-top:12px">
+  <h3>⚙️ Como funciona: ProviderTemplate + UI</h3>
+
+<div class="mockup">
+  <div class="mockup-header">O tipo que a UI consome</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.5;margin:0;white-space:pre;background:#f5f5f5;padding:10px">
+<strong style="color:#1a56db">struct ProviderTemplate: Codable, Identifiable, Sendable</strong> {
+    var id: String                    // "deepseek"
+    var displayName: String           // "DeepSeek"
+    var icon: String                  // asset name ou SF Symbol
+    var type: ProviderType            // openAICompatible, anthropic, gemini, local
+    var baseURL: String               // endpoint base
+    var auth: AuthMethod              // api_key_header, api_key_bearer, none
+    var authHeader: String?           // "Authorization", "x-api-key"
+    var authPrefix: String?           // "Bearer "
+    var defaultModels: [String]       // modelos pré-carregados
+    var autoDiscover: Bool            // true = escanear rede local
+    var discoveryPort: Int?           // porta pra auto-discovery
+    var description: String           // tooltip na UI
+}
+
+<strong style="color:#6b7280">// A UI lê do JSONConfigProvider:</strong>
+<strong style="color:#6b7280">// let templates = configProvider.providerTemplates  →  [ProviderTemplate]</strong>
+
+<strong style="color:#6b7280">// O grid renderiza dinamicamente:</strong>
+<strong style="color:#6b7280">// ForEach(templates) { template in ProviderCard(template: template) }</strong>
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section" style="margin-top:12px">
+  <h3>🔄 Fluxo completo: JSON → Botão → Provider vivo</h3>
+
+<div class="mockup">
+  <div class="mockup-header">3 camadas, todas data-driven</div>
+  <div class="mockup-body">
+    <pre style="font-size:10.5px;line-height:1.6;margin:0;white-space:pre;background:#f5f5f5;padding:10px">
+<strong style="color:#6b7280">1. JSON</strong>
+   provider_templates.deepseek = { type: "openAICompatible", base_url: "...", ... }
+                    │
+                    ▼
+<strong style="color:#6b7280">2. UI</strong>
+   ForEach(configProvider.providerTemplates) → ProviderCard(template)
+   → Botão "DeepSeek" aparece automaticamente
+                    │
+                    ▼  (usuário clica, cola API key, salva)
+<strong style="color:#6b7280">3. Runtime</strong>
+   ai_config.json → providers.deepseek = { api_key: "sk-...", enabled: true }
+   ProviderResolver.resolve("deepseek") → OpenAICompatibleProvider
+   → Pronto pra usar.
+
+<strong style="color:#047857">Tempo pra adicionar DeepSeek: 30 segundos. Zero código.</strong>
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section" style="margin-top:12px">
+  <h3>🗂️ O que substitui no código atual</h3>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
+    <div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:10px">
+      <h4 style="margin:0 0 4px 0;color:#dc2626;font-size:12px">Remove</h4>
+      <ul style="margin:0;padding-left:16px;font-size:10px">
+        <li><code>ProviderTemplates.swift</code> — hardcoded static accessors</li>
+        <li><code>ProviderCard.swift</code> — UI hardcoded por provider</li>
+        <li>Switch/case por provider no grid da UI</li>
+      </ul>
+    </div>
+    <div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:8px;padding:10px">
+      <h4 style="margin:0 0 4px 0;color:#047857;font-size:12px">Substituído por</h4>
+      <ul style="margin:0;padding-left:16px;font-size:10px">
+        <li><code>ProviderTemplate</code> — struct Codable</li>
+        <li><code>JSONConfigProvider.providerTemplates</code> — array do JSON</li>
+        <li><code>ProviderTemplateCard(template:)</code> — componente genérico data-driven</li>
+        <li>UI renderiza <code>ForEach(templates)</code> — dinâmico por definição</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</div>
+
+<div style="margin-top:16px">
+  <p style="color:#6b7280;font-size:13px">📌 O JSON é a fonte da verdade dos templates. Adicionar entrada = botão novo na UI. Se o tipo for "openAICompatible", zero código. Se for tipo novo (ex: "cohere"), precisa do Provider.swift + 1 case — mas o botão já aparece.</p>
+</div>

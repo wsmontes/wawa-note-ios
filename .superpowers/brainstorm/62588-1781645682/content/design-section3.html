@@ -1,0 +1,191 @@
+<h2>Design — Seção 3: ModelPolicy + Budget Tracking</h2>
+<p class="subtitle">Seleção de modelo unificada, budget-aware, configurável por JSON</p>
+
+<div class="section">
+  <h3>🔀 Problema atual: Lógica de escolha de modelo espalhada</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Hoje: 4 lugares diferentes decidem qual modelo usar</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.4;margin:0;white-space:pre;background:#fef2f2;padding:10px">
+1️⃣ <strong>AgentLoop.resolveModel()</strong>        ← chat + pipeline
+   if mode == .auto: executor 3 iters → advisor
+   if budget.isOverBudget: downgrade to executor
+
+2️⃣ <strong>BudgetTracker.recommendedTier</strong>      ← usa saldo USD
+   premium (>50%), standard (25-50%), economy (<25%)
+
+3️⃣ <strong>ActiveProviderManager.bestProviderFor()</strong> ← prefix heuristics
+   gpt- → openAI, claude- → anthropic, gemini- → google
+
+4️⃣ <strong>ModelResolver</strong> (classe separada)     ← NÃO é usado pelo fluxo principal
+   Tiered model resolution com fallbacks. Código morto?
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section" style="margin-top:12px">
+  <h3>✅ Proposta: ModelPolicy protocol + TieredModelPolicy</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Tudo consolidado num protocolo com impl padrão</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.5;margin:0;white-space:pre;background:#ecfdf5;padding:12px">
+<strong style="color:#1a56db">protocol ModelPolicy: Sendable</strong> {
+    /// Seleciona o modelo para uma feature, dado o budget atual
+    func selectModel(for feature: String, budget: BudgetState) -> ModelSelection
+    /// Lista modelos disponíveis no provider ativo
+    func availableModels() async -> [String]
+    /// Resolve qual provider deve servir um modelo específico
+    func providerFor(model: String) -> ProviderType?
+}
+
+<strong style="color:#047857">struct ModelSelection</strong> {
+    let model: String
+    let tier: ModelTier        // .auto, .deep, .fast, .economy
+    let provider: ProviderType
+    let reason: String         // "feature config", "budget downgrade", "offline fallback"
+}
+
+<strong style="color:#047857">enum ModelTier: String, Codable</strong> {
+    case auto    // escolhe baseado no budget
+    case deep    // modelo mais capaz (reasoning)
+    case fast    // modelo mais rápido/barato
+    case economy // fallback de custo mínimo
+}
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section">
+  <h3>📐 TieredModelPolicy — implementação padrão</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Lógica de decisão em 3 passos</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.5;margin:0;white-space:pre;background:#f5f5f5;padding:10px">
+actor TieredModelPolicy: ModelPolicy {
+    let config: AIConfigProvider
+    let budget: BudgetTracker
+    let network: NetworkMonitor
+
+    func selectModel(for feature: String, budget: BudgetState) -> ModelSelection {
+        // Passo 1: Config base — modelo definido em ai_config.json
+        let configuredModel = config.modelFor(feature: feature)
+
+        // Passo 2: Budget — downgrade se necessário
+        let tier: ModelTier = switch budget.remainingPercent {
+            case > 0.50: .deep       // usa o melhor
+            case 0.25...0.50: .fast  // modelo rápido
+            case < 0.25: .economy    // mínimo
+        }
+
+        // Passo 3: Disponibilidade — fallback se offline
+        if !network.isConnected {
+            return ModelSelection(
+                model: config.localFallbackModel(for: feature),
+                tier: .economy,
+                provider: .local,
+                reason: "offline — usando modelo local"
+            )
+        }
+
+        return ModelSelection(
+            model: configuredModel,
+            tier: tier,
+            provider: config.providerType(for: feature),
+            reason: "feature config (budget: \(budget.remainingPercent))"
+        )
+    }
+}
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section">
+  <h3>💰 BudgetTracker — simplificado e integrado</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Mantido mas desacoplado do AgentLoop</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.4;margin:0;white-space:pre;background:#f5f5f5;padding:10px">
+<strong>Mantém:</strong>
+- Daily budget em USD (configurável em ai_config.json → "budget": { "daily_usd": 1.00 })
+- Tracking de spend via usage.tokens
+- UserDefaults persistence
+
+<strong>Remove:</strong>
+- recommendedTier (vai pro ModelPolicy)
+- Lógica de tier no AgentLoop (vai pro ModelPolicy)
+
+<strong>Adiciona:</strong>
+- BudgetState struct (remainingPercent, isOverBudget, dailyTotal, spentToday)
+- Notifications quando atinge thresholds (50%, 25%, 10%)
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section">
+  <h3>📝 Configuração no ai_config.json</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Novos blocos: budget + model_tiers</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.4;margin:0;white-space:pre;background:#f5f5f5;padding:10px">
+{
+  "budget": {
+    "daily_usd": 1.00,
+    "thresholds": { "warning": 0.50, "critical": 0.25 },
+    "reset_at": "midnight_utc"
+  },
+  "model_tiers": {
+    "deep":    { "prefer": ["claude-opus-4-8", "gpt-5.5", "gemini-2.5-pro"] },
+    "fast":    { "prefer": ["claude-sonnet-4-6", "gpt-5.1-mini", "gemini-2.5-flash"] },
+    "economy": { "prefer": ["claude-haiku-4-5", "gpt-5.1-nano", "gemini-2.0-flash-lite"] },
+    "local":   { "prefer": ["llama-3.2-3b", "phi-4-mini", "qwen2.5-3b"] }
+  },
+  "default_models": {
+    "chat":       { "deep": "claude-sonnet-4-6", "fast": "gpt-5.1-mini", "economy": "claude-haiku-4-5" },
+    "analysis":   { "deep": "claude-opus-4-8", "fast": "claude-sonnet-4-6", "economy": "gpt-5.1-mini" },
+    "agent":      { "deep": "claude-opus-4-8", "fast": "claude-sonnet-4-6", "economy": "gpt-5.1-mini" },
+    "vision":     { "deep": "claude-sonnet-4-6", "fast": "gpt-5.1-mini", "economy": "claude-haiku-4-5" }
+  }
+}
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section">
+  <h3>🗑️ O que some</h3>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
+    <div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:10px">
+      <h4 style="margin:0 0 4px 0;color:#dc2626">Remove</h4>
+      <ul style="margin:0;padding-left:16px;font-size:12px">
+        <li><code>AgentLoop.resolveModel()</code> — 100+ linhas</li>
+        <li><code>ActiveProviderManager.bestProviderFor()</code> — prefix heuristics</li>
+        <li><code>ModelResolver</code> — classe não usada (código morto)</li>
+        <li><code>BudgetTracker.recommendedTier</code></li>
+      </ul>
+    </div>
+    <div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:8px;padding:10px">
+      <h4 style="margin:0 0 4px 0;color:#047857">Substituído por</h4>
+      <ul style="margin:0;padding-left:16px;font-size:12px">
+        <li><code>ModelPolicy.selectModel(for:budget:)</code> — ponto único</li>
+        <li><code>TieredModelPolicy</code> — impl padrão</li>
+        <li><code>ai_config.json → model_tiers</code> — configurável</li>
+        <li><code>BudgetState</code> — struct imutável</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</div>
+
+<div style="margin-top:16px">
+  <p style="color:#6b7280;font-size:13px">📌 Seção 3 cobre ModelPolicy + Budget. Próxima: (4) ProviderResolver simplificado.</p>
+</div>

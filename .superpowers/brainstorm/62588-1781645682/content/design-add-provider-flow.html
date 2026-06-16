@@ -1,0 +1,185 @@
+<h2>Adicionar um Provider Novo — Fluxo Prático</h2>
+<p class="subtitle">O que o usuário faz · O que a arquitetura faz · O que o JSON ganha</p>
+
+<div class="section">
+  <h3>👤 O que o usuário faz (3 passos, 30 segundos)</h3>
+</div>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">Passo 1: Escolhe o template</div>
+    <div class="mockup-body" style="max-width:300px;margin:0 auto;font-family:-apple-system,sans-serif">
+      <div style="font-size:13px;font-weight:600;margin-bottom:6px">Add Provider</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px;text-align:center;font-size:11px">🤖 OpenAI</div>
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px;text-align:center;font-size:11px">🧠 Anthropic</div>
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px;text-align:center;font-size:11px">🔷 Gemini</div>
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px;text-align:center;font-size:11px">🦙 Ollama</div>
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px;text-align:center;font-size:11px">🖥️ LM Studio</div>
+        <div style="background:#eff6ff;border:2px solid #3b82f6;border-radius:8px;padding:8px;text-align:center;font-size:11px;font-weight:600">🔌 Custom</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">Passo 2: Cola a API Key</div>
+    <div class="mockup-body" style="max-width:300px;margin:0 auto;font-family:-apple-system,sans-serif">
+      <div style="font-size:13px;font-weight:600;margin-bottom:6px">Connect DeepSeek</div>
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px;margin-bottom:6px">
+        <div style="font-size:9px;color:#6b7280">API Key</div>
+        <div style="font-size:10px;font-family:monospace">sk-••••••••••••••••</div>
+      </div>
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px;margin-bottom:6px">
+        <div style="font-size:9px;color:#6b7280">Base URL</div>
+        <div style="font-size:10px">https://api.deepseek.com/v1</div>
+      </div>
+      <div style="font-size:10px;color:#10b981;text-align:center;margin-bottom:6px">✓ 3 models found</div>
+      <div style="background:#10b981;color:#fff;border-radius:8px;padding:8px;text-align:center;font-size:11px;font-weight:600">Save</div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:14px">
+  <h3>⚙️ O que a arquitetura faz (automático)</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Save → JSON → Runtime — sem restart</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.6;margin:0;white-space:pre;background:#f5f5f5;padding:12px">
+<strong style="color:#1e40af">1. UI → AIConfigPersistence.writeProviderConfig()</strong>
+   Adiciona ao ai_config.json:
+   "providers": {
+     ...
+     "deepseek": {
+       "type": "openAICompatible",
+       "base_url": "https://api.deepseek.com/v1",
+       "models": ["deepseek-chat", "deepseek-reasoner"],
+       "enabled": true
+     }
+   }
+
+<strong style="color:#1e40af">2. AIConfigPersistence → JSONConfigProvider.reload()</strong>
+   JSONConfigProvider relê o arquivo.
+   Novo provider aparece no ProviderResolver.
+   Novos modelos aparecem no ModelPolicy.
+
+<strong style="color:#1e40af">3. ProviderResolver.resolve("deepseek") → OpenAICompatibleProvider</strong>
+   Tipo "openAICompatible" → usa OpenAICompatibleProvider.
+   Zero código novo. O provider genérico cobre qualquer OpenAI-compatível.
+
+<strong style="color:#1e40af">4. Pronto.</strong>
+   O provider já está disponível pra chat, análise, pipeline.
+   Modelos novos podem ser assignados a tiers via Tier Editor.
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section" style="margin-top:12px">
+  <h3>🆕 E se for um tipo NOVO de provider? (ex: Mistral, Cohere, xAI)</h3>
+
+<div class="mockup">
+  <div class="mockup-header">2 cenários</div>
+  <div class="mockup-body">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:8px;padding:10px">
+        <h4 style="margin:0 0 4px 0;color:#047857;font-size:12px">Cenário A: API OpenAI-compatível</h4>
+        <p style="margin:0;font-size:10px">Mistral, DeepSeek, xAI, Groq, Together, Fireworks, Perplexity, OpenRouter, etc.</p>
+        <p style="margin:4px 0 0 0;font-size:10px;color:#6b7280">→ Usa <code>OpenAICompatibleProvider</code>. Zero código. Só adicionar no JSON.</p>
+      </div>
+      <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:10px">
+        <h4 style="margin:0 0 4px 0;color:#b45309;font-size:12px">Cenário B: API proprietária</h4>
+        <p style="margin:0;font-size:10px">API não segue o padrão OpenAI (ex: Cohere Native, AI21)</p>
+        <p style="margin:4px 0 0 0;font-size:10px;color:#6b7280">→ Criar 1 arquivo: <code>CohereProvider.swift</code> conforming to <code>AIProvider</code></p>
+        <p style="margin:2px 0 0 0;font-size:10px;color:#6b7280">→ Registrar no <code>ProviderResolver</code>: 1 case no switch</p>
+        <p style="margin:2px 0 0 0;font-size:10px;color:#6b7280">→ Template no UI: 1 entrada no <code>provider_templates</code> do JSON</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="mockup" style="margin-top:8px">
+  <div class="mockup-header">Cenário B em detalhe — 3 pontos de extensão</div>
+  <div class="mockup-body">
+    <pre style="font-size:10.5px;line-height:1.5;margin:0;white-space:pre;background:#f5f5f5;padding:10px">
+<strong style="color:#6b7280">1. Novo Provider (1 arquivo Swift)</strong>
+   Providers/CohereProvider.swift
+   └─ struct CohereProvider: AIProvider {
+        func send(_ request: AIRequest) async throws → AIResponse { ... }
+        func fetchModels() async throws → [String] { ... }
+      }
+
+<strong style="color:#6b7280">2. Registrar no ProviderResolver (1 case)</strong>
+   ProviderResolver.swift → HealthAwareResolver.provider(for:)
+   └─ case .cohere: return CohereProvider(config: config)
+
+<strong style="color:#6b7280">3. Template no JSON (1 entrada)</strong>
+   ai_config.json → provider_templates:
+   └─ "cohere": {
+        "type": "cohere",
+        "display_name": "Cohere",
+        "base_url": "https://api.cohere.com/v2",
+        "icon": "cohere_icon",
+        "models": ["command-r-plus", "command-r"]
+      }
+
+   <strong style="color:#047857">→ UI mostra "Cohere" no template picker automaticamente.</strong>
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section" style="margin-top:12px">
+  <h3>📊 Resumo: O que precisa de código vs o que é só config</h3>
+
+  <table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:8px">
+    <thead>
+      <tr style="background:#e5e7eb">
+        <th style="padding:6px 8px;text-align:left">Ação</th>
+        <th style="padding:6px 8px;text-align:center">Precisa código?</th>
+        <th style="padding:6px 8px;text-align:left">Onde</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="padding:4px 8px">Adicionar provider OpenAI-compatível (DeepSeek, Mistral, xAI...)</td>
+        <td style="padding:4px 8px;text-align:center;color:#047857">❌ Não</td>
+        <td style="padding:4px 8px;font-size:10px">UI → ai_config.json</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 8px">Adicionar provider com API proprietária (Cohere, AI21...)</td>
+        <td style="padding:4px 8px;text-align:center;color:#d97706">✅ 1 arquivo</td>
+        <td style="padding:4px 8px;font-size:10px">XxxProvider.swift + 1 case + 1 JSON entry</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 8px">Adicionar modelo novo de provider existente</td>
+        <td style="padding:4px 8px;text-align:center;color:#047857">❌ Não</td>
+        <td style="padding:4px 8px;font-size:10px">UI: "Refresh Models" → fetch da API</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 8px">Mudar modelo do tier "deep" pra "fast"</td>
+        <td style="padding:4px 8px;text-align:center;color:#047857">❌ Não</td>
+        <td style="padding:4px 8px;font-size:10px">UI: Tier Editor → ai_config.json</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 8px">Ajustar budget diário</td>
+        <td style="padding:4px 8px;text-align:center;color:#047857">❌ Não</td>
+        <td style="padding:4px 8px;font-size:10px">UI: Budget slider → ai_config.json</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 8px">Adicionar feature nova (ex: "code_review")</td>
+        <td style="padding:4px 8px;text-align:center;color:#047857">❌ Não</td>
+        <td style="padding:4px 8px;font-size:10px">JSON: features + model_policy.features</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 8px">Adicionar tier novo (ex: "ultra")</td>
+        <td style="padding:4px 8px;text-align:center;color:#047857">❌ Não</td>
+        <td style="padding:4px 8px;font-size:10px">JSON: model_policy.tiers + thresholds</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div style="margin-top:16px">
+  <p style="color:#6b7280;font-size:13px">📌 O ponto: 90% dos casos (novo provider OpenAI-compatível, novo modelo, ajuste de tier) são zero código — só UI + JSON. Só provider com API proprietária precisa de 1 arquivo Swift.</p>
+</div>

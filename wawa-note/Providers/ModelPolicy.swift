@@ -36,12 +36,13 @@ struct ModelPolicyRules: Codable, Sendable {
 
 extension ModelPolicyRules {
     func tier(for budgetPercent: Double) -> String {
-        for threshold in budget.thresholds.sorted(by: { $0.minPercent > $1.minPercent }) {
+        let sorted = budget.thresholds.sorted(by: { $0.minPercent > $1.minPercent })
+        for threshold in sorted {
             if budgetPercent >= threshold.minPercent {
                 return threshold.tier
             }
         }
-        return budget.thresholds.last?.tier ?? "economy"
+        return sorted.last?.tier ?? "economy"
     }
 
     func model(for feature: String, tier: String) -> String? {

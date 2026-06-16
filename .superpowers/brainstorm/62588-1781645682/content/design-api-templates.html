@@ -1,0 +1,320 @@
+<h2>API Templates — Qualquer API vira Tool via JSON + Skill</h2>
+<p class="subtitle">Mesmo padrão dos provider_templates: define no JSON → botão na UI → tool pro agente → skill ensina</p>
+
+<div class="section">
+  <h3>🎯 O conceito</h3>
+
+<div class="mockup">
+  <div class="mockup-header">3 camadas que se completam</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.6;margin:0;white-space:pre;background:#f5f5f5;padding:12px">
+┌──────────────────────────────────────────────────┐
+│ <strong style="color:#1a56db">api_templates</strong> (JSON)                             │
+│ Define: URL, auth, endpoints, parâmetros, schema  │
+│ → Botão aparece na UI de APIs                     │
+└────────────────┬─────────────────────────────────┘
+                 │ alimenta
+┌────────────────▼─────────────────────────────────┐
+│ <strong style="color:#047857">APICallTool</strong> (AgentTool genérica)              │
+│ Recebe: api_name, endpoint, params                │
+│ → Constrói HTTP request do JSON                   │
+│ → Retorna response pro modelo                     │
+└────────────────┬─────────────────────────────────┘
+                 │ ensinada por
+┌────────────────▼─────────────────────────────────┐
+│ <strong style="color:#b45309">skill</strong> (prompt no JSON)                         │
+│ Ensina o modelo: quando usar, como chamar,        │
+│ o que esperar de resposta, exemplos               │
+└──────────────────────────────────────────────────┘
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section" style="margin-top:12px">
+  <h3>📝 Exemplo: GitHub API</h3>
+
+<div class="mockup">
+  <div class="mockup-header">ai_config.json → api_templates</div>
+  <div class="mockup-body">
+    <pre style="font-size:10px;line-height:1.5;margin:0;white-space:pre;background:#f5f5f5;padding:12px">
+{
+  "<strong style="color:#1a56db">api_templates</strong>": {
+    "<strong>github</strong>": {
+      "display_name": "GitHub",
+      "icon": "github",
+      "base_url": "https://api.github.com",
+      "auth": "api_key_bearer",
+      "auth_header": "Authorization",
+      "auth_prefix": "Bearer ",
+      "<strong>endpoints</strong>": [
+        {
+          "name": "list_issues",
+          "method": "GET",
+          "path": "/repos/{owner}/{repo}/issues",
+          "description": "Lista issues de um repositório",
+          "parameters": {
+            "owner": { "type": "string", "description": "Dono do repo", "required": true },
+            "repo": { "type": "string", "description": "Nome do repo", "required": true },
+            "state": { "type": "string", "enum": ["open", "closed", "all"], "default": "open" },
+            "labels": { "type": "string", "description": "Filtrar por labels (ex: bug,enhancement)" }
+          }
+        },
+        {
+          "name": "create_issue",
+          "method": "POST",
+          "path": "/repos/{owner}/{repo}/issues",
+          "description": "Cria uma nova issue",
+          "parameters": {
+            "owner": { "type": "string", "required": true },
+            "repo": { "type": "string", "required": true },
+            "title": { "type": "string", "description": "Título da issue", "required": true },
+            "body": { "type": "string", "description": "Corpo em markdown" },
+            "labels": { "type": "array", "items": "string" }
+          }
+        },
+        {
+          "name": "list_pull_requests",
+          "method": "GET",
+          "path": "/repos/{owner}/{repo}/pulls",
+          "description": "Lista pull requests abertos",
+          "parameters": {
+            "owner": { "type": "string", "required": true },
+            "repo": { "type": "string", "required": true },
+            "state": { "type": "string", "enum": ["open", "closed", "all"], "default": "open" }
+          }
+        },
+        {
+          "name": "get_file",
+          "method": "GET",
+          "path": "/repos/{owner}/{repo}/contents/{path}",
+          "description": "Lê conteúdo de um arquivo",
+          "parameters": {
+            "owner": { "type": "string", "required": true },
+            "repo": { "type": "string", "required": true },
+            "path": { "type": "string", "description": "Caminho do arquivo no repo", "required": true },
+            "ref": { "type": "string", "description": "Branch ou commit SHA" }
+          }
+        }
+      ],
+      "<strong style="color:#b45309">skill</strong>": {
+        "name": "GitHub API",
+        "prompt": "You have access to the GitHub API. Use it to manage issues, read files, and list pull requests. Always specify owner and repo. When creating issues, use markdown for the body. Link issues to PRs when relevant.",
+        "when_to_use": "When the user asks about GitHub issues, PRs, or repository files."
+      }
+    },
+
+    "<strong>linear</strong>": {
+      "display_name": "Linear",
+      "icon": "linear",
+      "base_url": "https://api.linear.app/graphql",
+      "auth": "api_key_header",
+      "auth_header": "Authorization",
+      "type": "graphql",
+      "endpoints": [
+        {
+          "name": "query",
+          "method": "POST",
+          "path": "",
+          "description": "GraphQL query contra a API do Linear",
+          "body_type": "graphql",
+          "parameters": {
+            "query": { "type": "string", "description": "GraphQL query string", "required": true },
+            "variables": { "type": "object", "description": "Query variables" }
+          }
+        }
+      ],
+      "skill": {
+        "name": "Linear API",
+        "prompt": "You have access to Linear via GraphQL. Common queries: ...",
+        "when_to_use": "When the user asks about Linear issues, projects, or teams."
+      }
+    }
+  }
+}
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section" style="margin-top:12px">
+  <h3>🔧 APICallTool — a tool genérica</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Uma única AgentTool resolve qualquer API definida no JSON</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.5;margin:0;white-space:pre;background:#f5f5f5;padding:10px">
+<strong style="color:#047857">struct APICallTool: AgentTool</strong> {
+    let name = "api_call"
+    let description = "Chama uma API externa registrada."
+    let parameters: AIToolParameters = [
+        "api_name": { type: "string", description: "Nome da API (ex: github, linear)" },
+        "endpoint":  { type: "string", description: "Nome do endpoint" },
+        "params":    { type: "object", description: "Parâmetros do endpoint" }
+    ]
+
+    func execute(_ input: ToolInput, context: ToolContext) async throws -> ToolResult {
+        // 1. Lookup: api_templates[input.api_name] → APITemplate
+        guard let api = configProvider.apiTemplate(named: input.apiName) else {
+            return .error("API '\(input.apiName)' não encontrada.")
+        }
+
+        // 2. Lookup: api.endpoints[input.endpoint] → EndpointDefinition
+        guard let endpoint = api.endpoints.first(where: { $0.name == input.endpoint }) else {
+            return .error("Endpoint '\(input.endpoint)' não encontrado.")
+        }
+
+        // 3. Construir URL (substituir {placeholders})
+        let url = endpoint.renderURL(base: api.baseURL, params: input.params)
+
+        // 4. Construir request (method, headers, body, auth)
+        let request = endpoint.buildRequest(url: url, params: input.params, auth: api.auth)
+
+        // 5. Executar
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        // 6. Retornar resposta formatada
+        return .success(prettyJSON(data))
+    }
+}
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section" style="margin-top:12px">
+  <h3>🧠 Como o modelo aprende — skills injetadas no system prompt</h3>
+
+<div class="mockup">
+  <div class="mockup-header">AgentOrchestrator monta o system prompt com as skills ativas</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.5;margin:0;white-space:pre;background:#f5f5f5;padding:10px">
+<strong style="color:#6b7280">// AgentOrchestrator.runInteractive() → monta system prompt:</strong>
+
+system_prompt = """
+Você é um assistente de projetos com acesso a APIs externas.
+
+APIs disponíveis:
+${activeSkills.map { skill in
+  """
+  **${skill.name}** — use api_call(api_name: "${skill.apiName}", ...)
+  ${skill.prompt}
+  Endpoints: ${skill.endpoints.map { "- \($0.name): \($0.description)" }.joined("\n")}
+  """
+}.joined("\n\n")}
+
+Ferramenta: api_call(api_name, endpoint, params)
+"""
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section" style="margin-top:12px">
+  <h3>📱 UI: mesma estrutura dos Providers</h3>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">APIs — Lista</div>
+    <div class="mockup-body" style="max-width:280px;margin:0 auto;font-family:-apple-system,sans-serif">
+      <div style="background:#f9fafb;border-radius:12px;padding:12px">
+        <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:8px">🔌 Connected APIs</div>
+
+        <div style="background:#fff;border-radius:8px;padding:10px;margin-bottom:4px;border:1px solid #e5e7eb;display:flex;align-items:center;gap:8px">
+          <span>🐙</span>
+          <div style="flex:1"><div style="font-size:12px;font-weight:600">GitHub</div><div style="font-size:9px;color:#6b7280">4 endpoints</div></div>
+          <span style="width:6px;height:6px;background:#10b981;border-radius:50%"></span>
+        </div>
+
+        <div style="background:#fff;border-radius:8px;padding:10px;margin-bottom:4px;border:1px solid #e5e7eb;display:flex;align-items:center;gap:8px">
+          <span>◻️</span>
+          <div style="flex:1"><div style="font-size:12px;font-weight:600">Linear</div><div style="font-size:9px;color:#6b7280">GraphQL</div></div>
+          <span style="width:6px;height:6px;background:#10b981;border-radius:50%"></span>
+        </div>
+
+        <div style="background:#fff;border-radius:8px;padding:10px;margin-bottom:4px;border:1px solid #e5e7eb;display:flex;align-items:center;gap:8px">
+          <span>📋</span>
+          <div style="flex:1"><div style="font-size:12px;font-weight:600">Notion</div><div style="font-size:9px;color:#6b7280">2 endpoints</div></div>
+          <span style="width:6px;height:6px;background:#10b981;border-radius:50%"></span>
+        </div>
+
+        <div style="background:#fff;border-radius:8px;padding:8px;border:1px dashed #d1d5db;text-align:center">
+          <span style="font-size:18px;color:#6b7280">+</span>
+          <span style="font-size:10px;color:#6b7280;display:block">Add API</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">Add API — Grid de templates</div>
+    <div class="mockup-body" style="max-width:280px;margin:0 auto;font-family:-apple-system,sans-serif">
+      <div style="background:#f9fafb;border-radius:12px;padding:12px">
+        <div style="font-size:12px;font-weight:600;margin-bottom:8px">Add API Integration</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px;text-align:center;font-size:10px">🐙<br>GitHub</div>
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px;text-align:center;font-size:10px">◻️<br>Linear</div>
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px;text-align:center;font-size:10px">📋<br>Notion</div>
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px;text-align:center;font-size:10px">📊<br>Google Sheets</div>
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px;text-align:center;font-size:10px">💬<br>Slack</div>
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px;text-align:center;font-size:10px">🏗️<br>Vercel</div>
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px;text-align:center;font-size:10px">🐳<br>Docker Hub</div>
+          <div style="background:#fff;border:1px dashed #d1d5db;border-radius:8px;padding:8px;text-align:center;font-size:10px;color:#6b7280">🔌<br>Custom API</div>
+        </div>
+        <div style="font-size:9px;color:#6b7280;margin-top:6px;text-align:center">
+          Adicionar nova API: 1 entrada no JSON.<br>Zero Swift. Botão aparece sozinho.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="section" style="margin-top:12px">
+  <h3>🔄 O modelo em ação</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Exemplo de diálogo — o agente usa a API via tool</div>
+  <div class="mockup-body" style="font-family:-apple-system,sans-serif;font-size:11px">
+    <div style="background:#eff6ff;padding:8px;border-radius:8px;margin-bottom:6px">
+      <strong>User:</strong> "Quais issues abertas temos no repo wawa-note-ios?"
+    </div>
+    <div style="background:#f3f4f6;padding:8px;border-radius:8px;margin-bottom:6px">
+      <strong>Agent:</strong> "Vou consultar o GitHub..."<br>
+      <span style="font-family:monospace;font-size:10px;color:#6b7280">→ api_call(api_name: "github", endpoint: "list_issues", params: {owner: "...", repo: "wawa-note-ios", state: "open"})</span>
+    </div>
+    <div style="background:#ecfdf5;padding:8px;border-radius:8px;margin-bottom:6px">
+      <strong>Tool Result:</strong> [{ title: "Fix transcription bug", labels: ["bug"], ... }, { title: "Add dark mode", labels: ["enhancement"], ... }]
+    </div>
+    <div style="background:#f3f4f6;padding:8px;border-radius:8px">
+      <strong>Agent:</strong> "Encontrei 2 issues abertas:<br>1. <strong>Fix transcription bug</strong> [bug]<br>2. <strong>Add dark mode</strong> [enhancement]<br>Quer que eu crie uma branch pra alguma delas?"
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="section" style="margin-top:12px">
+  <h3>📐 Estrutura final do JSON — providers + apis</h3>
+
+<div class="mockup">
+  <div class="mockup-header">ai_config.json completo</div>
+  <div class="mockup-body">
+    <pre style="font-size:10px;line-height:1.4;margin:0;white-space:pre;background:#f5f5f5;padding:10px">
+{
+  "<strong>provider_templates</strong>": { ... },    ← AI Providers (OpenAI, Anthropic, Ollama...)
+  "<strong>api_templates</strong>":     { ... },    ← APIs externas (GitHub, Linear, Notion...)
+  "<strong>model_policy</strong>":      { ... },    ← Tiers + budget + feature mapping
+  "<strong>features</strong>":          { ... },    ← Temperature, maxTokens, prompts
+  "<strong>agent_modes</strong>":       { ... },    ← Tools + system prompts por modo
+  "<strong>providers</strong>":         { ... },    ← Instâncias configuradas (com API keys)
+  "<strong>apis</strong>":              { ... }     ← Instâncias configuradas (com API keys)
+}
+    </pre>
+  </div>
+</div>
+</div>
+</div>
+
+<div style="margin-top:16px">
+  <p style="color:#6b7280;font-size:13px">📌 Providers e APIs usam o mesmo padrão: template JSON → botão na UI → tool pro agente → skill ensina. Adicionar GitHub, Linear, Notion, Slack, etc = 1 entrada no JSON. Zero Swift.</p>
+</div>

@@ -1,0 +1,231 @@
+<h2>AI Services — Arquitetura Atual</h2>
+<p class="subtitle">Visão completa: Providers, Router, Config, e como são consumidos</p>
+
+<div class="section">
+  <h3>🏗️ Camadas da Arquitetura</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Provider Hierarchy &amp; Factory Pattern</div>
+  <div class="mockup-body">
+    <pre style="font-size:12px;line-height:1.6;margin:0;white-space:pre;background:#f5f5f5;padding:12px;border-radius:6px;overflow-x:auto">
+┌──────────────────────────────────────────────────┐
+│                  <strong style="color:#1a56db">AIConfigService</strong> (singleton)            │
+│  ai_config.json → features, models, presets, lenses │
+│  <em style="color:#6b7280">requestParams(for:model:) → AIFeatureParams(t°, maxT, ctx, reasoning)</em> │
+└──────────┬───────────────┬───────────────────────┘
+           │               │
+    ┌──────▼──────┐  ┌─────▼──────────────┐
+    │<strong style="color:#047857">ProviderRouter</strong>│  │<strong style="color:#047857">ActiveProviderManager</strong>│
+    │ Factory      │  │ Active/task routing │
+    │ provider(for:)│  │ Health monitor     │
+    └──────┬───────┘  │ Provider pool      │
+           │          └────────────────────┘
+           │ create
+    ┌──────▼──────────────────────────────────┐
+    │           <strong style="color:#b45309">AIProvider</strong> (protocol)               │
+    │  send() / embed() / fetchModels()       │
+    │  sendStreaming() → AsyncThrowingStream   │
+    └──────┬──────────────┬───────────────────┘
+           │              │
+  ┌────────▼──────┐ ┌─────▼──────────┐ ┌──────▼──────────┐
+  │<strong>Anthropic</strong>     │ │<strong>Gemini</strong>         │ │<strong>OpenAICompat</strong>    │
+  │ Messages API  │ │ GenerateContent│ │ Covers: OpenAI,  │
+  │ x-api-key     │ │ x-goog-api-key │ │ OpenRouter,      │
+  │ SSE streaming │ │ embed() ✅     │ │ DeepSeek, Ollama,│
+  │ thinking ✅   │ │ systemInstr    │ │ LM Studio        │
+  └───────────────┘ └────────────────┘ └──────────────────┘
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section">
+  <h3>📞 Fluxo de uma Chamada AI Típica</h3>
+
+<div class="mockup">
+  <div class="mockup-header">Call Flow: do Service ao Provider</div>
+  <div class="mockup-body">
+    <pre style="font-size:12px;line-height:1.6;margin:0;white-space:pre;background:#f5f5f5;padding:12px;border-radius:6px;overflow-x:auto">
+Service Layer (AnalysisService, ChatViewModel, AgentLoop, etc.)
+  │
+  ├─ 1️⃣ <strong style="color:#1a56db">AIConfigService.shared.requestParams(for: "analysis", model: m)</strong>
+  │     → AIFeatureParams(temperature: 0.4, maxTokens: 4096, contextWindow: 128k, ...)
+  │
+  ├─ 2️⃣ Constrói AIRequest(model, messages, temperature, maxTokens, responseFormat, tools)
+  │
+  ├─ 3️⃣ <strong style="color:#047857">ProviderRouter.resolveActive(context:)</strong>
+  │     → ActiveProviderManager.getProviderFor(task:) → ProviderRouter.provider(for: config)
+  │     → Retorna: any AIProvider (OpenAICompatible / Anthropic / Gemini)
+  │
+  └─ 4️⃣ <strong style="color:#b45309">provider.send(request)</strong> ou <strong style="color:#b45309">provider.sendStreaming(request)</strong>
+        → HTTP POST → AIResponse / AsyncThrowingStream&lt;AIStreamEvent&gt;
+    </pre>
+  </div>
+</div>
+</div>
+
+<div class="section">
+  <h3>🎯 Quem consome AI — 15 call sites mapeados</h3>
+
+<div class="mockup">
+  <div class="mockup-header">AIRequest Creation Sites — Centralizado vs Bypass</div>
+  <div class="mockup-body">
+    <table style="width:100%;font-size:11px;border-collapse:collapse">
+      <thead>
+        <tr style="background:#e5e7eb">
+          <th style="padding:6px 8px;text-align:left;border-bottom:2px solid #d1d5db">Local</th>
+          <th style="padding:6px 8px;text-align:left;border-bottom:2px solid #d1d5db">Feature</th>
+          <th style="padding:6px 8px;text-align:left;border-bottom:2px solid #d1d5db">requestParams?</th>
+          <th style="padding:6px 8px;text-align:left;border-bottom:2px solid #d1d5db">Status</th>
+        </tr>
+        <tr>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;font-family:monospace">AgentLoop.swift</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">"agent"</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">✅ temp + maxTokens</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb"><span style="color:#047857">✓ OK</span></td>
+        </tr>
+        <tr>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;font-family:monospace">AnalysisService.analyze()</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">"analysis"</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">✅ temp + maxTokens</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb"><span style="color:#047857">✓ OK</span></td>
+        </tr>
+        <tr>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;font-family:monospace">AnalysisSkillService</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">"analysis"</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">✅ temp + maxTokens</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb"><span style="color:#047857">✓ OK</span></td>
+        </tr>
+        <tr>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;font-family:monospace">GraphEdgeService</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">"analysis"</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">✅ temp + maxTokens</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb"><span style="color:#047857">✓ OK</span></td>
+        </tr>
+        <tr>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;font-family:monospace">ProjectIngestionPipeline</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">"project_ingestion"</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">✅ temp + maxTokens</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb"><span style="color:#047857">✓ OK</span></td>
+        </tr>
+        <tr>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;font-family:monospace">ProjectConversionService</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">"project_conversion"</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">✅ temp + maxTokens</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb"><span style="color:#047857">✓ OK</span></td>
+        </tr>
+        <tr>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;font-family:monospace">ChatViewModel (greeting)</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">"chat"</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">✅ temp + maxTokens</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb"><span style="color:#047857">✓ OK</span></td>
+        </tr>
+        <tr>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;font-family:monospace">ShellInterpreter (vision)</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">"vision"</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">✅ temp + maxTokens</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb"><span style="color:#047857">✓ OK</span></td>
+        </tr>
+        <tr style="background:#fef3c7">
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;font-family:monospace">AnalysisService.summarizeChunk()</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">"analysis"</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">⚠️ NÃO usa → nil/nil</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb"><span style="color:#d97706">⚠ bypass</span></td>
+        </tr>
+        <tr style="background:#fef3c7">
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;font-family:monospace">AnalysisService.tryRetryWithFix()</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">"analysis"</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">⚠️ NÃO usa → nil/nil</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb"><span style="color:#d97706">⚠ bypass</span></td>
+        </tr>
+        <tr style="background:#fef3c7">
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;font-family:monospace">ContentExtractionService (vision)</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">"vision"</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">⚠️ temp sim, maxTokens=500 hard</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb"><span style="color:#d97706">⚠ bypass</span></td>
+        </tr>
+        <tr style="background:#fef3c7">
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;font-family:monospace">ProjectIngestionPipeline (fix)</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">"project_ingestion"</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">⚠️ fix retry sem t°/maxT</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb"><span style="color:#d97706">⚠ bypass</span></td>
+        </tr>
+        <tr style="background:#f3f4f6">
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;font-family:monospace">ProviderEditorView (test)</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">—</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">🔧 test connection</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb"><span style="color:#6b7280">— legit</span></td>
+        </tr>
+        <tr style="background:#f3f4f6">
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;font-family:monospace">ProviderConnectView (test)</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">—</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">🔧 test connection</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb"><span style="color:#6b7280">— legit</span></td>
+        </tr>
+        <tr style="background:#f3f4f6">
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;font-family:monospace">OpenAICompat.warmUp()</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">—</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">🔧 warmup (maxTokens:1)</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb"><span style="color:#6b7280">— legit</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+</div>
+
+<div class="section">
+  <h3>🚨 Problemas encontrados (bypass do AIConfigService)</h3>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px">
+    <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:12px">
+      <h4 style="margin:0 0 6px 0;color:#b45309">⚠️ AnalysisService — 2 bypass</h4>
+      <ul style="margin:0;padding-left:16px;font-size:13px">
+        <li><code>summarizeChunkWithRetry()</code>: cria AIRequest sem temperature e sem maxTokens</li>
+        <li><code>tryRetryWithFix()</code>: só seta responseFormat, esquece t° e maxT</li>
+      </ul>
+    </div>
+    <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:12px">
+      <h4 style="margin:0 0 6px 0;color:#b45309">⚠️ ContentExtractionService — maxT hardcoded</h4>
+      <ul style="margin:0;padding-left:16px;font-size:13px">
+        <li><code>extractTextFromImage()</code>: usa temperature do config mas hardcoda <code>maxTokens: 500</code></li>
+      </ul>
+    </div>
+    <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:12px">
+      <h4 style="margin:0 0 6px 0;color:#b45309">⚠️ ProjectIngestionPipeline — fix retry</h4>
+      <ul style="margin:0;padding-left:16px;font-size:13px">
+        <li>Retry de JSON malformado não repassa temperature/maxTokens</li>
+      </ul>
+    </div>
+    <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:12px">
+      <h4 style="margin:0 0 6px 0;color:#b45309">⚠️ ContentExtractionService — análise de imagem</h4>
+      <ul style="margin:0;padding-left:16px;font-size:13px">
+        <li><code>ImageAnalysisService</code>: cap adicional de <code>min(params.maxTokens, 2048)</code> sobre o config</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>📊 Métricas da Auditoria</h3>
+
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;text-align:center;margin-top:8px">
+    <div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:8px;padding:16px">
+      <div style="font-size:28px;font-weight:bold;color:#047857">15</div>
+      <div style="font-size:12px;color:#6b7280">total AIRequest sites</div>
+    </div>
+    <div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:8px;padding:16px">
+      <div style="font-size:28px;font-weight:bold;color:#047857">9</div>
+      <div style="font-size:12px;color:#6b7280">usam requestParams ✅</div>
+    </div>
+    <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:16px">
+      <div style="font-size:28px;font-weight:bold;color:#d97706">4</div>
+      <div style="font-size:12px;color:#6b7280">bypass (precisa fix)</div>
+    </div>
+    <div style="background:#f3f4f6;border:1px solid #d1d5db;border-radius:8px;padding:16px">
+      <div style="font-size:28px;font-weight:bold;color:#6b7280">3</div>
+      <div style="font-size:12px;color:#6b7280">legítimos (test/warmup)</div>
+    </div>
+  </div>
+</div>
+</div>

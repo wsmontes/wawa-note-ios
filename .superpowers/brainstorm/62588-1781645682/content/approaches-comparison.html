@@ -1,0 +1,166 @@
+<h2>3 Abordagens de Redesenho</h2>
+<p class="subtitle">Objetivo: flexibilidade máxima — adicionar providers, modelos, features sem mexer no core</p>
+
+<div class="section">
+  <h3>Restrições confirmadas</h3>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+    <span style="background:#dbeafe;color:#1e40af;padding:4px 10px;border-radius:20px;font-size:13px">🔒 ai_config.json mantido (extend only)</span>
+    <span style="background:#dbeafe;color:#1e40af;padding:4px 10px;border-radius:20px;font-size:13px">🔒 Provider APIs externas mantidas</span>
+    <span style="background:#f3f4f6;color:#6b7280;padding:4px 10px;border-radius:20px;font-size:13px">🔓 SwiftData models podem mudar</span>
+    <span style="background:#f3f4f6;color:#6b7280;padding:4px 10px;border-radius:20px;font-size:13px">🔓 Settings UI pode mudar</span>
+    <span style="background:#f3f4f6;color:#6b7280;padding:4px 10px;border-radius:20px;font-size:13px">🔓 Router/Manager podem mudar</span>
+  </div>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Core Unificado + Enforcement por Tipo</h3>
+      <p><strong>Ideia:</strong> Criar um <code>AIService</code> como fachada única. Toda chamada AI passa por ele — sem exceção.</p>
+
+<div class="mockup" style="margin-top:8px">
+  <div class="mockup-header">Estrutura</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.4;margin:0;white-space:pre;background:#f5f5f5;padding:8px">
+AIService (fachada única)
+├─ send(request: AIRequest) → AIResponse
+├─ sendStreaming(request:) → AsyncStream
+├─ embed(text:model:) → [Float]
+│
+│  Internamente:
+├─ ConfigLayer: aplica requestParams do feature
+├─ RoutingLayer: escolhe provider (online/offline/task)
+├─ RetryLayer: retry policy + circuit breaker
+└─ ModelLayer: tier selection + budget
+
+AgentService (substitui AgentLoop + Pipeline)
+├─ run(agentConfig:) → unifica chat e pipeline
+└─ tools: [AgentTool] injetadas por contexto
+    </pre>
+  </div>
+</div>
+
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4>
+          <ul><li>Zero bypass garantido</li><li>Fácil de auditar (1 ponto de entrada)</li><li>AgentLoop + Pipeline unificados</li></ul>
+        </div>
+        <div class="cons"><h4>Cons</h4>
+          <ul><li>Fachada pode virar god object</li><li>Menos flexível para casos especiais</li><li>Migração grande (15 call sites)</li></ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Protocol-Driven com Composição</h3>
+      <p><strong>Ideia:</strong> Tudo vira protocolo injetável. AIConfigProvider, ProviderResolver, ModelPolicy, ToolProvider — cada aspecto é um protocolo com impls plugáveis.</p>
+
+<div class="mockup" style="margin-top:8px">
+  <div class="mockup-header">Estrutura</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.4;margin:0;white-space:pre;background:#f5f5f5;padding:8px">
+protocol AIConfigProvider { requestParams(for:model:) → Params }
+protocol ProviderResolver { resolve(for:request) → AIProvider }
+protocol ModelPolicy { select(feature:budget:) → String }
+protocol ToolProvider { tools(for:context) → [AgentTool] }
+
+AgentOrchestrator (unifica AgentLoop + Pipeline)
+├─ config: AIConfigProvider
+├─ resolver: ProviderResolver
+├─ modelPolicy: ModelPolicy
+└─ toolProvider: ToolProvider
+
+// Impls existentes viram adapters
+class JSONConfigProvider: AIConfigProvider { ... }  // ai_config.json
+class HealthAwareResolver: ProviderResolver { ... } // health + fallback
+class TieredModelPolicy: ModelPolicy { ... }        // budget + tier
+    </pre>
+  </div>
+</div>
+
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4>
+          <ul><li>Máxima flexibilidade (troca cada peça)</li><li>Testável (mocks por protocolo)</li><li>ai_config.json é só uma impl de AIConfigProvider</li></ul>
+        </div>
+        <div class="cons"><h4>Cons</h4>
+          <ul><li>Muitos protocolos novos</li><li>Risco de overengineering</li><li>Curva de aprendizado maior</li></ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Middleware Pipeline</h3>
+      <p><strong>Ideia:</strong> Inspirado em Vapor/FastAPI. AIRequest passa por uma chain de middlewares configuráveis. Cada middleware faz uma transformação.</p>
+
+<div class="mockup" style="margin-top:8px">
+  <div class="mockup-header">Estrutura</div>
+  <div class="mockup-body">
+    <pre style="font-size:11px;line-height:1.4;margin:0;white-space:pre;background:#f5f5f5;padding:8px">
+protocol AIMiddleware {
+    func process(_ request: AIRequest, next: ...) async throws → AIResponse
+}
+
+// Chain configurável:
+[ConfigMiddleware, BudgetMiddleware, RoutingMiddleware, RetryMiddleware, LoggingMiddleware]
+     → cada um processa e chama next
+
+AgentOrchestrator
+├─ middlewareChain: [AIMiddleware]
+└─ run(agentConfig:) → usa middleware chain + tool loop
+
+// Features adicionam middlewares específicos:
+// "analysis" → [ConfigM, BudgetM, RoutingM, JSONValidationM]
+// "chat"     → [ConfigM, RoutingM, StreamingM]
+    </pre>
+  </div>
+</div>
+
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4>
+          <ul><li>Extremamente composable</li><li>Cada middleware é uma responsabilidade única</li><li>Features podem ter chains diferentes</li></ul>
+        </div>
+        <div class="cons"><h4>Cons</h4>
+          <ul><li>Pattern não idiomático no Swift/iOS</li><li>Debugging mais complexo (chain)</li><li>Overhead de design para o tamanho do app</li></ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:16px">
+  <h3>📊 Comparação lado a lado</h3>
+  <table style="width:100%;font-size:12px;border-collapse:collapse">
+    <thead>
+      <tr style="background:#e5e7eb">
+        <th style="padding:6px 8px;text-align:left">Critério</th>
+        <th style="padding:6px 8px;text-align:center">A: Core Unificado</th>
+        <th style="padding:6px 8px;text-align:center">B: Protocol-Driven</th>
+        <th style="padding:6px 8px;text-align:center">C: Middleware</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td style="padding:5px 8px">Flexibilidade</td><td style="padding:5px 8px;text-align:center">⭐⭐</td><td style="padding:5px 8px;text-align:center">⭐⭐⭐</td><td style="padding:5px 8px;text-align:center">⭐⭐⭐</td></tr>
+      <tr><td style="padding:5px 8px">Simplicidade</td><td style="padding:5px 8px;text-align:center">⭐⭐⭐</td><td style="padding:5px 8px;text-align:center">⭐⭐</td><td style="padding:5px 8px;text-align:center">⭐</td></tr>
+      <tr><td style="padding:5px 8px">Testabilidade</td><td style="padding:5px 8px;text-align:center">⭐</td><td style="padding:5px 8px;text-align:center">⭐⭐⭐</td><td style="padding:5px 8px;text-align:center">⭐⭐⭐</td></tr>
+      <tr><td style="padding:5px 8px">Enforcement (zero bypass)</td><td style="padding:5px 8px;text-align:center">⭐⭐⭐</td><td style="padding:5px 8px;text-align:center">⭐⭐</td><td style="padding:5px 8px;text-align:center">⭐⭐⭐</td></tr>
+      <tr><td style="padding:5px 8px">Esforço de migração</td><td style="padding:5px 8px;text-align:center">Médio</td><td style="padding:5px 8px;text-align:center">Alto</td><td style="padding:5px 8px;text-align:center">Alto</td></tr>
+      <tr><td style="padding:5px 8px">Idiomático Swift/iOS</td><td style="padding:5px 8px;text-align:center">⭐⭐⭐</td><td style="padding:5px 8px;text-align:center">⭐⭐⭐</td><td style="padding:5px 8px;text-align:center">⭐</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="section" style="margin-top:16px;background:#ecfdf5;border:1px solid #6ee7b7;border-radius:8px;padding:12px">
+  <h3 style="margin:0 0 4px 0;color:#047857">🏆 Recomendação: Abordagem B — Protocol-Driven com Composição</h3>
+  <p style="margin:0;font-size:13px">
+    Alinha com o princípio de flexibilidade máxima. O código já é protocol-first (AIProvider, TranscriptionEngine, FormatImporter, ContextSensor).
+    Estender esse padrão para config, routing e model selection é natural.
+    O <code>ai_config.json</code> vira uma implementação de <code>AIConfigProvider</code> — trocável sem mexer no resto.
+  </p>
+</div>
+</div>
