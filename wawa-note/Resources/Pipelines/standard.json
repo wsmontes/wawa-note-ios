@@ -1,0 +1,110 @@
+{
+  "name": "standard",
+  "version": "1.0",
+  "description": "Default content analysis pipeline: extract text → AI analysis → project ingestion.",
+  "params": {
+    "maxIterations": 15,
+    "retryAttempts": 2,
+    "retryBackoffSeconds": [5, 15],
+    "agentMode": "auto"
+  },
+  "stages": [
+    {
+      "id": "extraction",
+      "description": "Extract text from audio or image items before analysis.",
+      "condition": "{{ item.isAudio || item.isImage }}",
+      "onFailure": "continue",
+      "steps": [
+        {"action": "set_status", "value": "transcribing"},
+        {"action": "extract_content"}
+      ]
+    },
+    {
+      "id": "analysis",
+      "description": "AI-powered analysis via autonomous agent loop.",
+      "condition": "{{ !params.extractionOnly }}",
+      "stages": [
+        {
+          "id": "setup",
+          "description": "Agent reviews content catalog and selects approach.",
+          "steps": [
+            {"action": "agent_message", "prompt": "{{ prompts.catalog }}"}
+          ]
+        },
+        {
+          "id": "agent_loop",
+          "type": "agent_loop",
+          "iterations": "{{ params.maxIterations }}",
+          "mode": "{{ params.agentMode }}",
+          "retry": {
+            "maxAttempts": "{{ params.retryAttempts }}",
+            "backoffSeconds": "{{ params.retryBackoffSeconds }}"
+          },
+          "tools": "{{ provider.analysisTools }}",
+          "systemPrompt": {
+            "parts": [
+              "{{ prompts.catalog }}",
+              "{{ prompts.procedure }}"
+            ],
+            "joinWith": "\n\n"
+          },
+          "taskTemplate": "Process knowledge item {{ item.id }}.\nTitle: {{ item.title }}\nType: {{ item.type }}",
+          "onComplete": [
+            {"action": "set_status", "value": "analyzed"},
+            {"action": "clear_inbox"}
+          ],
+          "onFailure": [
+            {"action": "set_status", "value": "failed"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ingestion",
+      "description": "Project ingestion, embeddings, and Spotlight indexing.",
+      "condition": "{{ item.hasProject && !params.extractionOnly }}",
+      "steps": [
+        {"action": "project_ingest"},
+        {"action": "update_embeddings"},
+        {"action": "index_spotlight"}
+      ]
+    }
+  ],
+  "prompts": {
+    "catalog": {
+      "description": "Schema and skill catalog shown to the agent",
+      "source": "runtime",
+      "generator": "buildCatalogPrompt"
+    },
+    "procedure": {
+      "description": "Core analysis procedure with tool instructions",
+      "source": "promptStore",
+      "key": "pipeline_standard"
+    }
+  },
+  "variables": {
+    "item": {
+      "source": "knowledgeItem",
+      "description": "The KnowledgeItem being processed"
+    },
+    "provider": {
+      "source": "activeProvider",
+      "description": "Active AI provider with available tools and models",
+      "fields": ["analysisTools", "executorModel", "advisorModel"]
+    },
+    "params": {
+      "source": "config",
+      "description": "This file's params block — user-editable"
+    },
+    "prompts": {
+      "source": "runtime",
+      "description": "Resolved prompts from PromptStore or built-in templates",
+      "fields": ["catalog", "procedure"]
+    },
+    "env": {
+      "source": "automationSettings",
+      "description": "Global automation preferences",
+      "fields": ["autoAnalyze", "autoTranscribe"]
+    }
+  }
+}

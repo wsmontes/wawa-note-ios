@@ -74,32 +74,52 @@ final class AIConfigService: @unchecked Sendable {
     private(set) var config: AIConfig
 
     private init() {
+        config = Self.loadConfig()
+    }
+
+    /// Returns the config for a given project context. Resolves through cascade:
+    /// project/config → configs/ → bundle.
+    func config(for projectSlug: String? = nil) -> AIConfig {
+        if let slug = projectSlug,
+           let projCfg = Self.loadConfig(projectSlug: slug) {
+            return projCfg
+        }
+        if let globalCfg = Self.loadConfig(fromGlobalOverride: true) {
+            return globalCfg
+        }
+        return config
+    }
+
+    private static func loadConfig(projectSlug: String? = nil, fromGlobalOverride: Bool = false) -> AIConfig? {
+        let url: URL
+        if let slug = projectSlug {
+            url = FileArtifactStore().projectConfigDirectoryURL(for: slug).appendingPathComponent("ai_config.json")
+        } else if fromGlobalOverride {
+            url = FileArtifactStore().configsDirectoryURL().appendingPathComponent("ai_config.json")
+            guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        } else {
+            guard let bundleURL = Bundle.main.url(forResource: "ai_config", withExtension: "json") else { return nil }
+            url = bundleURL
+        }
+        guard let data = try? Data(contentsOf: url),
+              let cfg = try? JSONDecoder().decode(AIConfig.self, from: data) else { return nil }
+        AppLog.provider.info("Loaded AI config from \(url.lastPathComponent) — \(cfg.providers.count) providers")
+        return cfg
+    }
+
+    private static func loadConfig() -> AIConfig {
         if let url = Bundle.main.url(forResource: "ai_config", withExtension: "json") {
             do {
                 let data = try Data(contentsOf: url)
-                config = try JSONDecoder().decode(AIConfig.self, from: data)
-                AppLog.provider.info("Loaded AI config v\(self.config.version): \(self.config.providers.count) providers, \(self.config.features?.count ?? 0) features")
-                validateConfig()
-                return
-            } catch let decodingError as DecodingError {
-                let detail = Self.describeDecodingError(decodingError)
-                AppLog.provider.error("ai_config.json decode failed: \(detail) — using default config")
+                let config = try JSONDecoder().decode(AIConfig.self, from: data)
+                AppLog.provider.info("Loaded AI config v\(config.version): \(config.providers.count) providers, \(config.features?.count ?? 0) features")
+                return config
             } catch {
                 AppLog.provider.error("Failed to load ai_config.json: \(error) — using default config")
             }
-        } else {
-            AppLog.provider.error("ai_config.json not found in bundle — using default config")
         }
-        // Fallback: empty config with sensible defaults — app launches without ai_config.json
-        config = AIConfig(
-            version: "1.0",
-            description: "Default config (failed to load)",
-            providers: [:],
-            defaultModels: nil,
-            modelPresets: [:],
-            features: [:],
-            lenses: nil
-        )
+        return AIConfig(version: "1.0", description: "Default config", providers: [:],
+                        defaultModels: nil, modelPresets: [:], features: [:], lenses: nil)
     }
 
     /// Validate loaded config and warn about critical issues.

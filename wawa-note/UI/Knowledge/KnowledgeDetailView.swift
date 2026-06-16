@@ -1,10 +1,18 @@
 import SwiftUI
 import SwiftData
 
-private enum ReprocessMode {
+private enum ReprocessMode: CustomStringConvertible {
     case transcribeOnly
     case analyzeOnly
     case full
+
+    var description: String {
+        switch self {
+        case .transcribeOnly: "transcribeOnly"
+        case .analyzeOnly: "analyzeOnly"
+        case .full: "full"
+        }
+    }
 }
 
 struct KnowledgeDetailView: View {
@@ -54,6 +62,7 @@ struct KnowledgeDetailView: View {
     private let assetResolver = AudioAssetResolver()
     @State private var isReprocessing = false
     @State private var showReprocessWarning = false
+    @State private var refreshID = UUID()  // bumped on pipeline complete to force re-render
     @State private var pendingReprocessMode: ReprocessMode = .analyzeOnly
     @State private var agentEvents: [PipelineAgentEvent] = []
     @State private var isAgentThinking = false
@@ -226,6 +235,7 @@ struct KnowledgeDetailView: View {
             }
             .padding(.vertical, 16)
         }
+        .id(refreshID) // force re-render on pipeline complete
         .background(Color(.systemGroupedBackground))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -254,10 +264,11 @@ struct KnowledgeDetailView: View {
                         Label("Connect to Item", systemImage: "arrow.triangle.pull")
                     }
 
-                    // Reprocess menu — always available for processable items.
-                    // iOS 17/18 on-device transcription bug motivated re-transcribe.
-                    if item.type == .audio || item.bodyText != nil
-                        || item.analysisProviderId != nil || item.transcriptionEngineId != nil {
+                    // Reprocess menu — available for any processable item.
+                    let canReprocess = item.type == .audio || item.type == .image
+                        || item.bodyText != nil || item.analysisProviderId != nil
+                        || item.transcriptionEngineId != nil
+                    if canReprocess {
                         Menu {
                             if item.type == .audio {
                                 let already = item.transcriptionEngineId != nil
@@ -276,16 +287,29 @@ struct KnowledgeDetailView: View {
                                     }
                                 }
                             }
-                            if item.type == .audio || item.bodyText != nil
-                                || item.analysisProviderId != nil {
+                            if item.type == .image {
+                                Button {
+                                    Task { await reprocessItem(mode: .transcribeOnly) }
+                                } label: {
+                                    Label(item.bodyText?.isEmpty != false ? "Extract Text" : "Re-extract Text",
+                                          systemImage: "text.viewfinder")
+                                }
+                            }
+                            // Re-analyze: only when there's content to analyze
+                            let canAnalyze = (item.type == .audio && item.transcriptionEngineId != nil)
+                                || (item.type == .image && item.bodyText?.isEmpty == false)
+                                || item.bodyText?.isEmpty == false
+                                || item.analysisProviderId != nil
+                            if canAnalyze {
                                 Button {
                                     Task { await reprocessItem(mode: .analyzeOnly) }
                                 } label: {
                                     Label("Re-analyze", systemImage: "brain.head.profile")
                                 }
                             }
-                            if item.type == .audio, item.transcriptionEngineId != nil,
-                               item.analysisProviderId != nil {
+                            let canFullReprocess = (item.type == .audio && item.transcriptionEngineId != nil && item.analysisProviderId != nil)
+                                || (item.type == .image && item.bodyText?.isEmpty == false && item.analysisProviderId != nil)
+                            if canFullReprocess {
                                 Divider()
                                 Button {
                                     Task { await reprocessItem(mode: .full) }
@@ -367,6 +391,9 @@ struct KnowledgeDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: .pipelineCompleted)) { n in
             if n.object as? String == item.id.uuidString {
                 pipelineStage = ""
+                // Force SwiftUI to re-render with fresh data — the managed object
+                // may have been updated in another context.
+                refreshID = UUID()
                 Task { @MainActor in
                     loadRawAnalysisJSON()
                     loadData()
@@ -750,6 +777,74 @@ struct KnowledgeDetailView: View {
                             .font(.subheadline)
                     }
                     .buttonStyle(.bordered).tint(.orange)
+                }
+            }
+            .padding(16)
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+        }
+
+        // MARK: Speaker Confirmations
+        if let pending = pendingConfirmations(), !pending.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Speaker Confirmations", systemImage: "person.fill.questionmark")
+                    .font(.headline).foregroundStyle(.orange)
+                Text("The agent needs your help to identify these speakers.")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                ForEach(Array(pending.enumerated()), id: \.offset) { idx, pc in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(pc["question"] as? String ?? "Who is this?")
+                            .font(.subheadline).fontWeight(.medium)
+                        if let guess = pc["best_guess"] as? String {
+                            Text("Best guess: \(guess)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let candidates = pc["candidates"] as? [[String: Any]] {
+                            ForEach(Array(candidates.enumerated()), id: \.offset) { ci, c in
+                                HStack(spacing: 4) {
+                                    Text(c["name"] as? String ?? "")
+                                        .font(.caption).fontWeight(.medium)
+                                    if let ev = c["evidence"] as? String {
+                                        Text("— \(ev)")
+                                            .font(.caption2).foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                            }
+                        }
+
+                        HStack(spacing: 16) {
+                            Button {
+                                confirmSpeaker(idx, answer: "yes")
+                            } label: {
+                                Label("Yes", systemImage: "checkmark.circle.fill")
+                                    .font(.subheadline).fontWeight(.medium)
+                            }
+                            .buttonStyle(.borderedProminent).tint(.green)
+
+                            Button {
+                                confirmSpeaker(idx, answer: "no")
+                            } label: {
+                                Label("No", systemImage: "xmark.circle.fill")
+                                    .font(.subheadline)
+                            }
+                            .buttonStyle(.bordered).tint(.red)
+
+                            Button {
+                                confirmSpeaker(idx, answer: "rephrase")
+                            } label: {
+                                Label("Rephrase", systemImage: "questionmark.circle.fill")
+                                    .font(.subheadline)
+                            }
+                            .buttonStyle(.bordered).tint(.orange)
+                        }
+                    }
+                    .padding(12)
+                    .background(Color(.systemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
             }
             .padding(16)
@@ -1394,11 +1489,30 @@ struct KnowledgeDetailView: View {
 
     @ViewBuilder
     private var imageSection: some View {
+        // Show extracted text even if images failed to load
+        if let text = item.bodyText, !text.isEmpty {
+            let hasVision = text.contains("VISUAL ANALYSIS")
+            VStack(alignment: .leading, spacing: 6) {
+                Label(hasVision ? "OCR + Vision" : "OCR Text",
+                      systemImage: hasVision ? "eye.fill" : "doc.text.magnifyingglass")
+                    .font(.subheadline).fontWeight(.medium)
+                    .foregroundStyle(hasVision ? .purple : .secondary)
+                Text(text).font(.body)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 16)
+        }
+
         if scannedPages.isEmpty {
-            Text("No scanned image")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 16)
+            if item.bodyText?.isEmpty != false {
+                Text("No scanned image")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 16)
+            }
         } else {
             VStack(alignment: .leading, spacing: 16) {
                 // Page indicator above gallery
@@ -1435,23 +1549,6 @@ struct KnowledgeDetailView: View {
                 }
                 .tabViewStyle(.page(indexDisplayMode: scannedPages.count > 1 ? .always : .never))
                 .frame(minHeight: 350)
-
-                // OCR text
-                if let text = item.bodyText, !text.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label("Extracted Text", systemImage: "doc.text.magnifyingglass")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundStyle(.secondary)
-                        Text(text)
-                            .font(.body)
-                    }
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(.secondarySystemGroupedBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .padding(.horizontal, 16)
-                }
             }
             .padding(.top, 8)
         }
@@ -1760,6 +1857,8 @@ struct KnowledgeDetailView: View {
     private func reprocessItem(mode: ReprocessMode = .analyzeOnly,
                                 confirmed: Bool = false,
                                 forceAppleOnDevice: Bool = false) async {
+        // Guard against double-tap or race conditions
+        guard !isReprocessing else { return }
         // Whisper path needs an AI provider; Apple on-device does not.
         if mode == .transcribeOnly, !forceAppleOnDevice {
             if !AIConfigService.shared.isAnalysisAvailable(context: modelContext) {
@@ -1798,10 +1897,15 @@ struct KnowledgeDetailView: View {
 
         // ── Clear state ─────────────────────────────────────────────
         if doTranscribe {
-            item.transcriptionEngineId = nil
-            item.status = .recorded
-            try? FileManager.default.removeItem(at: dir.appendingPathComponent("transcript.json"))
-            transcript = nil
+            if item.type == .audio {
+                item.transcriptionEngineId = nil
+                item.status = .recorded
+                try? FileManager.default.removeItem(at: dir.appendingPathComponent("transcript.json"))
+                transcript = nil
+            } else if item.type == .image {
+                item.bodyText = nil
+                item.status = .recorded
+            }
         }
         if doAnalyze {
             item.analysisProviderId = nil
@@ -1811,31 +1915,32 @@ struct KnowledgeDetailView: View {
             analysis = nil
             rawAnalysisJSON = [:]
         }
+        // Prevent autoProcessPendingItems from double-processing.
+        item.inboxDate = nil
         try? modelContext.save()
 
-        // ── Transcribe: call extraction directly ────────────────────
-        // Bypasses process() guard that blocks Phase 0 when analysis exists.
-        if doTranscribe {
+        // ── Run ────────────────────────────────────────────────────
+        if doTranscribe && !doAnalyze {
+            // Extraction-only: run directly with visible progress indicator.
+            // The queue would also run Phase 2 (analysis) which we don't want.
             isTranscribing = true
             let extractionSvc = ContentExtractionService(modelContext: modelContext, fileStore: fileStore)
-            _ = await extractionSvc.extractTextFromAudio(item)
-            isTranscribing = false
-            loadData()
-            // extractTextFromAudio sets status → .pendingReview, which blocks
-            // process() below. Reset so analysis can proceed.
-            if doAnalyze {
-                item.status = .transcribed
-                try? modelContext.save()
+            if item.type == .audio {
+                _ = await extractionSvc.extractTextFromAudio(item)
+            } else if item.type == .image {
+                _ = await extractionSvc.extractTextFromImage(item)
             }
-        }
-
-        // ── Analyze: run full pipeline ──────────────────────────────
-        if doAnalyze {
-            item.status = .analyzing
-            try? modelContext.save()
-            AppLog.provider.info("🔍 reprocessItem: calling forceReanalyze for \(item.id.uuidString.prefix(8))")
-            await contentPipeline.forceReanalyze(itemID: item.id, using: modelContext)
-            AppLog.provider.info("🔍 reprocessItem: forceReanalyze RETURNED for \(item.id.uuidString.prefix(8))")
+            isTranscribing = false
+            let fetchedItem = try? KnowledgeItemService(context: modelContext).fetchItem(id: item.id)
+            AppLog.provider.info("🔍 reprocessItem: extraction done — bodyText=\(fetchedItem?.bodyText?.count ?? 0) chars, hasVision=\(fetchedItem?.bodyText?.contains("VISUAL ANALYSIS") ?? false)")
+            refreshID = UUID()
+            loadData()
+        } else {
+            // Analysis or full reprocess: enqueue for pipeline processing.
+            // The queue handles both extraction + analysis with full progress tracking.
+            processingQueue.enqueue(itemID: item.id, projectID: item.projectID,
+                                    trigger: .directUserAction)
+            AppLog.provider.info("🔍 reprocessItem: enqueued mode=\(mode) for \(item.id.uuidString.prefix(8))")
         }
     }
 
@@ -1926,6 +2031,72 @@ struct KnowledgeDetailView: View {
             return body
         }
         return nil
+    }
+
+    /// Reads speakers.json and returns pending_confirmations array if present.
+    private func pendingConfirmations() -> [[String: Any]]? {
+        let url = fileStore.itemDirectoryURL(for: item.id).appendingPathComponent("speakers.json")
+        guard FileManager.default.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let pending = json["pending_confirmations"] as? [[String: Any]],
+              !pending.isEmpty else { return nil }
+        return pending
+    }
+
+    /// Handles user confirmation for a speaker. Builds a prompt from the answer
+    /// and triggers a new agent iteration via the processing queue.
+    private func confirmSpeaker(_ index: Int, answer: String) {
+        guard var pending = pendingConfirmations(), index < pending.count else { return }
+        guard var speakers = readSpeakersJSON() else { return }
+
+        let pc = pending[index]
+        let label = pc["speaker_label"] as? String ?? "Unknown"
+        let guess = pc["best_guess"] as? String ?? "Unknown"
+
+        // Build confirmation message for the agent
+        var confirmMsg: String
+        switch answer {
+        case "yes":
+            confirmMsg = "✅ CONFIRMED: \(label) is \(guess). Update speakers.json to mark this as high confidence."
+            // Update in-memory: move from pending to confirmed
+            speakers["speakers"] = (speakers["speakers"] as? [[String: Any]] ?? []) + [[
+                "label": label, "resolved_to": guess, "confidence": "high",
+                "evidence_summary": "User confirmed this identification."
+            ]]
+            pending.remove(at: index)
+        case "no":
+            confirmMsg = "❌ REJECTED: \(label) is NOT \(guess). Remove this candidate and reconsider."
+            pending.remove(at: index)
+        default: // rephrase
+            confirmMsg = "❓ REPHRASE: The user wants you to reformulate the question about \(label). Use data from other confirmed speakers to improve."
+            // Keep pending, add rephrase flag
+            pending[index] = pc.merging(["rephrase": true]) { $1 }
+        }
+
+        speakers["pending_confirmations"] = pending
+
+        // Write updated speakers.json
+        let url = fileStore.itemDirectoryURL(for: item.id).appendingPathComponent("speakers.json")
+        if let data = try? JSONSerialization.data(withJSONObject: speakers, options: [.prettyPrinted]) {
+            try? data.write(to: url, options: .atomic)
+        }
+
+        // Enqueue re-analysis with confirmation context
+        item.analysisProviderId = nil
+        try? modelContext.save()
+        processingQueue.enqueue(itemID: item.id, projectID: item.projectID,
+                                trigger: .directUserAction)
+        AppLog.provider.info("🔍 confirmSpeaker: enqueued re-analysis for \(item.id.uuidString.prefix(8))")
+    }
+
+    /// Reads the full speakers.json file.
+    private func readSpeakersJSON() -> [String: Any]? {
+        let url = fileStore.itemDirectoryURL(for: item.id).appendingPathComponent("speakers.json")
+        guard FileManager.default.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return json
     }
 
     // MARK: - Agent event badge

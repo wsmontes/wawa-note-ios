@@ -195,6 +195,11 @@ final class FileArtifactStore: @unchecked Sendable {
         baseURL.appendingPathComponent(AppDirectoryNames.configs, isDirectory: true)
     }
 
+    /// Project-level config directory: `projects/{slug}/config/`
+    func projectConfigDirectoryURL(for projectSlug: String) -> URL {
+        baseURL.appendingPathComponent("projects/\(projectSlug)/config", isDirectory: true)
+    }
+
     func chatDirectoryURL() -> URL {
         baseURL.appendingPathComponent(AppDirectoryNames.chat, isDirectory: true)
     }

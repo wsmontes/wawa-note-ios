@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+import Contacts
+import EventKit
 
 // MARK: - Shell Command
 
@@ -205,11 +207,12 @@ enum ShellInterpreter {
         case "progress": result = handleProgress(cmd, ctx)
         case "cleanup": result = handleCleanup(cmd, ctx)
         case "recipe": result = handleRecipe(cmd, ctx)
+        case "person": result = handlePerson(cmd, ctx)
         case "help":  result = handleHelp(cmd, ctx)
         case "ask_user": result = handleAskUser(cmd, ctx)
         default:
             // Try fuzzy matching
-            let suggestions = ["ls", "cd", "cat", "find", "grep", "touch", "echo", "rm", "mv", "head", "wc", "history", "extract", "semantic", "analyze", "cal", "export", "vision", "describe", "progress", "help", "ask_user"]
+            let suggestions = ["ls", "cd", "cat", "find", "grep", "touch", "echo", "rm", "mv", "head", "wc", "history", "extract", "semantic", "analyze", "cal", "person", "export", "vision", "describe", "progress", "help", "ask_user"]
             let close = suggestions.filter { $0.hasPrefix(cmd.name) || levenshtein(cmd.name, $0) <= 2 }
             let hint = close.isEmpty ? "" : ". Did you mean: \(close.joined(separator: ", "))?"
             let tip = cmd.name.count > 0 && cmd.name.first?.isLowercase != true
@@ -1506,6 +1509,268 @@ enum ShellInterpreter {
         return ok("Semantic search initiated for '\(query)' across \(itemCount) items with content. Results will be available when embeddings are processed. For immediate results, use grep.")
     }
 
+    // MARK: - person (cross-reference contacts, calendar, transcripts, calls, memory)
+
+    /// Cross-references a person name across all available sources.
+    /// Returns a structured summary with match quality labels.
+    /// Usage: person "Carla"  |  person show "Carla Silva"
+    private static func handlePerson(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
+        if cmd.args.first == "show" {
+            return handlePersonShow(Array(cmd.args.dropFirst()), ctx)
+        }
+        guard let query = cmd.args.first, !query.isEmpty else {
+            return shellErr("person: usage: person \"Name\"  |  person show \"Full Name\"")
+        }
+        let q = query.lowercased()
+        var lines: [String] = []
+        var total = 0
+        let visited = NSMutableSet() // track seen names to deduplicate
+
+        // ── Source 1: Contacts ───────────────────────────────────
+        var contactHits: [String] = []
+        let (contactResults, contactPermError) = searchContacts(query: query)
+        if let permErr = contactPermError { lines.append("⚠️ Contacts: \(permErr)\n") }
+        for (name, email, org, job, matchType) in contactResults.prefix(5) {
+            let tag = matchType == "exact" ? "exata" : "aproximada"
+            var line = "  [\(tag)] \(name)"
+            if let e = email { line += " — \(e)" }
+            if let o = org { line += " — \(o)" }
+            if let j = job { line += " — \(j)" }
+            contactHits.append(line)
+            visited.add(name.lowercased())
+            total += 1
+        }
+        if !contactHits.isEmpty {
+            lines.append("### CONTACTS (\(contactHits.count))")
+            lines.append(contentsOf: contactHits)
+            lines.append("")
+        }
+
+        // ── Source 2: Calendar ───────────────────────────────────
+        var calHits: [String] = []
+        if let calPermErr = ensureCalendarAccess() {
+            lines.append("⚠️ Calendar: \(calPermErr)\n")
+        } else {
+            let calSvc = CalendarSyncService()
+            let sixMonths = DateInterval(start: Date().addingTimeInterval(-180*86400), duration: 180*86400)
+            let events = calSvc.fetchEvents(for: sixMonths)
+        for event in events {
+            let title = event.title.lowercased()
+            let attendeeNames = (event.attendees ?? []).compactMap { $0.name?.lowercased() }
+            if title.contains(q) {
+                calHits.append("  [mencionada] \"\(event.title)\" — \(formattedDate(event.startDate))")
+                total += 1
+            } else if attendeeNames.contains(where: { $0.contains(q) }) {
+                let matched = attendeeNames.filter { $0.contains(q) }.joined(separator: ", ")
+                calHits.append("  [attendee] \"\(event.title)\" — \(formattedDate(event.startDate)) — \(matched)")
+                total += 1
+            }
+            if calHits.count >= 5 { break }
+        }
+        if !calHits.isEmpty {
+            lines.append("### CALENDAR (\(calHits.count))")
+            lines.append(contentsOf: calHits.prefix(5))
+            lines.append("")
+        }
+        } // end calendar permission check
+
+        // ── Source 3: Transcript grep ─────────────────────────────
+        var transcriptHits: [String] = []
+        let allItems = (try? KnowledgeItemService(context: ctx.modelContext).allItems()) ?? []
+        for item in allItems where item.type == .audio {
+            guard let transcript = try? ctx.fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id),
+                  !transcript.segments.isEmpty else { continue }
+            let fullText = transcript.segments.map(\.text).joined(separator: " ")
+            if fullText.lowercased().contains(q) {
+                // Extract a snippet around the match
+                let snippet = snippetAround(fullText, query: q, radius: 60)
+                let tag = item.title.lowercased().contains(q) ? "exata" : "parcial"
+                transcriptHits.append("  [\(tag)] \"\(item.title)\" \(item.createdAt.formatted(date: .numeric, time: .omitted)) — \"...\(snippet)...\"")
+                total += 1
+            }
+            if transcriptHits.count >= 5 { break }
+        }
+        if !transcriptHits.isEmpty {
+            lines.append("### TRANSCRIPT MENTIONS (\(transcriptHits.count))")
+            lines.append(contentsOf: transcriptHits)
+            lines.append("")
+        }
+
+        // ── Source 4: Recent Calls ────────────────────────────────
+        var callHits: [String] = []
+        if let calls = fetchRecentCalls(matching: query) {
+            for (name, direction, date, duration) in calls.prefix(3) {
+                let dir = direction == "incoming" ? "recebida" : "efetuada"
+                callHits.append("  [exata] \(name) — \(dir) — \(formattedDate(date)) (\(duration)s)")
+                total += 1
+            }
+        }
+        if !callHits.isEmpty {
+            lines.append("### CHAMADAS RECENTES (\(callHits.count))")
+            lines.append(contentsOf: callHits)
+            lines.append("")
+        }
+
+        // ── Source 5: WawaNote Memory ─────────────────────────────
+        var memHits: [String] = []
+        for item in allItems {
+            guard item.analysisProviderId != nil else { continue }
+            guard let analysisData = try? ctx.fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) else { continue }
+            // Check if person appears in analysis fields
+            let decisionText = analysisData.decisions.map { $0.title + " " + ($0.details ?? "") }.joined(separator: " ")
+            let actionText = analysisData.actionItems.map { $0.task + " " + ($0.owner ?? "") }.joined(separator: " ")
+            let analysisText = analysisData.shortSummary + " " + decisionText + " " + actionText
+            if analysisText.lowercased().contains(q) {
+                memHits.append("  [exata] \"\(query)\" citada em análise de \"\(item.title)\" — \(item.createdAt.formatted(date: .numeric, time: .omitted))")
+                total += 1
+            }
+            if memHits.count >= 3 { break }
+        }
+        if !memHits.isEmpty {
+            lines.append("### WAWANOTE MEMORY (\(memHits.count))")
+            lines.append(contentsOf: memHits)
+            lines.append("")
+        }
+
+        if total == 0 {
+            return ok("person \"\(query)\": Nenhum resultado encontrado em contacts, calendário, transcrições, chamadas ou memória interna.")
+        }
+
+        let header = "## person \"\(query)\" — \(total) resultados em \(lines.filter { $0.hasPrefix("###") }.count) fontes\n"
+        return ok(header + "\n" + lines.joined(separator: "\n"))
+    }
+
+    /// Drill-down: full details for a specific person name
+    private static func handlePersonShow(_ args: [String], _ ctx: ToolContext) -> ToolResult {
+        guard let name = args.first, !name.isEmpty else {
+            return shellErr("person show: usage: person show \"Full Name\"")
+        }
+        var lines: [String] = ["## person show \"\(name)\"\n"]
+
+        // Contact detail
+        let (contacts, _) = searchContacts(query: name)
+        if !contacts.isEmpty {
+            lines.append("### CONTACT")
+            for (cname, email, org, job, _) in contacts.prefix(1) where cname.lowercased() == name.lowercased() {
+                lines.append("  Name: \(cname)")
+                if let e = email { lines.append("  Email: \(e)") }
+                if let o = org { lines.append("  Organization: \(o)") }
+                if let j = job { lines.append("  Job Title: \(j)") }
+            }
+            lines.append("")
+        }
+
+        // Calendar appearances
+        let calSvc = CalendarSyncService()
+        let sixMonths = DateInterval(start: Date().addingTimeInterval(-180*86400), duration: 180*86400)
+        let events = calSvc.fetchEvents(for: sixMonths)
+        let relevantEvents = events.filter { event in
+            let attNames = (event.attendees ?? []).compactMap { $0.name?.lowercased() }
+            return attNames.contains(where: { $0.contains(name.lowercased()) }) ||
+            event.title.lowercased().contains(name.lowercased())
+        }
+        let df = DateFormatter(); df.dateStyle = .short; df.timeStyle = .short
+        if !relevantEvents.isEmpty {
+            lines.append("### CALENDAR (\(relevantEvents.count))")
+            for e in relevantEvents.prefix(5) {
+                lines.append("  \(df.string(from: e.startDate)) — \"\(e.title)\"")
+            }
+            lines.append("")
+        }
+
+        // SwiftData Person entity
+        let persons = (try? PersonService(context: ctx.modelContext).search(name)) ?? []
+        if !persons.isEmpty {
+            lines.append("### PERSON ENTITY")
+            for p in persons.prefix(1) {
+                lines.append("  Name: \(p.displayName)")
+                if let e = p.email { lines.append("  Email: \(e)") }
+                if let r = p.role { lines.append("  Role: \(r)") }
+            }
+            lines.append("")
+        }
+
+        return ok(lines.joined(separator: "\n"))
+    }
+
+    /// Search Contacts using CNContactStore. Returns results + permission status string.
+    /// If permission is notDetermined, requests it synchronously and returns empty.
+    private static func searchContacts(query: String) -> ([(String, String?, String?, String?, String)], String?) {
+        let status = CNContactStore.authorizationStatus(for: .contacts)
+        switch status {
+        case .notDetermined:
+            var granted = false
+            let sem = DispatchSemaphore(value: 0)
+            CNContactStore().requestAccess(for: .contacts) { ok, _ in
+                granted = ok; sem.signal()
+            }
+            sem.wait()
+            if !granted { return ([], "Contacts access denied by user.") }
+        case .denied, .restricted:
+            return ([], "Contacts access denied. Enable in Settings → Privacy → Contacts.")
+        case .authorized: break
+        @unknown default: return ([], "Contacts: unknown authorization status.")
+        }
+
+        let store = CNContactStore()
+        let keys: [CNKeyDescriptor] = [CNContactGivenNameKey as CNKeyDescriptor,
+                                        CNContactFamilyNameKey as CNKeyDescriptor,
+                                        CNContactEmailAddressesKey as CNKeyDescriptor,
+                                        CNContactOrganizationNameKey as CNKeyDescriptor,
+                                        CNContactJobTitleKey as CNKeyDescriptor]
+        let predicate = CNContact.predicateForContacts(matchingName: query)
+        guard let contacts = try? store.unifiedContacts(matching: predicate, keysToFetch: keys) else { return ([], nil) }
+        let results = contacts.compactMap { c -> (String, String?, String?, String?, String)? in
+            let fullName = [c.givenName, c.familyName].filter { !$0.isEmpty }.joined(separator: " ")
+            guard !fullName.isEmpty else { return nil }
+            let email = c.emailAddresses.first?.value as? String
+            let matchType = fullName.lowercased() == query.lowercased() ? "exact" : "fuzzy"
+            return (fullName, email, c.organizationName.isEmpty ? nil : c.organizationName,
+                    c.jobTitle.isEmpty ? nil : c.jobTitle, matchType)
+        }
+        return (results, nil)
+    }
+
+    /// Checks and requests calendar permission. Returns nil if OK, error message if not.
+    private static func ensureCalendarAccess() -> String? {
+        let status = EKEventStore.authorizationStatus(for: .event)
+        switch status {
+        case .notDetermined:
+            var granted = false
+            let sem = DispatchSemaphore(value: 0)
+            EKEventStore.shared.requestFullAccessToEvents { ok, _ in
+                granted = ok; sem.signal()
+            }
+            sem.wait()
+            if !granted { return "Calendar access denied by user." }
+        case .denied, .restricted:
+            return "Calendar access denied. Enable in Settings → Privacy → Calendars."
+        case .authorized, .fullAccess: break
+        @unknown default: return "Calendar: unknown authorization status."
+        }
+        return nil
+    }
+
+    /// Fetch recent phone/FaceTime calls matching a name via CallKit history.
+    private static func fetchRecentCalls(matching name: String) -> [(String, String, Date, Int)]? {
+        // Call history requires entitlements and is limited on iOS.
+        // Return nil if unavailable — the agent treats this as "no call data."
+        return nil
+    }
+
+    /// Extract a text snippet around a query match.
+    private static func snippetAround(_ text: String, query: String, radius: Int) -> String {
+        guard let range = text.lowercased().range(of: query.lowercased()) else {
+            return String(text.prefix(radius * 2))
+        }
+        let lower = text.distance(from: text.startIndex, to: range.lowerBound)
+        let start = max(0, lower - radius)
+        let end = min(text.count, lower + query.count + radius)
+        let si = text.index(text.startIndex, offsetBy: start)
+        let ei = text.index(text.startIndex, offsetBy: end)
+        return String(text[si..<ei]).replacingOccurrences(of: "\n", with: " ")
+    }
+
     // MARK: - analyze (trigger pipeline)
 
     private static func handleAnalyze(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
@@ -1527,34 +1792,104 @@ enum ShellInterpreter {
 
     private static func handleCal(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
         let sub = cmd.args.first ?? "list"
+
+        // Check and request calendar permission
+        if let permErr = ensureCalendarAccess() {
+            return shellErr("cal: \(permErr)")
+        }
+
+        let svc = CalendarSyncService()
+        let iso = ISO8601DateFormatter()
+
+        // Parse --from and --to (supports YYYY-MM-DD or ISO8601)
+        func parseDate(_ str: String?) -> Date? {
+            guard let s = str else { return nil }
+            // Try ISO8601 first, then simple date
+            if let d = iso.date(from: s) { return d }
+            let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
+            return df.date(from: s)
+        }
+        let fromDate = parseDate(cmd.flags["from"])
+        let toDate = parseDate(cmd.flags["to"])
+
+        // Date range: use --from/--to, else default to next 7 days
+        func dateRange() -> DateInterval {
+            if let from = fromDate, let to = toDate {
+                return DateInterval(start: from, end: to)
+            }
+            if let from = fromDate {
+                return DateInterval(start: from, duration: 7 * 86400)
+            }
+            let now = Date()
+            return DateInterval(start: now, duration: 7 * 86400)
+        }
+
         switch sub {
         case "add":
             guard let title = cmd.flags["title"] else { return shellErr("cal add: --title required. --start (ISO8601), --end, --notes optional.") }
             let startStr = cmd.flags["start"] ?? Date().ISO8601Format()
             let endStr = cmd.flags["end"]
             let notes = cmd.flags["notes"]
-            let start = ISO8601DateFormatter().date(from: startStr) ?? Date()
-            let end = endStr.flatMap { ISO8601DateFormatter().date(from: $0) } ?? start.addingTimeInterval(3600)
-            let svc = CalendarSyncService()
+            let start = iso.date(from: startStr) ?? Date()
+            let end = endStr.flatMap { iso.date(from: $0) } ?? start.addingTimeInterval(3600)
             do {
                 let eventID = try svc.createEvent(title: title, startDate: start, endDate: end, notes: notes)
                 return ok("Calendar event created: \(title) (\(eventID.prefix(8)))")
             } catch {
                 return shellErr("cal add: failed — \(error.localizedDescription)")
             }
+
         case "list":
-            let svc = CalendarSyncService()
-            let now = Date()
-            let week = DateInterval(start: now, duration: 7 * 86400)
-            let events = svc.fetchEvents(for: week)
-            if events.isEmpty { return ok("No upcoming events in the next 7 days.") }
-            var lines = ["Upcoming events (next 7 days):", ""]
+            let range = dateRange()
+            let events = svc.fetchEvents(for: range)
+            let label = fromDate != nil ? "\(formattedDate(range.start)) → \(formattedDate(range.end))" : "next 7 days"
+            if events.isEmpty { return ok("No events \(label).") }
+            var lines = ["Events (\(label)):", ""]
             for e in events.prefix(20) {
-                lines.append("  \(e.startDate.formatted())  \(e.title)")
+                lines.append("  \(formattedDate(e.startDate))  \(e.title)")
+                if let loc = e.location { lines.append("       Location: \(loc)") }
             }
             return ok(lines.joined(separator: "\n"))
+
+        case "find":
+            guard let query = cmd.args.dropFirst().first, !query.isEmpty else {
+                return shellErr("cal find: usage: cal find \"query\" [--from YYYY-MM-DD] [--to YYYY-MM-DD]")
+            }
+            let range = dateRange()
+            let events = svc.fetchEvents(for: range)
+            let q = query.lowercased()
+            let matched = events.filter { $0.title.lowercased().contains(q) }
+            if matched.isEmpty { return ok("No events matching \"\(query)\" in range.") }
+            var lines = ["Events matching \"\(query)\" (\(matched.count)):", ""]
+            for e in matched.prefix(15) {
+                lines.append("  \(formattedDate(e.startDate))  \(e.title)")
+                if let loc = e.location { lines.append("       Location: \(loc)") }
+                if let notes = e.notes { lines.append("       Notes: \(notes.prefix(120))") }
+            }
+            return ok(lines.joined(separator: "\n"))
+
+        case "attendees":
+            let range = dateRange()
+            let events = svc.fetchEvents(for: range)
+            var allAttendees = Set<String>()
+            for event in events {
+                for att in (event.attendees ?? []) {
+                    if let name = att.name?.trimmingCharacters(in: .whitespaces), !name.isEmpty {
+                        allAttendees.insert(name)
+                    }
+                }
+            }
+            if allAttendees.isEmpty { return ok("No attendees found in events for this range.") }
+            let sorted = allAttendees.sorted()
+            var lines = ["Attendees in calendar events (\(sorted.count) unique):", ""]
+            for name in sorted {
+                let count = events.filter { ($0.attendees ?? []).compactMap({ $0.name }).contains(name) }.count
+                lines.append("  \(name) — \(count) event\(count == 1 ? "" : "s")")
+            }
+            return ok(lines.joined(separator: "\n"))
+
         default:
-            return shellErr("cal: usage: cal list | cal add --title \"Event\" --start \"2026-06-07T14:00:00Z\" [--end ...] [--notes ...]")
+            return shellErr("cal: usage: cal list|find|attendees|add [--from YYYY-MM-DD] [--to YYYY-MM-DD]")
         }
     }
 
@@ -1800,6 +2135,14 @@ enum ShellInterpreter {
 
     // MARK: - Helpers
 
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateStyle = .short; f.timeStyle = .short; return f
+    }()
+
+    private static func formattedDate(_ date: Date) -> String {
+        dateFormatter.string(from: date)
+    }
+
     private static func ok(_ content: String, blocks: [ChatBlock]? = nil) -> ToolResult {
         ToolResult(content: content, blocks: blocks, citations: [], isError: false, displaySummary: String(content.prefix(80)))
     }
@@ -1810,6 +2153,6 @@ enum ShellInterpreter {
 
     /// Known command names for did-you-mean suggestions (used by dispatch default).
     private static let knownCommands: Set<String> = ["ls", "cd", "cat", "echo", "touch", "rm", "mv", "find",
-        "grep", "wc", "man", "history", "help", "pwd", "mkdir", "ask_user", "plan", "assign", "progress", "cleanup"]
+        "grep", "wc", "man", "history", "help", "pwd", "mkdir", "ask_user", "plan", "assign", "progress", "cleanup", "person"]
 }
 

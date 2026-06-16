@@ -32,7 +32,6 @@ struct InboxView: View {
     enum InboxFilter: String, CaseIterable {
         case needsReview = "Needs Review"
         case all = "All"
-        case anarlog = "Anarlog"
         case unassigned = "Unassigned"
         case flagged = "Flagged"
         case trash = "Trash"
@@ -41,7 +40,6 @@ struct InboxView: View {
             switch self {
             case .needsReview: "tray"
             case .all: "tray.full"
-            case .anarlog: "arrow.triangle.2.circlepath"
             case .unassigned: "questionmark.folder"
             case .flagged: "flag"
             case .trash: "trash"
@@ -341,7 +339,6 @@ struct InboxView: View {
         switch filterMode {
         case .needsReview: "Everything is reviewed. New captures and imports will appear here."
         case .all: "No source items yet. Start recording, importing, or creating a note."
-        case .anarlog: "No anarlog notes imported yet. Configure the shared folder in Settings to sync."
         case .unassigned: "All items are assigned to a project. Nice work."
         case .flagged: "No flagged items. Flag items to mark them for follow-up."
         case .trash: "Trash is empty."
@@ -352,6 +349,12 @@ struct InboxView: View {
 
     private var filteredItems: [KnowledgeItem] {
         var result = allItems
+
+        // Exclude config project items (providers, prompts, skills, etc.)
+        let configProjectID = projects.first(where: { $0.slug == ConfigProjectService.configProjectSlug })?.id
+        if let configID = configProjectID {
+            result = result.filter { $0.projectID != configID }
+        }
 
         // Exclude trash unless viewing trash
         if filterMode != .trash, let trashID = trashFolderID {
@@ -370,7 +373,6 @@ struct InboxView: View {
         switch filterMode {
         case .needsReview: result = result.filter { $0.inboxDate != nil && $0.analysisProviderId == nil }
         case .all, .trash: break
-        case .anarlog: result = result.filter { $0.anarlogFrontmatterJSON != nil }
         case .unassigned: result = result.filter { $0.projectID == nil && $0.folderID == nil }
         case .flagged: result = result.filter { $0.isFlagged }
         }
@@ -423,7 +425,11 @@ struct InboxView: View {
 
     private var needsReviewCount: Int {
         var items = allItems
-        // Exclude trash — same logic as filteredItems for .needsReview
+        // Exclude config project
+        if let configID = projects.first(where: { $0.slug == ConfigProjectService.configProjectSlug })?.id {
+            items = items.filter { $0.projectID != configID }
+        }
+        // Exclude trash
         if let trashID = trashFolderID {
             items = items.filter { $0.folderID != trashID }
         }

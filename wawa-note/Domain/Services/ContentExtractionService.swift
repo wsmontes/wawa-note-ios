@@ -258,7 +258,10 @@ final class ContentExtractionService {
     }
 
     func extractTextFromImage(_ item: KnowledgeItem) async -> String? {
-        if let body = item.bodyText, !body.isEmpty {
+        // Return cached text if already extracted — prevents double extraction
+        // from overwriting a successful OCR+Vision result.
+        if let body = item.bodyText, !body.isEmpty, body != " " {
+            AppLog.provider.info("ContentExtraction: reusing existing bodyText (\(body.count) chars)")
             return body
         }
         guard let relativePath = item.imageFileRelativePath else { return nil }

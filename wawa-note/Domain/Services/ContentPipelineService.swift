@@ -57,11 +57,20 @@ enum PipelineTemplate {
     - "sentiment": "positive/neutral/negative" — overall tone
     - "custom_sections": {} — any other relevant groupings you identify
 
+    ### Step 4: SPEAKER RESOLUTION (when transcript has speakers)
+    After write_analysis, identify speakers mentioned in the transcript.
+    Use `person "Name"` to cross-reference each speaker across contacts,
+    calendar, transcripts, and memory. Compare results carefully — homonyms
+    are common, disambiguate by context (company, recent meetings, other speakers).
+    When uncertain, add to pending_confirmations with evidence for each candidate.
+    Output via write_speakers — the schema is strictly validated. Retry until it passes.
+
     ## RULES
     - ALWAYS start with extract
     - ALWAYS use write_analysis — never just describe results
     - "summary" is the only REQUIRED section. All others are OPTIONAL.
     - ONLY include sections that have meaningful content. Skip empty ones entirely (don't use null).
+    - If content quality is too low to analyze (blurry scan, inaudible audio, garbled OCR), produce a minimal analysis with "summary" explaining why and stop. Do NOT loop retrying on unanalyzable content.
     - You may add custom sections beyond the examples above if the content warrants it.
     - Be specific — reference what was actually said
     - Use snake_case for section keys
@@ -134,7 +143,7 @@ final class ContentPipelineService: ObservableObject {
 
     /// Builds the catalog prompt that teaches the agent how to choose schema + skill
     /// based on content. Lists available schemas and skills compactly.
-    private static func buildCatalogPrompt() -> String {
+    static func buildCatalogPrompt() -> String {
         let schemaList = AnalysisSchemaStore.shared.schemas.values
             .sorted { $0.displayName < $1.displayName }
             .map { "\($0.name) — \($0.displayName): \($0.description)" }
@@ -144,24 +153,26 @@ final class ContentPipelineService: ObservableObject {
             .map { "\($0.name) — \($0.displayName): \($0.description)" }
             .joined(separator: "\n")
         return """
-        ## ANALYSIS SETUP — DO THIS FIRST
+        ## ANALYSIS SETUP
 
-        Before analyzing, you MUST select your tools. Read the content, then choose the schema (output structure) and skill (tutorial) that best apply.
+        Read the content, then decide your approach:
 
-        1. Call `select_schema <name>` — picks the output structure. Available:
+        1. If a schema below clearly matches the content, call `select_schema <name>`:
         \(schemaList)
 
-        2. Call `select_skill <name>` — picks the tutorial/guidance. Available:
+        2. If a skill below provides useful guidance, call `select_skill <name>`:
         \(skillList)
 
-        Choose based on what you SEE in the content, not the item type. A meeting transcript might be an interview. A note might be a journal entry. Read first, then decide.
+        If nothing fits well, skip both and proceed directly to write_analysis.
+        You can define your own structure based on what the content actually needs.
+        The UI will adapt to whatever fields you produce.
         """
     }
 
     /// Process an item through the pipeline using an autonomous agent.
     /// The agent decides the strategy (single-pass, chunked, map-reduce) based on
     /// content size and type. Skips phases that already completed.
-    func process(_ itemID: UUID, using modelContext: ModelContext, forceReanalysis: Bool = false) {
+    func process(_ itemID: UUID, using modelContext: ModelContext, forceReanalysis: Bool = false, extractionOnly: Bool = false) {
         guard activeJobs[itemID] == nil else {
             AppLog.provider.info("ContentPipeline: item \(itemID) already being processed, skipping duplicate call")
             return
@@ -232,14 +243,20 @@ final class ContentPipelineService: ObservableObject {
                     }
                 }
                 if item.type == .image, item.bodyText == nil {
+                    let pageCount = item.imagePageCount ?? 1
+                    item.status = .transcribing
+                    try? modelContext.save()
                     pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
                         itemType: item.type.rawValue, phase: "recognizing",
                         currentTool: nil, toolSummary: nil, toolLog: [], events: [], thinkingActive: false)
                     NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
-                        userInfo: ["stage": "recognizing"])
+                        userInfo: ["stage": "Extracting text" + (pageCount > 1 ? " (\(pageCount) pages)" : "")])
                     if let ocrText = await extractionSvc.extractTextFromImage(item) {
-                        AppLog.provider.info("ContentPipeline: OCR complete for item \(itemID) — \(ocrText.count) chars")
-                        // Set pendingReview so user can verify OCR before analysis
+                        let hasVision = ocrText.contains("VISUAL ANALYSIS")
+                        AppLog.provider.info("ContentPipeline: extraction complete for item \(itemID) — \(ocrText.count) chars, vision=\(hasVision)")
+                        NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
+                            userInfo: ["stage": "OCR done (\(ocrText.count) chars" + (hasVision ? " + vision)" : ")")])
+                        // Set pendingReview so user can verify extraction before analysis
                         if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
                             fresh.status = .pendingReview
                             do { try modelContext.save() }
@@ -256,6 +273,12 @@ final class ContentPipelineService: ObservableObject {
                     // bestAvailableText handles the fetch; call it to cache the result
                     _ = await extractionSvc.bestAvailableText(for: item)
                 }
+            }
+
+            // Extraction-only mode: stop after Phase 0, don't run analysis.
+            if extractionOnly {
+                AppLog.provider.info("ContentPipeline: extractionOnly — stopping after Phase 0 for \(itemID)")
+                return
             }
 
             guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
@@ -284,11 +307,15 @@ final class ContentPipelineService: ObservableObject {
                 SetTitleTool(),
                 SelectSchemaTool(),
                 SelectSkillTool(),
-                WriteAnalysisTool()
+                WriteAnalysisTool(),
+                WriteSpeakersTool()
             ]
 
             let catalogPrompt = Self.buildCatalogPrompt()
             let systemPrompt = catalogPrompt + "\n\n" + (resolvedFramework.map { PipelineTemplate.forFramework($0) } ?? PipelineTemplate.standard)
+            let pipelineDef = PipelineStore.shared.active
+            let iterationBudget = pipelineDef?.params?.maxIterations ?? 15
+            let agentMode: AgentMode = pipelineDef?.params?.agentMode == "deep" ? .deep : (pipelineDef?.params?.agentMode == "fast" ? .fast : .auto)
 
             let registry = AgentToolRegistry(tools: tools)
             let config = AIConfigService.shared
@@ -313,7 +340,7 @@ final class ContentPipelineService: ObservableObject {
 
             let loop = AgentLoop(
                 registry: registry, toolContext: toolContext,
-                maxIterations: 15, mode: .auto,
+                maxIterations: iterationBudget, mode: agentMode,
                 executorModel: executorModel, advisorModel: advisorModel
             )
 
@@ -349,7 +376,7 @@ final class ContentPipelineService: ObservableObject {
 
             var lastError: String?
             var attemptCount = 0
-            let maxAttempts = 2
+            let maxAttempts = pipelineDef?.params?.retryAttempts ?? 2
 
             while attemptCount < maxAttempts {
                 attemptCount += 1
@@ -358,7 +385,7 @@ final class ContentPipelineService: ObservableObject {
                     systemPrompt: systemPrompt,
                     tools: tools,
                     provider: provider,
-                    maxIterations: 15
+                    maxIterations: iterationBudget
                 )
 
                 var failed = false
@@ -554,76 +581,9 @@ final class ContentPipelineService: ObservableObject {
         }
     }
 
-    /// Run analysis unconditionally — no guards, no status checks.
-    /// Used by the reprocess menu when the user explicitly requests re-analysis.
-    func forceReanalyze(itemID: UUID, using modelContext: ModelContext) async {
-        AppLog.provider.info("🔍 forceReanalyze: ENTRY — itemID=\(itemID.uuidString.prefix(8))")
-
-        guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
-            AppLog.provider.error("🔍 forceReanalyze: EXIT — no provider configured")
-            return
-        }
-        AppLog.provider.info("🔍 forceReanalyze: provider=\(provider.id)")
-
-        let config = AIConfigService.shared
-        let executorModel = config.resolvedModelFor(feature: "chat", context: modelContext)
-            ?? config.resolvedModelFor(feature: "analysis", context: modelContext) ?? ""
-        let advisorModel = config.resolvedModelFor(feature: "analysis", context: modelContext) ?? executorModel
-        guard !executorModel.isEmpty else {
-            AppLog.provider.error("🔍 forceReanalyze: EXIT — no model available")
-            return
-        }
-        AppLog.provider.info("🔍 forceReanalyze: executor=\(executorModel) advisor=\(advisorModel)")
-
-        guard let item = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) else {
-            AppLog.provider.error("🔍 forceReanalyze: EXIT — item not found")
-            return
-        }
-
-        let tools: [any AgentTool] = [ShellTool(), SetTitleTool(), SelectSchemaTool(), SelectSkillTool(), WriteAnalysisTool()]
-        let registry = AgentToolRegistry(tools: tools)
-        let toolContext = ToolContext(modelContext: modelContext, activeItemID: itemID, sandboxedItemID: itemID)
-        let systemPrompt = Self.buildCatalogPrompt() + "\n\n" + PipelineTemplate.standard
-        let loop = AgentLoop(registry: registry, toolContext: toolContext,
-                              maxIterations: 15, mode: .auto,
-                              executorModel: executorModel, advisorModel: advisorModel)
-
-        AppLog.provider.info("🔍 forceReanalyze: launching agent loop")
-        let stream = loop.runAutonomous(
-            task: "Process knowledge item \(itemID.uuidString). Title: \(item.title). Type: \(item.type.rawValue).",
-            systemPrompt: systemPrompt, tools: tools, provider: provider, maxIterations: 15
-        )
-
-        var lastError: String?
-        do {
-            for try await event in stream {
-                switch event {
-                case .toolCallStarted(let name, _, _):
-                    AppLog.provider.info("forceReanalyze: tool \(name)")
-                case .finished: break
-                case .error(let err): lastError = err.localizedDescription
-                default: break
-                }
-            }
-        } catch {
-            lastError = error.localizedDescription
-        }
-
-        if lastError == nil, let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
-            fresh.status = .analyzed
-            fresh.analysisProviderId = executorModel
-            fresh.inboxDate = nil
-            try? modelContext.save()
-        }
-        NotificationCenter.default.post(name: .pipelineCompleted, object: itemID.uuidString)
-        AppLog.provider.info("🔍 forceReanalyze: EXIT complete — error=\(lastError ?? "none") itemID=\(itemID.uuidString.prefix(8))")
-    }
-
-    /// Process a queue entry — wraps the battle-tested process() with an async completion gate.
+    /// Process a queue entry with async completion gate.
     func processEntry(itemID: UUID, projectID: UUID? = nil, using modelContext: ModelContext? = nil) async {
         let ctx = modelContext ?? ModelContext(modelContainer)
-        // Use the original process() which has retry logic, background tasks, notifications, and verification
-        // Wait for completion via notification
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             var resumed = false
             var token: NSObjectProtocol?
@@ -634,7 +594,6 @@ final class ContentPipelineService: ObservableObject {
                 resumed = true
                 continuation.resume()
             }
-            // Fire the original process() — it handles everything internally
             process(itemID, using: ctx)
             // Safety timeout: if notification never fires, resume after 120s
             Task { @MainActor in
@@ -3063,6 +3022,148 @@ final class PresetExportService {
             if let fw = lens.framework { fwJSON = (try? JSONEncoder().encode(fw)).flatMap { String(data: $0, encoding: .utf8) } }
             return Preset(id: "preset/\(lens.id)", name: lens.name, description: lens.description,
                 lensID: lens.id, frameworkJSON: fwJSON, version: 1)
+        }
+    }
+}
+
+// MARK: - Config Resolver
+
+/// Resolves configuration files through a cascade:
+/// 1. `projects/{slug}/config/{filename}` — project-level (highest priority)
+/// 2. `configs/{filename}` — global user overrides
+/// 3. `Resources/{filename}` — bundle defaults
+enum ConfigResolver {
+    static func resolve(_ filename: String, projectSlug: String? = nil) -> Data? {
+        let store = FileArtifactStore()
+
+        // 1. Project-level override
+        if let slug = projectSlug {
+            let projectURL = store.projectConfigDirectoryURL(for: slug).appendingPathComponent(filename)
+            if FileManager.default.fileExists(atPath: projectURL.path),
+               let data = try? Data(contentsOf: projectURL) {
+                AppLog.provider.info("ConfigResolver: using project-level \(filename) for \(slug)")
+                return data
+            }
+        }
+
+        // 2. Global user override
+        let globalURL = store.configsDirectoryURL().appendingPathComponent(filename)
+        if FileManager.default.fileExists(atPath: globalURL.path),
+           let data = try? Data(contentsOf: globalURL) {
+            AppLog.provider.info("ConfigResolver: using global override \(filename)")
+            return data
+        }
+
+        // 3. Bundle default (try multiple paths)
+        let bundlePaths = [filename, "Pipelines/\(filename)", "Skills/\(filename)", "Schemas/\(filename)"]
+        for path in bundlePaths {
+            if let url = Bundle.main.url(forResource: path, withExtension: nil),
+               let data = try? Data(contentsOf: url) {
+                return data
+            }
+        }
+
+        AppLog.provider.warning("ConfigResolver: \(filename) not found in any level")
+        return nil
+    }
+
+    /// Resolves and decodes a Codable config file.
+    static func resolve<T: Decodable>(_ filename: String, projectSlug: String? = nil, as type: T.Type) -> T? {
+        guard let data = resolve(filename, projectSlug: projectSlug) else { return nil }
+        return try? JSONDecoder().decode(T.self, from: data)
+    }
+}
+
+// MARK: - Pipeline Definition Model
+
+struct PipeParams: Codable, Sendable {
+    let maxIterations: Int?
+    let retryAttempts: Int?
+    let retryBackoffSeconds: [Int]?
+    let agentMode: String?
+    let extractionOnly: Bool?
+}
+
+struct PipeStage: Codable, Sendable {
+    let id: String
+    let description: String?
+    let condition: String?
+    let onFailure: String?
+    let steps: [PipeStep]?
+    let stages: [PipeStage]?
+}
+
+struct PipeStep: Codable, Sendable {
+    let action: String; let value: String?; let prompt: String?
+}
+
+struct PipeDefinition: Codable, Sendable {
+    let name: String; let version: String; let description: String?
+    let params: PipeParams?; let stages: [PipeStage]
+}
+
+// MARK: - Pipeline Store
+
+@MainActor
+final class PipelineStore: ObservableObject {
+    static let shared = PipelineStore()
+    @Published private(set) var definitions: [String: PipeDefinition] = [:]
+    private(set) var activeName: String = "standard"
+
+    private init() {
+        loadBuiltIn()
+        let url = FileArtifactStore().configsDirectoryURL().appendingPathComponent("pipeline.json")
+        if FileManager.default.fileExists(atPath: url.path),
+           let data = try? Data(contentsOf: url),
+           let overrides = try? JSONDecoder().decode([String: PipeDefinition].self, from: data) {
+            for (name, def) in overrides { self.definitions[name] = def }
+        }
+        AppLog.provider.info("PipelineStore: \(self.definitions.count) pipeline(s) loaded")
+    }
+
+    private func loadBuiltIn() {
+        guard let url = Bundle.main.url(forResource: "Pipelines", withExtension: nil) else { return }
+        guard let files = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) else { return }
+        for fileURL in files where fileURL.pathExtension == "json" {
+            guard let data = try? Data(contentsOf: fileURL),
+                  let def = try? JSONDecoder().decode(PipeDefinition.self, from: data) else { continue }
+            definitions[def.name] = def
+        }
+    }
+
+    var active: PipeDefinition? { active() }
+
+    /// Returns the pipeline definition for a given project context.
+    /// Resolves through cascade: project/config → configs/ → bundle.
+    func active(for projectSlug: String? = nil) -> PipeDefinition? {
+        if let slug = projectSlug,
+           let def = ConfigResolver.resolve("pipeline.json", projectSlug: slug, as: PipeDefinition.self) {
+            return def
+        }
+        if let def = ConfigResolver.resolve("pipeline.json", as: PipeDefinition.self) {
+            return def
+        }
+        return definitions[activeName]
+    }
+
+    func saveOverride(_ def: PipeDefinition, projectSlug: String? = nil) {
+        let url: URL
+        if let slug = projectSlug {
+            url = FileArtifactStore().projectConfigDirectoryURL(for: slug).appendingPathComponent("pipeline.json")
+        } else {
+            url = FileArtifactStore().configsDirectoryURL().appendingPathComponent("pipeline.json")
+        }
+        var overrides: [String: PipeDefinition] = [:]
+        if FileManager.default.fileExists(atPath: url.path),
+           let data = try? Data(contentsOf: url),
+           let existing = try? JSONDecoder().decode([String: PipeDefinition].self, from: data) {
+            overrides = existing
+        }
+        overrides[def.name] = def
+        if let data = try? JSONEncoder().encode(overrides) {
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? FileArtifactStore().atomicWriteWithBackup(data: data, url: url)
+            definitions[def.name] = def
         }
     }
 }

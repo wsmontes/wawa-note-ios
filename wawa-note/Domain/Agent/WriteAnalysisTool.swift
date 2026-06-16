@@ -448,6 +448,124 @@ struct WriteAnalysisTool: AgentTool {
     }
 }
 
+// MARK: - Write Speakers Tool
+
+/// Dedicated tool for speaker resolution output. The agent identifies speakers
+/// from the transcript, cross-references with contacts/calendar/memory via the
+/// `person` command, and writes structured results. Schema is strictly validated
+/// — the agent retries until it passes.
+struct WriteSpeakersTool: AgentTool {
+    let name = "write_speakers"
+    let description = """
+        Write the speaker resolution results after cross-referencing with \
+        contacts, calendar, and transcripts. Call this AFTER using `person` \
+        to research each speaker. The output is validated against a strict \
+        schema — fix any validation errors and call again.
+        """
+    let parameters = AIToolParameters(
+        properties: [
+            "speakersJson": AIToolProperty(
+                type: "string",
+                description: "JSON with 'speakers' array and optional 'pending_confirmations' array."
+            )
+        ],
+        required: ["speakersJson"]
+    )
+
+    @MainActor
+    func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
+        guard let jsonStr = arguments["speakersJson"] as? String,
+              let data = jsonStr.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return ToolResult(content: "Error: speakersJson must be valid JSON", isError: true, displaySummary: "Invalid JSON")
+        }
+
+        // Validate against strict schema
+        if let errors = validateSpeakersSchema(json) {
+            return ToolResult(content: """
+                ⚠️ SCHEMA VALIDATION FAILED — fix and call write_speakers again:
+
+                \(errors.joined(separator: "\n"))
+
+                Required format:
+                {
+                  "speakers": [{
+                    "label": "Speaker 1",
+                    "resolved_to": "Full Name",
+                    "confidence": "high|medium|low",
+                    "evidence_summary": "1-2 sentence summary"
+                  }],
+                  "pending_confirmations": [{
+                    "speaker_label": "Speaker 3",
+                    "best_guess": "Full Name",
+                    "confidence": "low",
+                    "candidates": [{"name": "...", "evidence": "..."}],
+                    "question": "Who is this?"
+                  }]
+                }
+                """, isError: true, displaySummary: "Schema validation failed")
+        }
+
+        // Write speakers.json artifact
+        guard let itemID = context.activeItemID else {
+            return ToolResult(content: "Error: no active item in context", isError: true, displaySummary: "No item")
+        }
+        let store = FileArtifactStore()
+        try store.createMeetingDirectory(for: itemID)
+        let enriched = json.merging(["_metadata": ["writtenBy": "WriteSpeakersTool", "timestamp": ISO8601DateFormatter().string(from: Date())]]) { $1 }
+        let prettyData = try JSONSerialization.data(withJSONObject: enriched, options: [.prettyPrinted, .sortedKeys])
+        let url = store.itemDirectoryURL(for: itemID).appendingPathComponent("speakers.json")
+        try store.atomicWriteWithBackup(data: prettyData, url: url)
+
+        let speakerCount = (json["speakers"] as? [[String: Any]])?.count ?? 0
+        let pendingCount = (json["pending_confirmations"] as? [[String: Any]])?.count ?? 0
+        return ToolResult(content: "Speakers written: \(speakerCount) resolved, \(pendingCount) pending confirmation.", displaySummary: "\(speakerCount) speakers, \(pendingCount) pending")
+    }
+
+    /// Validates the speakers JSON against the strict schema. Returns array of
+    /// error strings or nil if valid.
+    private func validateSpeakersSchema(_ json: [String: Any]) -> [String]? {
+        var errors: [String] = []
+
+        guard let speakers = json["speakers"] as? [[String: Any]], !speakers.isEmpty else {
+            return ["Missing required 'speakers' array (must be non-empty)"]
+        }
+
+        for (i, sp) in speakers.enumerated() {
+            let prefix = "speakers[\(i)]"
+            if sp["label"] as? String == nil { errors.append("\(prefix).label: required string") }
+            if sp["resolved_to"] as? String == nil { errors.append("\(prefix).resolved_to: required string") }
+            if let conf = sp["confidence"] as? String, !["high", "medium", "low"].contains(conf) {
+                errors.append("\(prefix).confidence: must be high|medium|low, got '\(conf)'")
+            } else if sp["confidence"] == nil {
+                errors.append("\(prefix).confidence: required (high|medium|low)")
+            }
+            if sp["evidence_summary"] as? String == nil { errors.append("\(prefix).evidence_summary: required string") }
+        }
+
+        if let pending = json["pending_confirmations"] as? [[String: Any]] {
+            for (i, pc) in pending.enumerated() {
+                let prefix = "pending_confirmations[\(i)]"
+                if pc["speaker_label"] as? String == nil { errors.append("\(prefix).speaker_label: required") }
+                if pc["best_guess"] as? String == nil { errors.append("\(prefix).best_guess: required") }
+                if let conf = pc["confidence"] as? String, !["high", "medium", "low"].contains(conf) {
+                    errors.append("\(prefix).confidence: must be high|medium|low")
+                }
+                guard let candidates = pc["candidates"] as? [[String: Any]], !candidates.isEmpty else {
+                    errors.append("\(prefix).candidates: required non-empty array"); continue
+                }
+                for (j, c) in candidates.enumerated() {
+                    if c["name"] as? String == nil { errors.append("\(prefix).candidates[\(j)].name: required") }
+                    if c["evidence"] as? String == nil { errors.append("\(prefix).candidates[\(j)].evidence: required") }
+                }
+                if pc["question"] as? String == nil { errors.append("\(prefix).question: required") }
+            }
+        }
+
+        return errors.isEmpty ? nil : errors
+    }
+}
+
 // MARK: - Set Title Tool
 
 /// Dedicated tool for the agent to rename an item after reading its content.
