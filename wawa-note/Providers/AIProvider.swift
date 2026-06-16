@@ -121,6 +121,67 @@ final class BudgetTracker: @unchecked Sendable {
     }
 }
 
+// MARK: - BudgetState
+
+struct BudgetState: Sendable {
+    let dailyLimit: Double?
+    let spentToday: Double
+    var remainingPercent: Double {
+        guard let limit = dailyLimit, limit > 0 else { return 1.0 }
+        return max(0, 1.0 - spentToday / limit)
+    }
+    var isOverBudget: Bool {
+        guard let limit = dailyLimit, limit > 0 else { return false }
+        return spentToday >= limit
+    }
+    var remainingBudget: Double? {
+        guard let limit = dailyLimit else { return nil }
+        return max(0, limit - spentToday)
+    }
+
+    static func from(_ tracker: BudgetTracker) -> BudgetState {
+        BudgetState(dailyLimit: tracker.dailyLimit, spentToday: tracker.spentToday)
+    }
+}
+
+// MARK: - ModelOverride
+
+struct ModelOverride: Sendable {
+    var model: String?
+    var tier: String?
+    var temperature: Double?
+    var maxTokens: Int?
+    var providerID: String?
+
+    init(model: String? = nil, tier: String? = nil,
+         temperature: Double? = nil, maxTokens: Int? = nil,
+         providerID: String? = nil) {
+        self.model = model
+        self.tier = tier
+        self.temperature = temperature
+        self.maxTokens = maxTokens
+        self.providerID = providerID
+    }
+}
+
+// MARK: - ModelSelection
+
+struct ModelSelection: Sendable {
+    let model: String
+    let tier: String
+    let provider: ProviderType
+    let reason: String
+}
+
+// MARK: - ProviderPreference
+
+enum ProviderPreference: Sendable {
+    case any
+    case localPreferred
+    case localRequired
+    case specific(String)
+}
+
 struct ProviderMetrics: Codable, Sendable {
     var ttftMs: Double?          // Time to first token
     var totalLatencyMs: Double   // Total request latency
