@@ -67,18 +67,69 @@ protocol ModelPolicy: Sendable {
 
 // MARK: - Config Types (populated by JSON config parsing)
 
-struct ProviderTemplateConfig: Codable, Sendable {
+struct ProviderTemplateConfig: Codable, Identifiable, Sendable {
     var id: String
     var displayName: String
-    var providerType: String
-    var template: [String: String]
+    var icon: String
+    var type: ProviderType
+    var baseURL: String
+    var auth: AuthMethod
+    var authHeader: String?
+    var authPrefix: String?
+    var defaultModels: [String]
+    var autoDiscover: Bool
+    var discoveryPort: Int?
+    var description: String
+    var requiresAuth: Bool
+
+    enum AuthMethod: String, Codable, Sendable {
+        case none
+        case apiKeyHeader = "api_key_header"
+        case apiKeyBearer = "api_key_bearer"
+        case apiKeyQuery = "api_key_query"
+    }
 }
 
-struct APITemplate: Codable, Sendable {
+struct APITemplate: Codable, Identifiable, Sendable {
     var id: String
+    var displayName: String
+    var icon: String
     var baseURL: String
-    var authType: String
-    var headers: [String: String]?
+    var auth: ProviderTemplateConfig.AuthMethod
+    var authHeader: String?
+    var authPrefix: String?
+    var type: APIType
+    var endpoints: [APIEndpoint]
+    var skill: APISkill
+
+    enum APIType: String, Codable, Sendable {
+        case rest
+        case graphql
+    }
+}
+
+struct APIEndpoint: Codable, Sendable {
+    var name: String
+    var method: String
+    var path: String
+    var description: String
+    var bodyType: String?
+    var parameters: [String: APIParameter]?
+}
+
+struct APIParameter: Codable, Sendable {
+    var type: String
+    var description: String?
+    var `enum`: [String]?
+    var `default`: String?
+    var required: Bool?
+    var items: String?
+}
+
+struct APISkill: Codable, Sendable {
+    var name: String
+    var prompt: String
+    var whenToUse: String?
 }
 
 // MARK: - AIConfigProvider Protocol
