@@ -12,7 +12,10 @@ struct AIConfig: Codable, Sendable {
     let modelPresets: [String: ModelPreset]?
     let features: [String: FeatureConfig]?
     let lenses: [String: LensJSON]?
-
+    let providerTemplates: [ProviderTemplateConfig]?
+    let apiTemplates: [APITemplate]?
+    let modelPolicy: ModelPolicyRules?
+    let agentModes: [String: AgentModeConfig]?
 
     struct ProviderConfig: Codable, Sendable {
         let id: String; let displayName: String; let type: String
@@ -119,7 +122,8 @@ final class AIConfigService: @unchecked Sendable {
             }
         }
         return AIConfig(version: "1.0", description: "Default config", providers: [:],
-                        defaultModels: nil, modelPresets: [:], features: [:], lenses: nil)
+                        defaultModels: nil, modelPresets: [:], features: [:], lenses: nil,
+                        providerTemplates: nil, apiTemplates: nil, modelPolicy: nil, agentModes: nil)
     }
 
     /// Validate loaded config and warn about critical issues.
@@ -450,4 +454,128 @@ struct AIFeatureParams {
     let maxTokens: Int?
     let contextWindow: Int
     let isReasoning: Bool
+}
+
+// MARK: - JSONConfigProvider
+
+final class JSONConfigProvider: @unchecked Sendable, AIConfigProvider {
+    private let configService: AIConfigService
+
+    init(configService: AIConfigService = .shared) {
+        self.configService = configService
+    }
+
+    func requestParams(for feature: String, model: String, override: ModelOverride?) -> AIFeatureParams {
+        if let overrideTemp = override?.temperature, let overrideMax = override?.maxTokens {
+            let contextWindow = configService.contextWindowTokens(for: model)
+            let isReasoning = configService.isReasoningModel(model)
+            return AIFeatureParams(
+                temperature: overrideTemp,
+                maxTokens: overrideMax,
+                contextWindow: contextWindow,
+                isReasoning: isReasoning
+            )
+        }
+        var params = configService.requestParams(for: feature, model: model)
+        if let temp = override?.temperature {
+            params = AIFeatureParams(temperature: temp, maxTokens: params.maxTokens,
+                                     contextWindow: params.contextWindow, isReasoning: params.isReasoning)
+        }
+        if let maxT = override?.maxTokens {
+            params = AIFeatureParams(temperature: params.temperature, maxTokens: maxT,
+                                     contextWindow: params.contextWindow, isReasoning: params.isReasoning)
+        }
+        return params
+    }
+
+    func modelFor(feature: String) -> String {
+        configService.modelFor(feature: feature)
+    }
+
+    func presetFor(model: String) -> AIConfig.ModelPreset? {
+        configService.presetFor(model: model)
+    }
+
+    var providerTemplates: [ProviderTemplateConfig] {
+        configService.config.providerTemplates ?? configService.allProviders().map { config in
+            ProviderTemplateConfig(
+                id: config.id,
+                displayName: config.displayName,
+                icon: iconForProvider(config.id),
+                type: ProviderType(rawValue: config.type) ?? .openAICompatible,
+                baseURL: config.baseURL,
+                auth: authForConfig(config),
+                authHeader: authHeaderForConfig(config),
+                authPrefix: authPrefixForConfig(config),
+                defaultModels: config.availableModels ?? [],
+                autoDiscover: ProviderType(rawValue: config.type)?.isLocal ?? false,
+                discoveryPort: ProviderType(rawValue: config.type)?.isLocal == true ? 11434 : nil,
+                description: config.description ?? "",
+                requiresAuth: !(ProviderType(rawValue: config.type)?.isLocal ?? false)
+            )
+        }
+    }
+
+    var apiTemplates: [APITemplate] {
+        configService.config.apiTemplates ?? []
+    }
+
+    var modelPolicyRules: ModelPolicyRules {
+        configService.config.modelPolicy ?? defaultModelPolicyRules
+    }
+
+    var agentModes: [String: AgentModeConfig] {
+        configService.config.agentModes ?? [:]
+    }
+
+    // MARK: - Helpers
+
+    private var defaultModelPolicyRules: ModelPolicyRules {
+        ModelPolicyRules(
+            budget: ModelPolicyRules.BudgetRules(dailyUSD: 1.0, thresholds: [
+                ModelPolicyRules.BudgetThreshold(minPercent: 0.50, tier: "deep"),
+                ModelPolicyRules.BudgetThreshold(minPercent: 0.25, tier: "fast"),
+                ModelPolicyRules.BudgetThreshold(minPercent: 0.00, tier: "economy")
+            ]),
+            tiers: [
+                "deep": ModelPolicyRules.TierConfig(label: "Deep", prefer: ["claude-sonnet-4-6"]),
+                "fast": ModelPolicyRules.TierConfig(label: "Fast", prefer: ["gpt-5.1-mini"]),
+                "economy": ModelPolicyRules.TierConfig(label: "Economy", prefer: ["claude-haiku-4-5"])
+            ],
+            features: [:],
+            offlineFallback: ModelPolicyRules.OfflineFallbackConfig(enabled: true),
+            userOverride: ModelPolicyRules.UserOverrideConfig(enabled: true)
+        )
+    }
+
+    private func iconForProvider(_ id: String) -> String {
+        switch id {
+        case "openai": return "brain.head.profile"
+        case "anthropic": return "brain"
+        case "gemini": return "sparkles"
+        case "ollama": return "desktopcomputer"
+        case "lmstudio": return "cpu"
+        case "deepseek": return "globe"
+        default: return "gearshape"
+        }
+    }
+
+    private func authForConfig(_ config: AIConfig.ProviderConfig) -> ProviderTemplateConfig.AuthMethod {
+        if ProviderType(rawValue: config.type)?.isLocal ?? false { return .none }
+        return .apiKeyBearer
+    }
+
+    private func authHeaderForConfig(_ config: AIConfig.ProviderConfig) -> String? {
+        switch ProviderType(rawValue: config.type) {
+        case .anthropic: return "x-api-key"
+        default: return "Authorization"
+        }
+    }
+
+    private func authPrefixForConfig(_ config: AIConfig.ProviderConfig) -> String? {
+        switch ProviderType(rawValue: config.type) {
+        case .anthropic: return ""
+        default: return "Bearer "
+        }
+    }
 }
