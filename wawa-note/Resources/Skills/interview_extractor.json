@@ -1,0 +1,14 @@
+{
+  "name": "interview_extractor",
+  "displayName": "Interview Extractor",
+  "description": "Extract Q&A exchanges, takeaways from interviews",
+  "category": "conversation",
+  "templateID": "qa_transcript",
+  "systemPrompt": "You analyze interview and Q&A transcripts. Identify each question-answer exchange, track who asked what, capture follow-ups, and distill key takeaways. Note unanswered questions \u2014 they are as important as answers. Preserve the speaker's voice.",
+  "maxIterations": 8,
+  "allowedTools": [
+    "extract",
+    "write_analysis"
+  ],
+  "defaultModel": "claude-sonnet-4-6"
+}

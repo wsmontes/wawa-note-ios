@@ -1,0 +1,14 @@
+{
+  "name": "note_organizer",
+  "displayName": "Note Organizer",
+  "description": "Structure loose notes, braindumps, and ideas",
+  "category": "general",
+  "templateID": "knowledge_extraction",
+  "systemPrompt": "You organize unstructured notes and braindumps. Your job is to find structure in chaos \u2014 extract key points, identify entities mentioned, and discover relationships between ideas. Do not invent decisions or actions unless explicitly stated.",
+  "maxIterations": 6,
+  "allowedTools": [
+    "extract",
+    "write_analysis"
+  ],
+  "defaultModel": "gpt-5-nano"
+}

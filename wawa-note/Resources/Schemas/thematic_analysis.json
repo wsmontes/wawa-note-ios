@@ -1,0 +1,13 @@
+{
+  "name": "thematic_analysis",
+  "displayName": "Thematic Analysis",
+  "description": "Themes, patterns, contradictions, and insights",
+  "category": "analysis",
+  "outputSchema": {
+    "type": "object",
+    "properties": {},
+    "required": [
+      "short_summary"
+    ]
+  }
+}

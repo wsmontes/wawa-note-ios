@@ -93,6 +93,8 @@ final class KnowledgeItem {
     @Attribute(.unique) var id: UUID
     var typeRaw: String
     var title: String
+    /// Preserved original title (filename, recording date, etc.) before AI rename.
+    var originalTitle: String?
     var createdAt: Date
     var updatedAt: Date
     var statusRaw: String

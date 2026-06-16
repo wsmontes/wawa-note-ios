@@ -1,0 +1,13 @@
+{
+  "name": "timeline_narrative",
+  "displayName": "Timeline Narrative",
+  "description": "Chronological events, cause-effect chains",
+  "category": "analysis",
+  "outputSchema": {
+    "type": "object",
+    "properties": {},
+    "required": [
+      "short_summary"
+    ]
+  }
+}

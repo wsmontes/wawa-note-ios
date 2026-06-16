@@ -1,0 +1,13 @@
+{
+  "name": "research_synthesis",
+  "displayName": "Research Synthesis",
+  "description": "Hypotheses, findings, sources, methodology",
+  "category": "research",
+  "outputSchema": {
+    "type": "object",
+    "properties": {},
+    "required": [
+      "short_summary"
+    ]
+  }
+}

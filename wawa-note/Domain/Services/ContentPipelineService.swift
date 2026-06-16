@@ -20,8 +20,9 @@ enum PipelineTemplate {
 
     ## TOOLS
 
-    You have two tools:
+    You have three tools:
     - run_command: shell commands for exploration (extract, ls, cat, grep, echo)
+    - set_title: rename the item after reading content (call BEFORE analysis)
     - write_analysis: save your structured analysis
 
     ## MANDATORY STEPS
@@ -30,7 +31,12 @@ enum PipelineTemplate {
     Use run_command: `extract <item-id>`
     If empty or fails, report and stop.
 
-    ### Step 2: ANALYZE (adaptive)
+    ### Step 2: TITLE (after reading)
+    Read the extracted content. Generate a concise, descriptive title
+    (5-10 words) that captures the essence. Call set_title with the title.
+    Better than generic names like "Recording 2026-06-15".
+
+    ### Step 3: ANALYZE (adaptive)
     Review the content and decide which sections are relevant. Not all content needs the same sections — a casual note and a formal meeting have different needs.
 
     Produce a JSON object with sections YOU choose. Use write_analysis:
@@ -126,10 +132,36 @@ final class ContentPipelineService: ObservableObject {
         self.modelContainer = modelContainer
     }
 
+    /// Builds the catalog prompt that teaches the agent how to choose schema + skill
+    /// based on content. Lists available schemas and skills compactly.
+    private static func buildCatalogPrompt() -> String {
+        let schemaList = AnalysisSchemaStore.shared.schemas.values
+            .sorted { $0.displayName < $1.displayName }
+            .map { "\($0.name) — \($0.displayName): \($0.description)" }
+            .joined(separator: "\n")
+        let skillList = AnalysisSkillStore.shared.skills.values
+            .sorted { $0.displayName < $1.displayName }
+            .map { "\($0.name) — \($0.displayName): \($0.description)" }
+            .joined(separator: "\n")
+        return """
+        ## ANALYSIS SETUP — DO THIS FIRST
+
+        Before analyzing, you MUST select your tools. Read the content, then choose the schema (output structure) and skill (tutorial) that best apply.
+
+        1. Call `select_schema <name>` — picks the output structure. Available:
+        \(schemaList)
+
+        2. Call `select_skill <name>` — picks the tutorial/guidance. Available:
+        \(skillList)
+
+        Choose based on what you SEE in the content, not the item type. A meeting transcript might be an interview. A note might be a journal entry. Read first, then decide.
+        """
+    }
+
     /// Process an item through the pipeline using an autonomous agent.
     /// The agent decides the strategy (single-pass, chunked, map-reduce) based on
     /// content size and type. Skips phases that already completed.
-    func process(_ itemID: UUID, using modelContext: ModelContext) {
+    func process(_ itemID: UUID, using modelContext: ModelContext, forceReanalysis: Bool = false) {
         guard activeJobs[itemID] == nil else {
             AppLog.provider.info("ContentPipeline: item \(itemID) already being processed, skipping duplicate call")
             return
@@ -151,13 +183,16 @@ final class ContentPipelineService: ObservableObject {
 
             // Respect the extraction review gate. Items in pendingReview wait for
             // the user to approve the extracted text before analysis proceeds.
-            guard item.status != .pendingReview else {
+            // When forceReanalysis is true, skip — caller explicitly requested a run.
+            guard forceReanalysis || item.status != .pendingReview else {
                 AppLog.provider.info("ContentPipeline: item \(itemID) pending review — waiting for user approval")
                 return
             }
 
-            // Skip if already analyzed (re-analyze is triggered manually via the UI)
-            guard item.analysisProviderId == nil || !AutomationSettings.shared.autoAnalyze else {
+            // Skip if already analyzed (re-analyze is triggered manually via the UI).
+            // When forceReanalysis is true, bypass this guard — caller has already
+            // cleared analysisProviderId and wants a fresh analysis run.
+            guard forceReanalysis || item.analysisProviderId == nil || !AutomationSettings.shared.autoAnalyze else {
                 AppLog.provider.info("ContentPipeline: item \(itemID) already analyzed, skipping")
                 // Still run ingestion if needed
                 if let projectID = item.projectID {
@@ -246,8 +281,14 @@ final class ContentPipelineService: ObservableObject {
 
             let tools: [any AgentTool] = [
                 ShellTool(),
+                SetTitleTool(),
+                SelectSchemaTool(),
+                SelectSkillTool(),
                 WriteAnalysisTool()
             ]
+
+            let catalogPrompt = Self.buildCatalogPrompt()
+            let systemPrompt = catalogPrompt + "\n\n" + (resolvedFramework.map { PipelineTemplate.forFramework($0) } ?? PipelineTemplate.standard)
 
             let registry = AgentToolRegistry(tools: tools)
             let config = AIConfigService.shared
@@ -314,7 +355,7 @@ final class ContentPipelineService: ObservableObject {
                 attemptCount += 1
                 let stream = loop.runAutonomous(
                     task: attemptCount == 1 ? taskDescription : "Previous attempt failed. Error: \(lastError ?? "unknown"). Try a different strategy — use different tools, chunk differently, or simplify.",
-                    systemPrompt: PipelineTemplate.standard,
+                    systemPrompt: systemPrompt,
                     tools: tools,
                     provider: provider,
                     maxIterations: 15
@@ -465,11 +506,12 @@ final class ContentPipelineService: ObservableObject {
                     currentTool: nil, toolSummary: error, toolLog: toolLog,
                     events: agentEvents, thinkingActive: false)
             }
-            // Mark item as processed so it's not re-enqueued forever.
-            // Keep inboxDate so the item stays visible in the inbox for user review.
+            // Mark item as processed. On success, clear inboxDate so the
+            // Unprocessed badge disappears — item is fully analyzed, no review needed.
             if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
                 fresh.analysisProviderId = provider.id
                 fresh.status = lastError == nil ? .analyzed : .failed
+                if lastError == nil { fresh.inboxDate = nil }
                 do { try modelContext.save() } catch {
                     AppLog.provider.error("ContentPipeline: critical save failed (analysis status): \(error.localizedDescription)")
                 }
@@ -510,6 +552,71 @@ final class ContentPipelineService: ObservableObject {
                                             userInfo: ["stage": PipelineStage.ingesting.rawValue])
             await ingestionPipeline.ingest(itemID: itemID, projectID: projectID, using: modelContext)
         }
+    }
+
+    /// Run analysis unconditionally — no guards, no status checks.
+    /// Used by the reprocess menu when the user explicitly requests re-analysis.
+    func forceReanalyze(itemID: UUID, using modelContext: ModelContext) async {
+        AppLog.provider.info("🔍 forceReanalyze: ENTRY — itemID=\(itemID.uuidString.prefix(8))")
+
+        guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
+            AppLog.provider.error("🔍 forceReanalyze: EXIT — no provider configured")
+            return
+        }
+        AppLog.provider.info("🔍 forceReanalyze: provider=\(provider.id)")
+
+        let config = AIConfigService.shared
+        let executorModel = config.resolvedModelFor(feature: "chat", context: modelContext)
+            ?? config.resolvedModelFor(feature: "analysis", context: modelContext) ?? ""
+        let advisorModel = config.resolvedModelFor(feature: "analysis", context: modelContext) ?? executorModel
+        guard !executorModel.isEmpty else {
+            AppLog.provider.error("🔍 forceReanalyze: EXIT — no model available")
+            return
+        }
+        AppLog.provider.info("🔍 forceReanalyze: executor=\(executorModel) advisor=\(advisorModel)")
+
+        guard let item = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) else {
+            AppLog.provider.error("🔍 forceReanalyze: EXIT — item not found")
+            return
+        }
+
+        let tools: [any AgentTool] = [ShellTool(), SetTitleTool(), SelectSchemaTool(), SelectSkillTool(), WriteAnalysisTool()]
+        let registry = AgentToolRegistry(tools: tools)
+        let toolContext = ToolContext(modelContext: modelContext, activeItemID: itemID, sandboxedItemID: itemID)
+        let systemPrompt = Self.buildCatalogPrompt() + "\n\n" + PipelineTemplate.standard
+        let loop = AgentLoop(registry: registry, toolContext: toolContext,
+                              maxIterations: 15, mode: .auto,
+                              executorModel: executorModel, advisorModel: advisorModel)
+
+        AppLog.provider.info("🔍 forceReanalyze: launching agent loop")
+        let stream = loop.runAutonomous(
+            task: "Process knowledge item \(itemID.uuidString). Title: \(item.title). Type: \(item.type.rawValue).",
+            systemPrompt: systemPrompt, tools: tools, provider: provider, maxIterations: 15
+        )
+
+        var lastError: String?
+        do {
+            for try await event in stream {
+                switch event {
+                case .toolCallStarted(let name, _, _):
+                    AppLog.provider.info("forceReanalyze: tool \(name)")
+                case .finished: break
+                case .error(let err): lastError = err.localizedDescription
+                default: break
+                }
+            }
+        } catch {
+            lastError = error.localizedDescription
+        }
+
+        if lastError == nil, let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+            fresh.status = .analyzed
+            fresh.analysisProviderId = executorModel
+            fresh.inboxDate = nil
+            try? modelContext.save()
+        }
+        NotificationCenter.default.post(name: .pipelineCompleted, object: itemID.uuidString)
+        AppLog.provider.info("🔍 forceReanalyze: EXIT complete — error=\(lastError ?? "none") itemID=\(itemID.uuidString.prefix(8))")
     }
 
     /// Process a queue entry — wraps the battle-tested process() with an async completion gate.

@@ -1,0 +1,13 @@
+{
+  "name": "qa_transcript",
+  "displayName": "Q&A Transcript",
+  "description": "Q&A exchanges, interviews, structured conversations",
+  "category": "conversation",
+  "outputSchema": {
+    "type": "object",
+    "properties": {},
+    "required": [
+      "short_summary"
+    ]
+  }
+}

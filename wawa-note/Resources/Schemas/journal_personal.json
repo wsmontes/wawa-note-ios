@@ -1,0 +1,13 @@
+{
+  "name": "journal_personal",
+  "displayName": "Journal / Personal",
+  "description": "Personal reflection, mood, people, places, themes",
+  "category": "personal",
+  "outputSchema": {
+    "type": "object",
+    "properties": {},
+    "required": [
+      "short_summary"
+    ]
+  }
+}

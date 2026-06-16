@@ -1,0 +1,13 @@
+{
+  "name": "people_tracker",
+  "displayName": "People Tracker",
+  "description": "Attendees, commitments, sentiment, accountability",
+  "category": "meeting",
+  "outputSchema": {
+    "type": "object",
+    "properties": {},
+    "required": [
+      "short_summary"
+    ]
+  }
+}

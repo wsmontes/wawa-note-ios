@@ -1,0 +1,13 @@
+{
+  "name": "decisions_actions",
+  "displayName": "Decisions & Actions",
+  "description": "Meeting-like: decisions, tasks, risks, open questions",
+  "category": "meeting",
+  "outputSchema": {
+    "type": "object",
+    "properties": {},
+    "required": [
+      "short_summary"
+    ]
+  }
+}

@@ -31,6 +31,10 @@ final class ToolContext: @unchecked Sendable {
     /// returns specific fix instructions to the agent on mismatch.
     var activeFramework: ProjectFramework?
 
+    /// Item-level schema selected by the agent via select_schema.
+    /// WriteAnalysisTool validates against this when activeFramework is nil.
+    var activeSchema: AnalysisSchema?
+
     // Planning & agent iteration tracking
     var isPlanning: Bool = false
     var planTaskIDs: [UUID] = []

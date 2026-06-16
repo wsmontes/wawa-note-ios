@@ -139,6 +139,27 @@ struct KnowledgeDetailView: View {
                     .padding(.top, 12)
                 }
 
+                if let error = analysisError {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                            Text(error).font(.subheadline)
+                        }
+                        if error.contains("Settings") {
+                            Button("Open Settings") {
+                                guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                                UIApplication.shared.open(url)
+                            }.font(.subheadline)
+                        }
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.red.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                }
+
                 Divider().padding(.top, 16)
 
                 // Audio player — shown when item has playable audio (single file or segments)
@@ -413,6 +434,13 @@ struct KnowledgeDetailView: View {
                     }
                     Text(item.type.label)
                         .font(.caption).foregroundStyle(.secondary)
+
+                    // Original title — shown discreetly when AI has renamed the item
+                    if let orig = item.originalTitle, orig != item.title {
+                        Text(orig)
+                            .font(.caption2).foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
 
                     // Mood badge for journal entries
                     if item.type == .journalEntry, let moodTag = item.tags.first(where: { $0.hasPrefix("mood/") }) {
@@ -1756,6 +1784,7 @@ struct KnowledgeDetailView: View {
         }
 
         isReprocessing = true
+        analysisError = nil
         defer { isReprocessing = false }
 
         // Override engine preference based on explicit user choice.
@@ -1787,15 +1816,26 @@ struct KnowledgeDetailView: View {
         // ── Transcribe: call extraction directly ────────────────────
         // Bypasses process() guard that blocks Phase 0 when analysis exists.
         if doTranscribe {
+            isTranscribing = true
             let extractionSvc = ContentExtractionService(modelContext: modelContext, fileStore: fileStore)
             _ = await extractionSvc.extractTextFromAudio(item)
+            isTranscribing = false
             loadData()
+            // extractTextFromAudio sets status → .pendingReview, which blocks
+            // process() below. Reset so analysis can proceed.
+            if doAnalyze {
+                item.status = .transcribed
+                try? modelContext.save()
+            }
         }
 
         // ── Analyze: run full pipeline ──────────────────────────────
-        // Guards pass now because analysisProviderId was cleared above.
         if doAnalyze {
-            await contentPipeline.process(item.id, using: modelContext)
+            item.status = .analyzing
+            try? modelContext.save()
+            AppLog.provider.info("🔍 reprocessItem: calling forceReanalyze for \(item.id.uuidString.prefix(8))")
+            await contentPipeline.forceReanalyze(itemID: item.id, using: modelContext)
+            AppLog.provider.info("🔍 reprocessItem: forceReanalyze RETURNED for \(item.id.uuidString.prefix(8))")
         }
     }
 

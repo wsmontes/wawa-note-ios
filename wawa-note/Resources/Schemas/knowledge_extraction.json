@@ -1,0 +1,13 @@
+{
+  "name": "knowledge_extraction",
+  "displayName": "Knowledge Extraction",
+  "description": "Key points, entities, relationships \u2014 notes, articles",
+  "category": "general",
+  "outputSchema": {
+    "type": "object",
+    "properties": {},
+    "required": [
+      "short_summary"
+    ]
+  }
+}

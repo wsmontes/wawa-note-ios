@@ -227,7 +227,7 @@ struct InboxView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title.isEmpty ? "Untitled" : item.title)
                     .font(.body).lineLimit(1)
-                    .foregroundStyle(item.inboxDate != nil ? .primary : .secondary)
+                    .foregroundStyle((item.inboxDate != nil && item.analysisProviderId == nil) ? .primary : .secondary)
 
                 HStack(spacing: 6) {
                     Text(item.type.label)
@@ -240,7 +240,7 @@ struct InboxView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
 
-                    if item.inboxDate != nil {
+                    if item.inboxDate != nil && item.analysisProviderId == nil {
                         Text("·").font(.caption).foregroundStyle(.secondary)
                         Text("Unprocessed")
                             .font(.caption2)
@@ -368,7 +368,7 @@ struct InboxView: View {
         }
 
         switch filterMode {
-        case .needsReview: result = result.filter { $0.inboxDate != nil }
+        case .needsReview: result = result.filter { $0.inboxDate != nil && $0.analysisProviderId == nil }
         case .all, .trash: break
         case .anarlog: result = result.filter { $0.anarlogFrontmatterJSON != nil }
         case .unassigned: result = result.filter { $0.projectID == nil && $0.folderID == nil }
@@ -427,7 +427,7 @@ struct InboxView: View {
         if let trashID = trashFolderID {
             items = items.filter { $0.folderID != trashID }
         }
-        return items.filter { $0.inboxDate != nil }.count
+        return items.filter { $0.inboxDate != nil && $0.analysisProviderId == nil }.count
     }
 
     // MARK: - Actions
