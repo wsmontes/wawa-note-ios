@@ -1,6 +1,12 @@
 import SwiftUI
 import SwiftData
 
+private enum ReprocessMode {
+    case transcribeOnly
+    case analyzeOnly
+    case full
+}
+
 struct KnowledgeDetailView: View {
     let item: KnowledgeItem
     @Environment(\.modelContext) private var modelContext
@@ -48,6 +54,7 @@ struct KnowledgeDetailView: View {
     private let assetResolver = AudioAssetResolver()
     @State private var isReprocessing = false
     @State private var showReprocessWarning = false
+    @State private var pendingReprocessMode: ReprocessMode = .analyzeOnly
     @State private var agentEvents: [PipelineAgentEvent] = []
     @State private var isAgentThinking = false
     @State private var rawAnalysisJSON: [String: Any] = [:]
@@ -226,11 +233,47 @@ struct KnowledgeDetailView: View {
                         Label("Connect to Item", systemImage: "arrow.triangle.pull")
                     }
 
-                    if item.analysisProviderId != nil || isPipelineProcessing || isReprocessing {
-                        Button {
-                            Task { await reprocessItem() }
+                    // Reprocess menu — always available for processable items.
+                    // iOS 17/18 on-device transcription bug motivated re-transcribe.
+                    if item.type == .audio || item.bodyText != nil
+                        || item.analysisProviderId != nil || item.transcriptionEngineId != nil {
+                        Menu {
+                            if item.type == .audio {
+                                let already = item.transcriptionEngineId != nil
+                                Section {
+                                    Button {
+                                        Task { await reprocessItem(mode: .transcribeOnly, forceAppleOnDevice: true) }
+                                    } label: {
+                                        Label(already ? "Re-transcribe (Apple)" : "Transcribe (Apple)",
+                                              systemImage: "iphone.gen3")
+                                    }
+                                    Button {
+                                        Task { await reprocessItem(mode: .transcribeOnly, forceAppleOnDevice: false) }
+                                    } label: {
+                                        Label(already ? "Re-transcribe (Whisper)" : "Transcribe (Whisper)",
+                                              systemImage: "cloud")
+                                    }
+                                }
+                            }
+                            if item.type == .audio || item.bodyText != nil
+                                || item.analysisProviderId != nil {
+                                Button {
+                                    Task { await reprocessItem(mode: .analyzeOnly) }
+                                } label: {
+                                    Label("Re-analyze", systemImage: "brain.head.profile")
+                                }
+                            }
+                            if item.type == .audio, item.transcriptionEngineId != nil,
+                               item.analysisProviderId != nil {
+                                Divider()
+                                Button {
+                                    Task { await reprocessItem(mode: .full) }
+                                } label: {
+                                    Label("Full Reprocess", systemImage: "arrow.triangle.2.circlepath")
+                                }
+                            }
                         } label: {
-                            Label("Re-analyze", systemImage: "arrow.triangle.2.circlepath")
+                            Label("Reprocess", systemImage: "arrow.triangle.2.circlepath")
                         }
                         .disabled(isReprocessing || isPipelineProcessing)
                     }
@@ -278,7 +321,7 @@ struct KnowledgeDetailView: View {
         }
         .alert("Re-process Item", isPresented: $showReprocessWarning) {
             Button("Cancel", role: .cancel) { }
-            Button("Continue") { Task { await reprocessItem(confirmed: true) } }
+            Button("Continue") { Task { await reprocessItem(mode: pendingReprocessMode, confirmed: true) } }
         } message: {
             Text("You have manually edited this item's content. Re-processing will re-analyze it. Your edits will be protected and AI may suggest changes for your review instead of overwriting them.")
         }
@@ -689,44 +732,6 @@ struct KnowledgeDetailView: View {
         }
 
         if let transcript {
-            // Analyze button ABOVE transcript — user should see the action before
-            // scrolling through the full text, especially for long transcripts.
-            if transcript != nil && analysis == nil && !isAnalyzing && !isPipelineProcessing {
-                VStack(spacing: 12) {
-                    if analysisAvailable {
-                        Image(systemName: "sparkles")
-                            .font(.largeTitle)
-                            .foregroundStyle(.secondary)
-                        Text("Ready for analysis")
-                            .font(.headline)
-                        if let error = analysisError {
-                            Text(error).font(.caption).foregroundStyle(.red)
-                        }
-                        ActiveModelPicker(selectedModel: $selectedModel, label: "Model")
-                        Button("Analyze via Agent") {
-                            Task { await reprocessItem() }
-                        }
-                        .buttonStyle(.borderedProminent)
-                    } else {
-                        Image(systemName: "link.badge.plus")
-                            .font(.largeTitle)
-                            .foregroundStyle(.secondary)
-                        Text("Connect an AI Provider")
-                            .font(.headline)
-                        Text("Go to Settings → AI Services to connect an AI provider and analyze your content.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .padding(24)
-                .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-            }
-
             if isAnalyzing {
                 HStack(spacing: 10) {
                     ProgressView()
@@ -1724,16 +1729,28 @@ struct KnowledgeDetailView: View {
 
     // MARK: - Reprocess
 
-    private func reprocessItem(confirmed: Bool = false) async {
-        guard AIConfigService.shared.isAnalysisAvailable(context: modelContext) else {
+    private func reprocessItem(mode: ReprocessMode = .analyzeOnly,
+                                confirmed: Bool = false,
+                                forceAppleOnDevice: Bool = false) async {
+        // Whisper path needs an AI provider; Apple on-device does not.
+        if mode == .transcribeOnly, !forceAppleOnDevice {
+            if !AIConfigService.shared.isAnalysisAvailable(context: modelContext) {
+                analysisError = "No AI provider configured. Use Apple on-device or add a provider in Settings."
+                return
+            }
+        }
+        // Re-analysis modes always need an AI provider.
+        if mode != .transcribeOnly,
+           !AIConfigService.shared.isAnalysisAvailable(context: modelContext) {
             analysisError = "No AI provider with an API key is configured. Go to Settings → AI Services."
             return
         }
-        // Check for user-owned fields before re-processing
-        if !confirmed {
+        // Check for user-owned fields before re-processing (analysis modes only)
+        if !confirmed, mode != .transcribeOnly {
             let userOwned = ["title", "bodyText"].filter { item.provenance.isUserOwned(field: $0) }
             if !userOwned.isEmpty {
                 showReprocessWarning = true
+                pendingReprocessMode = mode
                 return
             }
         }
@@ -1741,22 +1758,45 @@ struct KnowledgeDetailView: View {
         isReprocessing = true
         defer { isReprocessing = false }
 
-        // Clear previous analysis so pipeline re-runs Phase 2
-        item.analysisProviderId = nil
+        // Override engine preference based on explicit user choice.
+        if mode == .transcribeOnly || mode == .full {
+            TranscriptionSettings.shared.mode = forceAppleOnDevice ? .apple : .whisper
+        }
+
+        let dir = fileStore.itemDirectoryURL(for: item.id)
+        let doTranscribe = mode == .transcribeOnly || mode == .full
+        let doAnalyze = mode == .analyzeOnly || mode == .full
+
+        // ── Clear state ─────────────────────────────────────────────
+        if doTranscribe {
+            item.transcriptionEngineId = nil
+            item.status = .recorded
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent("transcript.json"))
+            transcript = nil
+        }
+        if doAnalyze {
+            item.analysisProviderId = nil
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent("analysis.json"))
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent("analysis.dynamic.json"))
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent("provider.response.raw.txt"))
+            analysis = nil
+            rawAnalysisJSON = [:]
+        }
         try? modelContext.save()
 
-        // Delete stale artifacts
-        let dir = fileStore.itemDirectoryURL(for: item.id)
-        try? FileManager.default.removeItem(at: dir.appendingPathComponent("analysis.json"))
-        try? FileManager.default.removeItem(at: dir.appendingPathComponent("analysis.dynamic.json"))
-        try? FileManager.default.removeItem(at: dir.appendingPathComponent("provider.response.raw.txt"))
+        // ── Transcribe: call extraction directly ────────────────────
+        // Bypasses process() guard that blocks Phase 0 when analysis exists.
+        if doTranscribe {
+            let extractionSvc = ContentExtractionService(modelContext: modelContext, fileStore: fileStore)
+            _ = await extractionSvc.extractTextFromAudio(item)
+            loadData()
+        }
 
-        // Clear local state so UI refreshes
-        analysis = nil
-
-        // Re-run pipeline. If item belongs to a project, Phase 3 will
-        // also re-ingest and update the project context.
-        await contentPipeline.process(item.id, using: modelContext)
+        // ── Analyze: run full pipeline ──────────────────────────────
+        // Guards pass now because analysisProviderId was cleared above.
+        if doAnalyze {
+            await contentPipeline.process(item.id, using: modelContext)
+        }
     }
 
     // MARK: - Backlinks
