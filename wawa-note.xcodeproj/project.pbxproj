@@ -99,6 +99,7 @@
 		80CEC69B92C4B96BA72F5037 /* expand.md in Resources */ = {isa = PBXBuildFile; fileRef = 7E89569E6B870271AA6D0629 /* expand.md */; };
 		816E4C60E1FEC0B7798B83E6 /* ProjectDerivedItemService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8F08C2011D7404D601036BC /* ProjectDerivedItemService.swift */; };
 		83F25C487A4675EE6502FA54 /* ProjectDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88A3DE3EB52EBD68CA2C5B9D /* ProjectDetailView.swift */; };
+		4EF06BBBC685F8893C3931D4 /* SendToMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC41D66B8DB780CA0A397BAB /* SendToMenuView.swift */; };
 		8422629AB5FF4824ACEAA07F /* ModelPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB83957918094F378295C568 /* ModelPolicy.swift */; };
 		85D55066625EA634298431E6 /* GraphEdgeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F58AF17D2A708B7406877331 /* GraphEdgeService.swift */; };
 		86010F67B3044E6EC8AED8E8 /* AITemplate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78D11606C12C0A8D34128FDE /* AITemplate.swift */; };
@@ -426,6 +427,7 @@
 		F58AF17D2A708B7406877331 /* GraphEdgeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphEdgeService.swift; sourceTree = "<group>"; };
 		F606F4B7A83FB68B775F9EE7 /* ImportRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportRouter.swift; sourceTree = "<group>"; };
 		F62B07B30DFC4523B77C88BC /* ModelResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelResolver.swift; sourceTree = "<group>"; };
+		EC41D66B8DB780CA0A397BAB /* SendToMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SendToMenuView.swift; sourceTree = "<group>"; };
 		F63FECDA0CA220E10BB4F014 /* CalendarPermissionView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CalendarPermissionView.swift; sourceTree = "<group>"; };
 		F7BCE1FC738F8573CD3ABC3F /* JournalEditorView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JournalEditorView.swift; sourceTree = "<group>"; };
 		F9055DD2056C4925A60A6299 /* TranscriptRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptRenderer.swift; sourceTree = "<group>"; };
@@ -886,6 +888,7 @@
 			isa = PBXGroup;
 			children = (
 				88A3DE3EB52EBD68CA2C5B9D /* ProjectDetailView.swift */,
+				EC41D66B8DB780CA0A397BAB /* SendToMenuView.swift */,
 				446C28973B9F54B2DDB9BE5D /* ProjectGraphView.swift */,
 				523D314449E1E56659ED1269 /* ProjectListView.swift */,
 				C07606D38930B50121D0D0FD /* ProjectTaskBoardView.swift */,
@@ -1179,6 +1182,7 @@
 				7A1BCFA48364326BFB818D1E /* PrimaryActionButton.swift in Sources */,
 				8FFBD4E9213AF5BD252502C5 /* ProjectConversionService.swift in Sources */,
 				83F25C487A4675EE6502FA54 /* ProjectDetailView.swift in Sources */,
+				4EF06BBBC685F8893C3931D4 /* SendToMenuView.swift in Sources */,
 				132C25A6060A5F83B7DA9C49 /* ProjectExportService.swift in Sources */,
 				43D28AC291895A7C8BB99BEE /* ProjectGraphView.swift in Sources */,
 				E85D449289B3F582F5878A2B /* ProjectListView.swift in Sources */,

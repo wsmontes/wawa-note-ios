@@ -375,6 +375,8 @@ struct ItemsView: View {
             }
             Text(item.createdAt.formatted(.relative(presentation: .named)))
                 .font(.caption2).foregroundStyle(.secondary)
+
+            SendToMenu(item: item, projectID: projectID)
         }
         .padding(.vertical, 4)
     }
