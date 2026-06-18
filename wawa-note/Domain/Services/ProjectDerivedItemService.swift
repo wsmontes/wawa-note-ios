@@ -243,10 +243,16 @@ final class ProjectDerivedItemService {
 
     /// Marks all source items in a project as needing reprocessing with the given context.
     /// Used when project domain changes or user requests re-analysis.
-    func markItemsForReprocessing(projectID: UUID, context: String, itemIDs: [UUID]) {
-        // This is a lightweight trigger — actual reprocessing is handled by the Item Agent
+    /// Marks items for reprocessing. Delegates to ProjectService which sets the
+    /// needsProjectReprocessing flag on KnowledgeItem records.
+    func markItemsForReprocessing(projectID: UUID, context reprocessContext: String, itemIDs: [UUID]) {
+        let projectSvc = ProjectService(context: self.context)
         for itemID in itemIDs {
-            // Set the flag on KnowledgeItem (handled by ProjectService integration)
+            do {
+                try projectSvc.markForReprocessing(itemID: itemID, projectID: projectID, context: reprocessContext)
+            } catch {
+                AppLog.general.error("ProjectDerivedItemService: failed to mark item \(itemID) for reprocessing: \(error)")
+            }
         }
     }
 }

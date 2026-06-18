@@ -186,10 +186,35 @@ final class ProjectAgent {
 
     /// Enriches newly added items with device context (Calendar, Contacts, Location).
     func enrichWithDeviceContext(itemIDs: [UUID]) async throws {
-        // Placeholder for future implementation
-        // DeviceContextService will cross-reference items against
-        // Calendar events, Contacts, and Location data
-        AppLog.general.info("ProjectAgent: enrichWithDeviceContext called for \(itemIDs.count) items — stub")
+        let deviceContext = DeviceContextService()
+        for itemID in itemIDs {
+            guard let item = try fetchKnowledgeItem(itemID) else { continue }
+            let enrichments = await deviceContext.crossReference(item: item)
+            for enrichment in enrichments {
+                switch enrichment {
+                case .calendarEvent(let event):
+                    _ = try derivedService.createConnection(
+                        title: "\(item.title) → Calendar: \(event.title)",
+                        projectID: projectID,
+                        fromDerivedID: item.id,
+                        toDerivedID: projectID,
+                        edgeType: .references,
+                        provenanceItemID: item.id
+                    )
+                case .contact(let person):
+                    let personID = try ensurePersonExists(person, context: context)
+                    try GraphEdgeService(context: context).create(
+                        fromID: item.id,
+                        toID: personID,
+                        edgeType: .mentions,
+                        provenanceItemID: item.id
+                    )
+                case .location(let place):
+                    AppLog.general.info("DeviceContext: item \(item.title.prefix(20)) matched location \(place)")
+                }
+            }
+        }
+        AppLog.general.info("ProjectAgent: enrichWithDeviceContext complete — \(itemIDs.count) items processed")
     }
 
     // MARK: - Reprocess triggers
@@ -347,8 +372,28 @@ final class ProjectAgent {
     }
 
     private func extractMetrics(from text: String) -> [SynthesisMetric] {
-        // Default stub — will be enhanced when agent emits structured metrics
-        return []
+        // Computed defaults — enhanced when agent emits structured metrics via tool calls.
+        let derivedSvc = ProjectDerivedItemService(context: context)
+        let activeTasks = (try? derivedSvc.fetchActiveTasks(for: projectID)) ?? []
+        let activeSignals = (try? derivedSvc.fetchActiveSignals(for: projectID)) ?? []
+        let items = (try? projectService.items(in: projectID)) ?? []
+
+        return [
+            SynthesisMetric(
+                id: "item_count", label: "Items", value: Double(items.count),
+                format: "number", status: items.isEmpty ? "warning" : "healthy", icon: "doc.fill"
+            ),
+            SynthesisMetric(
+                id: "active_tasks", label: "Active Tasks", value: Double(activeTasks.count),
+                format: "number", status: activeTasks.count > 10 ? "warning" : "healthy", icon: "checklist"
+            ),
+            SynthesisMetric(
+                id: "active_signals", label: "Active Signals", value: Double(activeSignals.count),
+                format: "number",
+                status: activeSignals.contains { $0.isCritical } ? "critical" : (activeSignals.count > 5 ? "warning" : "healthy"),
+                icon: "waveform.path.ecg"
+            )
+        ]
     }
 }
 
