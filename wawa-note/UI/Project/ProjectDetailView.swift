@@ -81,500 +81,58 @@ struct ProjectDetailLink: View {
     }
 }
 
-// MARK: - Project Home (Glance Layer)
+// MARK: - Project Home (Simplified)
 
 struct ProjectHomeView: View {
     let project: Project
     @Environment(\.modelContext) private var modelContext
-    @EnvironmentObject private var processingQueue: ProcessingQueueService
-    @EnvironmentObject private var contentPipeline: ContentPipelineService
-    @EnvironmentObject private var coordinator: RecordingCoordinator
-    @State private var tasks: [TaskItem] = []
-    @State private var items: [KnowledgeItem] = []
-    @State private var signals: [AgentSuggestion] = []
-    @State private var showActionSheet = false
-    @State private var showNoteEditor = false
-    @State private var showFileImporter = false
-    @State private var createdNoteItem: KnowledgeItem? = nil
-    @State private var lastLoadTime: Date = .distantPast
+    @EnvironmentObject private var chatState: ChatOverlayState
+    @State private var selectedTab: ProjectTab = .synthesis
+
+    enum ProjectTab: String, CaseIterable {
+        case synthesis = "Síntese"
+        case files = "Arquivos"
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                headerSection
-                metricsRow
-                if project.healthStatus != nil || (project.healthScore ?? 0) > 0 {
-                    healthSection
+        VStack(spacing: 0) {
+            // Segment control
+            Picker("View", selection: $selectedTab) {
+                ForEach(ProjectTab.allCases, id: \.rawValue) { tab in
+                    Text(tab.rawValue).tag(tab)
                 }
-                if !signals.isEmpty {
-                    alertsSection
-                }
-                recentActivity
             }
+            .pickerStyle(.segmented)
             .padding(.horizontal)
             .padding(.top, 8)
-            .padding(.bottom)
+
+            // Content
+            switch selectedTab {
+            case .synthesis:
+                ProjectSynthesisView(project: project)
+            case .files:
+                ItemsView(projectID: project.id)
+            }
         }
         .navigationTitle(project.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button { showActionSheet = true } label: {
+                    Button { /* capture flow */ } label: {
                         Label("Add Item", systemImage: "plus")
                     }
-                    Button { exportJSON() } label: {
-                        Label("Export JSON", systemImage: "doc.text")
-                    }
-                    Button { exportMarkdown() } label: {
-                        Label("Export Markdown", systemImage: "doc.richtext")
+                    Button { /* export */ } label: {
+                        Label("Export", systemImage: "square.and.arrow.up")
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
-                        .font(.title3)
                 }
             }
         }
-        .confirmationDialog("Add to Project", isPresented: $showActionSheet) {
-            Button("Record Audio") { coordinator.startRecording(projectID: project.id) }
-            Button("Add Note") { showNoteEditor = true }
-            Button("Import File") { showFileImporter = true }
-            Button("Cancel", role: .cancel) { }
+        .onAppear {
+            chatState.context = .project(project.id)
         }
-        .sheet(isPresented: $showNoteEditor) {
-            NoteEditorView(mode: .create(type: .note, folderID: nil, initialTag: nil))
-        }
-        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.json, .plainText, .pdf, .html, .rtf, .audio, .image]) { result in
-            if case .success(let url) = result {
-                Task { await handleImportedFile(url) }
-            }
-        }
-        .onAppear { loadData() }
-        .onChange(of: createdNoteItem?.id) { _, _ in
-            if let item = createdNoteItem {
-                try? ProjectService(context: modelContext).addItem(item.id, to: project.id)
-                processingQueue.enqueue(itemID: item.id, projectID: project.id, trigger: .newCapture)
-                createdNoteItem = nil
-            }
-        }
-        .refreshable { loadData(force: true) }
-    }
-
-    // MARK: Header
-
-    @State private var editingIntention = false
-    @State private var intentionDraft = ""
-
-    private var headerSection: some View {
-        VStack(spacing: 8) {
-            if editingIntention {
-                HStack {
-                    TextField("What is the intention of this project?", text: $intentionDraft, axis: .vertical)
-                        .font(.subheadline)
-                        .lineLimit(3...6)
-                    Button("Save") {
-                        let trimmed = intentionDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-                        project.intention = trimmed.isEmpty ? nil : trimmed
-                        project.intentionIsAutoGenerated = false
-                        try? modelContext.save()
-                        editingIntention = false
-                    }.font(.subheadline).fontWeight(.medium)
-                }
-                .padding(8)
-                .background(.regularMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-            } else if let intent = project.intention, !intent.isEmpty {
-                Button { intentionDraft = intent; editingIntention = true } label: {
-                    HStack(spacing: 4) {
-                        Text(intent)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                        if project.intentionIsAutoGenerated {
-                            Text("AI").font(.system(size: 9)).padding(.horizontal, 4).background(.blue.opacity(0.15)).clipShape(Capsule())
-                        }
-                    }
-                }
-            } else {
-                Button { intentionDraft = ""; editingIntention = true } label: {
-                    Text("Qual é a intenção deste projeto?")
-                        .font(.subheadline)
-                        .foregroundStyle(.tertiary)
-                        .italic()
-                }
-            }
-            statusBadge
-        }
-    }
-
-    private var statusBadge: some View {
-        Text(project.status.rawValue.capitalized)
-            .font(.subheadline)
-            .fontWeight(.medium)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
-            .background(project.status == .active ? Color.blue.opacity(0.12) : Color.gray.opacity(0.12))
-            .clipShape(Capsule())
-    }
-
-    // MARK: Metrics Row
-
-    private var metricsRow: some View {
-        VStack(spacing: 10) {
-            // Items card
-            NavigationLink {
-                ItemsView(projectID: project.id)
-            } label: {
-                richMetricCard(
-                    icon: "doc.fill", iconColor: .blue,
-                    title: "Items", count: items.count,
-                    subtitle: itemBreakdown,
-                    accent: unprocessedCount > 0 ? "\(unprocessedCount) unprocessed" : nil,
-                    accentColor: .orange
-                )
-            }
-            .buttonStyle(.plain)
-            .contentShape(Rectangle())
-
-            // Tasks card
-            NavigationLink {
-                BoardView(projectID: project.id)
-            } label: {
-                richMetricCard(
-                    icon: "checklist", iconColor: .teal,
-                    title: "Tasks", count: tasks.count,
-                    subtitle: taskBreakdown,
-                    accent: overdueCount > 0 ? "\(overdueCount) overdue" : nil,
-                    accentColor: .red
-                )
-            }
-            .buttonStyle(.plain)
-            .contentShape(Rectangle())
-
-            // Signals card
-            if !signals.isEmpty {
-                NavigationLink {
-                    SignalsView(projectID: project.id)
-                } label: {
-                    richMetricCard(
-                        icon: "waveform.path.ecg", iconColor: activeSignals.contains { $0.type == "risk" || $0.type == "alert" } ? .red : .purple,
-                        title: "Signals", count: activeSignals.count,
-                        subtitle: signalBreakdown,
-                        accent: criticalDoubts > 0 ? "\(criticalDoubts) critical doubts" : nil,
-                        accentColor: .orange
-                    )
-                }
-                .buttonStyle(.plain)
-                .contentShape(Rectangle())
-            }
-        }
-    }
-
-    private func richMetricCard(icon: String, iconColor: Color, title: String, count: Int, subtitle: String, accent: String?, accentColor: Color) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.title2)
-                .foregroundStyle(iconColor)
-                .frame(width: 36)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.headline)
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
-                Text("\(count)").font(.title2).fontWeight(.bold).foregroundStyle(iconColor)
-                if let accent {
-                    Text(accent).font(.caption2).foregroundStyle(accentColor)
-                }
-            }
-            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
-        }
-        .padding()
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-
-    private var itemBreakdown: String {
-        let byType = Dictionary(grouping: items, by: \.type)
-        return byType.map { "\($0.value.count) \($0.key.label.lowercased())" }.joined(separator: " · ")
-    }
-
-    private var taskBreakdown: String {
-        let byStatus = Dictionary(grouping: tasks, by: \.status)
-        return columnsOrder.compactMap { s in
-            byStatus[s].map { "\($0.count) \(s.rawValue.lowercased())" }
-        }.joined(separator: " · ")
-    }
-
-    private var signalBreakdown: String {
-        let byType = Dictionary(grouping: activeSignals, by: \.type)
-        return byType.prefix(3).map { "\($0.value.count) \($0.key.replacingOccurrences(of: "_", with: " "))" }.joined(separator: " · ")
-    }
-
-    private var columnsOrder: [TaskStatus] { [.todo, .inProgress, .done, .cancelled] }
-
-    private var unprocessedCount: Int {
-        items.filter { $0.inboxDate != nil && $0.analysisProviderId == nil }.count
-    }
-
-    private var overdueCount: Int {
-        tasks.filter { ($0.dueAt ?? .distantFuture) < Date() && $0.status != .done }.count
-    }
-
-    private var activeSignals: [AgentSuggestion] {
-        signals.filter { $0.isActive }
-    }
-
-    private var criticalDoubts: Int {
-        signals.filter { $0.type == "doubt" && $0.isCritical && $0.isActive }.count
-    }
-
-    // MARK: Health + Status
-
-    private var healthSection: some View {
-        VStack(spacing: 12) {
-            HStack {
-                if let score = project.healthScore {
-                    HealthRing(score: score, status: project.healthStatus ?? "healthy")
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Project Health")
-                        .font(.headline)
-                    if let status = project.healthStatus {
-                        Text(status.capitalized)
-                            .font(.subheadline)
-                            .foregroundStyle(healthColor)
-                    }
-                    if let inertia = inertiaScore {
-                        Text("Ontology: \(OntologyInertiaService.shared.inertiaLabel(inertia))")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-            }
-
-            // Processing status
-            let pendingCount = items.filter { $0.inboxDate != nil && $0.analysisProviderId == nil }.count
-            let activeInQueue = processingQueue.entries.filter {
-                $0.status == .queued || $0.status == .processing
-            }.count
-
-            if activeInQueue > 0 {
-                HStack {
-                    ProgressView().scaleEffect(0.8)
-                    Text("Processing \(activeInQueue) item\(activeInQueue > 1 ? "s" : "")...")
-                        .font(.subheadline)
-                        .foregroundStyle(.blue)
-                    Spacer()
-                }
-            } else if pendingCount > 0 {
-                let hasProvider = (try? ProviderRouter.resolveActive(context: modelContext)) != nil
-                Button {
-                    for item in items.prefix(5) where item.inboxDate != nil && item.analysisProviderId == nil {
-                        processingQueue.enqueue(itemID: item.id, projectID: project.id, trigger: .backgroundBackfill)
-                    }
-                } label: {
-                    HStack {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                        Text(hasProvider
-                             ? "Process \(pendingCount) pending item\(pendingCount > 1 ? "s" : "")"
-                             : "\(pendingCount) item\(pendingCount > 1 ? "s" : "") waiting — configure AI provider in Settings")
-                            .font(.subheadline)
-                        Spacer()
-                    }
-                    .foregroundStyle(hasProvider ? .blue : .orange)
-                }
-                .disabled(!hasProvider)
-            }
-        }
-        .padding()
-        .frame(maxWidth: .infinity)
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-
-    private var healthColor: Color {
-        switch project.healthStatus { case "healthy": .mint; case "stale": .orange; case "atRisk": .red; default: .secondary }
-    }
-
-    private var inertiaScore: Double? {
-        OntologyInertiaService.shared.computeInertia(projectID: project.id, context: modelContext)
-    }
-
-    // MARK: Alerts
-
-    private var alertsSection: some View {
-        let active = signals.filter { $0.isActive }
-        let doubts = active.filter { $0.type == "doubt" }
-        guard !active.isEmpty else { return AnyView(EmptyView()) }
-        return AnyView(
-            NavigationLink {
-                SignalsView(projectID: project.id)
-            } label: {
-                VStack(spacing: 8) {
-                    HStack {
-                        Label("Signals", systemImage: "waveform.path.ecg")
-                            .font(.headline)
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    HStack(spacing: 16) {
-                        if !doubts.isEmpty {
-                            Label("\(doubts.count) doubts", systemImage: "questionmark.bubble.fill")
-                                .font(.subheadline)
-                                .foregroundStyle(doubts.contains { $0.isCritical } ? .orange : .yellow)
-                        }
-                        if active.count > doubts.count {
-                            Label("\(active.count - doubts.count) signals", systemImage: "exclamationmark.triangle.fill")
-                                .font(.subheadline)
-                                .foregroundStyle(active.contains { $0.type == "risk" || $0.type == "alert" } ? .red : .secondary)
-                        }
-                        Spacer()
-                    }
-                }
-                .padding()
-                .background(.regularMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-            .buttonStyle(.plain)
-        )
-    }
-
-    // MARK: Activity
-
-    private var recentActivity: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Recent Activity")
-                .font(.headline)
-
-            let activities = buildActivityFeed()
-            if activities.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "clock.arrow.circlepath").font(.largeTitle).foregroundStyle(.secondary)
-                    Text("Activity will appear here as items are processed and tasks are completed")
-                        .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity).padding(.vertical, 24)
-            } else {
-                ForEach(activities.prefix(8)) { event in
-                    activityRow(icon: event.icon, color: event.color, title: event.title, snippet: event.snippet, date: event.date)
-                }
-            }
-        }
-    }
-
-    private struct ActivityEvent: Identifiable {
-        let id = UUID()
-        let icon: String; let color: Color; let title: String; let snippet: String; let date: Date
-    }
-
-    private func buildActivityFeed() -> [ActivityEvent] {
-        var events: [ActivityEvent] = []
-
-        // Analyzed items
-        for item in items where item.analysisProviderId != nil {
-            events.append(ActivityEvent(icon: "sparkles", color: .purple,
-                title: "Item analyzed", snippet: item.title, date: item.updatedAt))
-        }
-
-        // Completed tasks
-        for task in tasks where task.status == .done {
-            events.append(ActivityEvent(icon: "checkmark.circle.fill", color: .green,
-                title: "Task completed", snippet: task.title, date: task.updatedAt))
-        }
-
-        // Active signals
-        for signal in signals where signal.isActive {
-            events.append(ActivityEvent(icon: signalIcon(signal.type), color: signalColor(signal.type),
-                title: "Signal: \(signal.type.replacingOccurrences(of: "_", with: " "))", snippet: signal.title, date: signal.createdAt))
-        }
-
-        // Recently created items
-        for item in items.sorted(by: { $0.createdAt > $1.createdAt }).prefix(3) {
-            events.append(ActivityEvent(icon: "plus.circle.fill", color: .blue,
-                title: "Item added", snippet: item.title, date: item.createdAt))
-        }
-
-        return events.sorted(by: { $0.date > $1.date })
-    }
-
-    private func activityRow(icon: String, color: Color, title: String, snippet: String, date: Date) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .foregroundStyle(color)
-                .frame(width: 28)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline).fontWeight(.medium)
-                Text(snippet).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
-            Spacer()
-            Text(date.formatted(.relative(presentation: .named)))
-                .font(.caption2).foregroundStyle(.secondary)
-        }
-    }
-
-    // MARK: Actions
-
-
-    private func handleImportedFile(_ url: URL) async {
-        let didStart = url.startAccessingSecurityScopedResource()
-        defer { if didStart { url.stopAccessingSecurityScopedResource() } }
-        let router = ImportRouter(importers: [
-            JSONImporter(), MarkdownImporter(), PlainTextImporter(),
-            SRTImporter(), ICSImporter(), PDFImporter(), HTMLImporter(), RTFImporter(),
-            AnarlogImporter(), MeetilyImporter()
-        ])
-        guard let importer = router.importer(for: url) else { return }
-        do {
-            let result = try await importer.importFromURL(url)
-            let item = result.knowledgeItem
-            modelContext.insert(item)
-            try? modelContext.save()
-            try? ProjectService(context: modelContext).addItem(item.id, to: project.id)
-            processingQueue.enqueue(itemID: item.id, projectID: project.id, trigger: .newCapture)
-            loadData()
-        } catch {
-            AppLog.general.error("Import failed: \(error.localizedDescription)")
-        }
-    }
-
-    // MARK: Data loading
-
-    private func loadData(force: Bool = false) {
-        let now = Date()
-        if !force && now.timeIntervalSince(lastLoadTime) < 1.0 {
-            return  // Skip redundant reloads within 1 second
-        }
-        lastLoadTime = now
-        AppLog.debug("project", "loadData start — projectID=\(project.id.uuidString.prefix(8))")
-        tasks = (try? TaskService(context: modelContext).tasks(for: project.id)) ?? []
-        items = (try? ProjectService(context: modelContext).items(in: project.id)) ?? []
-        let all = (try? modelContext.fetch(FetchDescriptor<AgentSuggestion>())) ?? []
-        signals = all.filter { $0.projectID == project.id }
-        AppLog.debug("project", "loadData done — tasks=\(tasks.count) items=\(items.count) signals=\(signals.count)")
-    }
-
-    private func exportJSON() {
-        let svc = InstanceExportService()
-        let export = svc.exportSingleProject(project, context: modelContext)
-        guard let data = try? JSONEncoder().encode(export),
-              let json = String(data: data, encoding: .utf8) else { return }
-        let vc = UIActivityViewController(activityItems: [json], applicationActivities: nil)
-        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let root = scene.windows.first?.rootViewController { root.present(vc, animated: true) }
-    }
-
-    private func exportMarkdown() {
-        let exporter = ProjectExportService()
-        let edges = (try? GraphEdgeService(context: modelContext).neighborhood(of: project.id, radius: 2)) ?? []
-        let md = exporter.exportMarkdown(project: project, items: items, tasks: tasks, edges: edges)
-        let vc = UIActivityViewController(activityItems: [md], applicationActivities: nil)
-        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let root = scene.windows.first?.rootViewController { root.present(vc, animated: true) }
     }
 }
 
@@ -1595,3 +1153,97 @@ struct ConfigSchemaViewer: View {
 
 // MARK: - Document Scanner (VisionKit wrapper)
 
+
+// MARK: - Project Synthesis Views
+
+/// Renders the project's synthesis document with actionable primitives.
+struct ProjectSynthesisView: View {
+    let project: Project
+    @Environment(\.modelContext) private var modelContext
+    @State private var synthesis: ProjectDerivedItem?
+    @State private var derivedItems: [ProjectDerivedItem] = []
+    @State private var isLoading = true
+
+    var body: some View {
+        Group {
+            if isLoading {
+                ProgressView("Loading synthesis...")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .onAppear { loadData() }
+            } else if let synthesis {
+                ScrollView {
+                    SynthesisContentView(synthesis: synthesis, derivedItems: derivedItems, projectID: project.id)
+                }
+                .refreshable { loadData() }
+            } else {
+                EmptySynthesisView(project: project)
+            }
+        }
+    }
+
+    @MainActor
+    private func loadData() {
+        let svc = ProjectDerivedItemService(context: modelContext)
+        synthesis = try? svc.fetchSynthesis(for: project.id).first
+        derivedItems = (try? svc.fetch(for: project.id)) ?? []
+        isLoading = false
+    }
+}
+
+/// Renders the synthesis body content from parsed JSON.
+struct SynthesisContentView: View {
+    let synthesis: ProjectDerivedItem
+    let derivedItems: [ProjectDerivedItem]
+    let projectID: UUID
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Parse and render synthesis body
+            if let bodyJSON = synthesis.bodyJSON,
+               let data = bodyJSON.data(using: .utf8),
+               let body = try? JSONDecoder().decode(SynthesisBody.self, from: data) {
+                Text(.init(body.markdown))
+                    .padding()
+            } else {
+                Text("Synthesis pending...")
+                    .foregroundStyle(.secondary)
+                    .padding()
+            }
+        }
+    }
+}
+
+/// Shown when no synthesis exists yet.
+struct EmptySynthesisView: View {
+    let project: Project
+    @Environment(\.modelContext) private var modelContext
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Spacer()
+            Image(systemName: "doc.richtext")
+                .font(.system(size: 48))
+                .foregroundStyle(.secondary)
+            Text("No synthesis yet")
+                .font(.headline)
+            Text("The Project Agent generates a synthesis once items are added and analyzed.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+            // Check if there are items to process
+            let items = (try? ProjectService(context: modelContext).items(in: project.id)) ?? []
+            if items.isEmpty {
+                Text("Add items to this project to get started.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            } else {
+                Button("Generate Synthesis") {
+                    // Will trigger ProjectAgent in Task 6
+                }
+                .buttonStyle(.bordered)
+            }
+            Spacer()
+        }
+    }
+}
