@@ -48,6 +48,26 @@ extension VFSPath {
         default: return false
         }
     }
+
+    /// The project ID for any project-scoped path, or nil for non-project paths.
+    var projectID: UUID? {
+        switch self {
+        case .project(_, let pid): return pid
+        case .projectItems(_, let pid): return pid
+        case .projectItem(_, let pid, _): return pid
+        case .projectItemContents(_, let pid, _): return pid
+        case .projectTasks(_, let pid): return pid
+        case .projectTask(_, let pid, _): return pid
+        case .projectPeople(_, let pid): return pid
+        case .projectEdges(_, let pid): return pid
+        case .projectSignals(_, let pid): return pid
+        case .projectAnalysis(_, let pid, _): return pid
+        case .projectExport(_, let pid): return pid
+        case .configSchemas(_, let pid): return pid
+        case .configSchema(_, let pid, _): return pid
+        default: return nil
+        }
+    }
 }
 
 // MARK: - VFS Service

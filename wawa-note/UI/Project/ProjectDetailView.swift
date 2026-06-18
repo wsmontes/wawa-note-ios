@@ -89,7 +89,11 @@ struct ProjectHomeView: View {
     let project: Project
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var chatState: ChatOverlayState
+    @EnvironmentObject private var coordinator: RecordingCoordinator
     @State private var selectedTab: ProjectTab = .synthesis
+    @State private var showCaptureSheet = false
+    @State private var showNoteEditor = false
+    @State private var showFileImporter = false
 
     enum ProjectTab: String, CaseIterable {
         case synthesis = "Síntese"
@@ -121,20 +125,89 @@ struct ProjectHomeView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button { /* capture flow */ } label: {
+                    Button { showCaptureSheet = true } label: {
                         Label("Add Item", systemImage: "plus")
                     }
-                    Button { /* export */ } label: {
-                        Label("Export", systemImage: "square.and.arrow.up")
+                    Button { exportMarkdown() } label: {
+                        Label("Export Markdown", systemImage: "doc.richtext")
+                    }
+                    Button { exportJSON() } label: {
+                        Label("Export JSON", systemImage: "doc.text")
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
             }
         }
+        .confirmationDialog("Add to Project", isPresented: $showCaptureSheet) {
+            Button("Record Audio") { coordinator.startRecording(projectID: project.id) }
+            Button("Add Note") { showNoteEditor = true }
+            Button("Import File") { showFileImporter = true }
+            Button("Cancel", role: .cancel) { }
+        }
+        .sheet(isPresented: $showNoteEditor) {
+            NoteEditorView(mode: .create(type: .note, folderID: nil, initialTag: nil))
+        }
+        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.json, .plainText, .pdf, .html, .rtf, .audio, .image]) { result in
+            if case .success(let url) = result {
+                Task { await handleImportedFile(url) }
+            }
+        }
         .onAppear {
             chatState.context = .project(project.id)
         }
+    }
+
+    private func handleImportedFile(_ url: URL) async {
+        let didStart = url.startAccessingSecurityScopedResource()
+        defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+        let router = ImportRouter(importers: [
+            JSONImporter(), MarkdownImporter(), PlainTextImporter(),
+            SRTImporter(), ICSImporter(), PDFImporter(), HTMLImporter(), RTFImporter(),
+            AnarlogImporter(), MeetilyImporter()
+        ])
+        guard let importer = router.importer(for: url) else { return }
+        do {
+            let result = try await importer.importFromURL(url)
+            let item = result.knowledgeItem
+            modelContext.insert(item)
+            try? modelContext.save()
+            try? ProjectService(context: modelContext).addItem(item.id, to: project.id)
+        } catch {
+            AppLog.general.error("Import failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func exportMarkdown() {
+        let items = (try? ProjectService(context: modelContext).items(in: project.id)) ?? []
+        let derivedTasks = (try? ProjectDerivedItemService(context: modelContext).fetch(for: project.id, type: .task)) ?? []
+        let edges = (try? GraphEdgeService(context: modelContext).neighborhood(of: project.id, radius: 2)) ?? []
+        let exporter = ProjectExportService()
+
+        // Build task rows from ProjectDerivedItem, matching the TaskItem format
+        let taskRows = derivedTasks.map { t -> String in
+            let check = t.status == .done ? "x" : " "
+            var line = "- [\(check)] **\(t.title)**"
+            if let owner = t.ownerName { line += " — \(owner)" }
+            if let prio = t.priorityRaw, prio != "medium" { line += " · \(prio.capitalized)" }
+            if let due = t.dueAt { line += " · Due: \(due.formatted(date: .abbreviated, time: .omitted))" }
+            return line
+        }
+
+        let md = exporter.exportMarkdown(project: project, items: items, tasks: taskRows, edges: edges)
+        let vc = UIActivityViewController(activityItems: [md], applicationActivities: nil)
+        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let root = scene.windows.first?.rootViewController { root.present(vc, animated: true) }
+    }
+
+    private func exportJSON() {
+        let svc = InstanceExportService()
+        let export = svc.exportSingleProject(project, context: modelContext)
+        guard let data = try? JSONEncoder().encode(export),
+              let json = String(data: data, encoding: .utf8) else { return }
+        let vc = UIActivityViewController(activityItems: [json], applicationActivities: nil)
+        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let root = scene.windows.first?.rootViewController { root.present(vc, animated: true) }
     }
 }
 

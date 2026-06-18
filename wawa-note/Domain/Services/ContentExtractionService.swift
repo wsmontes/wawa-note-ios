@@ -253,7 +253,11 @@ final class ContentExtractionService {
             }
             request.recognitionLevel = .accurate
             request.usesLanguageCorrection = true
-            try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
+            do {
+                try VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
+            } catch {
+                continuation.resume(returning: nil)
+            }
         }
     }
 
@@ -287,9 +291,10 @@ final class ContentExtractionService {
         if let provider = try? ProviderRouter.resolveActive(context: modelContext) {
             let msg = AIMessage(role: .user, content: [.text("Describe this image."), .imageFile(imageURL)])
             let model = AIConfigService.shared.modelFor(feature: "vision")
+            let params = AIConfigService.shared.requestParams(for: "vision", model: model)
             let req = AIRequest(model: model, messages: [msg],
-                temperature: AIConfigService.shared.requestParams(for: "vision", model: model).temperature,
-                maxTokens: 500)
+                temperature: params.temperature,
+                maxTokens: params.maxTokens)
             if let response = try? await provider.send(req), !response.content.isEmpty {
                 let combined = [ocrText, "---", response.content].compactMap { $0 }.joined(separator: "\n")
                 // Save enriched text to body

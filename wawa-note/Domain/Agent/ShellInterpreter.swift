@@ -951,7 +951,8 @@ enum ShellInterpreter {
                     item.tags = item.tags + ["mood/\(mood)"]
                 }
             }
-            let proj = vpath.isProjectLike ? (try? ProjectService(context: ctx.modelContext).fetch(id: ctx.activeProjectID!)) : nil
+            let resolvedProjectID = vpath.projectID ?? ctx.activeProjectID
+            let proj = resolvedProjectID.flatMap { try? ProjectService(context: ctx.modelContext).fetch(id: $0) }
             if let p = proj {
                 try? ProjectService(context: ctx.modelContext).addItem(item.id, to: p.id)
             }

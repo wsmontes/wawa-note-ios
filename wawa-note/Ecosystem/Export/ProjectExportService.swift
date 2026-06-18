@@ -6,6 +6,42 @@ struct ProjectExportService {
 
     // MARK: - Project Markdown export
 
+    /// Exports with pre-formatted task rows (from ProjectDerivedItem or other sources).
+    func exportMarkdown(project: Project, items: [KnowledgeItem], tasks taskRows: [String], edges: [GraphEdge]) -> String {
+        var md = "# \(project.name)\n\n"
+        if let summary = project.summary, !summary.isEmpty { md += "\(summary)\n\n" }
+        md += "**Status:** \(project.status.rawValue.capitalized)\n"
+        md += "**Created:** \(project.createdAt.formatted(date: .long, time: .shortened))\n"
+        md += "**Items:** \(items.count) | **Tasks:** \(taskRows.count) | **Connections:** \(edges.count)\n\n---\n\n"
+
+        if !taskRows.isEmpty { md += "## Tasks\n\n\(taskRows.joined(separator: "\n"))\n\n" }
+
+        if !items.isEmpty {
+            md += "## Knowledge Items\n\n"
+            for item in items {
+                md += "### \(item.title.isEmpty ? "Untitled" : item.title)\n"
+                md += "**Type:** \(item.type.label) | **Date:** \(item.createdAt.formatted(date: .abbreviated, time: .shortened))\n\n"
+                if let analysis = try? fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) {
+                    if !analysis.shortSummary.isEmpty { md += "\(analysis.shortSummary)\n\n" }
+                    if !analysis.decisions.isEmpty {
+                        md += "**Decisions:**\n"
+                        for d in analysis.decisions { md += "- \(d.title)\n" }
+                        md += "\n"
+                    }
+                }
+            }
+        }
+
+        if !edges.isEmpty {
+            md += "## Connections\n\n"
+            for edge in edges.prefix(50) {
+                md += "- \(edge.fromID.uuidString.prefix(8)) → [\(edge.edgeType.rawValue)] → \(edge.toID.uuidString.prefix(8))\n"
+            }
+            md += "\n"
+        }
+        return md
+    }
+
     func exportMarkdown(project: Project, items: [KnowledgeItem], tasks: [TaskItem], edges: [GraphEdge]) -> String {
         var md = ""
         md += "# \(project.name)\n\n"

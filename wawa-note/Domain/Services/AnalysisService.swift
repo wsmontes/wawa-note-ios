@@ -277,12 +277,15 @@ final class AnalysisService: @unchecked Sendable {
         \(chunk.text)
         """
 
+        let params = AIConfigService.shared.requestParams(for: "analysis", model: model)
         let request = AIRequest(
             model: model,
             messages: [
                 AIMessage(role: .system, content: [.text("You are a concise \(summarizerLabel) summarizer. Return only the summary text, no JSON.")]),
                 AIMessage(role: .user, content: [.text(prompt)])
-            ]
+            ],
+            temperature: params.temperature,
+            maxTokens: params.maxTokens
         )
 
         do {
