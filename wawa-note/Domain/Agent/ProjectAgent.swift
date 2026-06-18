@@ -34,17 +34,24 @@ final class ProjectAgent {
         let existingSignals = (try? derivedService.fetch(for: projectID, type: .signal)) ?? []
         let edges = (try? GraphEdgeService(context: context).neighborhood(of: projectID, radius: 2)) ?? []
 
-        // 2. Build context description
+        // 2. Detect domain framework
+        let domainFramework = await detectDomain()
+        if let fw = domainFramework {
+            AppLog.general.info("ProjectAgent: detected domain framework '\(fw.name)' for project '\(project.name)'")
+        }
+
+        // 3. Build context description (with framework context if detected)
         let contextDescription = buildContextDescription(
             project: project,
             items: items,
             existingSynthesis: existingSynthesis,
             tasks: existingTasks,
             signals: existingSignals,
-            edges: edges
+            edges: edges,
+            domainFramework: domainFramework
         )
 
-        // 3. Set up tools and context
+        // 4. Set up tools and context
         let tools = ProjectTools.makeTools(projectID: projectID)
         let toolContext = ToolContext(
             modelContext: context,
@@ -73,7 +80,7 @@ final class ProjectAgent {
         }
 
         // 5. Run agent autonomously
-        let systemPrompt = """
+        var taskPrompt = """
         You are the Project Agent for "\(project.name)".
         Your universe is this project's items and their derivations.
 
@@ -95,9 +102,22 @@ final class ProjectAgent {
         Use `create_connection` to link related items.
         """
 
+        // Append framework-specific synthesis instructions if available
+        if let fw = domainFramework {
+            taskPrompt += """
+
+            ## DOMAIN FRAMEWORK: \(fw.name)
+
+            This project has been classified under the "\(fw.name)" domain framework.
+
+            Framework synthesis instructions:
+            \(fw.projectSynthesis.systemPrompt)
+            """
+        }
+
         let fullOutput = try await runAutonomousLoop(
             loop: loop,
-            task: systemPrompt,
+            task: taskPrompt,
             systemPrompt: "You are a project synthesis agent. Analyze the project context and use the available tools to produce a comprehensive synthesis.",
             tools: tools,
             provider: provider,
@@ -109,14 +129,57 @@ final class ProjectAgent {
         return synthesis
     }
 
-    // MARK: - Domain detection (stub for Task 11)
+    // MARK: - Domain detection
 
-    /// Detects the domain of the project based on its items and metadata.
-    /// Returns a domain identifier string, or nil if undetermined.
-    /// Stub implementation — full implementation in Task 11.
-    func detectDomain() async throws -> String? {
-        // Task 11 will implement domain detection
-        return nil
+    /// Detects the most appropriate framework/domain for this project
+    /// based on the content of its items. Uses keyword scoring against
+    /// built-in framework definitions.
+    func detectDomain() async -> ProjectFramework? {
+        let items = (try? projectService.items(in: projectID)) ?? []
+        guard !items.isEmpty else { return nil }
+
+        // Build a sample of item content (titles + types + any analysis summaries)
+        var sampleText = ""
+        let store = FileArtifactStore()
+        for item in items.prefix(5) {
+            sampleText += "\(item.type.label): \(item.title)\n"
+            let analysisURL = store.meetingDirectoryURL(for: item.id)
+                .appendingPathComponent("analysis.json")
+            if let data = try? Data(contentsOf: analysisURL),
+               let text = String(data: data, encoding: .utf8) {
+                sampleText += String(text.prefix(200)) + "\n"
+            }
+        }
+
+        // Match against built-in frameworks
+        let frameworks = FrameworkService.allBuiltInFrameworks
+        guard !frameworks.isEmpty, !sampleText.isEmpty else { return nil }
+
+        // Simple keyword scoring — in production, use the AI to classify
+        var scores: [(framework: ProjectFramework, score: Int)] = []
+        for (_, framework) in frameworks {
+            var score = 0
+            let keywords = extractFrameworkKeywords(framework)
+            for keyword in keywords {
+                if sampleText.localizedCaseInsensitiveContains(keyword) {
+                    score += 1
+                }
+            }
+            if score > 0 {
+                scores.append((framework, score))
+            }
+        }
+
+        scores.sort { $0.score > $1.score }
+        return scores.first?.framework
+    }
+
+    private func extractFrameworkKeywords(_ framework: ProjectFramework) -> [String] {
+        var keywords: [String] = []
+        keywords.append(contentsOf: framework.name.components(separatedBy: " "))
+        keywords.append(contentsOf: framework.entityKinds)
+        keywords.append(contentsOf: framework.edgeTypes)
+        return keywords.map { $0.lowercased() }
     }
 
     // MARK: - Device context enrichment
@@ -186,11 +249,19 @@ final class ProjectAgent {
         existingSynthesis: ProjectDerivedItem?,
         tasks: [ProjectDerivedItem],
         signals: [ProjectDerivedItem],
-        edges: [GraphEdge]
+        edges: [GraphEdge],
+        domainFramework: ProjectFramework? = nil
     ) -> String {
         var desc = "PROJECT: \(project.name)\n"
         if let intent = project.intention { desc += "Intention: \(intent)\n" }
         if let summary = project.summary { desc += "Summary: \(summary)\n" }
+
+        if let fw = domainFramework {
+            desc += "DOMAIN FRAMEWORK: \(fw.name)\n"
+            desc += "Framework description: \(fw.description)\n"
+            desc += "Entity kinds: \(fw.entityKinds.joined(separator: ", "))\n"
+            desc += "Edge types: \(fw.edgeTypes.joined(separator: ", "))\n"
+        }
 
         desc += "\nITEMS (\(items.count)):\n"
         for item in items.prefix(20) {
