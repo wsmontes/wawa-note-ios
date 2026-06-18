@@ -161,15 +161,97 @@ private struct HealthRing: View {
     }
 }
 
+// MARK: - Unified Item Row
+
+/// Represents either a KnowledgeItem or a ProjectDerivedItem in the unified file browser.
+enum UnifiedItem: Identifiable {
+    case knowledge(KnowledgeItem)
+    case derived(ProjectDerivedItem)
+
+    var id: UUID {
+        switch self {
+        case .knowledge(let item): item.id
+        case .derived(let item): item.id
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .knowledge(let item): item.title
+        case .derived(let item): item.title
+        }
+    }
+
+    var displayIcon: String {
+        switch self {
+        case .knowledge(let item): item.type.icon
+        case .derived(let item): item.displayIcon
+        }
+    }
+
+    var displayColor: Color {
+        switch self {
+        case .knowledge(let item): item.type.color
+        case .derived(let item):
+            switch item.type {
+            case .synthesis: .purple
+            case .task: .teal
+            case .signal: .orange
+            case .connection: .blue
+            }
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .knowledge(let item): item.type.label
+        case .derived(let item):
+            switch item.type {
+            case .synthesis: "Synthesis"
+            case .task: "Task · \(item.statusRaw ?? "todo")"
+            case .signal: "Signal · \(item.statusRaw ?? "visible")"
+            case .connection: "Connection"
+            }
+        }
+    }
+
+    var createdAt: Date {
+        switch self {
+        case .knowledge(let item): item.createdAt
+        case .derived(let item): item.createdAt
+        }
+    }
+
+    var isSource: Bool {
+        if case .knowledge = self { return true }
+        return false
+    }
+
+    var isDerived: Bool {
+        if case .derived = self { return true }
+        return false
+    }
+}
+
 // MARK: - Items View (List Layer)
 
 struct ItemsView: View {
     let projectID: UUID
     @Environment(\.modelContext) private var modelContext
-    @State private var items: [KnowledgeItem] = []
+    @State private var unifiedItems: [UnifiedItem] = []
     @State private var searchText = ""
-    @State private var selectedType: String? = nil
+    @State private var selectedType: UnifiedItemFilter = .all
     @State private var sortOrder: ItemSortOrder = .recent
+
+    enum UnifiedItemFilter: String, CaseIterable {
+        case all = "All"
+        case meetings = "Meetings"
+        case notes = "Notes"
+        case tasks = "Tasks"
+        case signals = "Signals"
+        case synthesis = "Synthesis"
+        case connections = "Connections"
+    }
 
     var body: some View {
         List {
@@ -177,24 +259,29 @@ struct ItemsView: View {
                 emptyState
             } else {
                 ForEach(filteredItems) { item in
-                    NavigationLink {
-                        KnowledgeDetailView(item: item)
-                    } label: {
-                        itemRow(item)
-                    }
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            try? TrashService(context: modelContext).moveToTrash(item)
-                            loadItems()
-                        } label: {
-                            Label("Delete", systemImage: "trash")
+                    unifiedRow(item)
+                        .swipeActions(edge: .trailing) {
+                            if case .knowledge(let ki) = item {
+                                Button(role: .destructive) {
+                                    try? TrashService(context: modelContext).moveToTrash(ki)
+                                    loadItems()
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            } else if case .derived(let di) = item {
+                                Button(role: .destructive) {
+                                    try? ProjectDerivedItemService(context: modelContext).delete(di)
+                                    loadItems()
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
                         }
-                    }
                 }
             }
         }
-        .searchable(text: $searchText, prompt: "Search items")
-        .navigationTitle("Items")
+        .searchable(text: $searchText, prompt: "Search files")
+        .navigationTitle("Files")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 8) {
@@ -215,19 +302,37 @@ struct ItemsView: View {
         .refreshable { loadItems() }
     }
 
-    private var filteredItems: [KnowledgeItem] {
-        var result = items
+    private var filteredItems: [UnifiedItem] {
+        var result = unifiedItems
         if !searchText.isEmpty {
             result = result.filter { $0.title.localizedCaseInsensitiveContains(searchText) }
         }
-        switch sortOrder {
-        case .recent: result.sort { $0.updatedAt > $1.updatedAt }
-        case .name: result.sort { $0.title.localizedCompare($1.title) == .orderedAscending }
-        case .type: result.sort { ($0.typeRaw) < ($1.typeRaw) }
-        case .created: result.sort { $0.createdAt > $1.createdAt }
+        if selectedType != .all {
+            result = result.filter { item in
+                switch item {
+                case .knowledge(let ki):
+                    switch selectedType {
+                    case .all: return true
+                    case .meetings: return ki.type == .audio
+                    case .notes: return ki.type == .note
+                    default: return false
+                    }
+                case .derived(let di):
+                    switch selectedType {
+                    case .tasks: return di.type == .task
+                    case .signals: return di.type == .signal
+                    case .synthesis: return di.type == .synthesis
+                    case .connections: return di.type == .connection
+                    default: return false
+                    }
+                }
+            }
         }
-        if let type = selectedType {
-            result = result.filter { $0.type.rawValue == type }
+        switch sortOrder {
+        case .recent: result.sort { $0.createdAt > $1.createdAt }
+        case .name: result.sort { $0.title.localizedCompare($1.title) == .orderedAscending }
+        case .type: result.sort { $0.subtitle.localizedCompare($1.subtitle) == .orderedAscending }
+        case .created: result.sort { $0.createdAt > $1.createdAt }
         }
         return result
     }
@@ -245,9 +350,8 @@ struct ItemsView: View {
 
     private var filterMenu: some View {
         Menu {
-            Button("All") { selectedType = nil }
-            ForEach(KnowledgeItemType.allCases, id: \.rawValue) { t in
-                Button(t.label) { selectedType = t.rawValue }
+            ForEach(UnifiedItemFilter.allCases, id: \.rawValue) { filter in
+                Button(filter.rawValue) { selectedType = filter }
             }
         } label: {
             Label("Filter", systemImage: "line.3.horizontal.decrease")
@@ -255,17 +359,17 @@ struct ItemsView: View {
         }
     }
 
-    private func itemRow(_ item: KnowledgeItem) -> some View {
+    private func unifiedRow(_ item: UnifiedItem) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: item.type.icon)
+            Image(systemName: item.displayIcon)
                 .frame(width: 32)
-                .foregroundStyle(item.type.color)
+                .foregroundStyle(item.displayColor)
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title).font(.body).lineLimit(1)
-                Text(item.type.label).font(.caption).foregroundStyle(.secondary)
+                Text(item.subtitle).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            if item.inboxDate != nil {
+            if item.isSource, case .knowledge(let ki) = item, ki.inboxDate != nil {
                 Text("Unprocessed").font(.caption2).padding(.horizontal, 6).padding(.vertical, 2)
                     .background(Color.orange.opacity(0.12)).clipShape(Capsule())
             }
@@ -276,7 +380,12 @@ struct ItemsView: View {
     }
 
     private func loadItems() {
-        items = (try? ProjectService(context: modelContext).items(in: projectID)) ?? []
+        let knowledgeItems = (try? ProjectService(context: modelContext).items(in: projectID)) ?? []
+        let derivedItems = (try? ProjectDerivedItemService(context: modelContext).fetch(for: projectID)) ?? []
+        var combined: [UnifiedItem] = []
+        combined.append(contentsOf: knowledgeItems.map { .knowledge($0) })
+        combined.append(contentsOf: derivedItems.map { .derived($0) })
+        unifiedItems = combined
     }
 }
 
