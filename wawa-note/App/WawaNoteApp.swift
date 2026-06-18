@@ -35,7 +35,8 @@ struct WawaNoteApp: App {
             QueueEntry.self,
             ProjectFrame.self,
             ChangeRecord.self,
-            ProjectSnapshot.self
+            ProjectSnapshot.self,
+            ProjectDerivedItem.self
         ])
         if isTesting {
             // In-memory store for tests — no disk I/O, fast setup

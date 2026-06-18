@@ -504,6 +504,7 @@
 			<array>
 				<string>D152CDB77463601A6585C90A</string>
 				<string>D23BF9768E864959A0713A58</string>
+				<string>FF1DC35DE74B45F0A472365A52B19505</string>
 			</array>
 			<key>isa</key>
 			<string>PBXSourcesBuildPhase</string>
@@ -2004,6 +2005,17 @@
 			<string>sourcecode.swift</string>
 			<key>path</key>
 			<string>AnarlogDocumentTests.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>B3499F3FBEA143629A73279841C31E25</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>ProjectDerivedItemTests.swift</string>
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
 		</dict>
@@ -4454,6 +4466,13 @@
 			<key>isa</key>
 			<string>PBXBuildFile</string>
 		</dict>
+		<key>FF1DC35DE74B45F0A472365A52B19505</key>
+		<dict>
+			<key>fileRef</key>
+			<string>B3499F3FBEA143629A73279841C31E25</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
 		<key>D2505829C648429A921C3319</key>
 		<dict>
 			<key>fileRef</key>
@@ -4551,6 +4570,7 @@
 			<array>
 				<string>C3136430A5FDBA2E5E31FF07</string>
 				<string>7207222C40524456A553D69E</string>
+				<string>B3499F3FBEA143629A73279841C31E25</string>
 			</array>
 			<key>isa</key>
 			<string>PBXGroup</string>

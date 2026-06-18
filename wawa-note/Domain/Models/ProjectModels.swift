@@ -811,3 +811,188 @@ enum QueueStatus: String, Codable, CaseIterable, Sendable {
     case waitingForUser = "waiting_for_user"
 }
 
+// MARK: - ProjectDerivedItem
+
+enum ProjectDerivedType: String, Codable, Sendable, CaseIterable {
+    case synthesis   // Living synthesis document — one per project
+    case task        // Actionable item with status, priority, dueAt, owner
+    case signal      // Alert, risk, doubt, opportunity
+    case connection  // Proposed edge between items
+}
+
+enum ProjectDerivedStatus: String, Codable, Sendable, CaseIterable {
+    // Task statuses
+    case todo
+    case inProgress
+    case done
+    case cancelled
+    // Signal statuses
+    case visible
+    case acknowledged
+    case resolved
+    case dismissed
+}
+
+/// Persisted derivation created by the Project Agent.
+/// Does NOT replace item-level derivations (those stay in item analysis JSON).
+/// Appears in the project file browser alongside KnowledgeItems.
+@Model
+final class ProjectDerivedItem {
+    @Attribute(.unique) var id: UUID
+    var projectID: UUID
+    var sourceItemID: UUID?        // nil = synthesis (project-level, not tied to one item)
+    var typeRaw: String
+    var title: String
+    var bodyJSON: String?          // Structured content specific to type (taskJSON, signalJSON, synthesisJSON)
+    var statusRaw: String?
+    var priorityRaw: String?       // For tasks: low, medium, high, critical
+    var ownerName: String?         // For tasks: assigned person
+    var dueAt: Date?               // For tasks: deadline
+    var confidence: Double?        // For signals: 0-1
+    var isCritical: Bool           // For signals: demands immediate attention
+    var createdAt: Date
+    var updatedAt: Date
+    var resolvedAt: Date?          // For signals: when resolved
+    var resolutionReason: String?  // For signals: why resolved
+    var reprocessContext: String?  // If created via reprocess, the context used
+
+    var type: ProjectDerivedType {
+        get { ProjectDerivedType(rawValue: typeRaw) ?? .synthesis }
+        set { typeRaw = newValue.rawValue }
+    }
+
+    var status: ProjectDerivedStatus? {
+        get { statusRaw.flatMap(ProjectDerivedStatus.init(rawValue:)) }
+        set { statusRaw = newValue?.rawValue }
+    }
+
+    init(
+        id: UUID = UUID(),
+        projectID: UUID,
+        sourceItemID: UUID? = nil,
+        type: ProjectDerivedType,
+        title: String,
+        bodyJSON: String? = nil,
+        status: ProjectDerivedStatus? = nil,
+        priority: TaskPriority? = nil,
+        ownerName: String? = nil,
+        dueAt: Date? = nil,
+        confidence: Double? = nil,
+        isCritical: Bool = false,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date(),
+        resolvedAt: Date? = nil,
+        resolutionReason: String? = nil,
+        reprocessContext: String? = nil
+    ) {
+        self.id = id
+        self.projectID = projectID
+        self.sourceItemID = sourceItemID
+        self.typeRaw = type.rawValue
+        self.title = title
+        self.bodyJSON = bodyJSON
+        self.statusRaw = status?.rawValue
+        self.priorityRaw = priority?.rawValue
+        self.ownerName = ownerName
+        self.dueAt = dueAt
+        self.confidence = confidence
+        self.isCritical = isCritical
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.resolvedAt = resolvedAt
+        self.resolutionReason = resolutionReason
+        self.reprocessContext = reprocessContext
+    }
+}
+
+// MARK: - Convenience helpers
+
+extension ProjectDerivedItem {
+    /// Whether this derived item is actionable (task or active signal).
+    var isActionable: Bool {
+        switch type {
+        case .task: status == .todo || status == .inProgress
+        case .signal: status == .visible || status == .acknowledged
+        default: false
+        }
+    }
+
+    /// Whether this item is in a terminal (non-active) state.
+    var isResolved: Bool {
+        switch type {
+        case .task: status == .done || status == .cancelled
+        case .signal: status == .resolved || status == .dismissed
+        case .synthesis, .connection: false
+        }
+    }
+
+    /// Icon name for file browser display.
+    var displayIcon: String {
+        switch type {
+        case .synthesis: "doc.richtext"
+        case .task: "checklist"
+        case .signal: signalIcon
+        case .connection: "arrow.triangle.branch"
+        }
+    }
+
+    private var signalIcon: String {
+        guard let body = bodyJSON, let data = body.data(using: .utf8),
+              let json = try? JSONDecoder().decode(SignalBody.self, from: data)
+        else { return "dot.radiowaves.left.and.right" }
+        switch json.signalType {
+        case "risk": return "exclamationmark.triangle.fill"
+        case "alert": return "bell.fill"
+        case "opportunity": return "lightbulb.fill"
+        case "doubt": return "questionmark.circle.fill"
+        case "pattern": return "rectangle.3.group.fill"
+        case "contradiction": return "arrow.triangle.swap"
+        default: return "waveform.path.ecg"
+        }
+    }
+}
+
+/// Structured body for signal-type derived items.
+struct SignalBody: Codable, Sendable {
+    var signalType: String       // risk, alert, opportunity, doubt, pattern, contradiction
+    var description: String
+    var suggestedAction: String? // What the agent suggests doing about it
+    var relatedItemIDs: [UUID]?  // Items this signal connects
+    var impactScore: Double?     // 0-1
+    var urgencyScore: Double?    // 0-1
+}
+
+/// Structured body for task-type derived items.
+struct TaskBody: Codable, Sendable {
+    var description: String?
+    var sourceSegmentIDs: [String]?
+    var aiGenerated: Bool
+    var suggestedByItemID: UUID?
+}
+
+/// Structured body for synthesis-type derived items.
+struct SynthesisBody: Codable, Sendable {
+    var markdown: String              // Full synthesis in markdown
+    var sections: [SynthesisSection]  // Parsed sections for rendering
+    var metrics: [SynthesisMetric]    // Computed metrics
+    var updatedFromItemIDs: [UUID]    // Items that contributed to latest version
+    var generatedAt: Date
+}
+
+struct SynthesisSection: Codable, Sendable {
+    var id: String
+    var title: String
+    var renderType: String  // "markdown", "cards", "table", "metrics", "timeline"
+    var content: String     // Markdown or JSON depending on renderType
+    var order: Int
+}
+
+struct SynthesisMetric: Codable, Sendable {
+    var id: String
+    var label: String
+    var value: Double
+    var format: String      // "number", "percentage", "days", "score"
+    var status: String      // "healthy", "warning", "critical", "neutral"
+    var icon: String?
+}
+
