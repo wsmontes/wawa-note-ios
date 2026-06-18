@@ -82,6 +82,8 @@ struct ProjectDetailLink: View {
 }
 
 // MARK: - Project Home (Simplified)
+// NOTE: This is the simplified version with Synthesis | Files segments (2026-06-18).
+// The old ProjectHomeView with multiple tabs has been consolidated into this version.
 
 struct ProjectHomeView: View {
     let project: Project
@@ -646,6 +648,7 @@ private func dueTimeColor(_ date: Date) -> Color {
 }
 
 // MARK: - Signals View (Feed Layer)
+// DEPRECATED: Subsumed by file browser with type filter in ItemsView (2026-06-18)
 
 struct SignalsView: View {
     let projectID: UUID
@@ -1353,7 +1356,14 @@ struct EmptySynthesisView: View {
                     .foregroundStyle(.tertiary)
             } else {
                 Button("Generate Synthesis") {
-                    // Will trigger ProjectAgent in Task 6
+                    Task {
+                        let agent = ProjectAgent(projectID: project.id, context: modelContext)
+                        do {
+                            _ = try await agent.generateSynthesis()
+                        } catch {
+                            AppLog.general.error("Failed to generate synthesis: \(error)")
+                        }
+                    }
                 }
                 .buttonStyle(.bordered)
             }

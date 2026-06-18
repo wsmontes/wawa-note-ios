@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 
+// MARK: - DEPRECATED: Subsumed by file browser with type filter (2026-06-18)
 struct EntitySummary: Identifiable {
     let id = UUID()
     let name: String

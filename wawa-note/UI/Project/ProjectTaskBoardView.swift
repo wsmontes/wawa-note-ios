@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 
+// MARK: - DEPRECATED: Subsumed by BoardView using ProjectDerivedItem (2026-06-18)
 struct ProjectTaskBoardView: View {
     let tasks: [ProjectDerivedItem]
     let projectID: UUID
