@@ -202,7 +202,8 @@
 		FD0799DC28F8515FAD62D77E /* ContextSensor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D12A5328821C091082B78FB3 /* ContextSensor.swift */; };
 		FF1DC35DE74B45F0A472365A52B19505 /* ProjectDerivedItemTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3499F3FBEA143629A73279841C31E25 /* ProjectDerivedItemTests.swift */; };
 		FF48C20D0A3FDD16A4D4B7BF /* FocusModeSensor.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA70DD32D85A83F607CF2D5A /* FocusModeSensor.swift */; };
-/* End PBXBuildFile section */
+			AAEECD8AB6447F1E70B522B4 /* DeviceContextService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36D21CDFFBC73E4EE394F6D7 /* DeviceContextService.swift */; };
+	/* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
 		7D60D164B1EF33E30C7242A6 /* PBXContainerItemProxy */ = {
@@ -436,6 +437,7 @@
 		FB515B983A4EBB487DAE0A43 /* ChatView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		FBBF1F833C2C6268366B6671 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		FDE499C4C6FBD48305E55385 /* ProviderPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderPickerView.swift; sourceTree = "<group>"; };
+	36D21CDFFBC73E4EE394F6D7 /* DeviceContextService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceContextService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -965,6 +967,7 @@
 				3A14D5E9B77C4B5DAA91C7A0 /* AnalysisSkillStore.swift */,
 				797B004C4676473EB1542FBE /* AnalysisSkillService.swift */,
 				C8F08C2011D7404D601036BC /* ProjectDerivedItemService.swift */,
+				36D21CDFFBC73E4EE394F6D7 /* DeviceContextService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -1300,6 +1303,7 @@
 				F16B4420DFB93317BFDB56F2 /* ProviderResolver.swift in Sources */,
 				BCA5D90E11ACBF34B1CD85E4 /* AIService.swift in Sources */,
 				816E4C60E1FEC0B7798B83E6 /* ProjectDerivedItemService.swift in Sources */,
+				AAEECD8AB6447F1E70B522B4 /* DeviceContextService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
