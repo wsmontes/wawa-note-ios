@@ -166,6 +166,8 @@ final class KnowledgeItem {
     var fieldProvenanceJSON: String?
     // Anarlog compatibility: preserves original YAML frontmatter for round-trip fidelity
     var anarlogFrontmatterJSON: String?
+    var needsProjectReprocessing: Bool = false
+    var projectReprocessContext: String?
 
     var type: KnowledgeItemType {
         get {
@@ -227,6 +229,8 @@ final class KnowledgeItem {
         self.languageCode = languageCode
         self.inboxDate = inboxDate
         self.fieldProvenanceJSON = nil
+        self.needsProjectReprocessing = false
+        self.projectReprocessContext = nil
     }
 }
 

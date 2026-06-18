@@ -116,6 +116,49 @@ final class ProjectService {
         return try context.fetch(descriptor)
     }
 
+    // MARK: - Derived items
+
+    /// Returns all ProjectDerivedItems for this project.
+    func derivedItems(in projectID: UUID) throws -> [ProjectDerivedItem] {
+        let service = ProjectDerivedItemService(context: context)
+        return try service.fetch(for: projectID)
+    }
+
+    /// Returns the synthesis for this project, if it exists.
+    func synthesis(for projectID: UUID) throws -> ProjectDerivedItem? {
+        let service = ProjectDerivedItemService(context: context)
+        return try service.fetchSynthesis(for: projectID).first
+    }
+
+    /// Returns active tasks for this project.
+    func activeTasks(in projectID: UUID) throws -> [ProjectDerivedItem] {
+        let service = ProjectDerivedItemService(context: context)
+        return try service.fetchActiveTasks(for: projectID)
+    }
+
+    /// Returns active signals for this project.
+    func activeSignals(in projectID: UUID) throws -> [ProjectDerivedItem] {
+        let service = ProjectDerivedItemService(context: context)
+        return try service.fetchActiveSignals(for: projectID)
+    }
+
+    /// Unified count of all content (KnowledgeItems + ProjectDerivedItems) in this project.
+    func totalContentCount(for projectID: UUID) throws -> Int {
+        let items = try self.items(in: projectID)
+        let derived = try derivedItems(in: projectID)
+        return items.count + derived.count
+    }
+
+    /// Marks a KnowledgeItem as needing reprocessing with the given context.
+    func markForReprocessing(itemID: UUID, projectID: UUID, context: String) throws {
+        guard let item = try fetchItem(itemID) else { return }
+        // Set reprocessing flag — the Item Agent picks this up
+        item.needsProjectReprocessing = true
+        item.projectReprocessContext = context
+        item.updatedAt = Date()
+        try self.context.save()
+    }
+
     /// Assign an item to a project. Persists immediately.
     /// Pipeline must be started separately by the caller.
     func addItem(_ itemID: UUID, to projectID: UUID) throws {
