@@ -91,7 +91,7 @@ final class ProjectDerivedItemService {
 
         // Upsert: delete existing synthesis, create new
         if let existing = try? fetchSynthesis(for: projectID).first {
-            context.delete(existing)
+            try delete(existing)
         }
 
         let item = ProjectDerivedItem(
