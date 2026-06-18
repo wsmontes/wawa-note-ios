@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 // MARK: - ProviderResolver Protocol
 
