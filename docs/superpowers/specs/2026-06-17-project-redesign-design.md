@@ -303,7 +303,124 @@ Both use the same tool registry, the same provider resolution (`AIConfigService`
 
 ---
 
-## 10. Implementation Constraints
+---
+
+## 10. Device Context Integration
+
+**The project is the integration surface between captured content and device context. An item without a project is self-contained. The project cross-references with the device.**
+
+### Context sources available to the Project Agent
+
+| Context source | What it provides | Cross-reference examples |
+|---|---|---|
+| **Calendar** | Events with date/time, location, attendees | Recording at 14h Jun 10 → "Q3 Planning Meeting" in Calendar |
+| **Contacts** | Names, phones, emails, organizations | Speaker "Maria" mentioned → Maria Silva in Contacts (3 recent calls) |
+| **Recent calls** | Call history with timestamps | Call with Maria Silva at 13:55 Jun 10 → 5 min before recording started |
+| **Reminders** | Active reminders, completed | Task "send proposal" in Reminders → resolved by meeting decision |
+| **Location** | Significant locations, visits | Recording location = Office → tagged as work context |
+| **Email** | Calendar event attendees, threads | Meeting invite has 5 attendees → 3 matched to speakers in transcript |
+| **Files** | Documents, downloads | "contract.pdf" in Files → cited in meeting transcript |
+
+### How the Project Agent uses device context
+
+When an item enters the project, the Project Agent (not the Item Agent) enriches it with device context:
+
+1. **Temporal match**: item date/time → Calendar event at same time → "this recording IS the Q3 Planning meeting"
+2. **Spatial match**: item location → significant location → "this was at the office"
+3. **Person match**: names in transcript → Contacts.app → "Maria Silva, 3 recent calls, was invited to the Calendar event"
+4. **Artifact match**: file references → Files.app → "contract.pdf exists on device"
+
+### Output: enriched derivations
+
+The Project Agent creates derivations that link items to device context:
+
+```
+ProjectDerivedItem(type: .connection)
+  "Reunião Q3 Planning (Jun 10)" → IS → Calendar Event "Q3 Planning"
+  with evidence: same date/time, 3 of 5 attendees matched in transcript
+
+ProjectDerivedItem(type: .signal)
+  "Maria Silva mentioned but not in Contacts"
+  → [Add to Contacts] [Ignore]
+```
+
+### Privacy boundary
+
+Device context stays on-device. The Project Agent reads Calendar/Contacts/Reminders via Apple's native APIs (EventKit, Contacts.framework). No context data leaves the device. The AI provider only receives already-resolved entity references (e.g., "Person: Maria Silva"), not raw contact data.
+
+### Existing sensors (reuse)
+
+The codebase already has context sensors (`ContextCapture/`) for Calendar, Location, AudioRoute, Focus, Motion, Battery. These feed background context. The Project Agent adds **foreground cross-referencing** at ingestion time — it actively queries the device to resolve identities and enrich items.
+
+---
+
+## 11. Project Outputs
+
+**Everything the project produces can be exported to the iOS ecosystem and beyond.**
+
+### Output catalog
+
+| Output | Source in project | Destination |
+|---|---|---|
+| **Synthesis report** | `ProjectDerivedItem(type: .synthesis)` | Markdown, PDF, Share Sheet |
+| **Tasks** | `ProjectDerivedItem(type: .task)` | Reminders.app, Calendar (with dueAt) |
+| **Calendar events** | Tasks with dates, deadline signals | Calendar.app (EventKit) |
+| **Contacts** | `Person` entities detected + enriched | Contacts.app |
+| **Graph** | `GraphEdge` + connections | JSON export, PNG image |
+| **Timeline** | Items with dates + events | JSON, CSV |
+| **Tables** | Any collection of derivations | CSV, Numbers, Share Sheet |
+| **Media** | Source items (audio, image) | Share Sheet, Files.app |
+| **Structured data** | Any ProjectDerivedItem | JSON export |
+| **Spotlight** | All project items | Core Spotlight index |
+
+### Send To — unified export action
+
+Every item in the file browser (source or derived) has a context menu with **Send To**. Destinations adapt by type:
+
+```
+Task "Contratar agência" → Send To:
+  ├── Reminders.app
+  ├── Calendar (if dueAt set)
+  └── Share Sheet
+
+Synthesis → Send To:
+  ├── Markdown
+  ├── PDF
+  └── Share Sheet
+
+Person "Maria Silva" → Send To:
+  ├── Contacts.app
+  └── Share Sheet (vCard)
+```
+
+### Agent-suggested outputs
+
+The Project Agent can emit signals with export suggestions:
+
+> "3 tasks lack deadlines but have dates mentioned in source items. Export to Reminders?"
+> → [Export 3 tasks] [Ignore]
+
+> "2 new contacts detected: Maria Silva, João Santos. Add to Contacts?"
+> → [Add both] [Maria only] [Ignore]
+
+### What already exists (reuse)
+- `ExportService` + `MarkdownExporter`, `JSONExporter` — item export
+- `ProjectExportService` — full project export (Markdown + JSON)
+- `TaskRemindersService` — tasks → Reminders.app
+- `SpotlightIndexService` — items → Core Spotlight
+- `CalendarSyncService` — events → Calendar.app
+
+### What needs to be built
+- **Send To** unified context menu on file browser rows
+- **Synthesis → PDF** renderer (Markdown rendered as PDF)
+- **ProjectDerivedItem → Reminders** bridge (adapt TaskRemindersService)
+- **Person → Contacts** bridge (Contacts.framework write)
+- **Collection → CSV** export (tasks, entities, signals as table)
+- **Send To → Calendar** for tasks with dueAt
+
+---
+
+## 12. Implementation Constraints
 
 - Target device: iPhone 14 Plus (primary), iPhone 15 (secondary)
 - SwiftData for persistence, FileManager for large artifacts
