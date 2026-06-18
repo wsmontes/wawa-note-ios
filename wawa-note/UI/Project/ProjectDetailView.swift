@@ -394,11 +394,11 @@ struct ItemsView: View {
 struct BoardView: View {
     let projectID: UUID
     @Environment(\.modelContext) private var modelContext
-    @State private var tasks: [TaskItem] = []
+    @State private var tasks: [ProjectDerivedItem] = []
     @State private var items: [KnowledgeItem] = []
     @State private var selectedColumn = 0
     @State private var showNewTask = false
-    @State private var editingTask: TaskItem? = nil
+    @State private var editingTask: ProjectDerivedItem? = nil
     @State private var dropTarget: TaskStatus? = nil
 
     private let columns: [TaskStatus] = [.todo, .inProgress, .done, .cancelled]
@@ -465,7 +465,7 @@ struct BoardView: View {
                             guard let idStr = dropped.first,
                                   let uuid = UUID(uuidString: idStr),
                                   let task = tasks.first(where: { $0.id == uuid }),
-                                  task.status != status else { return false }
+                                  task.statusRaw != status.rawValue else { return false }
                             moveTask(task, to: status)
                             return true
                         } isTargeted: { targeted in
@@ -498,8 +498,9 @@ struct BoardView: View {
 
     // MARK: Task Card — HIG spec: 16pt padding, headline 17pt, 4pt left bar, relative dates
 
-    private func taskCard(_ task: TaskItem) -> some View {
-        let barColor = priorityBarColor(task.priority)
+    private func taskCard(_ task: ProjectDerivedItem) -> some View {
+        let priority = TaskPriority(rawValue: task.priorityRaw ?? "medium") ?? .medium
+        let barColor = priorityBarColor(priority)
 
         return Button { editingTask = task } label: {
             HStack(spacing: 0) {
@@ -516,7 +517,7 @@ struct BoardView: View {
                         .lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                    // Metadata row: owner + due date + source badge
+                    // Metadata row: owner + due date
                     HStack(spacing: 8) {
                         if let owner = task.ownerName {
                             Label(owner, systemImage: "person.fill")
@@ -527,14 +528,6 @@ struct BoardView: View {
                                 .font(.caption)
                                 .foregroundStyle(due < Date() ? .red : dueTimeColor(due))
                         }
-                        if let createdBy = task.createdBy {
-                            Text(createdBy == .user ? "You" : "AI")
-                                .font(.caption2).fontWeight(.medium)
-                                .padding(.horizontal, 5).padding(.vertical, 1)
-                                .background(createdBy == .user ? Color.blue.opacity(0.1) : Color.purple.opacity(0.1))
-                                .clipShape(Capsule())
-                                .foregroundStyle(createdBy == .user ? .blue : .purple)
-                        }
                     }
                     .foregroundStyle(.secondary)
                 }
@@ -544,7 +537,7 @@ struct BoardView: View {
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .overlay(
                 RoundedRectangle(cornerRadius: 16)
-                    .stroke(dropTarget == task.status ? Color.green.opacity(0.5) : .clear, lineWidth: 2)
+                    .stroke(dropTarget?.rawValue == task.statusRaw ? Color.green.opacity(0.5) : .clear, lineWidth: 2)
             )
         }
         .buttonStyle(.plain)
@@ -552,7 +545,7 @@ struct BoardView: View {
         .contextMenu {
             Button { editingTask = task } label: { Label("Edit", systemImage: "pencil") }
             ForEach(columns, id: \.rawValue) { col in
-                if col != task.status {
+                if col.rawValue != task.statusRaw {
                     Button { moveTask(task, to: col) } label: {
                         Label("Move to \(statusLabel(col))", systemImage: "arrow.right")
                     }
@@ -563,7 +556,7 @@ struct BoardView: View {
         }
         .swipeActions(edge: .leading) {
             ForEach(columns.prefix(2), id: \.rawValue) { col in
-                if col != task.status {
+                if col.rawValue != task.statusRaw {
                     Button { moveTask(task, to: col) } label: { Text(statusLabel(col)) }.tint(statusColor(col))
                 }
             }
@@ -592,22 +585,32 @@ struct BoardView: View {
 
     // MARK: Helpers
 
-    private func filtered(_ status: TaskStatus) -> [TaskItem] { tasks.filter { $0.status == status } }
+    private func filtered(_ status: TaskStatus) -> [ProjectDerivedItem] {
+        tasks.filter { $0.statusRaw == status.rawValue }
+    }
 
-    private func moveTask(_ task: TaskItem, to status: TaskStatus) {
-        try? TaskService(context: modelContext).updateStatus(task, to: status)
+    private func moveTask(_ task: ProjectDerivedItem, to status: TaskStatus) {
+        let derivedStatus: ProjectDerivedStatus = {
+            switch status {
+            case .todo: .todo
+            case .inProgress: .inProgress
+            case .done: .done
+            case .cancelled: .cancelled
+            }
+        }()
+        try? ProjectDerivedItemService(context: modelContext).updateStatus(task, to: derivedStatus)
         let generator = UIImpactFeedbackGenerator(style: .medium)
         generator.impactOccurred()
         loadData()
     }
 
-    private func deleteTask(_ task: TaskItem) {
-        try? TaskService(context: modelContext).deleteTask(task)
+    private func deleteTask(_ task: ProjectDerivedItem) {
+        try? ProjectDerivedItemService(context: modelContext).delete(task)
         loadData()
     }
 
     private func loadData() {
-        tasks = (try? TaskService(context: modelContext).tasks(for: projectID)) ?? []
+        tasks = (try? ProjectDerivedItemService(context: modelContext).fetch(for: projectID, type: .task)) ?? []
         items = (try? ProjectService(context: modelContext).items(in: projectID)) ?? []
     }
 }

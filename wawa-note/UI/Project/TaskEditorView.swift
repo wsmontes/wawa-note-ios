@@ -7,7 +7,7 @@ struct TaskEditorView: View {
 
     enum Mode {
         case create(projectID: UUID?)
-        case edit(task: TaskItem)
+        case edit(task: ProjectDerivedItem)
     }
 
     let mode: Mode
@@ -36,10 +36,10 @@ struct TaskEditorView: View {
         case .edit(let task):
             _title = State(initialValue: task.title)
             _ownerName = State(initialValue: task.ownerName ?? "")
-            _priority = State(initialValue: task.priority)
+            _priority = State(initialValue: TaskPriority(rawValue: task.priorityRaw ?? "medium") ?? .medium)
             _dueAt = State(initialValue: task.dueAt)
             _hasDueDate = State(initialValue: task.dueAt != nil)
-            _notes = State(initialValue: task.notes ?? "")
+            _notes = State(initialValue: "")
             _selectedSourceItemID = State(initialValue: task.sourceItemID)
         }
     }
@@ -120,31 +120,20 @@ struct TaskEditorView: View {
         let finalNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         let sourceID = selectedSourceItemID
 
-        let service = TaskService(context: modelContext)
+        let service = ProjectDerivedItemService(context: modelContext)
 
         switch mode {
         case .create(let projectID):
-            let task = try? service.create(
+            guard let pid = projectID else { return }
+            try? service.createTask(
                 title: finalTitle,
-                projectID: projectID,
+                projectID: pid,
+                sourceItemID: sourceID,
                 priority: priority,
                 ownerName: ownerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : ownerName.trimmingCharacters(in: .whitespacesAndNewlines),
                 dueAt: hasDueDate ? dueAt : nil,
-                sourceItemID: sourceID
+                bodyJSON: finalNotes.isEmpty ? nil : finalNotes
             )
-            if let task {
-                task.notes = finalNotes.isEmpty ? nil : finalNotes
-                // Mark as user-created and set field provenance
-                task.createdBy = .user
-                var prov = task.provenance
-                prov.mark(field: "title", origin: .user)
-                prov.mark(field: "status", origin: .user)
-                prov.mark(field: "priority", origin: .user)
-                if task.ownerName != nil { prov.mark(field: "ownerName", origin: .user) }
-                if task.dueAt != nil { prov.mark(field: "dueAt", origin: .user) }
-                task.fieldProvenanceJSON = prov.encode()
-                try? modelContext.save()
-            }
 
         case .edit(let task):
             try? service.updateTask(
@@ -154,15 +143,8 @@ struct TaskEditorView: View {
                 priority: priority,
                 dueAt: hasDueDate ? dueAt : nil
             )
-            task.notes = finalNotes.isEmpty ? nil : finalNotes
+            task.bodyJSON = finalNotes.isEmpty ? nil : finalNotes
             task.sourceItemID = sourceID
-            // Mark fields as user-edited
-            var prov = task.provenance
-            prov.mark(field: "title", origin: .user)
-            prov.mark(field: "priority", origin: .user)
-            if ownerName != nil { prov.mark(field: "ownerName", origin: .user) }
-            if hasDueDate { prov.mark(field: "dueAt", origin: .user) }
-            task.fieldProvenanceJSON = prov.encode()
             try? modelContext.save()
         }
 

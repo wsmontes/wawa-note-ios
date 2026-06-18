@@ -2,11 +2,11 @@ import SwiftUI
 import SwiftData
 
 struct ProjectTaskBoardView: View {
-    let tasks: [TaskItem]
+    let tasks: [ProjectDerivedItem]
     let projectID: UUID
 
     @Environment(\.modelContext) private var modelContext
-    @State private var editingTask: TaskItem?
+    @State private var editingTask: ProjectDerivedItem?
     @State private var showNewTask = false
     @State private var newTaskStatus: TaskStatus = .todo
 
@@ -59,7 +59,7 @@ struct ProjectTaskBoardView: View {
     // MARK: - Column
 
     private func taskColumn(_ status: TaskStatus) -> some View {
-        let columnTasks = tasks.filter { $0.status == status }
+        let columnTasks = tasks.filter { $0.statusRaw == status.rawValue }
 
         return VStack(alignment: .leading, spacing: 0) {
             // Column header
@@ -134,7 +134,7 @@ struct ProjectTaskBoardView: View {
 
     // MARK: - Task card
 
-    private func taskCard(_ task: TaskItem, status: TaskStatus) -> some View {
+    private func taskCard(_ task: ProjectDerivedItem, status: TaskStatus) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -148,7 +148,7 @@ struct ProjectTaskBoardView: View {
                         if let owner = task.ownerName {
                             Label(owner, systemImage: "person").font(.caption2).foregroundStyle(.secondary)
                         }
-                        priorityBadge(task.priority)
+                        priorityBadge(TaskPriority(rawValue: task.priorityRaw ?? "medium") ?? .medium)
                         if let due = task.dueAt {
                             let urgency = due.timeIntervalSinceNow
                             Text(due.formatted(date: .abbreviated, time: .omitted))
@@ -166,11 +166,11 @@ struct ProjectTaskBoardView: View {
                     }
 
                     // Stale indicator
-                    if task.status == .todo, task.createdAt.timeIntervalSinceNow < -14 * 86400 {
+                    if task.statusRaw == TaskStatus.todo.rawValue, task.createdAt.timeIntervalSinceNow < -14 * 86400 {
                         Text("Stale — \(Int(-task.createdAt.timeIntervalSinceNow / 86400))d").font(.system(size: 8)).foregroundStyle(.orange)
                     }
                 }
-                .opacity(task.status == .todo && task.createdAt.timeIntervalSinceNow < -14 * 86400 ? 0.6 : 1.0)
+                .opacity(task.statusRaw == TaskStatus.todo.rawValue && task.createdAt.timeIntervalSinceNow < -14 * 86400 ? 0.6 : 1.0)
                 Spacer()
                 Menu {
                     ForEach(columns, id: \.rawValue) { col in
@@ -201,7 +201,7 @@ struct ProjectTaskBoardView: View {
     private var columnIndicator: some View {
         HStack(spacing: 6) {
             ForEach(columns, id: \.rawValue) { status in
-                let count = tasks.filter { $0.status == status }.count
+                let count = tasks.filter { $0.statusRaw == status.rawValue }.count
                 Circle()
                     .fill(count > 0 ? Color.accentColor : Color(.tertiarySystemFill))
                     .frame(width: 6, height: 6)
@@ -238,19 +238,20 @@ struct ProjectTaskBoardView: View {
 
     // MARK: - Actions
 
-    private func moveTask(_ task: TaskItem, to status: TaskStatus) {
-        let svc = TaskService(context: modelContext)
-        try? svc.updateStatus(task, to: status)
-        // Mark status as user-edited
-        var prov = task.provenance
-        prov.mark(field: "status", origin: .user)
-        task.fieldProvenanceJSON = prov.encode()
-        try? modelContext.save()
+    private func moveTask(_ task: ProjectDerivedItem, to status: TaskStatus) {
+        let derivedStatus: ProjectDerivedStatus = {
+            switch status {
+            case .todo: .todo
+            case .inProgress: .inProgress
+            case .done: .done
+            case .cancelled: .cancelled
+            }
+        }()
+        try? ProjectDerivedItemService(context: modelContext).updateStatus(task, to: derivedStatus)
     }
 
-    private func deleteTask(_ task: TaskItem) {
-        let svc = TaskService(context: modelContext)
-        try? svc.deleteTask(task)
+    private func deleteTask(_ task: ProjectDerivedItem) {
+        try? ProjectDerivedItemService(context: modelContext).delete(task)
     }
 
     // MARK: - Labels
