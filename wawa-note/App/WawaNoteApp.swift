@@ -74,6 +74,7 @@ struct WawaNoteApp: App {
         KnowledgeItemService.migrateMeetingToAudio(context: migrationContext)
         ProjectService.migrateProjectColors(context: migrationContext)
         ProjectService.migrateFieldProvenance(context: migrationContext)
+        ProjectService.migrateToProjectDerivedItems(context: migrationContext)
 
         // Setup notifications
         setupNotifications()

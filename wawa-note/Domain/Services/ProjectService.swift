@@ -79,6 +79,136 @@ final class ProjectService {
         UserDefaults.standard.set(true, forKey: key)
     }
 
+    /// One-time migration: convert TaskItem and AgentSuggestion records to ProjectDerivedItem.
+    /// Converts all TaskItem records -> ProjectDerivedItem(type: .task) with TaskBody JSON.
+    /// Converts all AgentSuggestion records -> ProjectDerivedItem(type: .signal) with SignalBody JSON.
+    /// Uses UserDefaults flag "migration_to_project_derived_v1" to run once.
+    /// Each conversion is wrapped in do/catch for resilience.
+    /// Directly inserts ProjectDerivedItem instances (bypasses service layer) to avoid
+    /// edge-creation during migration.
+    static func migrateToProjectDerivedItems(context: ModelContext) {
+        let key = "migration_to_project_derived_v1"
+        if UserDefaults.standard.bool(forKey: key) { return }
+
+        // Migrate TaskItems
+        let allTasks: [TaskItem]
+        do {
+            allTasks = try context.fetch(FetchDescriptor<TaskItem>())
+        } catch {
+            AppLog.general.error("Migration: failed to fetch TaskItems: \(error)")
+            return
+        }
+        for task in allTasks {
+            guard let pid = task.projectID else { continue }
+
+            // Check if already migrated (defensive dedup alongside UserDefaults guard)
+            let taskTitle = task.title
+            let existing = try? context.fetch(
+                FetchDescriptor<ProjectDerivedItem>(
+                    predicate: #Predicate { $0.projectID == pid && $0.typeRaw == "task" && $0.title == taskTitle }
+                )
+            )
+            if let existing, !existing.isEmpty { continue }
+
+            do {
+                let body = TaskBody(
+                    description: task.notes,
+                    sourceSegmentIDs: task.sourceSegmentIDList,
+                    aiGenerated: task.createdBy != .user,
+                    suggestedByItemID: task.sourceItemID
+                )
+                let bodyData = try? JSONEncoder().encode(body)
+                let bodyStr = bodyData.flatMap { String(data: $0, encoding: .utf8) }
+
+                let item = ProjectDerivedItem(
+                    projectID: pid,
+                    sourceItemID: task.sourceItemID,
+                    type: .task,
+                    title: task.title,
+                    bodyJSON: bodyStr,
+                    status: ProjectDerivedStatus(rawValue: task.statusRaw),
+                    priority: TaskPriority(rawValue: task.priorityRaw),
+                    ownerName: task.ownerName,
+                    dueAt: task.dueAt,
+                    confidence: task.confidence,
+                    createdAt: task.createdAt,
+                    updatedAt: task.updatedAt
+                )
+                context.insert(item)
+            } catch {
+                AppLog.general.error("Migration: failed to migrate task \(task.title): \(error)")
+            }
+        }
+
+        // Migrate AgentSuggestions
+        let allSignals: [AgentSuggestion]
+        do {
+            allSignals = try context.fetch(FetchDescriptor<AgentSuggestion>())
+        } catch {
+            AppLog.general.error("Migration: failed to fetch AgentSuggestions: \(error)")
+            return
+        }
+        for signal in allSignals {
+            guard let pid = signal.projectID else { continue }
+
+            // Check if already migrated (defensive dedup alongside UserDefaults guard)
+            let signalTitle = signal.title
+            let existing = try? context.fetch(
+                FetchDescriptor<ProjectDerivedItem>(
+                    predicate: #Predicate { $0.projectID == pid && $0.typeRaw == "signal" && $0.title == signalTitle }
+                )
+            )
+            if let existing, !existing.isEmpty { continue }
+
+            do {
+                let body = SignalBody(
+                    signalType: signal.type,
+                    description: signal.body ?? "",
+                    suggestedAction: nil,
+                    impactScore: signal.impactScore,
+                    urgencyScore: signal.urgencyScore
+                )
+                let bodyData = try? JSONEncoder().encode(body)
+                let bodyStr = bodyData.flatMap { String(data: $0, encoding: .utf8) }
+
+                let derivedStatus: ProjectDerivedStatus = {
+                    switch signal.status {
+                    case "visible": return .visible
+                    case "seen", "acknowledged": return .acknowledged
+                    case "approved", "transformed": return .resolved
+                    default: return .dismissed
+                    }
+                }()
+
+                let item = ProjectDerivedItem(
+                    projectID: pid,
+                    sourceItemID: signal.sourceItemID,
+                    type: .signal,
+                    title: signal.title,
+                    bodyJSON: bodyStr,
+                    status: derivedStatus,
+                    confidence: signal.confidence,
+                    isCritical: signal.isCritical,
+                    createdAt: signal.createdAt,
+                    updatedAt: signal.createdAt,
+                    resolvedAt: signal.resolvedAt,
+                    resolutionReason: signal.resolutionReason
+                )
+                context.insert(item)
+            } catch {
+                AppLog.general.error("Migration: failed to migrate signal \(signal.title): \(error)")
+            }
+        }
+
+        do {
+            try context.save()
+        } catch {
+            AppLog.general.error("Migration: save failed: \(error)")
+        }
+        AppLog.general.info("Migration to ProjectDerivedItem complete")
+        UserDefaults.standard.set(true, forKey: key)
+    }
+
     // MARK: - Private
 
     private func assignColor() -> String {
