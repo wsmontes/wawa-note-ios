@@ -435,7 +435,10 @@ final class RecordingCoordinator: ObservableObject {
                     return
                 }
 
-                // 3. Mark as queued so the detail view shows the right status
+                // 3. Clear crash checkpoint — recording stopped successfully
+                AudioFileWriter.clearCrashCheckpoint()
+
+                // 4. Mark as queued so the detail view shows the right status
                 updateItemStatus(itemId: itemId, to: .queuedForTranscription)
 
                 // 4. Route through ProcessingQueue when available
@@ -605,7 +608,81 @@ final class RecordingCoordinator: ObservableObject {
     /// Remove any recording directories for items that are still in .recording status
     /// (abandoned from previous app termination). Call once at app startup.
     /// Uses a dedicated background context to avoid touching the main context during init.
+    /// Attempts to recover from a crash using the recording checkpoint file.
+    /// Called on app launch before cleanupOrphanedRecordings.
+    /// Returns true if a checkpoint was found and recovery was attempted.
+    @discardableResult
+    func attemptCrashCheckpointRecovery() -> Bool {
+        guard let (meetingId, segmentIndex, sampleRate) = AudioFileWriter.loadCrashCheckpoint() else {
+            return false
+        }
+        AppLog.audio.info("Crash checkpoint found: meetingId=\(meetingId.uuidString.prefix(8)) segment=\(segmentIndex) sampleRate=\(sampleRate)Hz")
+
+        // Ensure the item exists and is in a recoverable state
+        let bgContext = ModelContext(modelContext.container)
+        var descriptor = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.id == meetingId })
+        descriptor.fetchLimit = 1
+        guard let item = try? bgContext.fetch(descriptor).first else {
+            AppLog.audio.warning("Crash recovery: item \(meetingId.uuidString.prefix(8)) not found — discarding checkpoint")
+            AudioFileWriter.clearCrashCheckpoint()
+            return false
+        }
+
+        // Only recover items stuck in .recording state
+        guard item.statusRaw == "recording" else {
+            AppLog.audio.info("Crash recovery: item \(meetingId.uuidString.prefix(8)) already in state \(item.statusRaw) — discarding checkpoint")
+            AudioFileWriter.clearCrashCheckpoint()
+            return false
+        }
+
+        // Save the current manifest with the last known segment index
+        var manifest = RecordingManifest(
+            recordingId: meetingId,
+            title: item.title,
+            startedAt: item.createdAt,
+            segments: (0...segmentIndex).map { i in
+                RecordingSegment(
+                    id: UUID(),
+                    index: i,
+                    fileName: String(format: "segment-%03d.wav", i),
+                    startedAt: item.createdAt.addingTimeInterval(Double(i) * 60),
+                    endedAt: nil,
+                    inputPortName: "recovered",
+                    inputPortType: "recovered",
+                    routeChangeReason: "crash_recovery",
+                    sampleRate: sampleRate
+                )
+            }
+        )
+        item.status = .recorded
+        item.audioFileRelativePath = AppFileConstants.audioFileName
+        let store = FileArtifactStore()
+        saveManifest(manifest, meetingId: meetingId)
+
+        // Attempt concatenation to produce a playable audio.m4a
+        Task {
+            let concatOK = await AudioSegmentConcatenator.concatenate(manifest: manifest, meetingId: meetingId)
+            if concatOK {
+                AppLog.audio.info("Crash recovery: concatenation succeeded for \(meetingId.uuidString.prefix(8))")
+                item.status = .recorded
+                try? bgContext.save()
+            } else {
+                AppLog.audio.warning("Crash recovery: concatenation failed — segments are still available as WAV")
+                // Don't fail the item — WAV segments are still usable
+                try? bgContext.save()
+            }
+        }
+
+        try? bgContext.save()
+        AudioFileWriter.clearCrashCheckpoint()
+        AppLog.event("audio", "Crash checkpoint recovered: \(meetingId.uuidString.prefix(8)) segment=\(segmentIndex)")
+        return true
+    }
+
     func cleanupOrphanedRecordings() {
+        // First, attempt crash checkpoint recovery
+        let recovered = attemptCrashCheckpointRecovery()
+
         // Use a fresh context isolated from the main context used by SwiftUI views.
         // This is a read-delete-save driven by app init, not user interaction.
         do {

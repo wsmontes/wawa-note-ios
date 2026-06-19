@@ -299,6 +299,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     // MARK: - Timer
 
+    private var checkpointTask: Task<Void, Never>?
+
     private func startTimer() {
         timerTask?.cancel()
         timerTask = Task { @MainActor [weak self] in
@@ -309,11 +311,29 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 try? await Task.sleep(nanoseconds: UInt64(Self.timerInterval * 1_000_000_000))
             }
         }
+        // Separate periodic checkpoint: every 5 seconds, write crash recovery data.
+        // This ensures that if the app crashes or is force-quit, we can recover
+        // the recording on next launch.
+        checkpointTask?.cancel()
+        checkpointTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard let self, let meetingId = self.currentMeetingId else { continue }
+                let sampleRate = self.sessionManager.sampleRate > 0 ? self.sessionManager.sampleRate : 44100
+                guard let fmt = AVAudioFormat(
+                    commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false
+                ) else { continue }
+                let segIdx = self.fileWriter.segmentIndex
+                self.fileWriter.writeCheckpoint(meetingId: meetingId, segmentIndex: segIdx, format: fmt)
+            }
+        }
     }
 
     private func stopTimer() {
         timerTask?.cancel()
         timerTask = nil
+        checkpointTask?.cancel()
+        checkpointTask = nil
     }
 
     // MARK: - Notifications
