@@ -679,6 +679,18 @@ final class RecordingCoordinator: ObservableObject {
         return true
     }
 
+    /// Checks whether an M4A file is missing its moov atom (unplayable).
+    /// Reads the first 8 bytes of the file: if the moov atom is missing and
+    /// only ftyp + mdat exist, the file was interrupted during export.
+    private func isM4ABroken(at url: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        let data = handle.readData(ofLength: 4096) // Read enough to see atom structure
+        // Check for moov atom presence
+        let moovRange = data.range(of: Data("moov".utf8))
+        return moovRange == nil
+    }
+
     func cleanupOrphanedRecordings() {
         // First, attempt crash checkpoint recovery
         let recovered = attemptCrashCheckpointRecovery()
@@ -703,8 +715,42 @@ final class RecordingCoordinator: ObservableObject {
                 item.audioFileRelativePath = AppFileConstants.audioFileName
                 recoveredIds.append(item.id)
             }
+
+            // Also recover recorded items with broken M4A (concatenation was interrupted).
+            // These items have status .recorded and WAV segments exist, but audio.m4a is
+            // invalid (missing moov atom). Re-concatenating from WAV segments fixes them.
+            let recordedDescriptor = FetchDescriptor<KnowledgeItem>(predicate: #Predicate {
+                $0.statusRaw == "recorded" && $0.audioFileRelativePath != nil
+            })
+            let recordedItems = (try? bgContext.fetch(recordedDescriptor)) ?? []
+            var repairedIds: [UUID] = []
+            for item in recordedItems {
+                let store = FileArtifactStore()
+                let audioURL = store.audioFileURL(for: item.id)
+                guard FileManager.default.fileExists(atPath: audioURL.path) else { continue }
+                if isM4ABroken(at: audioURL) {
+                    AppLog.audio.warning("Found broken M4A for item \(item.id.uuidString.prefix(8)) — re-concatenating from WAV segments")
+                    // Re-concatenate from WAV segments if manifest exists.
+                    // Use Task because concatenate() is async but cleanupOrphanedRecordings is sync.
+                    if let manifest = try? store.readRecordingManifest(for: item.id) {
+                        let itemId = item.id
+                        let capturedQueue = processingQueue
+                        Task { @MainActor in
+                            let ok = await AudioSegmentConcatenator.concatenate(manifest: manifest, meetingId: itemId)
+                            if ok {
+                                AppLog.audio.info("Repaired broken M4A for item \(itemId.uuidString.prefix(8))")
+                                // Re-enqueue for pipeline processing
+                                capturedQueue?.enqueue(itemID: itemId, trigger: .backgroundBackfill)
+                            } else {
+                                AppLog.audio.error("Failed to repair broken M4A for item \(itemId.uuidString.prefix(8))")
+                            }
+                        }
+                    }
+                }
+            }
+
             try bgContext.save()
-            AppLog.audio.info("Recovered \(recoveredIds.count)/\(orphans.count) interrupted recording(s)")
+            AppLog.audio.info("Recovered \(recoveredIds.count)/\(orphans.count) interrupted recording(s), repaired \(repairedIds.count) broken M4A(s)")
 
             // Trigger pipeline for successfully recovered items so they get
             // transcribed and analyzed. Without this, crash-recovered items

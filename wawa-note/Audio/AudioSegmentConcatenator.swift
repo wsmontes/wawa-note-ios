@@ -1,5 +1,6 @@
 import AVFoundation
 import OSLog
+import UIKit
 
 // MARK: - Segment concatenator (non-MainActor)
 
@@ -12,6 +13,10 @@ import OSLog
 /// All engines receive the same AAC/M4A file:
 /// - Apple on-device/cloud: prepareForRecognition decodes AAC→16kHz WAV for SFSpeechRecognizer
 /// - Whisper: AAC bytes sent directly via HTTP multipart
+///
+/// Background protection: uses UIApplication.beginBackgroundTask to prevent iOS
+/// from killing the process during export. Without this, a large WAV→M4A conversion
+/// can be terminated mid-export, producing a file with no moov atom (unplayable).
 enum AudioSegmentConcatenator {
     /// Concatenate segments into audio.m4a. Returns true on success.
     @discardableResult
@@ -31,6 +36,22 @@ enum AudioSegmentConcatenator {
 
         let destURL = store.audioFileURL(for: meetingId)
         _ = try? FileManager.default.removeItem(at: destURL)
+
+        // Request background execution time so iOS doesn't kill us mid-export.
+        // Large WAV files (300MB+) can take 10-30s to encode.
+        let bgTaskID = await withCheckedContinuation { (c: CheckedContinuation<UIBackgroundTaskIdentifier, Never>) in
+            Task { @MainActor in
+                let id = UIApplication.shared.beginBackgroundTask(withName: "WawaNote.Concat.\(meetingId.uuidString.prefix(8))") {
+                    AppLog.audio.warning("SegmentConcatenator: background task expired during export")
+                }
+                c.resume(returning: id)
+            }
+        }
+        defer {
+            Task { @MainActor in
+                if bgTaskID != .invalid { UIApplication.shared.endBackgroundTask(bgTaskID) }
+            }
+        }
 
         // Single segment: use AVAssetExportSession directly on the WAV source.
         // This properly encodes WAV/PCM → AAC/M4A in one pass.
