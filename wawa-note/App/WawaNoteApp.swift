@@ -37,6 +37,7 @@ struct WawaNoteApp: App {
             ChangeRecord.self,
             ProjectSnapshot.self,
             ProjectDerivedItem.self
+            // ProjectSuggestion.self — TODO: add to pbxproj via Xcode
         ])
         if isTesting {
             // In-memory store for tests — no disk I/O, fast setup
