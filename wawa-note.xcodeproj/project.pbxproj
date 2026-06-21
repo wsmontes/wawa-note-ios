@@ -26,6 +26,7 @@
 		17CD6D0F32104F68814795FA /* JSONValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08BDF24B770147A9A15E48A8 /* JSONValue.swift */; };
 		191E9E0AFC34A644A28C90B3 /* EmbeddingPipelineService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF6FB14E2C4252EF2822C115 /* EmbeddingPipelineService.swift */; };
 		1A1A2957DCC626B8AA4AF9B8 /* ProjectModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 809374C0AB31B8AA05A6DE7B /* ProjectModels.swift */; };
+		159BD3A70EF24F4CB6A967F5 /* ProjectUpdateFields.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FEB79C2D4634667A9777C7D /* ProjectUpdateFields.swift */; };
 		1B1E59C673CA472398A4692F /* MarkdownEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22E6296874D44763AC301D91 /* MarkdownEditorView.swift */; };
 		1BA7992376026ED73AFF90A3 /* AgentTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5A8A3B18B9BAD68974C2E1A /* AgentTool.swift */; };
 		1C4D46AC9F2548789886969A /* MeetilyImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DC1F74EDFCF435B8AE08D31 /* MeetilyImporter.swift */; };
@@ -327,6 +328,7 @@
 		7FFF472C700565AAC5D3A9FE /* AudioRouteSensor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRouteSensor.swift; sourceTree = "<group>"; };
 		8024D386B7BE5CEE54AC9B23 /* ImportFormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportFormView.swift; sourceTree = "<group>"; };
 		809374C0AB31B8AA05A6DE7B /* ProjectModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectModels.swift; sourceTree = "<group>"; };
+		0FEB79C2D4634667A9777C7D /* ProjectUpdateFields.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectUpdateFields.swift; sourceTree = "<group>"; };
 		82620239935DFA90CA53D65F /* ChatModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatModels.swift; sourceTree = "<group>"; };
 		832902E7908176DA271EE9E4 /* ProviderTemplates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderTemplates.swift; sourceTree = "<group>"; };
 		83D7DD93B7943C9055C6DA48 /* AppStatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStatusBadge.swift; sourceTree = "<group>"; };
@@ -826,6 +828,7 @@
 				D7A88777A589EB529B27525E /* KnowledgeItem.swift */,
 				09CC4F3B7260B7B261ADFB11 /* MeetingAnalysis.swift */,
 				809374C0AB31B8AA05A6DE7B /* ProjectModels.swift */,
+				0FEB79C2D4634667A9777C7D /* ProjectUpdateFields.swift */,
 				DEF2F8E71E35C1C273843EF5 /* TranscriptSegment.swift */,
 				AAD1ACDC751946B4BCAF4C1E /* ScannedCode.swift */,
 			);
@@ -1194,6 +1197,7 @@
 				43D28AC291895A7C8BB99BEE /* ProjectGraphView.swift in Sources */,
 				E85D449289B3F582F5878A2B /* ProjectListView.swift in Sources */,
 				1A1A2957DCC626B8AA4AF9B8 /* ProjectModels.swift in Sources */,
+				159BD3A70EF24F4CB6A967F5 /* ProjectUpdateFields.swift in Sources */,
 				BF53C6404E3CD326484B43BB /* ProjectService.swift in Sources */,
 				98E8614946736E82C077EBF8 /* ProjectTaskBoardView.swift in Sources */,
 				D8C48BAC56F8C059D6545625 /* ProjectTimelineView.swift in Sources */,
