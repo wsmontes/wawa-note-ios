@@ -26,6 +26,7 @@
 		17CD6D0F32104F68814795FA /* JSONValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08BDF24B770147A9A15E48A8 /* JSONValue.swift */; };
 		191E9E0AFC34A644A28C90B3 /* EmbeddingPipelineService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF6FB14E2C4252EF2822C115 /* EmbeddingPipelineService.swift */; };
 		1A1A2957DCC626B8AA4AF9B8 /* ProjectModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 809374C0AB31B8AA05A6DE7B /* ProjectModels.swift */; };
+		DBCF00D45AFF4D4982B65D92 /* ProjectSuggestion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99C9F4CC60A74B39968C327F /* ProjectSuggestion.swift */; };
 		159BD3A70EF24F4CB6A967F5 /* ProjectUpdateFields.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FEB79C2D4634667A9777C7D /* ProjectUpdateFields.swift */; };
 		1B1E59C673CA472398A4692F /* MarkdownEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22E6296874D44763AC301D91 /* MarkdownEditorView.swift */; };
 		1BA7992376026ED73AFF90A3 /* AgentTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5A8A3B18B9BAD68974C2E1A /* AgentTool.swift */; };
@@ -99,6 +100,7 @@
 		7EFF27A46DBDBFCD92E65BDC /* AnnotationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53709EAC396B7E6E5BEABDDF /* AnnotationService.swift */; };
 		80CEC69B92C4B96BA72F5037 /* expand.md in Resources */ = {isa = PBXBuildFile; fileRef = 7E89569E6B870271AA6D0629 /* expand.md */; };
 		816E4C60E1FEC0B7798B83E6 /* ProjectDerivedItemService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8F08C2011D7404D601036BC /* ProjectDerivedItemService.swift */; };
+		D8BB43A8A2BA474FAC862A31 /* ProjectSuggestionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3002732F0844E1EA4AE70DE /* ProjectSuggestionService.swift */; };
 		83F25C487A4675EE6502FA54 /* ProjectDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88A3DE3EB52EBD68CA2C5B9D /* ProjectDetailView.swift */; };
 		4EF06BBBC685F8893C3931D4 /* SendToMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC41D66B8DB780CA0A397BAB /* SendToMenuView.swift */; };
 		8422629AB5FF4824ACEAA07F /* ModelPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB83957918094F378295C568 /* ModelPolicy.swift */; };
@@ -336,6 +338,7 @@
 		7FFF472C700565AAC5D3A9FE /* AudioRouteSensor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRouteSensor.swift; sourceTree = "<group>"; };
 		8024D386B7BE5CEE54AC9B23 /* ImportFormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportFormView.swift; sourceTree = "<group>"; };
 		809374C0AB31B8AA05A6DE7B /* ProjectModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectModels.swift; sourceTree = "<group>"; };
+		99C9F4CC60A74B39968C327F /* ProjectSuggestion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectSuggestion.swift; sourceTree = "<group>"; };
 		0FEB79C2D4634667A9777C7D /* ProjectUpdateFields.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectUpdateFields.swift; sourceTree = "<group>"; };
 		82620239935DFA90CA53D65F /* ChatModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatModels.swift; sourceTree = "<group>"; };
 		832902E7908176DA271EE9E4 /* ProviderTemplates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderTemplates.swift; sourceTree = "<group>"; };
@@ -402,6 +405,7 @@
 		C74F08DDAAADB711153E3A3C /* ProviderAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderAdapter.swift; sourceTree = "<group>"; };
 		C7F551BB9A3A497A8484A8D7 /* FileRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileRowView.swift; sourceTree = "<group>"; };
 		C8F08C2011D7404D601036BC /* ProjectDerivedItemService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectDerivedItemService.swift; sourceTree = "<group>"; };
+		E3002732F0844E1EA4AE70DE /* ProjectSuggestionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectSuggestionService.swift; sourceTree = "<group>"; };
 		C974FC1B673E2BB133B11E95 /* AIProviderConfigModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderConfigModel.swift; sourceTree = "<group>"; };
 		C9FA4D425324DC08155D4DC9 /* ContentPipelineService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ContentPipelineService.swift; sourceTree = "<group>"; };
 		CA5DF0351C3B5F4530AECE40 /* TranscriptChunker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptChunker.swift; sourceTree = "<group>"; };
@@ -836,6 +840,7 @@
 				D7A88777A589EB529B27525E /* KnowledgeItem.swift */,
 				09CC4F3B7260B7B261ADFB11 /* MeetingAnalysis.swift */,
 				809374C0AB31B8AA05A6DE7B /* ProjectModels.swift */,
+				99C9F4CC60A74B39968C327F /* ProjectSuggestion.swift */,
 				0FEB79C2D4634667A9777C7D /* ProjectUpdateFields.swift */,
 				DEF2F8E71E35C1C273843EF5 /* TranscriptSegment.swift */,
 				AAD1ACDC751946B4BCAF4C1E /* ScannedCode.swift */,
@@ -986,6 +991,7 @@
 				3A14D5E9B77C4B5DAA91C7A0 /* AnalysisSkillStore.swift */,
 				797B004C4676473EB1542FBE /* AnalysisSkillService.swift */,
 				C8F08C2011D7404D601036BC /* ProjectDerivedItemService.swift */,
+				E3002732F0844E1EA4AE70DE /* ProjectSuggestionService.swift */,
 				36D21CDFFBC73E4EE394F6D7 /* DeviceContextService.swift */,
 			);
 			path = Services;
@@ -1213,6 +1219,7 @@
 				90564D1317B54549AB46A3AA /* FrameworkPickerView.swift in Sources */,
 				E85D449289B3F582F5878A2B /* ProjectListView.swift in Sources */,
 				1A1A2957DCC626B8AA4AF9B8 /* ProjectModels.swift in Sources */,
+				DBCF00D45AFF4D4982B65D92 /* ProjectSuggestion.swift in Sources */,
 				159BD3A70EF24F4CB6A967F5 /* ProjectUpdateFields.swift in Sources */,
 				BF53C6404E3CD326484B43BB /* ProjectService.swift in Sources */,
 				98E8614946736E82C077EBF8 /* ProjectTaskBoardView.swift in Sources */,
@@ -1327,6 +1334,7 @@
 				F16B4420DFB93317BFDB56F2 /* ProviderResolver.swift in Sources */,
 				BCA5D90E11ACBF34B1CD85E4 /* AIService.swift in Sources */,
 				816E4C60E1FEC0B7798B83E6 /* ProjectDerivedItemService.swift in Sources */,
+				D8BB43A8A2BA474FAC862A31 /* ProjectSuggestionService.swift in Sources */,
 				AAEECD8AB6447F1E70B522B4 /* DeviceContextService.swift in Sources */,
 		4B5C6D7E8F9A012345678901 /* ProjectAgent.swift in Sources */,
 		6D7E8F9A0123456789012345 /* ProjectTools.swift in Sources */,
