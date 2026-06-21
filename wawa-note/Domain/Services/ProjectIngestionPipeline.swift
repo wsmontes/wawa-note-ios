@@ -583,9 +583,12 @@ final class ProjectIngestionPipeline: ObservableObject {
             if auth.canModify(field: "summary", of: project, by: .llm) {
                 let datePrefix = Date().formatted(date: .abbreviated, time: .omitted)
                 let entry = "\n\n[\(datePrefix) — from \"\(newItem.title)\"]\n\(contribution)"
-                project.summary = previousSummary + entry
-                do { try context.save() }
-                catch { AppLog.provider.error("ProjectIngestion: failed to save summary: \(error.localizedDescription)") }
+                let newSummary = (project.summary ?? "") + entry
+                _ = try? ProjectService(context: context).update(
+                    id: project.id,
+                    fields: ProjectUpdateFields(summary: newSummary),
+                    origin: .llm
+                )
             } else {
                 let sugSvc = SuggestionGatingService(context: context)
                 sugSvc.proposeChange(
