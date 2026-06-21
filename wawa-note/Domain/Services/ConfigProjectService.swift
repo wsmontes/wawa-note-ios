@@ -41,9 +41,12 @@ final class ConfigProjectService {
         let svc = ProjectService(context: context)
         let project: Project
         do {
-            project = try svc.create(
-                name: configProjectName,
-                summary: "App configuration: providers, prompts, settings, and agent memories. Edit files directly to customize Wawa Note."
+            project = try svc.create(name: configProjectName, origin: .system)
+            // Set summary post-creation since create() no longer takes summary directly
+            _ = try? svc.update(
+                id: project.id,
+                fields: ProjectUpdateFields(summary: "App configuration: providers, prompts, settings, and agent memories. Edit files directly to customize Wawa Note."),
+                origin: .system
             )
         } catch {
             AppLog.general.error("ConfigProjectService: failed to create config project — \(error.localizedDescription)")

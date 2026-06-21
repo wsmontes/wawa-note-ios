@@ -980,7 +980,7 @@ enum ShellInterpreter {
             // Create a new project: touch /projects/ --name "Project Name" --summary "..."
             guard let name = cmd.flags["name"] else { return shellErr("touch: --name is required to create a project") }
             let summary = cmd.flags["summary"]
-            let project = try? ProjectService(context: ctx.modelContext).create(name: name, summary: summary)
+            let project = try? ProjectService(context: ctx.modelContext).create(name: name, origin: .llm)
             guard let p = project else { return shellErr("touch: failed to create project") }
             ctx.activeProjectID = p.id; ctx.activeProjectSlug = p.slug; ctx.activeProjectName = p.name
             return ok("✅ Created project: \(p.name) (\(p.slug))")
@@ -1098,20 +1098,16 @@ enum ShellInterpreter {
             }
 
         case .project(let slug, let pid):
-            guard let project = try? ProjectService(context: ctx.modelContext).fetch(id: pid) else {
-                return shellErr("echo: project not found")
-            }
-            if let newSummary = json["summary"] as? String {
-                project.summary = newSummary
-            }
-            if let newIntention = json["intention"] as? String {
-                project.intention = newIntention
-            }
+            var fields = ProjectUpdateFields()
+            if let newSummary = json["summary"] as? String { fields.summary = newSummary }
+            if let newIntention = json["intention"] as? String { fields.intention = newIntention }
             if let newStatus = json["status"] as? String,
-               let status = ProjectStatus(rawValue: newStatus) {
-                project.status = status
+               let status = ProjectStatus(rawValue: newStatus) { fields.status = status }
+            if fields.hasChanges {
+                _ = try? ProjectService(context: ctx.modelContext).update(
+                    id: pid, fields: fields, origin: .llm
+                )
             }
-            try? ctx.modelContext.save()
             return ok("Updated project \(slug)")
 
         case .agentPrompts:
