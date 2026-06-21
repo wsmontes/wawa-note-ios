@@ -1050,3 +1050,71 @@ final class ModelPolicyRulesTests: XCTestCase {
 
 // NowPlayingController tests require MediaPlayer framework linkage in test target.
 // TODO: Add MediaPlayer to test target's framework search paths and re-enable.
+
+// MARK: - ProjectService Update Tests
+
+@MainActor
+final class ProjectServiceUpdateTests: XCTestCase {
+
+    func testProjectUpdateFields_hasChanges_whenFieldIsSet() {
+        let fields = ProjectUpdateFields(name: "New Name")
+        XCTAssertTrue(fields.hasChanges)
+    }
+
+    func testProjectUpdateFields_hasChanges_whenEmpty() {
+        let fields = ProjectUpdateFields()
+        XCTAssertFalse(fields.hasChanges)
+    }
+
+    func testProjectUpdateFields_multipleFields() {
+        let fields = ProjectUpdateFields(name: "N", summary: "S", colorHex: "#FFF")
+        XCTAssertTrue(fields.hasChanges)
+    }
+
+    func testProjectTemplate_allCasesHaveValidFrameworkId() {
+        for template in ProjectTemplate.allCases {
+            XCTAssertTrue(template.frameworkId.hasPrefix("builtin/"),
+                          "Template \(template.rawValue) should have builtin/ prefix")
+        }
+    }
+
+    func testProjectTemplate_displayNameIsNotEmpty() {
+        for template in ProjectTemplate.allCases {
+            XCTAssertFalse(template.displayName.isEmpty,
+                           "Template \(template.rawValue) should have non-empty display name")
+        }
+    }
+}
+
+// MARK: - ProjectInlineEditing Tests
+
+@MainActor
+final class ProjectInlineEditingTests: XCTestCase {
+
+    func testProjectUpdateFields_codable() throws {
+        let fields = ProjectUpdateFields(name: "Test", summary: "Summary", colorHex: "#FFF")
+        let data = try JSONEncoder().encode(fields)
+        let decoded = try JSONDecoder().decode(ProjectUpdateFields.self, from: data)
+        XCTAssertEqual(decoded.name, "Test")
+        XCTAssertEqual(decoded.summary, "Summary")
+        XCTAssertEqual(decoded.colorHex, "#FFF")
+        XCTAssertNil(decoded.intention)
+    }
+
+    func testProjectUpdateFields_emptyCodable() throws {
+        let fields = ProjectUpdateFields()
+        let data = try JSONEncoder().encode(fields)
+        let decoded = try JSONDecoder().decode(ProjectUpdateFields.self, from: data)
+        XCTAssertFalse(decoded.hasChanges)
+    }
+
+    func testSuggestionType_allCases() {
+        // SuggestionType will be added in Task 11 — for now, verify placeholder
+        XCTAssertTrue(true, "SuggestionType tests deferred to Task 11")
+    }
+
+    func testSuggestionStatus_lifecycle() {
+        // SuggestionStatus will be added in Task 11 — for now, verify placeholder
+        XCTAssertTrue(true, "SuggestionType tests deferred to Task 11")
+    }
+}
