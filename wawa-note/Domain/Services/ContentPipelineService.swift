@@ -663,17 +663,18 @@ final class LensCatalogService {
         }
     }
 
-    func applyLens(_ lens: Lens, to project: Project) {
+    func applyLens(_ lens: Lens, to project: Project, context: ModelContext) {
+        let pid = project.id
+        var fields = ProjectUpdateFields()
         if let fw = lens.framework {
             project.frameworkJSON = (try? JSONEncoder().encode(fw)).flatMap { String(data: $0, encoding: .utf8) }
-            project.frameworkId = lens.id
+            fields.frameworkId = lens.id
         }
         if let override = lens.systemPromptOverride {
-            var instructions = project.customInstructions ?? ""
-            if !instructions.isEmpty { instructions += "\n\n" }
-            instructions += "[Lens: \(lens.name)]\n\(override)"
-            project.customInstructions = instructions
+            let merged = (project.customInstructions ?? "") + "\n\n[Lens: \(lens.name)]\n\(override)"
+            fields.customInstructions = merged
         }
+        _ = try? ProjectService(context: context).update(id: pid, fields: fields, origin: .system)
     }
 }
 
@@ -728,8 +729,12 @@ final class FrameworkService {
         }
     }
 
-    func apply(to project: Project, framework: ProjectFramework) {
-        project.frameworkId = framework.id
+    func apply(to project: Project, framework: ProjectFramework, context: ModelContext) {
+        let pid = project.id
+        let fields = ProjectUpdateFields(frameworkId: framework.id)
+        _ = try? ProjectService(context: context).update(id: pid, fields: fields, origin: .system)
+        // frameworkJSON is not in ProjectUpdateFields — keep direct storage for now.
+        // frameworkId change triggers framework resolution in the UI layer.
         if let data = try? JSONEncoder().encode(framework),
            let json = String(data: data, encoding: .utf8) {
             project.frameworkJSON = json
@@ -807,9 +812,11 @@ final class FrameworkService {
     }
 
     /// Reset a project's framework to the meeting default.
-    func restoreDefaults(to project: Project) {
+    func restoreDefaults(to project: Project, context: ModelContext) {
+        let pid = project.id
+        let fields = ProjectUpdateFields(frameworkId: "builtin/meeting")
+        _ = try? ProjectService(context: context).update(id: pid, fields: fields, origin: .system)
         project.frameworkJSON = nil
-        project.frameworkId = "builtin/meeting"
     }
 
     // MARK: Built-in frameworks

@@ -29,9 +29,7 @@ final class ProjectService {
     }
 
     func setColor(_ projectID: UUID, hex: String) throws {
-        guard let project = try fetch(id: projectID) else { return }
-        project.colorHex = hex
-        try context.save()
+        _ = try update(id: projectID, fields: ProjectUpdateFields(colorHex: hex), origin: .user)
     }
 
     // MARK: - Batch update

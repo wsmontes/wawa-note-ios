@@ -115,8 +115,12 @@ struct ProjectListView: View {
                 }
                 .swipeActions(edge: .trailing) {
                     Button {
-                        project.status = project.status == .archived ? .active : .archived
-                        try? modelContext.save()
+                        let newStatus: ProjectStatus = project.status == .archived ? .active : .archived
+                        _ = try? ProjectService(context: modelContext).update(
+                            id: project.id,
+                            fields: ProjectUpdateFields(status: newStatus),
+                            origin: .user
+                        )
                     } label: {
                         Label(project.status == .archived ? "Restore" : "Archive", systemImage: project.status == .archived ? "arrow.uturn.backward" : "archivebox")
                     }.tint(.orange)
