@@ -95,6 +95,17 @@ struct ProjectHomeView: View {
     @State private var showNoteEditor = false
     @State private var showFileImporter = false
 
+    // Project Info editing state
+    @State private var infoExpanded = false
+    @State private var editingName = ""
+    @State private var editingSummary = ""
+    @State private var editingIntention = ""
+    @State private var showSummaryEditor = false
+    @State private var showIntentionEditor = false
+    @State private var showIconPicker = false
+    @State private var showColorPicker = false
+    @State private var showFrameworkPicker = false
+
     enum ProjectTab: String, CaseIterable {
         case synthesis = "Síntese"
         case files = "Arquivos"
@@ -111,6 +122,90 @@ struct ProjectHomeView: View {
             .pickerStyle(.segmented)
             .padding(.horizontal)
             .padding(.top, 8)
+
+            // Project Info (collapsible)
+            DisclosureGroup("Project Info", isExpanded: $infoExpanded) {
+                VStack(spacing: 12) {
+                    // Name
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Name").font(.caption).foregroundStyle(.secondary)
+                        TextField("Project name", text: $editingName)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { saveProjectName() }
+                    }
+
+                    // Summary
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Summary").font(.caption).foregroundStyle(.secondary)
+                        Button { showSummaryEditor = true } label: {
+                            HStack {
+                                Text(editingSummary.isEmpty ? "Add summary..." : editingSummary)
+                                    .lineLimit(2)
+                                    .foregroundStyle(editingSummary.isEmpty ? .tertiary : .primary)
+                                Spacer()
+                                Image(systemName: "pencil")
+                            }
+                        }
+                    }
+
+                    // Intention
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Intention").font(.caption).foregroundStyle(.secondary)
+                        Button { showIntentionEditor = true } label: {
+                            HStack {
+                                Text(editingIntention.isEmpty ? "Add intention..." : editingIntention)
+                                    .lineLimit(2)
+                                    .foregroundStyle(editingIntention.isEmpty ? .tertiary : .primary)
+                                Spacer()
+                                Image(systemName: "pencil")
+                            }
+                        }
+                    }
+
+                    // Icon
+                    HStack {
+                        Text("Icon").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button { showIconPicker = true } label: {
+                            HStack {
+                                Image(systemName: project.iconName ?? "folder.fill")
+                                Text(project.iconName ?? "folder.fill").font(.caption)
+                                Image(systemName: "chevron.right").font(.caption)
+                            }
+                        }
+                    }
+
+                    // Color
+                    HStack {
+                        Text("Color").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button { showColorPicker = true } label: {
+                            HStack {
+                                Circle()
+                                    .fill(project.colorHex.flatMap { Color(hex: $0) } ?? .gray)
+                                    .frame(width: 16, height: 16)
+                                Text(project.colorHex ?? "Default").font(.caption)
+                                Image(systemName: "chevron.right").font(.caption)
+                            }
+                        }
+                    }
+
+                    // Framework
+                    HStack {
+                        Text("Framework").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button { showFrameworkPicker = true } label: {
+                            HStack {
+                                Text(project.frameworkId ?? "None").font(.caption)
+                                Image(systemName: "chevron.right").font(.caption)
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 8)
+            }
+            .padding(.horizontal)
+            .padding(.top, 4)
 
             // Content
             switch selectedTab {
@@ -155,7 +250,49 @@ struct ProjectHomeView: View {
         }
         .onAppear {
             chatState.context = .project(project.id)
+            editingName = project.name
+            editingSummary = project.summary ?? ""
+            editingIntention = project.intention ?? ""
         }
+        .sheet(isPresented: $showSummaryEditor) { TextEditorSheet(title: "Summary", text: $editingSummary, onSave: { saveSummary() }) }
+        .sheet(isPresented: $showIntentionEditor) { TextEditorSheet(title: "Intention", text: $editingIntention, onSave: { saveIntention() }) }
+        .sheet(isPresented: $showIconPicker) { IconPickerView(selectedIcon: Binding(get: { project.iconName ?? "folder.fill" }, set: { saveIcon($0) })) }
+        .sheet(isPresented: $showColorPicker) { ColorPickerView(selectedHex: Binding(get: { project.colorHex ?? "#007AFF" }, set: { saveColor($0) })) }
+        .sheet(isPresented: $showFrameworkPicker) { FrameworkPickerView(project: project) }
+    }
+
+    private func saveProjectName() {
+        let trimmed = editingName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, trimmed != project.name else { return }
+        _ = try? ProjectService(context: modelContext).update(
+            id: project.id, fields: ProjectUpdateFields(name: trimmed), origin: .user
+        )
+    }
+
+    private func saveSummary() {
+        guard editingSummary != (project.summary ?? "") else { return }
+        _ = try? ProjectService(context: modelContext).update(
+            id: project.id, fields: ProjectUpdateFields(summary: editingSummary), origin: .user
+        )
+    }
+
+    private func saveIntention() {
+        guard editingIntention != (project.intention ?? "") else { return }
+        _ = try? ProjectService(context: modelContext).update(
+            id: project.id, fields: ProjectUpdateFields(intention: editingIntention), origin: .user
+        )
+    }
+
+    private func saveIcon(_ icon: String) {
+        _ = try? ProjectService(context: modelContext).update(
+            id: project.id, fields: ProjectUpdateFields(iconName: icon), origin: .user
+        )
+    }
+
+    private func saveColor(_ hex: String) {
+        _ = try? ProjectService(context: modelContext).update(
+            id: project.id, fields: ProjectUpdateFields(colorHex: hex), origin: .user
+        )
     }
 
     private func handleImportedFile(_ url: URL) async {
@@ -1441,6 +1578,32 @@ struct EmptySynthesisView: View {
                 .buttonStyle(.bordered)
             }
             Spacer()
+        }
+    }
+}
+
+// MARK: - TextEditorSheet
+
+struct TextEditorSheet: View {
+    let title: String
+    @Binding var text: String
+    let onSave: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            TextEditor(text: $text)
+                .padding()
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { dismiss() }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") { onSave(); dismiss() }
+                    }
+                }
         }
     }
 }

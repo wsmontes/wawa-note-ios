@@ -189,6 +189,9 @@
 		E7BA8E7960AD2977767BB234 /* ProviderPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDE499C4C6FBD48305E55385 /* ProviderPickerView.swift */; };
 		E8243E4CB1A366F27379D5B5 /* Logging.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE8DBE8C0AA1D37C4D3C63DC /* Logging.swift */; };
 		E85D449289B3F582F5878A2B /* ProjectListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 523D314449E1E56659ED1269 /* ProjectListView.swift */; };
+		CC95EF4B43624F1A94AEA26F /* IconPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EF5C6EE1D274ED6A22A3B31 /* IconPickerView.swift */; };
+		6BE91D1B4AD14062B464D593 /* ColorPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A45A55843B41368A573C49 /* ColorPickerView.swift */; };
+		90564D1317B54549AB46A3AA /* FrameworkPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F409C3B9F1BD4588AE3B0F7E /* FrameworkPickerView.swift */; };
 		ECDE341A90BB4840B29FFD50 /* CreateProjectSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2780900D808940A394CC4196 /* CreateProjectSheet.swift */; };
 		E8C2C9DC724D73BA8930B03B /* MotionActivitySensor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 243B22707AC4965AD1F353BE /* MotionActivitySensor.swift */; };
 		EA1916AB46030687BABB947D /* AudioSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE604CBDF113F1871E5782FE /* AudioSessionManager.swift */; };
@@ -296,6 +299,9 @@
 		4CC5AFE2064848D49A02176E /* ShellTool.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShellTool.swift; sourceTree = "<group>"; };
 		4DC1F74EDFCF435B8AE08D31 /* MeetilyImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetilyImporter.swift; sourceTree = "<group>"; };
 		523D314449E1E56659ED1269 /* ProjectListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectListView.swift; sourceTree = "<group>"; };
+		0EF5C6EE1D274ED6A22A3B31 /* IconPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconPickerView.swift; sourceTree = "<group>"; };
+		F0A45A55843B41368A573C49 /* ColorPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorPickerView.swift; sourceTree = "<group>"; };
+		F409C3B9F1BD4588AE3B0F7E /* FrameworkPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameworkPickerView.swift; sourceTree = "<group>"; };
 		2780900D808940A394CC4196 /* CreateProjectSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateProjectSheet.swift; sourceTree = "<group>"; };
 		53709EAC396B7E6E5BEABDDF /* AnnotationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationService.swift; sourceTree = "<group>"; };
 		53FB720519AF6C596294DDF0 /* PromoteToProjectSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromoteToProjectSheet.swift; sourceTree = "<group>"; };
@@ -941,6 +947,9 @@
 				E0C9AB5D2E877D2F0F3FC93A /* ContentView.swift */,
 				4B7C43279EE74EA698E4284D /* PrimaryActionButton.swift */,
 				8DD97C1131C284D53F2B1D4E /* CreationSheetView.swift */,
+				F409C3B9F1BD4588AE3B0F7E /* FrameworkPickerView.swift */,
+				0EF5C6EE1D274ED6A22A3B31 /* IconPickerView.swift */,
+				F0A45A55843B41368A573C49 /* ColorPickerView.swift */,
 				DD768CE800C442CB82C227E1 /* AudioPlayerView.swift */,
 				F132015A365A45C9ACA43482 /* ModelDownloadView.swift */,
 			);
@@ -1199,6 +1208,9 @@
 				132C25A6060A5F83B7DA9C49 /* ProjectExportService.swift in Sources */,
 				43D28AC291895A7C8BB99BEE /* ProjectGraphView.swift in Sources */,
 				ECDE341A90BB4840B29FFD50 /* CreateProjectSheet.swift in Sources */,
+				CC95EF4B43624F1A94AEA26F /* IconPickerView.swift in Sources */,
+				6BE91D1B4AD14062B464D593 /* ColorPickerView.swift in Sources */,
+				90564D1317B54549AB46A3AA /* FrameworkPickerView.swift in Sources */,
 				E85D449289B3F582F5878A2B /* ProjectListView.swift in Sources */,
 				1A1A2957DCC626B8AA4AF9B8 /* ProjectModels.swift in Sources */,
 				159BD3A70EF24F4CB6A967F5 /* ProjectUpdateFields.swift in Sources */,
