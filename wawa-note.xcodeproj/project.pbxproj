@@ -189,6 +189,7 @@
 		E7BA8E7960AD2977767BB234 /* ProviderPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDE499C4C6FBD48305E55385 /* ProviderPickerView.swift */; };
 		E8243E4CB1A366F27379D5B5 /* Logging.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE8DBE8C0AA1D37C4D3C63DC /* Logging.swift */; };
 		E85D449289B3F582F5878A2B /* ProjectListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 523D314449E1E56659ED1269 /* ProjectListView.swift */; };
+		ECDE341A90BB4840B29FFD50 /* CreateProjectSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2780900D808940A394CC4196 /* CreateProjectSheet.swift */; };
 		E8C2C9DC724D73BA8930B03B /* MotionActivitySensor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 243B22707AC4965AD1F353BE /* MotionActivitySensor.swift */; };
 		EA1916AB46030687BABB947D /* AudioSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE604CBDF113F1871E5782FE /* AudioSessionManager.swift */; };
 		EA8C13DD312340ED8FC0C611 /* VFSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 171144B6DE4340FFB4DBF4B7 /* VFSService.swift */; };
@@ -295,6 +296,7 @@
 		4CC5AFE2064848D49A02176E /* ShellTool.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShellTool.swift; sourceTree = "<group>"; };
 		4DC1F74EDFCF435B8AE08D31 /* MeetilyImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetilyImporter.swift; sourceTree = "<group>"; };
 		523D314449E1E56659ED1269 /* ProjectListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectListView.swift; sourceTree = "<group>"; };
+		2780900D808940A394CC4196 /* CreateProjectSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateProjectSheet.swift; sourceTree = "<group>"; };
 		53709EAC396B7E6E5BEABDDF /* AnnotationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationService.swift; sourceTree = "<group>"; };
 		53FB720519AF6C596294DDF0 /* PromoteToProjectSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromoteToProjectSheet.swift; sourceTree = "<group>"; };
 		553737A2054C4442A4DBF531 /* ContentExtractionService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ContentExtractionService.swift; sourceTree = "<group>"; };
@@ -896,6 +898,7 @@
 		C05ECCACCEF3C286952360C6 /* Project */ = {
 			isa = PBXGroup;
 			children = (
+				2780900D808940A394CC4196 /* CreateProjectSheet.swift */,
 				88A3DE3EB52EBD68CA2C5B9D /* ProjectDetailView.swift */,
 				EC41D66B8DB780CA0A397BAB /* SendToMenuView.swift */,
 				446C28973B9F54B2DDB9BE5D /* ProjectGraphView.swift */,
@@ -1195,6 +1198,7 @@
 				4EF06BBBC685F8893C3931D4 /* SendToMenuView.swift in Sources */,
 				132C25A6060A5F83B7DA9C49 /* ProjectExportService.swift in Sources */,
 				43D28AC291895A7C8BB99BEE /* ProjectGraphView.swift in Sources */,
+				ECDE341A90BB4840B29FFD50 /* CreateProjectSheet.swift in Sources */,
 				E85D449289B3F582F5878A2B /* ProjectListView.swift in Sources */,
 				1A1A2957DCC626B8AA4AF9B8 /* ProjectModels.swift in Sources */,
 				159BD3A70EF24F4CB6A967F5 /* ProjectUpdateFields.swift in Sources */,
