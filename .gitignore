@@ -72,3 +72,6 @@ playground.xcworkspace
 wawa-debug.log
 *.logarchive
 .claude/scheduled_tasks.lock
+
+# Environment secrets
+.env
