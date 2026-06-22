@@ -190,43 +190,13 @@ struct ContentView: View {
 struct ExploreView: View {
     @EnvironmentObject private var chatState: ChatOverlayState
     @EnvironmentObject private var chatViewModel: ChatViewModel
-    @State private var selectedTab: ExploreTab = .projects
-
-    enum ExploreTab: String, CaseIterable {
-        case projects = "Projects"
-        case files = "Files"
-        case timeline = "Timeline"
-
-        var icon: String {
-            switch self {
-            case .projects: "folder"
-            case .files: "filemenu.and.selection"
-            case .timeline: "calendar.day.timeline.leading"
-            }
-        }
-    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("View", selection: $selectedTab) {
-                ForEach(ExploreTab.allCases, id: \.self) { tab in
-                    Label(tab.rawValue, systemImage: tab.icon).tag(tab)
-                }
+        ProjectListView()
+            .onAppear {
+                chatState.context = .exploreProjects
+                chatViewModel.pregenerateGreeting(for: .exploreProjects)
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-
-            switch selectedTab {
-            case .projects:
-                ProjectListView()
-            case .files:
-                FileBrowserView()
-            case .timeline:
-                TimelineExplorerView()
-            }
-        }
-        .onAppear { chatState.context = .exploreProjects; chatViewModel.pregenerateGreeting(for: .exploreProjects) }
     }
 }
 
