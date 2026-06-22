@@ -126,6 +126,16 @@ final class ProjectAgent {
 
         // 6. Parse result and create/update synthesis
         let synthesis = try parseAndSaveSynthesis(result: fullOutput, projectID: projectID)
+
+        // 7. Emit suggestion for user review
+        let suggestionSvc = ProjectSuggestionService(context: context)
+        suggestionSvc.emit(
+            projectID: projectID,
+            title: "Synthesis updated",
+            body: "The project synthesis was updated with new insights. Review and update the project summary?",
+            type: .summaryUpdate
+        )
+
         return synthesis
     }
 

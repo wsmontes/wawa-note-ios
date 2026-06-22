@@ -105,6 +105,8 @@ struct ProjectHomeView: View {
     @State private var showIconPicker = false
     @State private var showColorPicker = false
     @State private var showFrameworkPicker = false
+    @State private var suggestions: [ProjectSuggestion] = []
+    @State private var suggestionService: ProjectSuggestionService?
 
     enum ProjectTab: String, CaseIterable {
         case synthesis = "Síntese"
@@ -113,6 +115,19 @@ struct ProjectHomeView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Agent suggestions
+            if !suggestions.isEmpty {
+                VStack(spacing: 8) {
+                    ForEach(suggestions) { suggestion in
+                        SuggestionCardView(suggestion: suggestion) { action in
+                            handleSuggestion(suggestion, action: action)
+                        }
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+            }
+
             // Segment control
             Picker("View", selection: $selectedTab) {
                 ForEach(ProjectTab.allCases, id: \.rawValue) { tab in
@@ -253,12 +268,25 @@ struct ProjectHomeView: View {
             editingName = project.name
             editingSummary = project.summary ?? ""
             editingIntention = project.intention ?? ""
+            suggestionService = ProjectSuggestionService(context: modelContext)
+            suggestions = suggestionService?.pending(for: project.id) ?? []
         }
         .sheet(isPresented: $showSummaryEditor) { TextEditorSheet(title: "Summary", text: $editingSummary, onSave: { saveSummary() }) }
         .sheet(isPresented: $showIntentionEditor) { TextEditorSheet(title: "Intention", text: $editingIntention, onSave: { saveIntention() }) }
         .sheet(isPresented: $showIconPicker) { IconPickerView(selectedIcon: Binding(get: { project.iconName ?? "folder.fill" }, set: { saveIcon($0) })) }
         .sheet(isPresented: $showColorPicker) { ColorPickerView(selectedHex: Binding(get: { project.colorHex ?? "#007AFF" }, set: { saveColor($0) })) }
         .sheet(isPresented: $showFrameworkPicker) { FrameworkPickerView(project: project) }
+    }
+
+    private func handleSuggestion(_ suggestion: ProjectSuggestion, action: SuggestionAction) {
+        guard let svc = suggestionService else { return }
+        switch action {
+        case .accept:
+            try? svc.accept(suggestion)
+        case .dismiss:
+            try? svc.dismiss(suggestion)
+        }
+        suggestions = svc.pending(for: project.id)
     }
 
     private func saveProjectName() {
@@ -1579,6 +1607,34 @@ struct EmptySynthesisView: View {
             }
             Spacer()
         }
+    }
+}
+
+// MARK: - SuggestionCardView
+
+enum SuggestionAction { case accept, dismiss }
+
+struct SuggestionCardView: View {
+    let suggestion: ProjectSuggestion
+    let onAction: (SuggestionAction) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(suggestion.title, systemImage: "brain.head.profile")
+                .font(.subheadline).fontWeight(.semibold)
+            Text(suggestion.body)
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Dismiss") { onAction(.dismiss) }
+                    .buttonStyle(.bordered).controlSize(.small)
+                Button("Update") { onAction(.accept) }
+                    .buttonStyle(.borderedProminent).controlSize(.small)
+            }
+        }
+        .padding(12)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 

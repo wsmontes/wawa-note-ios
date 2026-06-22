@@ -19,6 +19,7 @@ struct PromoteToProjectSheet: View {
     @State private var selectedEntityIDs: Set<String> = []
     @State private var selectedEdgeIDs: Set<String> = []
     @State private var generationStep: String = ""
+    @State private var selectedTemplate: ProjectTemplate? = nil
 
     private var allSelected: Bool {
         guard let preview else { return false }
@@ -217,6 +218,19 @@ struct PromoteToProjectSheet: View {
                     .padding(.horizontal, AppSpacing.lg)
                 }
 
+                // Template picker
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Template (optional)").font(.caption).foregroundStyle(.secondary)
+                    Picker("Template", selection: $selectedTemplate) {
+                        Text("None").tag(nil as ProjectTemplate?)
+                        ForEach(ProjectTemplate.allCases, id: \.rawValue) { t in
+                            Text(t.displayName).tag(t as ProjectTemplate?)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+                .padding(.horizontal, AppSpacing.lg)
+
                 Button {
                     executeConversion(preview)
                 } label: {
@@ -399,7 +413,7 @@ struct PromoteToProjectSheet: View {
             edges: preview.edges.filter { selectedEdgeIDs.contains($0.id) }
         )
         do {
-            let project = try makeService().executeConversion(from: item, preview: filteredPreview)
+            let project = try makeService().executeConversion(from: item, preview: filteredPreview, template: selectedTemplate)
             processingQueue.enqueue(itemID: item.id, trigger: .newCapture)
             dismiss()
             onComplete(project)

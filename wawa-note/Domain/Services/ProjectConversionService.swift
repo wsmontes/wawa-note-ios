@@ -100,8 +100,8 @@ final class ProjectConversionService {
     }
 
     /// Execute the conversion: create Project, Tasks, People, Entities, and Edges
-    func executeConversion(from item: KnowledgeItem, preview: ConversionPreview) throws -> Project {
-        let project = try projectService.create(name: preview.projectName, origin: .user)
+    func executeConversion(from item: KnowledgeItem, preview: ConversionPreview, template: ProjectTemplate? = nil) throws -> Project {
+        let project = try projectService.create(name: preview.projectName, template: template, origin: .user)
         _ = try? projectService.update(
             id: project.id,
             fields: ProjectUpdateFields(summary: "Created from: \(item.title.isEmpty ? "Untitled" : item.title)"),
