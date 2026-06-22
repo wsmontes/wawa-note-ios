@@ -818,6 +818,8 @@ enum ProjectDerivedType: String, Codable, Sendable, CaseIterable {
     case task        // Actionable item with status, priority, dueAt, owner
     case signal      // Alert, risk, doubt, opportunity
     case connection  // Proposed edge between items
+    case decision    // Decision extracted from analysis
+    case question    // Open question extracted from analysis
 }
 
 enum ProjectDerivedStatus: String, Codable, Sendable, CaseIterable {
@@ -922,7 +924,7 @@ extension ProjectDerivedItem {
         switch type {
         case .task: status == .done || status == .cancelled
         case .signal: status == .resolved || status == .dismissed
-        case .synthesis, .connection: false
+        case .synthesis, .connection, .decision, .question: false
         }
     }
 
@@ -933,6 +935,8 @@ extension ProjectDerivedItem {
         case .task: "checklist"
         case .signal: signalIcon
         case .connection: "arrow.triangle.branch"
+        case .decision: "hammer.fill"
+        case .question: "questionmark.bubble.fill"
         }
     }
 

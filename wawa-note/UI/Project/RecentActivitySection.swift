@@ -64,6 +64,8 @@ struct RecentActivitySection: View {
                 case .signal: return ("exclamationmark.triangle", .yellow)
                 case .synthesis: return ("sparkles", .purple)
                 case .connection: return ("link", .blue)
+                case .decision: return ("hammer.fill", .orange)
+                case .question: return ("questionmark.bubble.fill", .blue)
                 }
             }()
             events.append(ActivityEvent(

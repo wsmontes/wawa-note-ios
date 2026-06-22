@@ -51,6 +51,8 @@ struct SendToMenu: View {
                 return [.reminders, .calendar, .share]
             case .connection:
                 return [.share]
+            case .decision, .question:
+                return [.share]
             }
         }
     }
