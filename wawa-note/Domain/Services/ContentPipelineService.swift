@@ -205,8 +205,11 @@ final class ContentPipelineService: ObservableObject {
             // cleared analysisProviderId and wants a fresh analysis run.
             guard forceReanalysis || item.analysisProviderId == nil || !AutomationSettings.shared.autoAnalyze else {
                 AppLog.provider.info("ContentPipeline: item \(itemID) already analyzed, skipping")
-                // Still run ingestion if needed
+                // Still run ingestion if item is in a project
                 if let projectID = item.projectID {
+                    // Fast path: parse analysis.json directly (no LLM call)
+                    _ = await ingestionPipeline.ingestFromAnalysis(itemID: itemID, projectID: projectID, using: modelContext)
+                    // Also run LLM-based ingestion for summary update + connections
                     await ingestionPipeline.ingest(itemID: itemID, projectID: projectID, using: modelContext)
                 }
                 return

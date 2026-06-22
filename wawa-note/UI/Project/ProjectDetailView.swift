@@ -105,6 +105,8 @@ struct ProjectHomeView: View {
     @State private var showColorPicker = false
     @State private var showFrameworkPicker = false
     @State private var showAllFiles = false
+    @State private var isUpdating = false
+    @State private var updateError: String?
     @State private var suggestions: [ProjectSuggestion] = []
     @State private var suggestionService: ProjectSuggestionService?
 
@@ -163,13 +165,35 @@ struct ProjectHomeView: View {
                             .padding(.horizontal)
                     }
                 } else if !projectItems.isEmpty {
-                    Button {
-                        Task { await generateSynthesis() }
-                    } label: {
-                        Label("Generate Synthesis", systemImage: "sparkles")
-                            .frame(maxWidth: .infinity)
+                    VStack(spacing: 8) {
+                        Button {
+                            isUpdating = true
+                            updateError = nil
+                            Task {
+                                do {
+                                    let agent = ProjectAgent(projectID: project.id, context: modelContext)
+                                    _ = try await agent.generateSynthesis()
+                                } catch {
+                                    updateError = error.localizedDescription
+                                }
+                                isUpdating = false
+                            }
+                        } label: {
+                            HStack {
+                                if isUpdating {
+                                    ProgressView().scaleEffect(0.8)
+                                }
+                                Label(isUpdating ? "Updating..." : "Update Project", systemImage: "arrow.triangle.2.circlepath")
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isUpdating)
+
+                        if let error = updateError {
+                            Text(error).font(.caption).foregroundStyle(.red)
+                        }
                     }
-                    .buttonStyle(.bordered)
                     .padding(.horizontal)
                 }
 

@@ -23,6 +23,15 @@ final class ProjectAgent {
     /// Generates or updates the project synthesis by running the agent over
     /// all item derivations and project context.
     func generateSynthesis() async throws -> ProjectDerivedItem {
+        // Validate provider availability before launching agent
+        guard (try? ProviderRouter.resolveActive(context: context)) != nil else {
+            throw ProjectAgentError.providerNotConfigured
+        }
+        let model = AIConfigService.shared.resolvedModelFor(feature: "analysis", context: context) ?? ""
+        guard !model.isEmpty else {
+            throw ProjectAgentError.providerNotConfigured
+        }
+
         guard let project = try projectService.fetch(id: projectID) else {
             throw ProjectAgentError.projectNotFound
         }

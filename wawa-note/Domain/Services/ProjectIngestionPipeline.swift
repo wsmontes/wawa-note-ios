@@ -83,6 +83,42 @@ final class ProjectIngestionPipeline: ObservableObject {
         await runIngestion(itemID: itemID, projectID: projectID, context: modelContext)
     }
 
+    /// Fast ingestion path — parses existing analysis.json directly, no LLM call.
+    /// Creates tasks, decisions, signals, questions from the analysis output.
+    @discardableResult
+    func ingestFromAnalysis(itemID: UUID, projectID: UUID, using modelContext: ModelContext) -> DerivationResult {
+        let fileStore = FileArtifactStore()
+        let itemSvc = KnowledgeItemService(context: modelContext)
+
+        guard let item = try? itemSvc.fetchItem(id: itemID) else {
+            AppLog.provider.warning("ProjectIngestion: item \(itemID) not found for fast ingestion")
+            return DerivationResult()
+        }
+
+        guard let output = AnalysisOutputParser.parse(item: item, fileStore: fileStore) else {
+            AppLog.provider.warning("ProjectIngestion: no analysis.json for item \(itemID)")
+            return DerivationResult()
+        }
+
+        let derivedSvc = ProjectDerivedItemService(context: modelContext)
+        let derivation = DerivationService(context: modelContext, derivedService: derivedSvc)
+        let result = derivation.derive(from: output, projectID: projectID, sourceItemID: itemID)
+
+        AppLog.provider.info("ProjectIngestion: fast path — \(result.tasksCreated)T \(result.decisionsCreated)D \(result.risksCreated)R \(result.questionsCreated)Q")
+
+        if !result.isEmpty {
+            let suggestionSvc = ProjectSuggestionService(context: modelContext)
+            suggestionSvc.emit(
+                projectID: projectID,
+                title: "New insights from \"\(item.title)\"",
+                body: "\(result.tasksCreated) tasks, \(result.decisionsCreated) decisions, \(result.risksCreated) risks, \(result.questionsCreated) questions were created.",
+                type: .summaryUpdate
+            )
+        }
+
+        return result
+    }
+
     // MARK: - Errors
 
     enum IngestionError: Error, LocalizedError {
