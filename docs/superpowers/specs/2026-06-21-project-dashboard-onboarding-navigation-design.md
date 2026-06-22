@@ -183,6 +183,16 @@ Explore tab = ProjectListView
 
 The global file browser and timeline are removed from the tab. Timeline remains available inside individual projects (already built in `ProjectTimelineView`).
 
+### Where users see files (before vs after)
+
+| Scope | Before | After |
+|---|---|---|
+| **Global (Explore tab)** | FileBrowserView duplicando Inbox | ❌ Removido |
+| **Global (Explore tab)** | TimelineExplorerView global | ❌ Removido |
+| **Dentro do projeto** | Tab "Arquivos" no ProjectHome | ✅ Seção "Files" no dashboard + [View all →] abre lista completa |
+| **Dentro do item** | KnowledgeDetailView com body.md, transcript.json, etc. | ✅ Inalterado |
+| **Inbox** | InboxView com busca/filtro de itens | ✅ Inalterado |
+
 ### Changes
 
 | Component | Action |
