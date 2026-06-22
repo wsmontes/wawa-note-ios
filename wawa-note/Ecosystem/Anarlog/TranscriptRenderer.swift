@@ -1,4 +1,6 @@
 import Foundation
+// Related JIRA: KAN-6, KAN-21
+
 
 /// Normalizes transcript output for readable rendering.
 ///

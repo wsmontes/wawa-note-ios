@@ -1,6 +1,8 @@
 import Foundation
 import SwiftData
 import Contacts
+// Related JIRA: KAN-8, KAN-29, KAN-40
+
 
 @MainActor
 final class PersonService {

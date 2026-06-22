@@ -1,4 +1,6 @@
 import SwiftUI
+// Related JIRA: KAN-141
+
 
 /// Routes a VFSNode to the appropriate editor view based on file type.
 @MainActor

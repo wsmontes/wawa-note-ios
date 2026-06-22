@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-8, KAN-35
+
 
 // MARK: - Graph Node
 

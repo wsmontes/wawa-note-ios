@@ -1,6 +1,8 @@
 import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
+// Related JIRA: KAN-8, KAN-10
+
 
 // MARK: - Shared Signal Helpers
 

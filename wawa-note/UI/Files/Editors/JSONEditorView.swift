@@ -1,4 +1,6 @@
 import SwiftUI
+// Related JIRA: KAN-141
+
 
 /// JSON file editor with Raw, Pretty, and Form modes.
 /// Form mode provides a user-friendly, adaptive interface for any JSON structure.

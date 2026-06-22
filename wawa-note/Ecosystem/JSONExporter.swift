@@ -1,4 +1,6 @@
 import Foundation
+// Related JIRA: KAN-12, KAN-64
+
 
 /// Exports a single KnowledgeItem as complete JSON using ItemExportFull from InstanceExportService.
 @MainActor

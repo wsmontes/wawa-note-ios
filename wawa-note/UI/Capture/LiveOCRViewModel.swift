@@ -3,6 +3,8 @@ import AVFoundation
 import Vision
 import CoreMotion
 import SwiftData
+// Related JIRA: KAN-136
+
 
 // MARK: - Motion State
 

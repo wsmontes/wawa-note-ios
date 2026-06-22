@@ -1,6 +1,8 @@
 import Foundation
 import Intents
 import OSLog
+// Related JIRA: KAN-151
+
 
 final class FocusModeSensor: ContextSensor, @unchecked Sendable {
     let sensorName = "focus_mode"

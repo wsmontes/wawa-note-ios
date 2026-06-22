@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-8, KAN-39
+
 
 // MARK: - Enriched Timeline Models
 

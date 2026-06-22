@@ -1,5 +1,7 @@
 import Foundation
 import OSLog
+// Related JIRA: KAN-12, KAN-63
+
 
 // MARK: - Meetily Template System
 

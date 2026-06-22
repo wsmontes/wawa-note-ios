@@ -1,6 +1,8 @@
 import Foundation
 import UniformTypeIdentifiers
 import OSLog
+// Related JIRA: KAN-12, KAN-62
+
 
 struct GitHubIssuesImporter: FormatImporter {
     let formatIdentifier = "github-issues"

@@ -1,6 +1,8 @@
 import SwiftUI
 import SwiftData
 import Combine
+// Related JIRA: KAN-10
+
 
 @MainActor
 final class ChatOverlayState: ObservableObject {

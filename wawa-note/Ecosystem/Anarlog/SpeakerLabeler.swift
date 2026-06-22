@@ -1,4 +1,6 @@
 import Foundation
+// Related JIRA: KAN-6, KAN-24
+
 
 /// Assigns human-readable speaker labels to transcript segments.
 ///

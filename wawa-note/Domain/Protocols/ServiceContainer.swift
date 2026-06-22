@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-11, KAN-56
+
 
 /// Centralized dependency injection container for domain services.
 /// Injected as @EnvironmentObject from WawaNoteApp. Consumers use protocol

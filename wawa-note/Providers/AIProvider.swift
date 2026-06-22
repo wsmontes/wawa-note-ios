@@ -1,5 +1,7 @@
 import Foundation
 import Network
+// Related JIRA: KAN-9, KAN-42
+
 
 // MARK: - Provider protocol
 

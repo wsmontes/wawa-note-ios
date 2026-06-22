@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-5, KAN-16
+
 
 // MARK: - Shared UserDefaults Keys
 // Centralized key constants to prevent divergence between ConfigProjectService,

@@ -1,6 +1,8 @@
 import SwiftUI
 import SwiftData
 import Combine
+// Related JIRA: KAN-9, KAN-44, KAN-47
+
 
 @MainActor
 final class ChatViewModel: ObservableObject {

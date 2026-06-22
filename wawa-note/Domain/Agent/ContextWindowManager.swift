@@ -1,4 +1,6 @@
 import Foundation
+// Related JIRA: KAN-9, KAN-32
+
 
 final class ContextWindowManager {
     let modelContextLimit: Int

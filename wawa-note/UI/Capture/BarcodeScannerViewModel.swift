@@ -1,6 +1,8 @@
 import SwiftUI
 import AVFoundation
 import SwiftData
+// Related JIRA: KAN-135
+
 
 // MARK: - Barcode Scanner ViewModel
 

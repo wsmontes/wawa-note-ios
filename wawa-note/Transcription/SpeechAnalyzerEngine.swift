@@ -1,6 +1,8 @@
 import Foundation
 import AVFoundation
 import OSLog
+// Related JIRA: KAN-6, KAN-24
+
 
 // MARK: - SpeechAnalyzer Engine (iOS 26+)
 

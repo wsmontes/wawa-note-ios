@@ -1,6 +1,8 @@
 import Foundation
 import UniformTypeIdentifiers
 import PDFKit
+// Related JIRA: KAN-12, KAN-62
+
 
 struct PDFImporter: FormatImporter {
     let formatIdentifier = "pdf"

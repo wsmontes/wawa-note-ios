@@ -1,4 +1,6 @@
 import SwiftUI
+// Related JIRA: KAN-10, KAN-112
+
 
 // MARK: - Color from Hex
 

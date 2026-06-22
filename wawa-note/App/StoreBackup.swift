@@ -1,4 +1,6 @@
 import Foundation
+// Related JIRA: KAN-57
+
 
 /// Safely backs up SwiftData store files before destructive operations.
 /// Copies .store, .store-shm, .store-wal to a timestamped recovery directory.

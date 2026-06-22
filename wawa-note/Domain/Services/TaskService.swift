@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-8, KAN-38
+
 
 /// TaskService is now a thin facade over ProjectDerivedItemService.
 /// It exists for backward compatibility during the migration period.

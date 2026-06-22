@@ -1,6 +1,8 @@
 import Foundation
 import PDFKit
 import SwiftData
+// Related JIRA: KAN-7, KAN-26
+
 
 /// Extracted from ContentPipelineService — handles document parsing (PDF, CSV, Word/RTF, file listing).
 struct DocumentParsingService {

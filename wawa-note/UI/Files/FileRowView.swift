@@ -1,4 +1,6 @@
 import SwiftUI
+// Related JIRA: KAN-141
+
 
 /// A single row in the file browser, representing a directory or file node.
 struct FileRowView: View {

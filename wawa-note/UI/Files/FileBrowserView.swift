@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-141
+
 
 /// Finder-like file browser for navigating the virtual filesystem.
 /// Used as a tab within the Explore section.

@@ -1,5 +1,7 @@
 import Foundation
 import OSLog
+// Related JIRA: KAN-6, KAN-22
+
 
 // MARK: - STT Adapter Protocol
 

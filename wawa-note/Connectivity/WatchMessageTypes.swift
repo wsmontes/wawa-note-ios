@@ -1,4 +1,6 @@
 import Foundation
+// Related JIRA: KAN-153
+
 
 enum WatchCommand: String, Codable {
     case startRecording

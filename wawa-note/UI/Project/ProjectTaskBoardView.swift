@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-8, KAN-36, KAN-92
+
 
 // MARK: - DEPRECATED: Subsumed by BoardView using ProjectDerivedItem (2026-06-18)
 struct ProjectTaskBoardView: View {

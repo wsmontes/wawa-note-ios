@@ -1,4 +1,6 @@
 import Foundation
+// Related JIRA: KAN-6
+
 
 enum TranscriptionMode: String {
     case apple = "apple"

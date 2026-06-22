@@ -1,6 +1,8 @@
 import AVFoundation
 import OSLog
 import UIKit
+// Related JIRA: KAN-5, KAN-20
+
 
 // MARK: - Segment concatenator (non-MainActor)
 

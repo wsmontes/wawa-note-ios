@@ -1,5 +1,7 @@
 import Foundation
 import UniformTypeIdentifiers
+// Related JIRA: KAN-12, KAN-62
+
 
 struct RTFImporter: FormatImporter {
     let formatIdentifier = "rtf"

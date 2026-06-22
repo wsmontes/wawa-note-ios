@@ -1,4 +1,6 @@
 import Foundation
+// Related JIRA: KAN-9, KAN-52
+
 
 enum ProviderType: String, Codable, CaseIterable {
     case openAICompatible

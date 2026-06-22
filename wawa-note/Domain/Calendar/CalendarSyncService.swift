@@ -2,6 +2,8 @@ import EventKit
 import SwiftData
 import OSLog
 import Foundation
+// Related JIRA: KAN-54, KAN-144
+
 
 extension EKEventStore {
     nonisolated(unsafe) static let shared = EKEventStore()

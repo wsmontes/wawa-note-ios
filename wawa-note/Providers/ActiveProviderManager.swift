@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-9, KAN-42
+
 
 extension Notification.Name {
     /// Posted when the active AI provider changes (connected, switched, or removed).

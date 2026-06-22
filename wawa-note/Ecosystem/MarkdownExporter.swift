@@ -1,4 +1,6 @@
 import Foundation
+// Related JIRA: KAN-12, KAN-64
+
 
 struct MarkdownExporter: Sendable {
 

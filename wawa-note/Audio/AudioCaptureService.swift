@@ -1,6 +1,8 @@
 import AVFoundation
 import Accelerate
 import OSLog
+// Related JIRA: KAN-5, KAN-14, KAN-78
+
 
 // MARK: - State
 

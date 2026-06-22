@@ -5,6 +5,8 @@ import AVFoundation
 import Vision
 import VisionKit
 import PhotosUI
+// Related JIRA: KAN-10, KAN-48
+
 
 // MARK: - HomeViewModel
 

@@ -2,6 +2,8 @@ import Foundation
 import SwiftData
 import Contacts
 import EventKit
+// Related JIRA: KAN-9, KAN-43, KAN-118
+
 
 // MARK: - Shell Command
 

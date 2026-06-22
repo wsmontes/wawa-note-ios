@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-8, KAN-36
+
 
 struct TaskEditorView: View {
     @Environment(\.dismiss) private var dismiss

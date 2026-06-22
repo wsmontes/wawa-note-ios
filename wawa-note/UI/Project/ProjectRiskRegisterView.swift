@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-8, KAN-41
+
 
 // MARK: - DEPRECATED: Subsumed by file browser with type filter (2026-06-18)
 struct RiskItem: Identifiable {

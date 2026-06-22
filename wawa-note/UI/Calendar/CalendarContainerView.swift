@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-54, KAN-144
+
 
 struct TimelineExplorerView: View {
     @EnvironmentObject private var calendarSync: CalendarSyncService

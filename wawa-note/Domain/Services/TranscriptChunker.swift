@@ -1,4 +1,6 @@
 import Foundation
+// Related JIRA: KAN-6, KAN-23
+
 
 struct TextChunk {
     let text: String

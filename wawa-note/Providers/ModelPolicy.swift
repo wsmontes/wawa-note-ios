@@ -1,4 +1,6 @@
 import Foundation
+// Related JIRA: KAN-9, KAN-42
+
 
 // MARK: - JSON-Driven Model Policy Rules
 

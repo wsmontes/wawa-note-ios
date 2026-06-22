@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-54, KAN-144
+
 
 @MainActor
 final class OnThisDayService {

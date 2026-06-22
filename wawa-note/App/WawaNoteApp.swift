@@ -3,6 +3,8 @@ import SwiftData
 import EventKit
 import LocalAuthentication
 import UserNotifications
+// Related JIRA: KAN-11, KAN-55, KAN-57, KAN-58
+
 
 @main
 struct WawaNoteApp: App {

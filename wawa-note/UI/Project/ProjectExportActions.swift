@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-12, KAN-64
+
 
 struct ProjectExportActions {
     let project: Project

@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-8, KAN-34
+
 
 struct PromoteToProjectSheet: View {
     let item: KnowledgeItem

@@ -1,5 +1,7 @@
 import Foundation
 import CoreSpotlight
+// Related JIRA: KAN-142
+
 
 struct SearchResult: Identifiable {
     let id = UUID()

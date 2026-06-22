@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-10, KAN-49, KAN-105
+
 
 struct InboxView: View {
     @Environment(\.modelContext) private var modelContext

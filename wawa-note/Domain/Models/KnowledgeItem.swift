@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-11, KAN-55, KAN-87
+
 
 enum ItemStatus: String, Codable, CaseIterable {
     case draft

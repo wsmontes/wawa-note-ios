@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-9, KAN-42
+
 
 /// A compact menu-style picker that shows all available models for the active provider.
 /// Merges static models from ai_config.json with dynamically fetched ones.

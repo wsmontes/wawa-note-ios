@@ -1,6 +1,8 @@
 import Foundation
 import SwiftData
 import OSLog
+// Related JIRA: KAN-9, KAN-42
+
 
 final class ProviderRouter: Sendable {
     private let keychain: SecureKeyStore

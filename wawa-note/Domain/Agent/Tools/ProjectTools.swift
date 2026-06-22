@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-8, KAN-34
+
 
 /// Tools available to the Project Agent during synthesis.
 enum ProjectTools {

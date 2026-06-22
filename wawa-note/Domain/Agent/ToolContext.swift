@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-9, KAN-45
+
 
 /// Mutable context passed to every tool execution.
 /// Reference type so that `cd` mutations persist across iterations of the agent loop.

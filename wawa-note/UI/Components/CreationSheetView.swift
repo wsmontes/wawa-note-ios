@@ -1,4 +1,6 @@
 import SwiftUI
+// Related JIRA: KAN-10, KAN-137, KAN-138, KAN-139
+
 
 struct CreationSheetView: View {
     @Environment(\.dismiss) private var dismiss

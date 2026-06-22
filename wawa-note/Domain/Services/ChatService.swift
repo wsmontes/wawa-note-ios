@@ -1,5 +1,7 @@
 import Foundation
 import os
+// Related JIRA: KAN-9, KAN-47
+
 
 @MainActor
 final class ChatService {

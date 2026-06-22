@@ -1,6 +1,8 @@
 import Foundation
 import OSLog
 import SwiftData
+// Related JIRA: KAN-9, KAN-42, KAN-88
+
 
 // MARK: - Config models
 

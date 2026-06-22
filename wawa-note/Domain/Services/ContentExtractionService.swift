@@ -5,6 +5,8 @@ import AVFoundation
 import Vision
 import CoreLocation
 import ImageIO
+// Related JIRA: KAN-7, KAN-26
+
 
 // MARK: - Text extraction from any content type
 

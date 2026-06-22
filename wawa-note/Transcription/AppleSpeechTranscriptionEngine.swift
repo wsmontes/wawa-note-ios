@@ -3,6 +3,8 @@ import Speech
 import NaturalLanguage
 import OSLog
 import AVFoundation
+// Related JIRA: KAN-6, KAN-21, KAN-73
+
 
 // MARK: - Transcription States
 

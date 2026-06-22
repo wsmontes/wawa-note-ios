@@ -1,6 +1,8 @@
 import Foundation
 import UniformTypeIdentifiers
 import OSLog
+// Related JIRA: KAN-12, KAN-63
+
 
 /// Imports anarlog `.md` session notes as KnowledgeItem records.
 ///

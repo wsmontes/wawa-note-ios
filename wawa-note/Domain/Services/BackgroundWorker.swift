@@ -1,4 +1,6 @@
 import Foundation
+// Related JIRA: KAN-11, KAN-60
+
 
 /// Actor for CPU-intensive work that should NOT run on @MainActor.
 /// Handles JSON parsing, prompt building, text processing — anything

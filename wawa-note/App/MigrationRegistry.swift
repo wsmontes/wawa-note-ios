@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-58
+
 
 /// Centralized registry for data migrations. Tracks which migrations have run
 /// via a plist file (not UserDefaults) with version, date, and success status.

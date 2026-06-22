@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-10, KAN-51, KAN-93
+
 
 private enum ReprocessMode: CustomStringConvertible {
     case transcribeOnly

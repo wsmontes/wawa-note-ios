@@ -3,6 +3,8 @@ import Contacts
 import EventKit
 import SwiftData
 import OSLog
+// Related JIRA: KAN-12, KAN-63
+
 
 /// Bridges participants between Wawa Note's iOS ecosystem (Contacts, Calendar)
 /// and anarlog's participant format.

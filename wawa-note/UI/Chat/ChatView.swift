@@ -2,6 +2,8 @@ import SwiftUI
 import SwiftData
 import Speech
 import AVFoundation
+// Related JIRA: KAN-9, KAN-46, KAN-82
+
 
 struct ChatView: View {
     @ObservedObject var viewModel: ChatViewModel

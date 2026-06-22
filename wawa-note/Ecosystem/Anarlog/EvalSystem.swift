@@ -1,5 +1,7 @@
 import Foundation
 import OSLog
+// Related JIRA: KAN-13, KAN-69
+
 
 // MARK: - LLM Output Evaluation System
 

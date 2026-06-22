@@ -1,4 +1,6 @@
 import SwiftUI
+// Related JIRA: KAN-54, KAN-144
+
 
 struct CalendarPermissionView: View {
     let onRequestPermission: () async -> Bool

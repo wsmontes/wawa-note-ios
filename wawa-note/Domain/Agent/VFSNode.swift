@@ -1,4 +1,6 @@
 import Foundation
+// Related JIRA: KAN-9, KAN-43
+
 
 // MARK: - VFS Node Type
 

@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-10, KAN-52
+
 
 @MainActor
 final class ProviderEditorViewModel: ObservableObject {

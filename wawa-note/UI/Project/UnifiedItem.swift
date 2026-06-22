@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-8, KAN-38
+
 
 /// Represents either a KnowledgeItem or a ProjectDerivedItem in the unified file browser.
 enum UnifiedItem: Identifiable {

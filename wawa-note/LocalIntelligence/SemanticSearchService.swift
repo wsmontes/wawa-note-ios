@@ -1,5 +1,7 @@
 import Foundation
 import OSLog
+// Related JIRA: KAN-150
+
 
 final class SemanticSearchService: @unchecked Sendable {
     private let embeddingService: EmbeddingService

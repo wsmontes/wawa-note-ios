@@ -1,4 +1,6 @@
 import SwiftUI
+// Related JIRA: KAN-141
+
 
 // MARK: - JSON Form View
 

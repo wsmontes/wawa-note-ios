@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-8, KAN-10, KAN-34
+
 
 enum ProjectSortOrder: CaseIterable { case recent, name, created }
 

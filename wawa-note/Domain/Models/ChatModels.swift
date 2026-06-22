@@ -1,4 +1,6 @@
 import Foundation
+// Related JIRA: KAN-9, KAN-47
+
 
 // MARK: - Chat Context
 
