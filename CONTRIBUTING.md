@@ -38,11 +38,21 @@ Obrigado pelo interesse em contribuir! Wawa Note é um app iOS open-source e pro
 ### Estrutura de Branches
 
 ```
-main          — produção, estável
-feature/*     — novas funcionalidades
-fix/*         — correções de bugs
-docs/*        — documentação
+main              — produção, estável
+KAN-XX/descricao  — branch vinculada a issue JIRA (preferido)
+feature/*         — novas funcionalidades (sem JIRA)
+fix/*             — correções de bugs (sem JIRA)
+docs/*            — documentação
 ```
+
+### JIRA Integration
+
+This project is tracked at https://wawasoftbc.atlassian.net (project key: **KAN**).
+
+- **Branch names** must include the JIRA key: `KAN-73/fix-aac-speech-gaps`
+- **Commit messages** must reference the issue: `KAN-73: switch AudioChunker to PCM WAV output`
+- **PRs** should mention the issue key in the title or description for auto-linking
+- Every source file has `// Related JIRA: KAN-XX` comments — keep them current
 
 ### Setup de Desenvolvimento
 

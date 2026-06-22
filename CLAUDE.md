@@ -256,6 +256,59 @@ let request = AIRequest(model: model, messages: [...],
 2. Build and run on device when available.
 3. Update this file and `docs/DECISIONS.md` when architectural decisions change.
 4. Prefer editing existing files to creating new ones (pbxproj limitation).
+5. **Always reference JIRA issues** — see JIRA Workflow below.
+
+## JIRA Workflow
+
+**Project:** KAN at https://wawasoftbc.atlassian.net (auth: wawasoftbc@gmail.com + API token)
+**Client:** `C:\workspace\_archive\wawasoft_jira_client.py` (JiraClient class, cloud API v3)
+
+### Before starting work
+
+1. **Check the board** — query JIRA for the relevant issue(s) before starting. Use `jira("show KAN-XX")` to get acceptance criteria and related issues.
+2. **Transition to In Progress** — `jira("move KAN-XX \"In Progress\"")`
+3. **Create branch with issue key** — `git checkout -b KAN-XX/short-description`
+
+### During work
+
+4. **Commit messages must include JIRA key** — `git commit -m "KAN-73: fix AAC decoding for SFSpeechRecognizer"`
+5. **Reference related issues** — if work touches multiple issues, mention all: `KAN-73, KAN-79: switch AudioChunker to PCM WAV`
+6. **Comment on JIRA with progress** — `jira("comment KAN-XX 'Implemented PCM path, testing on device'")`
+
+### After completing work
+
+7. **Transition to Done** — `jira("move KAN-XX Done")`
+8. **Link related issues discovered during work** — `jira("link KAN-XX KAN-YY --type Relates")`
+9. **Create new issues for discovered work** — don't silently add scope; create a new JIRA issue.
+
+### JIRA reference in code
+
+Every Swift file has a `// Related JIRA: KAN-XX, KAN-YY` comment after imports. When modifying a file:
+- Verify the JIRA references are still accurate
+- Add new JIRA keys if the file now relates to additional issues
+- Use the referenced JIRAs to understand the file's purpose and acceptance criteria
+
+### Key queries
+
+```python
+from wawasoft_jira_client import JiraClient
+c = JiraClient()
+c.jira("mine")                           # My open issues
+c.jira("search 'keyword' -p KAN")        # Search by keyword
+c.jira("show KAN-73 --comments --links") # Full issue details
+c.jira("recent KAN -n 10")              # Recent activity
+c.jira("children KAN-5")                # All items under an epic
+```
+
+### Sprint priorities
+
+- **Sprint 1 (label: sprint:1):** P0 bugs + dogfooding + state machine
+- **Sprint 2 (label: sprint:2):** God object splits + DI + tests
+- **Sprint 3 (label: sprint:3):** Chat UX + onboarding + kanban
+
+### Confluence documentation
+
+Architecture, data flow, and provider guides live in Confluence (wawasoftbc.atlassian.net/wiki). Key issues are linked to their relevant Confluence pages via remote links. Check the issue's links section for documentation references.
 
 ## When uncertain
 
