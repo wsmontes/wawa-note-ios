@@ -34,3 +34,13 @@ python scripts/jira-cli.py link KAN-XX KAN-YY               # Connect issues
 2. `P0` / Highest priority (critical bugs)
 3. `P1` / High priority (broken flows)
 4. Issues that unblock others (check Blocks links)
+
+## Code review workflow
+
+When the user reviews an already-completed issue:
+1. Issue moves from Done → **In Review**
+2. User comments with findings (or asks AI to investigate)
+3. If approved: move back to **Done** with "Review passed" comment
+4. If changes needed: move to **In Progress**, fix, then back through the flow
+
+Use the same issue — don't create separate review tickets.
