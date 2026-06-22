@@ -90,6 +90,7 @@ struct ProjectHomeView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var chatState: ChatOverlayState
     @EnvironmentObject private var coordinator: RecordingCoordinator
+    @EnvironmentObject private var services: ServiceContainer
     @State private var selectedTab: ProjectTab = .synthesis
     @State private var showCaptureSheet = false
     @State private var showNoteEditor = false
@@ -172,15 +173,15 @@ struct ProjectHomeView: View {
             let item = result.knowledgeItem
             modelContext.insert(item)
             try? modelContext.save()
-            try? ProjectService(context: modelContext).addItem(item.id, to: project.id)
+            try? services.projects.addItem(item.id, to: project.id)
         } catch {
             AppLog.general.error("Import failed: \(error.localizedDescription)")
         }
     }
 
     private func exportMarkdown() {
-        let items = (try? ProjectService(context: modelContext).items(in: project.id)) ?? []
-        let derivedTasks = (try? ProjectDerivedItemService(context: modelContext).fetch(for: project.id, type: .task)) ?? []
+        let items = (try? services.projects.items(in: project.id)) ?? []
+        let derivedTasks = (try? services.derived.fetch(for: project.id, type: .task)) ?? []
         let edges = (try? GraphEdgeService(context: modelContext).neighborhood(of: project.id, radius: 2)) ?? []
         let exporter = ProjectExportService()
 
@@ -345,7 +346,7 @@ struct ItemsView: View {
                                 }
                             } else if case .derived(let di) = item {
                                 Button(role: .destructive) {
-                                    try? ProjectDerivedItemService(context: modelContext).delete(di)
+                                    try? services.derived.delete(di)
                                     loadItems()
                                 } label: {
                                     Label("Delete", systemImage: "trash")
@@ -457,8 +458,8 @@ struct ItemsView: View {
     }
 
     private func loadItems() {
-        let knowledgeItems = (try? ProjectService(context: modelContext).items(in: projectID)) ?? []
-        let derivedItems = (try? ProjectDerivedItemService(context: modelContext).fetch(for: projectID)) ?? []
+        let knowledgeItems = (try? services.projects.items(in: projectID)) ?? []
+        let derivedItems = (try? services.derived.fetch(for: projectID)) ?? []
         var combined: [UnifiedItem] = []
         combined.append(contentsOf: knowledgeItems.map { .knowledge($0) })
         combined.append(contentsOf: derivedItems.map { .derived($0) })
@@ -675,20 +676,20 @@ struct BoardView: View {
             case .cancelled: .cancelled
             }
         }()
-        try? ProjectDerivedItemService(context: modelContext).updateStatus(task, to: derivedStatus)
+        try? services.derived.updateStatus(task, to: derivedStatus)
         let generator = UIImpactFeedbackGenerator(style: .medium)
         generator.impactOccurred()
         loadData()
     }
 
     private func deleteTask(_ task: ProjectDerivedItem) {
-        try? ProjectDerivedItemService(context: modelContext).delete(task)
+        try? services.derived.delete(task)
         loadData()
     }
 
     private func loadData() {
-        tasks = (try? ProjectDerivedItemService(context: modelContext).fetch(for: projectID, type: .task)) ?? []
-        items = (try? ProjectService(context: modelContext).items(in: projectID)) ?? []
+        tasks = (try? services.derived.fetch(for: projectID, type: .task)) ?? []
+        items = (try? services.projects.items(in: projectID)) ?? []
     }
 }
 
@@ -1373,7 +1374,7 @@ struct ProjectSynthesisView: View {
 
     @MainActor
     private func loadData() {
-        let svc = ProjectDerivedItemService(context: modelContext)
+        let svc = services.derived
         synthesis = try? svc.fetchSynthesis(for: project.id).first
         derivedItems = (try? svc.fetch(for: project.id)) ?? []
         isLoading = false
@@ -1422,7 +1423,7 @@ struct EmptySynthesisView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
             // Check if there are items to process
-            let items = (try? ProjectService(context: modelContext).items(in: project.id)) ?? []
+            let items = (try? services.projects.items(in: project.id)) ?? []
             if items.isEmpty {
                 Text("Add items to this project to get started.")
                     .font(.caption)

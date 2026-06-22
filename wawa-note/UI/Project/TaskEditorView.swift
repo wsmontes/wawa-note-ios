@@ -4,6 +4,7 @@ import SwiftData
 struct TaskEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var services: ServiceContainer
 
     enum Mode {
         case create(projectID: UUID?)
@@ -120,7 +121,7 @@ struct TaskEditorView: View {
         let finalNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         let sourceID = selectedSourceItemID
 
-        let service = ProjectDerivedItemService(context: modelContext)
+        let service = services.derived
 
         switch mode {
         case .create(let projectID):

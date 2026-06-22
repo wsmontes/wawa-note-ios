@@ -11,6 +11,7 @@ import SwiftData
 final class ToolContext: @unchecked Sendable {
     let modelContext: ModelContext
     let fileStore: FileArtifactStore
+    let services: ServiceContainer
     var activeProjectID: UUID?
     var activeProjectName: String?
     var activeProjectSlug: String?
@@ -45,6 +46,7 @@ final class ToolContext: @unchecked Sendable {
     }
 
     init(modelContext: ModelContext, fileStore: FileArtifactStore = FileArtifactStore(),
+         services: ServiceContainer? = nil,
          activeProjectID: UUID? = nil, activeProjectName: String? = nil,
          activeProjectSlug: String? = nil,
          activeItemID: UUID? = nil, contextKey: String? = nil, contextDisplayName: String? = nil,
@@ -52,6 +54,7 @@ final class ToolContext: @unchecked Sendable {
          sandboxedItemID: UUID? = nil, activeFramework: ProjectFramework? = nil) {
         self.modelContext = modelContext
         self.fileStore = fileStore
+        self.services = services ?? ServiceContainer(context: modelContext)
         self.activeProjectID = activeProjectID
         self.activeProjectName = activeProjectName
         self.activeProjectSlug = activeProjectSlug

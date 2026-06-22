@@ -15,6 +15,7 @@ struct WawaNoteApp: App {
     private let contentPipeline: ContentPipelineService
     private let ingestionPipeline: ProjectIngestionPipeline
     private let processingQueue: ProcessingQueueService
+    private let serviceContainer: ServiceContainer
 
     @StateObject private var biometricGate = BiometricGateService()
     private let notificationTokens = NotificationTokens()
@@ -27,11 +28,9 @@ struct WawaNoteApp: App {
             Folder.self,
             Annotation.self,
             Project.self,
-            TaskItem.self,
             Person.self,
             GraphEdge.self,
             Entity.self,
-            AgentSuggestion.self,
             QueueEntry.self,
             ProjectFrame.self,
             ChangeRecord.self,
@@ -52,6 +51,8 @@ struct WawaNoteApp: App {
         processingQueue = ProcessingQueueService()
         processingQueue.setPipeline(contentPipeline)
 
+        serviceContainer = ServiceContainer(context: ModelContext(modelContainer))
+
         let coordinator = RecordingCoordinator(modelContainer: modelContainer)
         coordinator.contentPipeline = contentPipeline
         coordinator.processingQueue = processingQueue
@@ -69,12 +70,9 @@ struct WawaNoteApp: App {
             }
         }
 
-        // Run one-time data migrations
+        // Run one-time data migrations via centralized registry
         let migrationContext = ModelContext(modelContainer)
-        KnowledgeItemService.migrateMeetingToAudio(context: migrationContext)
-        ProjectService.migrateProjectColors(context: migrationContext)
-        ProjectService.migrateFieldProvenance(context: migrationContext)
-        ProjectService.migrateToProjectDerivedItems(context: migrationContext)
+        MigrationRegistry.runPendingMigrations(context: migrationContext)
 
         // Setup notifications
         setupNotifications()
@@ -162,6 +160,9 @@ struct WawaNoteApp: App {
             return try ModelContainer(for: schema, configurations: config)
         } catch {
             AppLog.warn("general", "⚠️ ModelContainer load failed — recreating store. Error: \(error)")
+
+            // Back up existing store files before destruction
+            StoreBackup.backup()
 
             // Delete stores in all possible locations (app container + App Group)
             Self.destroyAllStores()
@@ -253,6 +254,7 @@ struct WawaNoteApp: App {
         .environmentObject(contentPipeline)
         .environmentObject(ingestionPipeline)
         .environmentObject(processingQueue)
+        .environmentObject(serviceContainer)
     }
 }
 

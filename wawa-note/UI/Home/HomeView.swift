@@ -165,7 +165,7 @@ final class HomeViewModel: ObservableObject {
         let itemId = await MainActor.run {
             let item = coord.createItemFromImport(title: meta.suggestedTitle, date: meta.creationDate ?? Date(), duration: meta.duration)
             if let target = targetProjectForImport, let item {
-                try? ProjectService(context: modelContext).addItem(item.id, to: target.id)
+                try? services.projects.addItem(item.id, to: target.id)
             }
             return item?.id
         }
@@ -189,7 +189,7 @@ final class HomeViewModel: ObservableObject {
                 modelContext.insert(item)
                 try? modelContext.save()
                 if let t = targetProjectForImport {
-                    try? ProjectService(context: modelContext).addItem(item.id, to: t.id)
+                    try? services.projects.addItem(item.id, to: t.id)
                 }
                 processingQueue?.enqueue(itemID: item.id, projectID: targetProjectForImport?.id, trigger: .newCapture)
             }
@@ -223,7 +223,7 @@ final class HomeViewModel: ObservableObject {
 
     private func importImageFile(_ url: URL, deleteSource: Bool, modelContext: ModelContext, pipeline: ContentPipelineService) async {
         guard let data = try? Data(contentsOf: url), let image = UIImage(data: data) else { return }
-        let itemService = KnowledgeItemService(context: modelContext)
+        let itemService = services.items
         let title = url.lastPathComponent
         guard let item = try? itemService.createItem(type: .image, title: title, bodyText: nil, inboxDate: Date()) else { return }
         // Save image
@@ -262,6 +262,7 @@ struct HomeView: View {
     @EnvironmentObject private var processingQueue: ProcessingQueueService
     @EnvironmentObject private var chatState: ChatOverlayState
     @EnvironmentObject private var chatViewModel: ChatViewModel
+    @EnvironmentObject private var services: ServiceContainer
     @Query(sort: \Project.updatedAt, order: .reverse) private var projects: [Project]
     @Query(filter: #Predicate<KnowledgeItem> { $0.inboxDate != nil }, sort: \KnowledgeItem.updatedAt, order: .reverse) private var inboxItems: [KnowledgeItem]
     @Query(sort: \KnowledgeItem.updatedAt, order: .reverse) private var allItems: [KnowledgeItem]
@@ -293,7 +294,7 @@ struct HomeView: View {
                 defaultSurface
                     .onAppear {
                         if let itemId = captureVM.savedItemId,
-                           let item = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemId) {
+                           let item = try? services.items.fetchItem(id: itemId) {
                             navigateToItem = item
                         }
                         captureVM.finishCapture()
@@ -325,7 +326,7 @@ struct HomeView: View {
         .sheet(item: $importVM.pendingImport) { imp in
             ImportFormView(sourceURL: imp.url, kind: imp.kind, textImporter: imp.textImporter, isFromShareExtension: imp.isFromShareExtension) { item in
                 if let t = importVM.targetProjectForImport {
-                    try? ProjectService(context: modelContext).addItem(item.id, to: t.id)
+                    try? services.projects.addItem(item.id, to: t.id)
                 }
                 processingQueue.enqueue(itemID: item.id, projectID: importVM.targetProjectForImport?.id, trigger: .newCapture)
                 navigateToItem = item
@@ -618,7 +619,7 @@ struct HomeView: View {
         .onTapGesture { navigateToItem = item }
         .swipeActions(edge: .leading) {
             Button {
-                try? KnowledgeItemService(context: modelContext).removeFromInbox(item)
+                try? services.items.removeFromInbox(item)
             } label: {
                 Label("Archive", systemImage: "archivebox.fill")
             }.tint(.green)
@@ -777,7 +778,7 @@ struct HomeView: View {
     }
 
     private func processPhotoItem(_ image: UIImage) async -> [KnowledgeItem] {
-        let itemService = KnowledgeItemService(context: modelContext)
+        let itemService = services.items
         guard let item = try? itemService.createItem(type: .image, title: "Photo", bodyText: nil) else { return [] }
         let store = FileArtifactStore()
         let dir = store.itemDirectoryURL(for: item.id)
@@ -1057,7 +1058,7 @@ struct ProjectPickerForItemView: View {
     }
 
     private func assignToProject(_ item: KnowledgeItem, project: Project) {
-        let svc = ProjectService(context: modelContext)
+        let svc = services.projects
         if item.projectID == nil {
             // Item has no project — move/assign
             try? svc.addItem(item.id, to: project.id)

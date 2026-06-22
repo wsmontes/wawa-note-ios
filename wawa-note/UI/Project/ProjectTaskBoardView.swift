@@ -7,6 +7,7 @@ struct ProjectTaskBoardView: View {
     let projectID: UUID
 
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var services: ServiceContainer
     @State private var editingTask: ProjectDerivedItem?
     @State private var showNewTask = false
     @State private var newTaskStatus: TaskStatus = .todo
@@ -248,11 +249,11 @@ struct ProjectTaskBoardView: View {
             case .cancelled: .cancelled
             }
         }()
-        try? ProjectDerivedItemService(context: modelContext).updateStatus(task, to: derivedStatus)
+        try? services.derived.updateStatus(task, to: derivedStatus)
     }
 
     private func deleteTask(_ task: ProjectDerivedItem) {
-        try? ProjectDerivedItemService(context: modelContext).delete(task)
+        try? services.derived.delete(task)
     }
 
     // MARK: - Labels

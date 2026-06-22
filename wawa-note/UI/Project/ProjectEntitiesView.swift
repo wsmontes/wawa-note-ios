@@ -13,6 +13,7 @@ struct EntitySummary: Identifiable {
 struct ProjectEntitiesView: View {
     let projectID: UUID
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var services: ServiceContainer
     @State private var entities: [EntitySummary] = []
     @State private var selectedKind: String?
     @State private var isLoading = true
@@ -100,7 +101,7 @@ struct ProjectEntitiesView: View {
     }
 
     private func loadEntities() async {
-        let projSvc = ProjectService(context: modelContext)
+        let projSvc = services.projects
         let store = FileArtifactStore()
         guard let items = try? projSvc.items(in: projectID) else {
             isLoading = false

@@ -7,6 +7,7 @@ struct InboxView: View {
     @EnvironmentObject private var processingQueue: ProcessingQueueService
     @EnvironmentObject private var chatState: ChatOverlayState
     @EnvironmentObject private var chatViewModel: ChatViewModel
+    @EnvironmentObject private var services: ServiceContainer
     @Query(sort: \KnowledgeItem.updatedAt, order: .reverse) private var allItems: [KnowledgeItem]
     @Query(sort: \Folder.name) private var folders: [Folder]
     @Query(sort: \Project.name) private var projects: [Project]
@@ -547,7 +548,7 @@ struct InboxView: View {
         let itemID = item.id
         let projectID = project.id
 
-        try? ProjectService(context: modelContext).addItem(itemID, to: projectID)
+        try? services.projects.addItem(itemID, to: projectID)
         processingQueue.enqueue(itemID: itemID, projectID: projectID, trigger: .projectAssignment)
 
         showFolderPicker = nil
@@ -555,7 +556,7 @@ struct InboxView: View {
     }
 
     private func removeFromProject(_ item: KnowledgeItem) {
-        try? ProjectService(context: modelContext).removeItem(item.id)
+        try? services.projects.removeItem(item.id)
     }
 
     private func formatDuration(_ seconds: Double) -> String {

@@ -21,6 +21,7 @@ struct KnowledgeDetailView: View {
     @EnvironmentObject private var contentPipeline: ContentPipelineService
     @EnvironmentObject private var processingQueue: ProcessingQueueService
     @EnvironmentObject private var chatState: ChatOverlayState
+    @EnvironmentObject private var services: ServiceContainer
     @State private var transcript: Transcript?
     @State private var analysis: MeetingAnalysis?
     @State private var annotations: [Annotation] = []
@@ -516,7 +517,7 @@ struct KnowledgeDetailView: View {
                         .textFieldStyle(.roundedBorder)
                         .padding()
                         .onChange(of: connectSearchText) { _, _ in
-                            let all = (try? KnowledgeItemService(context: modelContext).allItems()) ?? []
+                            let all = (try? services.items.allItems()) ?? []
                             connectableItems = all
                                 .filter { $0.id != item.id && (connectSearchText.isEmpty || $0.title.localizedCaseInsensitiveContains(connectSearchText)) }
                                 .prefix(20).map { $0 }
@@ -525,7 +526,7 @@ struct KnowledgeDetailView: View {
                 List {
                     ForEach(connectableItems.prefix(20)) { other in
                         Button {
-                            let gsvc = GraphEdgeService(context: modelContext)
+                            let gsvc = services.edges
                             try? gsvc.create(
                                 fromID: item.id, toID: other.id,
                                 edgeType: .relatesTo, weight: 1.0,
@@ -551,7 +552,7 @@ struct KnowledgeDetailView: View {
                     }
                 }
                 .onAppear {
-                    let all = (try? KnowledgeItemService(context: modelContext).allItems()) ?? []
+                    let all = (try? services.items.allItems()) ?? []
                     connectableItems = all.filter { $0.id != item.id }
                 }
             }
@@ -974,7 +975,7 @@ struct KnowledgeDetailView: View {
 
     private var resolvedFramework: ProjectFramework? {
         guard let projectID = item.projectID else { return nil }
-        let projSvc = ProjectService(context: modelContext)
+        let projSvc = services.projects
         guard let project = try? projSvc.fetch(id: projectID) else { return nil }
         return FrameworkService.shared.resolve(for: project)
     }
@@ -1832,7 +1833,7 @@ struct KnowledgeDetailView: View {
     }
 
     private func saveEdits() {
-        let service = KnowledgeItemService(context: modelContext)
+        let service = services.items
         try? service.updateItem(
             item,
             title: editedTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? item.title : editedTitle.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -1931,7 +1932,7 @@ struct KnowledgeDetailView: View {
                 _ = await extractionSvc.extractTextFromImage(item)
             }
             isTranscribing = false
-            let fetchedItem = try? KnowledgeItemService(context: modelContext).fetchItem(id: item.id)
+            let fetchedItem = try? services.items.fetchItem(id: item.id)
             AppLog.provider.info("🔍 reprocessItem: extraction done — bodyText=\(fetchedItem?.bodyText?.count ?? 0) chars, hasVision=\(fetchedItem?.bodyText?.contains("VISUAL ANALYSIS") ?? false)")
             refreshID = UUID()
             loadData()
@@ -1947,7 +1948,7 @@ struct KnowledgeDetailView: View {
     // MARK: - Backlinks
 
     private func loadBacklinks() {
-        let edgeService = GraphEdgeService(context: modelContext)
+        let edgeService = services.edges
         let incomingEdges = (try? edgeService.edges(to: item.id)) ?? []
 
         var results: [(edge: GraphEdge, sourceItem: KnowledgeItem)] = []
