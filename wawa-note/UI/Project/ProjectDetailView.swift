@@ -90,7 +90,6 @@ struct ProjectHomeView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var chatState: ChatOverlayState
     @EnvironmentObject private var coordinator: RecordingCoordinator
-    @State private var selectedTab: ProjectTab = .synthesis
     @State private var showCaptureSheet = false
     @State private var showNoteEditor = false
     @State private var showFileImporter = false
@@ -105,130 +104,181 @@ struct ProjectHomeView: View {
     @State private var showIconPicker = false
     @State private var showColorPicker = false
     @State private var showFrameworkPicker = false
+    @State private var showAllFiles = false
     @State private var suggestions: [ProjectSuggestion] = []
     @State private var suggestionService: ProjectSuggestionService?
 
-    enum ProjectTab: String, CaseIterable {
-        case synthesis = "Síntese"
-        case files = "Arquivos"
+    // Queries para o dashboard
+    @Query private var projectItems: [KnowledgeItem]
+    @Query private var projectTasks: [ProjectDerivedItem]
+
+    private var itemCount: Int { projectItems.count }
+    private var taskCount: Int { projectTasks.filter { $0.typeRaw == "task" }.count }
+    private var openTaskCount: Int {
+        projectTasks.filter { $0.typeRaw == "task" && ($0.statusRaw == "todo" || $0.statusRaw == "inProgress") }.count
+    }
+
+    init(project: Project) {
+        self.project = project
+        let pid = project.id
+        _projectItems = Query(filter: #Predicate { $0.projectID == pid }, sort: \KnowledgeItem.updatedAt, order: .reverse)
+        let pid2 = project.id
+        _projectTasks = Query(filter: #Predicate { $0.projectID == pid2 }, sort: \ProjectDerivedItem.updatedAt, order: .reverse)
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Agent suggestions
-            if !suggestions.isEmpty {
-                VStack(spacing: 8) {
-                    ForEach(suggestions) { suggestion in
-                        SuggestionCardView(suggestion: suggestion) { action in
-                            handleSuggestion(suggestion, action: action)
+        ScrollView {
+            VStack(spacing: 16) {
+                // Agent suggestions
+                if !suggestions.isEmpty {
+                    VStack(spacing: 8) {
+                        ForEach(suggestions) { suggestion in
+                            SuggestionCardView(suggestion: suggestion) { action in
+                                handleSuggestion(suggestion, action: action)
+                            }
                         }
                     }
+                    .padding(.horizontal)
+                }
+
+                // Hero stats
+                HeroStatsCard(project: project, itemCount: itemCount, taskCount: taskCount, openTaskCount: openTaskCount)
+                    .padding(.horizontal)
+
+                // Recent activity
+                RecentActivitySection(projectID: project.id)
+                    .padding(.horizontal)
+
+                // Pending tasks
+                PendingSection(projectID: project.id)
+                    .padding(.horizontal)
+
+                // Synthesis
+                if project.synthesis != nil {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Synthesis").font(.headline).padding(.horizontal)
+                        ProjectSynthesisView(project: project)
+                            .frame(maxHeight: 200)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .padding(.horizontal)
+                    }
+                } else if !projectItems.isEmpty {
+                    Button {
+                        Task { await generateSynthesis() }
+                    } label: {
+                        Label("Generate Synthesis", systemImage: "sparkles")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .padding(.horizontal)
+                }
+
+                // Project Info (collapsible)
+                DisclosureGroup("Project Info", isExpanded: $infoExpanded) {
+                    VStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Name").font(.caption).foregroundStyle(.secondary)
+                            TextField("Project name", text: $editingName)
+                                .textFieldStyle(.roundedBorder)
+                                .onSubmit { saveProjectName() }
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Summary").font(.caption).foregroundStyle(.secondary)
+                            Button { showSummaryEditor = true } label: {
+                                HStack {
+                                    Text(editingSummary.isEmpty ? "Add summary..." : editingSummary)
+                                        .lineLimit(2)
+                                        .foregroundStyle(editingSummary.isEmpty ? .tertiary : .primary)
+                                    Spacer()
+                                    Image(systemName: "pencil")
+                                }
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Intention").font(.caption).foregroundStyle(.secondary)
+                            Button { showIntentionEditor = true } label: {
+                                HStack {
+                                    Text(editingIntention.isEmpty ? "Add intention..." : editingIntention)
+                                        .lineLimit(2)
+                                        .foregroundStyle(editingIntention.isEmpty ? .tertiary : .primary)
+                                    Spacer()
+                                    Image(systemName: "pencil")
+                                }
+                            }
+                        }
+
+                        HStack {
+                            Text("Icon").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Button { showIconPicker = true } label: {
+                                HStack {
+                                    Image(systemName: project.iconName ?? "folder.fill")
+                                    Text(project.iconName ?? "folder.fill").font(.caption)
+                                    Image(systemName: "chevron.right").font(.caption)
+                                }
+                            }
+                        }
+
+                        HStack {
+                            Text("Color").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Button { showColorPicker = true } label: {
+                                HStack {
+                                    Circle().fill(project.colorHex.flatMap { Color(hex: $0) } ?? .gray).frame(width: 16, height: 16)
+                                    Text(project.colorHex ?? "Default").font(.caption)
+                                    Image(systemName: "chevron.right").font(.caption)
+                                }
+                            }
+                        }
+
+                        HStack {
+                            Text("Framework").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Button { showFrameworkPicker = true } label: {
+                                HStack {
+                                    Text(project.frameworkId ?? "None").font(.caption)
+                                    Image(systemName: "chevron.right").font(.caption)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.vertical, 8)
                 }
                 .padding(.horizontal)
-                .padding(.top, 8)
-            }
 
-            // Segment control
-            Picker("View", selection: $selectedTab) {
-                ForEach(ProjectTab.allCases, id: \.rawValue) { tab in
-                    Text(tab.rawValue).tag(tab)
+                // Files (condensed)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Files").font(.headline)
+                        Spacer()
+                        Text("\(itemCount) items").font(.caption).foregroundStyle(.secondary)
+                    }
+                    ForEach(projectItems.prefix(5)) { item in
+                        HStack {
+                            Image(systemName: item.type == .audio ? "recordingtape" : "doc.text")
+                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading) {
+                                Text(item.title).font(.subheadline).lineLimit(1)
+                                Text(item.type.rawValue.capitalized).font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                        }
+                    }
+                    if itemCount > 5 {
+                        Button("View all \(itemCount) files") { showAllFiles = true }
+                            .font(.caption)
+                    }
                 }
+                .padding(16)
+                .background(Color(.secondarySystemGroupedBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .padding(.horizontal)
+
+                Spacer().frame(height: 16)
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
             .padding(.top, 8)
-
-            // Project Info (collapsible)
-            DisclosureGroup("Project Info", isExpanded: $infoExpanded) {
-                VStack(spacing: 12) {
-                    // Name
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Name").font(.caption).foregroundStyle(.secondary)
-                        TextField("Project name", text: $editingName)
-                            .textFieldStyle(.roundedBorder)
-                            .onSubmit { saveProjectName() }
-                    }
-
-                    // Summary
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Summary").font(.caption).foregroundStyle(.secondary)
-                        Button { showSummaryEditor = true } label: {
-                            HStack {
-                                Text(editingSummary.isEmpty ? "Add summary..." : editingSummary)
-                                    .lineLimit(2)
-                                    .foregroundStyle(editingSummary.isEmpty ? .tertiary : .primary)
-                                Spacer()
-                                Image(systemName: "pencil")
-                            }
-                        }
-                    }
-
-                    // Intention
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Intention").font(.caption).foregroundStyle(.secondary)
-                        Button { showIntentionEditor = true } label: {
-                            HStack {
-                                Text(editingIntention.isEmpty ? "Add intention..." : editingIntention)
-                                    .lineLimit(2)
-                                    .foregroundStyle(editingIntention.isEmpty ? .tertiary : .primary)
-                                Spacer()
-                                Image(systemName: "pencil")
-                            }
-                        }
-                    }
-
-                    // Icon
-                    HStack {
-                        Text("Icon").font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Button { showIconPicker = true } label: {
-                            HStack {
-                                Image(systemName: project.iconName ?? "folder.fill")
-                                Text(project.iconName ?? "folder.fill").font(.caption)
-                                Image(systemName: "chevron.right").font(.caption)
-                            }
-                        }
-                    }
-
-                    // Color
-                    HStack {
-                        Text("Color").font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Button { showColorPicker = true } label: {
-                            HStack {
-                                Circle()
-                                    .fill(project.colorHex.flatMap { Color(hex: $0) } ?? .gray)
-                                    .frame(width: 16, height: 16)
-                                Text(project.colorHex ?? "Default").font(.caption)
-                                Image(systemName: "chevron.right").font(.caption)
-                            }
-                        }
-                    }
-
-                    // Framework
-                    HStack {
-                        Text("Framework").font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Button { showFrameworkPicker = true } label: {
-                            HStack {
-                                Text(project.frameworkId ?? "None").font(.caption)
-                                Image(systemName: "chevron.right").font(.caption)
-                            }
-                        }
-                    }
-                }
-                .padding(.vertical, 8)
-            }
-            .padding(.horizontal)
-            .padding(.top, 4)
-
-            // Content
-            switch selectedTab {
-            case .synthesis:
-                ProjectSynthesisView(project: project)
-            case .files:
-                ItemsView(projectID: project.id)
-            }
         }
         .navigationTitle(project.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -258,6 +308,16 @@ struct ProjectHomeView: View {
         .sheet(isPresented: $showNoteEditor) {
             NoteEditorView(mode: .create(type: .note, folderID: nil, initialTag: nil))
         }
+        .sheet(isPresented: $showAllFiles) {
+            NavigationStack {
+                ItemsView(projectID: project.id)
+                    .navigationTitle("Files")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) { Button("Close") { showAllFiles = false } }
+                    }
+            }
+        }
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.json, .plainText, .pdf, .html, .rtf, .audio, .image]) { result in
             if case .success(let url) = result {
                 Task { await handleImportedFile(url) }
@@ -276,6 +336,11 @@ struct ProjectHomeView: View {
         .sheet(isPresented: $showIconPicker) { IconPickerView(selectedIcon: Binding(get: { project.iconName ?? "folder.fill" }, set: { saveIcon($0) })) }
         .sheet(isPresented: $showColorPicker) { ColorPickerView(selectedHex: Binding(get: { project.colorHex ?? "#007AFF" }, set: { saveColor($0) })) }
         .sheet(isPresented: $showFrameworkPicker) { FrameworkPickerView(project: project) }
+    }
+
+    private func generateSynthesis() async {
+        let agent = ProjectAgent(projectID: project.id, context: modelContext)
+        _ = try? await agent.generateSynthesis()
     }
 
     private func handleSuggestion(_ suggestion: ProjectSuggestion, action: SuggestionAction) {

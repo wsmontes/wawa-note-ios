@@ -8,6 +8,7 @@ enum SuggestionType: String, Codable, CaseIterable, Sendable {
     case taskCreate
     case riskAlert
     case connectionProposal
+    case projectCreation
 }
 
 // MARK: - SuggestionStatus

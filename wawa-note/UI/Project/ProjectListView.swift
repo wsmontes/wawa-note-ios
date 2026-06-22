@@ -13,6 +13,8 @@ struct ProjectListView: View {
     @State private var searchText = ""
     @State private var listRefreshID = UUID()
     @State private var sortOrder: ProjectSortOrder = .recent
+    @State private var onboardingSuggestion: ProjectSuggestion?
+    @State private var showPromoteSheet = false
     @State private var itemCounts: [UUID: Int] = [:]
     @State private var taskCounts: [UUID: Int] = [:]
     @State private var openTaskCounts: [UUID: Int] = [:]
@@ -68,37 +70,77 @@ struct ProjectListView: View {
         }
         .onAppear {
             computeCounts()
-            // Rebuild list to force @Query refresh on tab switch
             listRefreshID = UUID()
+            // Check for orphan items that could become a project
+            let detector = InboxCriticalMassDetector(context: modelContext)
+            if detector.checkAndSuggest() != nil {
+                let pendingRaw = SuggestionStatus.pending.rawValue
+                let creationRaw = SuggestionType.projectCreation.rawValue
+                let descriptor = FetchDescriptor<ProjectSuggestion>(
+                    predicate: #Predicate {
+                        $0.suggestionTypeRaw == creationRaw && $0.statusRaw == pendingRaw
+                    }
+                )
+                let all = (try? modelContext.fetch(descriptor)) ?? []
+                onboardingSuggestion = all.first
+            }
         }
         .onChange(of: allItems.count) { _ in computeCounts() }
         .onChange(of: allTasks.count) { _ in computeCounts() }
     }
 
     private var emptyState: some View {
-        VStack(spacing: 16) {
-            Spacer().frame(height: 80)
+        VStack(spacing: 24) {
+            Spacer().frame(height: 60)
             Image(systemName: "folder.badge.questionmark")
                 .font(.system(size: 48))
                 .foregroundStyle(.secondary)
-            Text("No projects yet")
-                .font(.title3)
-                .fontWeight(.medium)
-            Text("Capture audio, scan documents, or create notes — then promote them to projects.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            Text("Welcome to Wawa Note")
+                .font(.title2).fontWeight(.semibold)
+            Text("Capture meetings, notes, or documents.\nThey become living projects with tasks, decisions, and connections.")
+                .font(.subheadline).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-            Button("Create Project") {
-                showNewProject = true
+                .padding(.horizontal, 32)
+            VStack(spacing: 12) {
+                Button("Create a project") { showNewProject = true }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: 280)
             }
-            .buttonStyle(.bordered)
+            .padding(.horizontal, 32)
             Spacer()
         }
     }
 
     private var listView: some View {
         List {
+            // Onboarding suggestion card
+            if let suggestion = onboardingSuggestion {
+                Section {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Image(systemName: "lightbulb.fill").foregroundStyle(.yellow)
+                            Text(suggestion.title).font(.subheadline).fontWeight(.semibold)
+                        }
+                        Text(suggestion.body).font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            Spacer()
+                            Button("Dismiss") {
+                                try? ProjectSuggestionService(context: modelContext).dismiss(suggestion)
+                                onboardingSuggestion = nil
+                            }
+                            .buttonStyle(.bordered).controlSize(.small)
+                            Button("Create Project") { showNewProject = true }
+                                .buttonStyle(.borderedProminent).controlSize(.small)
+                        }
+                    }
+                    .padding(12)
+                    .background(Color(.secondarySystemGroupedBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+            }
+
             ForEach(sortedProjects) { project in
                 NavigationLink(value: project.id) {
                     projectRow(project)
