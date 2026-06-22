@@ -5,13 +5,18 @@ struct HeroStatsCard: View {
     let itemCount: Int
     let taskCount: Int
     let openTaskCount: Int
+    let decisionCount: Int
+    let riskCount: Int
+    let questionCount: Int
+    let connectionCount: Int
 
     var body: some View {
         VStack(spacing: 12) {
-            HStack(spacing: 24) {
+            HStack(spacing: 16) {
                 statItem(value: "\(itemCount)", label: "Items", icon: "doc.text", color: .blue)
                 statItem(value: "\(taskCount)", label: "Tasks", icon: "checklist", color: .green)
-                statItem(value: "\(openTaskCount)", label: "Open", icon: "circle", color: .orange)
+                statItem(value: "\(decisionCount)", label: "Decisions", icon: "hammer.fill", color: .orange)
+                statItem(value: "\(riskCount)", label: "Risks", icon: "exclamationmark.triangle.fill", color: .yellow)
             }
 
             if project.lastActivityAt != nil || project.healthScore != nil {

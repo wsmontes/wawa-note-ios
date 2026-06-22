@@ -120,12 +120,30 @@ struct ProjectHomeView: View {
         projectTasks.filter { $0.typeRaw == "task" && ($0.statusRaw == "todo" || $0.statusRaw == "inProgress") }.count
     }
 
+    @Query private var heroDecisions: [ProjectDerivedItem]
+    @Query private var heroRisks: [ProjectDerivedItem]
+    @Query private var heroQuestions: [ProjectDerivedItem]
+    @Query private var heroConnections: [ProjectDerivedItem]
+
+    private var decisionCount: Int { heroDecisions.count }
+    private var riskCount: Int { heroRisks.count }
+    private var questionCount: Int { heroQuestions.count }
+    private var connectionCount: Int { heroConnections.count }
+
     init(project: Project) {
         self.project = project
         let pid = project.id
         _projectItems = Query(filter: #Predicate { $0.projectID == pid }, sort: \KnowledgeItem.updatedAt, order: .reverse)
         let pid2 = project.id
         _projectTasks = Query(filter: #Predicate { $0.projectID == pid2 }, sort: \ProjectDerivedItem.updatedAt, order: .reverse)
+        let pid3 = project.id; let dRaw = ProjectDerivedType.decision.rawValue
+        _heroDecisions = Query(filter: #Predicate { $0.projectID == pid3 && $0.typeRaw == dRaw })
+        let pid4 = project.id; let sRaw = ProjectDerivedType.signal.rawValue
+        _heroRisks = Query(filter: #Predicate { $0.projectID == pid4 && $0.typeRaw == sRaw })
+        let pid5 = project.id; let qRaw = ProjectDerivedType.question.rawValue
+        _heroQuestions = Query(filter: #Predicate { $0.projectID == pid5 && $0.typeRaw == qRaw })
+        let pid6 = project.id; let cRaw = ProjectDerivedType.connection.rawValue
+        _heroConnections = Query(filter: #Predicate { $0.projectID == pid6 && $0.typeRaw == cRaw })
     }
 
     var body: some View {
@@ -143,8 +161,13 @@ struct ProjectHomeView: View {
                     .padding(.horizontal)
                 }
 
+                // Attention Required
+                AttentionRequiredSection(projectID: project.id)
+                    .padding(.horizontal)
+
                 // Hero stats
-                HeroStatsCard(project: project, itemCount: itemCount, taskCount: taskCount, openTaskCount: openTaskCount)
+                HeroStatsCard(project: project, itemCount: itemCount, taskCount: taskCount, openTaskCount: openTaskCount,
+                              decisionCount: decisionCount, riskCount: riskCount, questionCount: questionCount, connectionCount: connectionCount)
                     .padding(.horizontal)
 
                 // Recent activity
@@ -154,6 +177,63 @@ struct ProjectHomeView: View {
                 // Pending tasks
                 PendingSection(projectID: project.id)
                     .padding(.horizontal)
+
+                // Decisions
+                if decisionCount > 0 {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Decisions").font(.headline)
+                        ForEach(heroDecisions.prefix(3)) { d in
+                            HStack(spacing: 8) {
+                                Image(systemName: "hammer.fill").foregroundStyle(.orange).frame(width: 20)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(d.title).font(.subheadline)
+                                    Text("From analysis · \(d.createdAt.formatted(.relative(presentation: .numeric)))")
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                    .padding(16).background(Color(.secondarySystemGroupedBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
+                }
+
+                // Risks
+                if riskCount > 0 {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Risks").font(.headline)
+                        ForEach(heroRisks.prefix(3)) { r in
+                            HStack(spacing: 8) {
+                                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow).frame(width: 20)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(r.title).font(.subheadline)
+                                    Text("\(r.createdAt.formatted(.relative(presentation: .numeric)))")
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                    .padding(16).background(Color(.secondarySystemGroupedBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
+                }
+
+                // Open Questions
+                if questionCount > 0 {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Open Questions").font(.headline)
+                        ForEach(heroQuestions.prefix(3)) { q in
+                            HStack(spacing: 8) {
+                                Image(systemName: "questionmark.bubble.fill").foregroundStyle(.blue).frame(width: 20)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(q.title).font(.subheadline)
+                                    Text("\(q.createdAt.formatted(.relative(presentation: .numeric)))")
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                    .padding(16).background(Color(.secondarySystemGroupedBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
+                }
 
                 // Synthesis
                 if project.synthesis != nil {

@@ -197,6 +197,7 @@
 		65718347F8C441D19E289A0B /* HeroStatsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB6657F6EE7D49F49808F933 /* HeroStatsCard.swift */; };
 		2AA56B93989E455690F021CB /* RecentActivitySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58B86D4F52EF49D09025334F /* RecentActivitySection.swift */; };
 		B7C521CC344A41759785DF37 /* PendingSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1ABB0495D2542EF947BB0C3 /* PendingSection.swift */; };
+		3DDA38773CEE42DDA38FB28F /* AttentionRequiredSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBE84CC3E0E24FF78C02780E /* AttentionRequiredSection.swift */; };
 		CC95EF4B43624F1A94AEA26F /* IconPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EF5C6EE1D274ED6A22A3B31 /* IconPickerView.swift */; };
 		6BE91D1B4AD14062B464D593 /* ColorPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A45A55843B41368A573C49 /* ColorPickerView.swift */; };
 		90564D1317B54549AB46A3AA /* FrameworkPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F409C3B9F1BD4588AE3B0F7E /* FrameworkPickerView.swift */; };
@@ -305,6 +306,7 @@
 		CB6657F6EE7D49F49808F933 /* HeroStatsCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeroStatsCard.swift; sourceTree = "<group>"; };
 		58B86D4F52EF49D09025334F /* RecentActivitySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentActivitySection.swift; sourceTree = "<group>"; };
 		C1ABB0495D2542EF947BB0C3 /* PendingSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingSection.swift; sourceTree = "<group>"; };
+		EBE84CC3E0E24FF78C02780E /* AttentionRequiredSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionRequiredSection.swift; sourceTree = "<group>"; };
 		446C28973B9F54B2DDB9BE5D /* ProjectGraphView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectGraphView.swift; sourceTree = "<group>"; };
 		4B7C43279EE74EA698E4284D /* PrimaryActionButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrimaryActionButton.swift; sourceTree = "<group>"; };
 		4CC5AFE2064848D49A02176E /* ShellTool.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShellTool.swift; sourceTree = "<group>"; };
@@ -924,6 +926,7 @@
 				2780900D808940A394CC4196 /* CreateProjectSheet.swift */,
 				CB6657F6EE7D49F49808F933 /* HeroStatsCard.swift */,
 				C1ABB0495D2542EF947BB0C3 /* PendingSection.swift */,
+				EBE84CC3E0E24FF78C02780E /* AttentionRequiredSection.swift */,
 				58B86D4F52EF49D09025334F /* RecentActivitySection.swift */,
 				88A3DE3EB52EBD68CA2C5B9D /* ProjectDetailView.swift */,
 				EC41D66B8DB780CA0A397BAB /* SendToMenuView.swift */,
@@ -1235,6 +1238,7 @@
 				65718347F8C441D19E289A0B /* HeroStatsCard.swift in Sources */,
 				2AA56B93989E455690F021CB /* RecentActivitySection.swift in Sources */,
 				B7C521CC344A41759785DF37 /* PendingSection.swift in Sources */,
+				3DDA38773CEE42DDA38FB28F /* AttentionRequiredSection.swift in Sources */,
 				CC95EF4B43624F1A94AEA26F /* IconPickerView.swift in Sources */,
 				6BE91D1B4AD14062B464D593 /* ColorPickerView.swift in Sources */,
 				90564D1317B54549AB46A3AA /* FrameworkPickerView.swift in Sources */,
