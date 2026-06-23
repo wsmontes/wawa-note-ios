@@ -68,7 +68,7 @@ final class ProjectDerivedItemService {
         let existing = try context.fetch(FetchDescriptor<ProjectDerivedItem>(
             predicate: #Predicate { $0.projectID == projectID && $0.typeRaw == typeRaw }
         ))
-        if let dup = existing.first(where: { $0.title.lowercased().trimmingCharacters(in: .whitespaces) == normalizedTitle && $0.isActive }) {
+        if let dup = existing.first(where: { $0.title.lowercased().trimmingCharacters(in: .whitespaces) == normalizedTitle }) {
             AppLog.general.info("ProjectDerivedItemService: dedup — signal '\(title)' already active in project")
             return dup
         }
