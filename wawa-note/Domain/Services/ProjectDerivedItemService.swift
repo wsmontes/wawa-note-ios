@@ -22,6 +22,17 @@ final class ProjectDerivedItemService {
         dueAt: Date? = nil,
         bodyJSON: String? = nil
     ) throws -> ProjectDerivedItem {
+        // KAN-75: Dedup — skip if task with same title already exists in project
+        let normalizedTitle = title.lowercased().trimmingCharacters(in: .whitespaces)
+        let typeRaw = ProjectDerivedType.task.rawValue
+        let existing = try context.fetch(FetchDescriptor<ProjectDerivedItem>(
+            predicate: #Predicate { $0.projectID == projectID && $0.typeRaw == typeRaw }
+        ))
+        if existing.contains(where: { $0.title.lowercased().trimmingCharacters(in: .whitespaces) == normalizedTitle }) {
+            AppLog.general.info("ProjectDerivedItemService: dedup — task '\(title)' already exists in project")
+            return existing.first { $0.title.lowercased().trimmingCharacters(in: .whitespaces) == normalizedTitle }!
+        }
+
         let item = ProjectDerivedItem(
             projectID: projectID,
             sourceItemID: sourceItemID,
@@ -51,6 +62,17 @@ final class ProjectDerivedItemService {
         confidence: Double? = nil,
         isCritical: Bool = false
     ) throws -> ProjectDerivedItem {
+        // KAN-75: Dedup — skip if signal with same title already active in project
+        let normalizedTitle = title.lowercased().trimmingCharacters(in: .whitespaces)
+        let typeRaw = ProjectDerivedType.signal.rawValue
+        let existing = try context.fetch(FetchDescriptor<ProjectDerivedItem>(
+            predicate: #Predicate { $0.projectID == projectID && $0.typeRaw == typeRaw }
+        ))
+        if let dup = existing.first(where: { $0.title.lowercased().trimmingCharacters(in: .whitespaces) == normalizedTitle && $0.isActive }) {
+            AppLog.general.info("ProjectDerivedItemService: dedup — signal '\(title)' already active in project")
+            return dup
+        }
+
         let bodyData = try? JSONEncoder().encode(signalBody)
         let bodyStr = bodyData.flatMap { String(data: $0, encoding: .utf8) }
 
