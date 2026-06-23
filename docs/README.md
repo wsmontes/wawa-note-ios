@@ -60,22 +60,18 @@ Documents that define the project. Read these before making architecture decisio
 | [provider_onboarding_redesign.md](provider_onboarding_redesign.md) | 2026-05-26 | Provider UX redesign: 5-specialist panel, pre-configured templates, progressive disclosure | KAN-42 | AI Provider onboarding |
 | [ON_DEVICE_LLM_PLAN.md](ON_DEVICE_LLM_PLAN.md) | 2026-05-27 | Plan for local LLM inference (llama.cpp + ModelDownloadService) | — | On-device LLM |
 | [PROMPTS.md](PROMPTS.md) | (early) | AI prompt templates for meeting analysis | KAN-76 | Content pipeline |
+| [BARCODE_SCANNING.md](BARCODE_SCANNING.md) | 2026-06-22 | Barcode/QR scanning: 13 symbologies, AVFoundation, ScannedCode model | KAN-195 | Barcode scanning |
+| [LIVE_OCR.md](LIVE_OCR.md) | 2026-06-22 | Live OCR: real-time Vision text recognition + Core Motion stability | KAN-196 | Live OCR |
+| [TRASH_AND_CONFIG_SERVICES.md](TRASH_AND_CONFIG_SERVICES.md) | 2026-06-22 | TrashService soft-delete/restore + ConfigProjectService VFS configuration | KAN-208 | Trash & Config |
 | [app-store-metadata.md](app-store-metadata.md) | (early) | App Store listing text | — | App Store |
 | [privacy-nutrition-labels.md](privacy-nutrition-labels.md) | (early) | Apple privacy label mappings | — | Privacy |
 
-### Missing Feature Specs (to be created)
+### Remaining Feature Specs (lower priority)
 
 | Feature | Priority | Source Files |
 |---|---|---|
-| Barcode/QR scanning (13 symbologies) | P1 | `UI/Home/BarcodeScannerView.swift`, `BarcodeScannerViewModel.swift` |
-| Live OCR (real-time Vision text + Core Motion) | P1 | `UI/Home/LiveOCRView.swift`, `LiveOCRViewModel.swift` |
-| Agent memory system (AgentMemoryStore) | P1 | `Domain/Agent/AgentMemoryStore.swift` |
-| Lens system (5 built-in lenses) | P2 | `Domain/Services/LensAnalysisService.swift`, `ai_config.json` |
-| Anarlog sync ecosystem (15 files) | P2 | `Ecosystem/Anarlog/` |
-| TrashService (soft-delete with empty) | P1 | `Domain/Services/TrashService.swift` |
-| ConfigProjectService (system config via VFS) | P2 | `Domain/Services/ConfigProjectService.swift` |
-| PostRecording automation | P1 | `Domain/Services/PostRecordingAutomationService.swift` |
-| Project frameworks (LLM-defined schemas) | P2 | `Domain/Services/FrameworkService.swift` |
+| Anarlog sync ecosystem (15 files) — documented in USER_JOURNEYS.md | P2 | `Ecosystem/Anarlog/` |
+| PostRecording automation — documented in USER_JOURNEYS.md | P1 | `Domain/Services/PostRecordingAutomationService.swift` |
 
 ---
 

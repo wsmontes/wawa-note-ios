@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-10, KAN-49
 
 @MainActor
 final class InboxCriticalMassDetector {
