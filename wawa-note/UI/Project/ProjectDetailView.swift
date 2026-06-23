@@ -101,7 +101,8 @@ struct ProjectHomeView: View {
 
     enum ProjectTab: String, CaseIterable {
         case synthesis = "Synthesis"
-        case files = "Arquivos"
+        case items = "Items"
+        case files = "Files"
     }
 
     var body: some View {
@@ -120,6 +121,8 @@ struct ProjectHomeView: View {
             switch selectedTab {
             case .synthesis:
                 ProjectSynthesisView(project: project)
+            case .items:
+                ProjectItemsView(projectID: project.id)
             case .files:
                 ItemsView(projectID: project.id)
             }
@@ -243,6 +246,153 @@ private struct HealthRing: View {
 }
 
 // MARK: - Unified Item Row
+
+// MARK: - Items Tab — Aggregated Cards (KAN-256)
+
+/// Aggregated view of all ProjectDerivedItem objects for a project,
+/// displayed as typed cards with source attribution.
+struct ProjectItemsView: View {
+    let projectID: UUID
+    @EnvironmentObject private var services: ServiceContainer
+    @State private var derivedItems: [ProjectDerivedItem] = []
+    @State private var filter: ItemFilter = .all
+    @State private var isLoading = true
+
+    enum ItemFilter: String, CaseIterable {
+        case all = "All"
+        case tasks = "Tasks"
+        case signals = "Signals"
+        case decisions = "Decisions"
+        case questions = "Questions"
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("Filter", selection: $filter) {
+                ForEach(ItemFilter.allCases, id: \.rawValue) { f in
+                    Text(f.rawValue).tag(f)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16).padding(.vertical, 8)
+
+            if isLoading {
+                Spacer()
+                ProgressView("Loading items...")
+                Spacer()
+            } else if filteredItems.isEmpty {
+                Spacer()
+                VStack(spacing: 12) {
+                    Image(systemName: "tray").font(.system(size: 36)).foregroundStyle(.secondary)
+                    Text("No items yet").font(.headline)
+                    Text("Tasks, signals, decisions, and questions extracted from project items will appear here.")
+                        .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 40)
+                }
+                Spacer()
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(filteredItems) { di in
+                            DerivedItemCard(item: di)
+                        }
+                    }
+                    .padding(16)
+                }
+            }
+        }
+        .onAppear { loadData() }
+    }
+
+    private var filteredItems: [ProjectDerivedItem] {
+        let items = derivedItems.filter { $0.type != .synthesis && $0.type != .connection }
+        switch filter {
+        case .all: return items
+        case .tasks: return items.filter { $0.type == .task }
+        case .signals: return items.filter { $0.type == .signal }
+        case .decisions: return items.filter { $0.type == .decision }
+        case .questions: return items.filter { $0.type == .question }
+        }
+    }
+
+    private func loadData() {
+        derivedItems = (try? services.derived.fetch(for: projectID)) ?? []
+        isLoading = false
+    }
+}
+
+/// A compact card for a ProjectDerivedItem, with typed icon, color, status,
+/// priority, and source item attribution.
+struct DerivedItemCard: View {
+    let item: ProjectDerivedItem
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: typeIcon)
+                .font(.body).foregroundStyle(typeColor)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.title).font(.subheadline).fontWeight(.medium).lineLimit(2)
+                HStack(spacing: 8) {
+                    if let priority = item.priorityRaw {
+                        HStack(spacing: 2) {
+                            Image(systemName: "flag.fill").font(.system(size: 7))
+                            Text(priority.capitalized)
+                        }
+                        .font(.caption2).foregroundStyle(priorityColor(priority))
+                    }
+                    if let owner = item.ownerName {
+                        Text(owner).font(.caption2).foregroundStyle(.secondary)
+                    }
+                    if let due = item.dueAt {
+                        Text(due.formatted(date: .abbreviated, time: .omitted)).font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
+                HStack(spacing: 4) {
+                    Circle().fill(item.isCritical ? .red : .secondary).frame(width: 5, height: 5)
+                    Text(item.type.rawValue.capitalized).font(.caption2).foregroundStyle(.tertiary)
+                    if let source = item.sourceItemID?.uuidString.prefix(8) {
+                        Text("· src:\(source)").font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            Spacer()
+            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+        }
+        .padding(12)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.03), radius: 4, y: 1)
+    }
+
+    private var typeIcon: String {
+        switch item.type {
+        case .task: "checklist"
+        case .signal: "exclamationmark.triangle.fill"
+        case .decision: "checkmark.shield.fill"
+        case .question: "questionmark.circle.fill"
+        default: "doc.text"
+        }
+    }
+
+    private var typeColor: Color {
+        switch item.type {
+        case .task: .blue
+        case .signal: .orange
+        case .decision: .green
+        case .question: .yellow
+        default: .secondary
+        }
+    }
+
+    private func priorityColor(_ p: String) -> Color {
+        switch p {
+        case "critical": .red
+        case "high": .orange
+        case "medium": .blue
+        default: .secondary
+        }
+    }
+}
 
 // MARK: - Items View (List Layer)
 
