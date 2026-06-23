@@ -27,7 +27,7 @@ struct DocumentParsingService {
 
     func readExcel(_ itemId: String, context: ModelContext) -> [[String: Any]]? {
         guard let uuid = UUID(uuidString: itemId),
-              let item = try? KnowledgeItemService(context: context).fetchItem(id: uuid),
+              let item = try? context.fetch(FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.id == uuid })).first,
               let text = item.bodyText ?? loadFileText(itemId: itemId, ext: "csv") else { return nil }
         let lines = text.components(separatedBy: "\n").filter { !$0.isEmpty }
         guard lines.count >= 2 else { return nil }

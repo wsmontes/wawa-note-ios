@@ -7,7 +7,8 @@ import SwiftData
 
 @MainActor
 protocol ProjectServiceProtocol: AnyObject {
-    func create(name: String, summary: String?, iconName: String?) throws -> Project
+    func create(name: String, template: ProjectTemplate?, sourceItemIDs: [UUID], origin: FieldOrigin) throws -> Project
+    func update(id: UUID, fields: ProjectUpdateFields, origin: FieldOrigin, reason: String?) throws -> Project
     func fetch(id: UUID) throws -> Project?
     func allProjects() throws -> [Project]
     func activeProjects() throws -> [Project]
@@ -27,6 +28,8 @@ protocol KnowledgeItemServiceProtocol: AnyObject {
     func createItem(type: KnowledgeItemType, title: String, bodyText: String?, folderID: UUID?, durationSeconds: Double?, languageCode: String?, tags: [String], inboxDate: Date?) throws -> KnowledgeItem
     func fetchItem(id: UUID) throws -> KnowledgeItem?
     func allItems() throws -> [KnowledgeItem]
+    func removeFromInbox(_ item: KnowledgeItem) throws
+    func updateItem(_ item: KnowledgeItem, title: String?, bodyText: String?, tags: [String]?) throws
 }
 
 // MARK: - ProjectDerivedItemServiceProtocol
@@ -44,6 +47,10 @@ protocol ProjectDerivedItemServiceProtocol: AnyObject {
     func updateStatus(_ item: ProjectDerivedItem, to status: ProjectDerivedStatus) throws
     func updateTask(_ item: ProjectDerivedItem, title: String?, ownerName: String?, priority: TaskPriority?, dueAt: Date?) throws
     func delete(_ item: ProjectDerivedItem) throws
+    func deleteTask(_ item: ProjectDerivedItem) throws
+    func tasks(for projectID: UUID) throws -> [ProjectDerivedItem]
+    func createConnection(title: String, projectID: UUID, fromDerivedID: UUID, toDerivedID: UUID, edgeType: EdgeType, provenanceItemID: UUID?) throws -> ProjectDerivedItem
+    func fetchSynthesis(for projectID: UUID) throws -> [ProjectDerivedItem]
 }
 
 // MARK: - GraphEdgeServiceProtocol
@@ -56,6 +63,8 @@ protocol GraphEdgeServiceProtocol: AnyObject {
     func edges(from nodeID: UUID) throws -> [GraphEdge]
     func edges(to nodeID: UUID) throws -> [GraphEdge]
     func neighborhood(of nodeID: UUID, radius: Int) throws -> [GraphEdge]
+    func recentEdges(limit: Int) throws -> [GraphEdge]
+    func deleteEdge(_ edge: GraphEdge) throws
 }
 
 extension GraphEdgeServiceProtocol {

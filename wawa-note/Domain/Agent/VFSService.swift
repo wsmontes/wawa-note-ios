@@ -1174,14 +1174,14 @@ enum VFSService {
         return "{}"
     }
 
-    private static func formatTaskJSON(_ t: TaskItem) -> String {
+    private static func formatTaskJSON(_ t: ProjectDerivedItem) -> String {
         var dict: [String: Any] = [
             "id": t.id.uuidString, "title": t.title,
             "status": t.statusRaw, "priority": t.priorityRaw
         ]
         if let owner = t.ownerName { dict["owner"] = owner }
         if let due = t.dueAt { dict["dueAt"] = due.ISO8601Format() }
-        if let notes = t.notes { dict["notes"] = notes }
+        if let body = t.bodyJSON { dict["body"] = body }
         if let data = try? JSONSerialization.data(withJSONObject: dict, options: .prettyPrinted),
            let json = String(data: data, encoding: .utf8) { return json }
         return "{}"
@@ -1267,16 +1267,16 @@ enum VFSService {
         try? context.modelContext.save()
     }
 
-    static func updateTaskFromJSON(_ task: TaskItem, jsonText: String, context: ToolContext) throws {
+    static func updateTaskFromJSON(_ task: ProjectDerivedItem, jsonText: String, context: ToolContext) throws {
         guard let data = jsonText.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw VFSError.invalidJSON
         }
         let svc = context.services.derived
-        var newStatus: TaskStatus?
+        var newStatus: ProjectDerivedStatus?
         if let s = json["status"] as? String {
-            guard let status = TaskStatus(rawValue: s) else {
-                throw VFSError.invalidField("status", s, TaskStatus.allCases.map(\.rawValue))
+            guard let status = ProjectDerivedStatus(rawValue: s) else {
+                throw VFSError.invalidField("status", s, ProjectDerivedStatus.allCases.map(\.rawValue))
             }
             newStatus = status
         }
@@ -1289,9 +1289,7 @@ enum VFSService {
         }
         let newTitle = json["title"] as? String
         let newOwner = json["owner"] as? String
-        if let v = json["notes"] as? String { task.notes = v }
-        if let v = json["sourceItemID"] as? String, let sid = UUID(uuidString: v) { task.sourceItemID = sid }
-        if let v = json["confidence"] as? Double { task.confidence = v }
+        if let v = json["notes"] as? String { /* ProjectDerivedItem has no notes — stored in bodyJSON */ }
         var newDue: Date?
         if let dueStr = json["due"] as? String ?? json["dueAt"] as? String {
             let fmts: [ISO8601DateFormatter] = {

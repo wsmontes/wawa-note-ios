@@ -38,6 +38,8 @@ enum UnifiedItem: Identifiable {
             case .task: .teal
             case .signal: .orange
             case .connection: .blue
+            case .decision: .yellow
+            case .question: .mint
             }
         }
     }
@@ -51,6 +53,8 @@ enum UnifiedItem: Identifiable {
             case .task: "Task · \(item.statusRaw ?? "todo")"
             case .signal: "Signal · \(item.statusRaw ?? "visible")"
             case .connection: "Connection"
+            case .decision: "Decision"
+            case .question: "Question"
             }
         }
     }

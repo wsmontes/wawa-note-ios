@@ -32,12 +32,14 @@ final class HomeViewModel: ObservableObject {
     private var contentPipeline: ContentPipelineService?
     private var coordinator: RecordingCoordinator?
     private var processingQueue: ProcessingQueueService?
+    var services: ServiceContainer?
 
-    func configure(modelContext: ModelContext, contentPipeline: ContentPipelineService, coordinator: RecordingCoordinator, processingQueue: ProcessingQueueService? = nil) {
+    func configure(modelContext: ModelContext, contentPipeline: ContentPipelineService, coordinator: RecordingCoordinator, processingQueue: ProcessingQueueService? = nil, services: ServiceContainer? = nil) {
         self.modelContext = modelContext
         self.contentPipeline = contentPipeline
         self.coordinator = coordinator
         self.processingQueue = processingQueue
+        self.services = services
     }
 
     // MARK: Import
@@ -167,7 +169,7 @@ final class HomeViewModel: ObservableObject {
         let itemId = await MainActor.run {
             let item = coord.createItemFromImport(title: meta.suggestedTitle, date: meta.creationDate ?? Date(), duration: meta.duration)
             if let target = targetProjectForImport, let item {
-                try? services.projects.addItem(item.id, to: target.id)
+                try? services?.projects.addItem(item.id, to: target.id)
             }
             return item?.id
         }
@@ -191,7 +193,7 @@ final class HomeViewModel: ObservableObject {
                 modelContext.insert(item)
                 try? modelContext.save()
                 if let t = targetProjectForImport {
-                    try? services.projects.addItem(item.id, to: t.id)
+                    try? services?.projects.addItem(item.id, to: t.id)
                 }
                 processingQueue?.enqueue(itemID: item.id, projectID: targetProjectForImport?.id, trigger: .newCapture)
             }
@@ -802,7 +804,7 @@ struct HomeView: View {
                 )
                 if item.bodyText != nil {
                     var prov = item.provenance
-                    prov.mark(field: "bodyText", origin: .system)
+                    prov.mark(field: "bodyText", origin: FieldOrigin.system)
                     item.fieldProvenanceJSON = prov.encode()
                 }
             }
@@ -814,7 +816,7 @@ struct HomeView: View {
                 item.bodyText = await recognizeText(from: image)
                 if item.bodyText != nil {
                     var prov = item.provenance
-                    prov.mark(field: "bodyText", origin: .system)
+                    prov.mark(field: "bodyText", origin: FieldOrigin.system)
                     item.fieldProvenanceJSON = prov.encode()
                 }
             }
@@ -834,6 +836,7 @@ struct ScrollingWaveformView: View {
     let level: Float; let isRunning: Bool
     @State private var offset: CGFloat = 0; @State private var timer: Timer?
 
+    @EnvironmentObject private var services: ServiceContainer
     var body: some View {
         TimelineView(.animation) { _ in
             Canvas { context, size in
@@ -973,7 +976,7 @@ final class ScannerViewModel: ObservableObject {
         if auth.canModify(field: "bodyText", of: item, by: .system) {
             item.bodyText = contentParts.joined(separator: "\n\n---\n\n")
             var prov = item.provenance
-            prov.mark(field: "bodyText", origin: .system)
+            prov.mark(field: "bodyText", origin: FieldOrigin.system)
             item.fieldProvenanceJSON = prov.encode()
         }
 
@@ -1032,6 +1035,7 @@ struct ProjectPickerForItemView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var processingQueue: ProcessingQueueService
 
+    @EnvironmentObject private var services: ServiceContainer
     var body: some View {
         NavigationStack {
             List {

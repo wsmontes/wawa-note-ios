@@ -3,7 +3,7 @@ import SwiftData
 // Related JIRA: KAN-12, KAN-64
 
 
-struct ProjectExportActions {
+@MainActor struct ProjectExportActions {
     let project: Project
     let modelContext: ModelContext
     let services: ServiceContainer

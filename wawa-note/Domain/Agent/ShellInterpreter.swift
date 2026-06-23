@@ -427,7 +427,7 @@ enum ShellInterpreter {
         case .projectItems(let slug, let pid):
             let items = (try? ctx.services.projects.items(in: pid)) ?? []
             var filtered = items
-            if let status = statusFilter { filtered = filtered.filter { $0.statusRaw == status } }
+            if let status = statusFilter { filtered = filtered.filter { $0.statusRaw ?? "todo" == status } }
             if let type = typeFilter { filtered = filtered.filter { $0.typeRaw == type } }
             if let tag = tagFilter { filtered = filtered.filter { $0.tags.contains(tag) } }
             if sinceDays > 0 {
@@ -442,25 +442,25 @@ enum ShellInterpreter {
                 lines.append(VFSService.formatItemLine(item, index: 0, long: long))
                 let hasTrans = FileManager.default.fileExists(atPath: ctx.fileStore.itemDirectoryURL(for: item.id).appendingPathComponent("transcript.json").path)
                 let hasAnalysis = FileManager.default.fileExists(atPath: ctx.fileStore.itemDirectoryURL(for: item.id).appendingPathComponent("analysis.json").path)
-                cards.append(.itemCard(ItemCardData(itemID: item.id.uuidString, title: item.title, type: item.typeRaw, status: item.statusRaw, durationSeconds: item.durationSeconds, projectSlug: slug, hasTranscript: hasTrans, hasAnalysis: hasAnalysis)))
+                cards.append(.itemCard(ItemCardData(itemID: item.id.uuidString, title: item.title, type: item.typeRaw, status: item.statusRaw ?? "draft", durationSeconds: item.durationSeconds, projectSlug: slug, hasTranscript: hasTrans, hasAnalysis: hasAnalysis)))
             }
             return ok(lines.joined(separator: "\n"), blocks: cards)
 
         case .projectTasks(let slug, let pid):
             var tasks = (try? ctx.services.derived.tasks(for: pid)) ?? []
-            if let status = statusFilter, status != "true" { tasks = tasks.filter { $0.statusRaw == status } }
+            if let status = statusFilter, status != "true" { tasks = tasks.filter { $0.statusRaw ?? "todo" == status } }
             tasks = Array(tasks.prefix(limit))
             if tasks.isEmpty { return ok("No tasks", blocks: [.text("No tasks yet. Use touch tasks/ --title \"...\" to create one.")]) }
             var lines = ["\(tasks.count) tasks:"]
             var cards: [ChatBlock] = []
             for t in tasks {
-                let check = t.statusRaw == "done" ? "☑" : "☐"
+                let check = t.statusRaw ?? "todo" == "done" ? "☑" : "☐"
                 let prioEmoji = t.priorityRaw == "critical" ? "🔴" : t.priorityRaw == "high" ? "🟠" : t.priorityRaw == "medium" ? "🔵" : "⚪"
                 let owner = t.ownerName.map { " @\($0)" } ?? ""
                 lines.append("  \(check) \(prioEmoji) \(t.title)\(owner)")
                 cards.append(.taskCard(TaskCardData(
-                    taskID: t.id.uuidString, title: t.title, status: t.statusRaw, priority: t.priorityRaw,
-                    owner: t.ownerName, projectSlug: slug, needsConfirmation: t.statusRaw != "done"
+                    taskID: t.id.uuidString, title: t.title, status: t.statusRaw ?? "todo", priority: t.priorityRaw ?? "medium",
+                    owner: t.ownerName, projectSlug: slug, needsConfirmation: t.statusRaw ?? "todo" != "done"
                 )))
             }
             return ok(lines.joined(separator: "\n"), blocks: cards)
@@ -787,14 +787,15 @@ enum ShellInterpreter {
         // Tasks directory
         if case .projectTasks(_, let pid) = vpath {
             var tasks = (try? ctx.services.derived.tasks(for: pid)) ?? []
-            if let s = statusFilter, s != "true" { tasks = tasks.filter { $0.statusRaw == s } }
+            if let s = statusFilter, s != "true" { tasks = tasks.filter { $0.statusRaw ?? "todo" == s } }
             tasks = Array(tasks.prefix(limit))
             if tasks.isEmpty { return ok("No matching tasks") }
             var lines = ["Found \(tasks.count) tasks:", ""]
             var cards: [ChatBlock] = []
             for t in tasks {
-                lines.append("  ☐ \(t.title)  [\(t.statusRaw)]")
-                cards.append(.taskCard(TaskCardData(taskID: t.id.uuidString, title: t.title, status: t.statusRaw, priority: t.priorityRaw, owner: t.ownerName, projectSlug: ctx.activeProjectSlug, needsConfirmation: t.statusRaw != "done")))
+                let raw = t.statusRaw ?? "todo"
+                lines.append("  ☐ \(t.title)  [\(raw)]")
+                cards.append(.taskCard(TaskCardData(taskID: t.id.uuidString, title: t.title, status: raw, priority: t.priorityRaw ?? "medium", owner: t.ownerName, projectSlug: ctx.activeProjectSlug, needsConfirmation: raw != "done")))
             }
             return ok(lines.joined(separator: "\n"), blocks: cards)
         }
@@ -813,7 +814,7 @@ enum ShellInterpreter {
         var results = allItems
         if let tag = tagFilter { results = results.filter { $0.tags.contains(tag) } }
         if let type = typeFilter { results = results.filter { $0.typeRaw == type } }
-        if let status = statusFilter { results = results.filter { $0.statusRaw == status } }
+        if let status = statusFilter { results = results.filter { $0.statusRaw ?? "todo" == status } }
         if let pslug = projectFilter {
             let allProjects = (try? ctx.services.projects.allProjects()) ?? []
             if let proj = allProjects.first(where: { VFSService.projectMatches($0, dirName: pslug) }) { results = results.filter { $0.projectID == proj.id } }
@@ -841,7 +842,7 @@ enum ShellInterpreter {
         for item in results {
             let pn = item.projectID.flatMap { pid in (try? ctx.services.projects.fetch(id: pid)).map { VFSService.safeDirName($0) } } ?? "-"
             lines.append("  \(VFSService.typeIcon(item.typeRaw)) \(item.title)  project=\(pn)")
-            cards.append(.itemCard(ItemCardData(itemID: item.id.uuidString, title: item.title, type: item.typeRaw, status: item.statusRaw, durationSeconds: item.durationSeconds, projectSlug: pn, hasTranscript: false, hasAnalysis: false)))
+            cards.append(.itemCard(ItemCardData(itemID: item.id.uuidString, title: item.title, type: item.typeRaw, status: item.statusRaw ?? "draft", durationSeconds: item.durationSeconds, projectSlug: pn, hasTranscript: false, hasAnalysis: false)))
         }
         return ok(lines.joined(separator: "\n"), blocks: cards)
     }
@@ -943,7 +944,7 @@ enum ShellInterpreter {
             }
             // Create item
             let svc = ctx.services.items
-            guard let item = try? svc.createItem(type: kt, title: t, bodyText: body, tags: tags, inboxDate: Date()) else {
+            guard let item = try? svc.createItem(type: kt, title: t, bodyText: body, folderID: nil, durationSeconds: nil, languageCode: nil, tags: tags, inboxDate: Date()) else {
                 return shellErr("touch: failed to create item — database error")
             }
             // Set type-specific fields
@@ -961,7 +962,7 @@ enum ShellInterpreter {
             let loc = proj != nil ? "/projects/\(VFSService.safeDirName(proj!))/items/" : "/inbox/"
             let card = ItemCardData(
                 itemID: item.id.uuidString, title: t, type: type,
-                status: item.statusRaw, durationSeconds: item.durationSeconds,
+                status: item.statusRaw ?? "draft", durationSeconds: item.durationSeconds,
                 projectSlug: proj.map { VFSService.safeDirName($0) },
                 hasTranscript: false, hasAnalysis: false
             )
@@ -982,7 +983,7 @@ enum ShellInterpreter {
             // Create a new project: touch /projects/ --name "Project Name" --summary "..."
             guard let name = cmd.flags["name"] else { return shellErr("touch: --name is required to create a project") }
             let summary = cmd.flags["summary"]
-            let project = try? ctx.services.projects.create(name: name, summary: summary)
+            let project = try? ctx.services.projects.create(name: name, template: nil, sourceItemIDs: [], origin: FieldOrigin.llm)
             guard let p = project else { return shellErr("touch: failed to create project") }
             ctx.activeProjectID = p.id; ctx.activeProjectSlug = p.slug; ctx.activeProjectName = p.name
             return ok("✅ Created project: \(p.name) (\(p.slug))")
@@ -996,13 +997,13 @@ enum ShellInterpreter {
                 AppLog.agent.warning("touch: invalid priority '\(priority)' — valid: \(valid). Using medium.")
             }
             let due = dueStr.flatMap { ISO8601DateFormatter().date(from: $0) }
-            guard let task = try? ctx.services.derived.create(
-                title: t, projectID: pid, priority: prio,
-                ownerName: owner, dueAt: due, createdBy: .llm) else {
+            guard let task = try? ctx.services.derived.createTask(
+                title: t, projectID: pid, sourceItemID: nil, priority: prio,
+                ownerName: owner, dueAt: due, bodyJSON: nil) else {
                 return shellErr("touch: failed to create task — database error")
             }
             let card = TaskCardData(
-                taskID: task.id.uuidString, title: t, status: task.statusRaw, priority: priority,
+                taskID: task.id.uuidString, title: t, status: task.statusRaw ?? "todo", priority: priority,
                 owner: owner, projectSlug: ctx.activeProjectSlug, needsConfirmation: true
             )
             return ok("✅ Created: \(t) [\(priority)]",
@@ -1042,9 +1043,9 @@ enum ShellInterpreter {
             // If path ends with a filename-like segment, try to create anyway in current context
             if let t = fallbackTitle, let pid = ctx.activeProjectID {
                 let prio = TaskPriority(rawValue: priority) ?? .medium
-                guard let task = try? ctx.services.derived.create(
-                    title: t, projectID: pid, priority: prio,
-                    ownerName: owner, dueAt: nil, createdBy: .llm
+                guard let task = try? ctx.services.derived.createTask(
+                    title: t, projectID: pid, sourceItemID: nil, priority: prio,
+                    ownerName: owner, dueAt: nil, bodyJSON: nil
                 ) else {
                     return shellErr("touch: failed to create task — database error")
                 }
@@ -1335,7 +1336,7 @@ enum ShellInterpreter {
             let preview = tasks.prefix(count)
             var lines = ["/projects/\(slug)/tasks/ (first \(preview.count) of \(tasks.count))", ""]
             for t in preview {
-                lines.append("\(t.id.uuidString).json  [\(t.statusRaw)]  \(t.title)")
+                lines.append("\(t.id.uuidString).json  [\(t.statusRaw ?? "todo")]  \(t.title)")
             }
             return ok(lines.joined(separator: "\n"))
 
@@ -1368,13 +1369,13 @@ enum ShellInterpreter {
         switch vpath {
         case .projectItems(_, let pid):
             var items = (try? ctx.services.projects.items(in: pid)) ?? []
-            if let s = statusFilter { items = items.filter { $0.statusRaw == s } }
+            if let s = statusFilter { items = items.filter { $0.statusRaw ?? "todo" == s } }
             if let t = typeFilter { items = items.filter { $0.typeRaw == t } }
             return ok("\(items.count) item(s)")
 
         case .projectTasks(_, let pid):
             var tasks = (try? ctx.services.derived.tasks(for: pid)) ?? []
-            if let s = statusFilter { tasks = tasks.filter { $0.statusRaw == s } }
+            if let s = statusFilter { tasks = tasks.filter { $0.statusRaw ?? "todo" == s } }
             return ok("\(tasks.count) task(s)")
 
         case .inbox:
@@ -1967,6 +1968,7 @@ enum ShellInterpreter {
                     let svc = ctx.services.items
                     if let note = try? svc.createItem(type: .note, title: "Vision: \(item.title)",
                         bodyText: "# Image Analysis\n\n**Question:** \(question)\n\n\(resultText)",
+                        folderID: nil, durationSeconds: nil, languageCode: nil,
                         tags: ["vision", "ai-analysis"], inboxDate: Date()) {
                         if let pid = item.projectID { try? ctx.services.projects.addItem(note.id, to: pid) }
                         AppLog.general.info("Vision: saved result as note \(note.title)")
@@ -2042,11 +2044,12 @@ enum ShellInterpreter {
             let pSvc = ctx.services.projects
             let items = (try? pSvc.items(in: pid)) ?? []
             let tasks = (try? ctx.services.derived.tasks(for: pid)) ?? []
-            let output = ProjectExportService().exportMarkdown(project: project, items: items, tasks: tasks, edges: [])
+            let taskRows = tasks.map { "\($0.title) (\($0.statusRaw ?? "todo"))" }
+            let output = ProjectExportService().exportMarkdown(project: project, items: items, tasks: taskRows, edges: [])
             let dir = ctx.fileStore.exportsDirectoryURL(for: pid)
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let url = dir.appendingPathComponent("project_export.\(ext)")
-            try? output.write(to: url, atomically: true, encoding: .utf8)
+            try? output.data(using: .utf8)?.write(to: url)
             return ok("Project exported to \(url.path) (\(items.count) items, \(tasks.count) tasks)")
         }
         return shellErr("export: '\(target)' not found as item or project ID")

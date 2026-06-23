@@ -279,4 +279,8 @@ final class ProjectDerivedItemService {
             }
         }
     }
+
+    // Protocol conformance helpers
+    func deleteTask(_ item: ProjectDerivedItem) throws { try delete(item) }
+    func tasks(for projectID: UUID) throws -> [ProjectDerivedItem] { try fetch(for: projectID, type: .task) }
 }
