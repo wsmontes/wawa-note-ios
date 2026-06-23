@@ -15,16 +15,48 @@ struct ModelInfo: Sendable, Codable {
     let recommendedFor: [String]?  // e.g. ["chat", "analysis", "transcription"]
 }
 
+/// Protocol abstracting an AI language model provider (OpenAI, Anthropic, Gemini, or compatible).
+///
+/// Implementations handle provider-specific API formats, authentication, streaming,
+/// and model discovery. The app uses `ProviderRouter` to resolve the active provider
+/// based on user configuration, offline state, and budget constraints.
+///
+/// ## Implementations
+/// - `OpenAICompatibleProvider` — OpenAI, Ollama, LM Studio, OpenRouter, LocalAI, DeepSeek
+/// - `AnthropicProvider` — Claude models via Anthropic Messages API
+/// - `GeminiProvider` — Google Gemini models
+///
+/// ## Related Docs
+/// - `docs/PROVIDER_ROUTING.md` — routing, budget, metrics, circuit breaker
+/// - `docs/API_PROVIDER_CONTRACTS.md` — contracts and capabilities
 protocol AIProvider: Sendable {
+    /// Unique identifier for this provider instance.
     var id: String { get }
+    /// Human-readable name shown in settings and model picker.
     var displayName: String { get }
+    /// The provider family (openai, anthropic, gemini, openaiCompatible).
     var providerType: ProviderType { get }
+    /// Capabilities this provider supports (streaming, JSON mode, tools, etc.).
     var capabilities: AIProviderCapabilities { get }
 
+    /// Send a chat completion request and receive the full response.
+    /// - Parameter request: The chat request with model, messages, and parameters.
+    /// - Returns: The completed response with content and usage metadata.
     func send(_ request: AIRequest) async throws -> AIResponse
+
+    /// Generate embeddings for the given text.
+    /// - Parameters:
+    ///   - text: The text to embed.
+    ///   - model: The embedding model to use.
+    /// - Returns: A vector of floating-point values.
     func embed(_ text: String, model: String) async throws -> [Float]
+
+    /// Fetch available model names from the provider API.
+    /// - Returns: Array of model identifier strings.
     func fetchModels() async throws -> [String]
-    /// Enriched model list with metadata. Default implementation calls fetchModels() and wraps.
+
+    /// Enriched model list with metadata. Default implementation calls `fetchModels()` and wraps.
+    /// - Returns: Array of `ModelInfo` with context window, recommendations, and creation dates.
     func fetchModelInfos() async throws -> [ModelInfo]
 }
 

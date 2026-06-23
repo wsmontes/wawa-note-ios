@@ -48,25 +48,45 @@ typealias LiveTranscriptionStream = AsyncThrowingStream<LiveTranscriptionResult,
 
 // MARK: - Engine Protocol
 
+/// Protocol abstracting speech-to-text transcription engines.
+///
+/// Supports both live (buffer-based) and file-based (batch) transcription.
+/// Engines declare their capabilities upfront so the dispatch logic in
+/// `ContentExtractionService` can route to the best available engine.
+///
+/// ## Implementations
+/// - `AppleSpeechTranscriptionEngine` — on-device SFSpeechRecognizer (supports live + file)
+/// - `RemoteTranscriptionEngine` — cloud Whisper API (file only)
+///
+/// ## Related Docs
+/// - `docs/CONTENT_PIPELINE.md` — where transcription fits in the pipeline
+/// - `docs/AUDIO_CAPTURE_ENGINE.md` — audio capture before transcription
 protocol TranscriptionEngine: Sendable {
+    /// Unique identifier for this engine instance.
     var id: String { get }
+    /// Human-readable name shown in settings.
     var displayName: String { get }
+    /// Whether a cancellation has been requested.
     var isCancelled: Bool { get }
+    /// What this engine can do (live, file, on-device, locales, model download).
     var capabilities: TranscriptionCapabilities { get }
 
     /// Transcribe a pre-recorded audio file.
-    /// - Parameter meetingId: the KnowledgeItem ID this transcript belongs to.
+    /// - Parameter audioFileURL: Path to the audio file (PCM WAV or M4A).
+    /// - Parameter meetingId: The KnowledgeItem ID this transcript belongs to.
+    /// - Returns: A `Transcript` with segments, language, and confidence scores.
     func transcribeFile(_ audioFileURL: URL, meetingId: UUID) async throws -> Transcript
 
     /// Transcribe a live audio stream (buffer-based).
     /// Returns an async stream of volatile + final results.
-    /// Guideline: "Diferencie resultado volátil de resultado finalizado."
+    /// Volatile results update in real-time; final results are immutable.
     func transcribeLive(from audioFileURL: URL) -> LiveTranscriptionStream
 
     /// Cancel an in-progress transcription.
     func cancel()
 
-    /// Check engine availability (model, permission, locale).
+    /// Check engine availability (model downloaded, permission granted, locale supported).
+    /// - Returns: Availability status with reason if unavailable.
     func checkAvailability() -> LocalTranscriptionAvailability
 
     /// Ensure prerequisites are met (model download, permission, etc).
