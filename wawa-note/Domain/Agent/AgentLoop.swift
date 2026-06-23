@@ -378,10 +378,20 @@ final class AgentLoop: @unchecked Sendable {
             timeoutSeconds: 120
         )
 
+        var errorReason: String?
         for try await event in stream {
-            if case .textDelta(let d) = event { fullOutput += d }
+            switch event {
+            case .textDelta(let d): fullOutput += d
+            case .error(let e): errorReason = e.localizedDescription
+            case .truncated(let reason, _):
+                if fullOutput.isEmpty { errorReason = "Sub-agent truncated: \(reason)" }
+            default: break
+            }
         }
 
+        if fullOutput.isEmpty, let error = errorReason {
+            return "[Sub-agent failed: \(error)]"
+        }
         return fullOutput
     }
 

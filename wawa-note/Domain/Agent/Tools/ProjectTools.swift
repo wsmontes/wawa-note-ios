@@ -47,12 +47,12 @@ struct SynthesizeProjectTool: AgentTool {
             )
         }
 
-        let sections: [SynthesisSection] = (arguments["sections"] as? [[String: Any]])?.compactMap { dict in
+        let sections: [SynthesisSection] = (arguments["sections"] as? [[String: Any]])?.enumerated().compactMap { idx, dict in
             guard let title = dict["title"] as? String,
                   let renderType = dict["renderType"] as? String,
                   let content = dict["content"] as? String
             else { return nil }
-            return SynthesisSection(id: UUID().uuidString, title: title, renderType: renderType, content: content, order: 0)
+            return SynthesisSection(id: UUID().uuidString, title: title, renderType: renderType, content: content, order: idx)
         } ?? []
 
         let metrics: [SynthesisMetric] = (arguments["metrics"] as? [[String: Any]])?.compactMap { dict in

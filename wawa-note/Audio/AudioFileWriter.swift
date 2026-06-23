@@ -148,7 +148,7 @@ final class AudioFileWriter: @unchecked Sendable {
             guard let wb = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameLength)) else { return }
             wb.frameLength = AVAudioFrameCount(frameLength)
             if let dest = wb.floatChannelData {
-                dest[0].initialize(from: samples, count: frameLength)
+                dest[0].assign(from: samples, count: frameLength)
             }
             self._writeWithRetry(buffer: wb, file: file)
         }
@@ -221,7 +221,9 @@ final class AudioFileWriter: @unchecked Sendable {
 
     /// Check if a crash recovery checkpoint exists from a previous session.
     /// Returns (meetingId, segmentIndex, sampleRate) if found, nil otherwise.
-    /// Only recovers checkpoints less than 1 hour old.
+    /// Recovers checkpoints less than 24 hours old (covers overnight scenarios).
+    private static let maxCheckpointAge: TimeInterval = 86400 // 24 hours
+
     static func loadCrashCheckpoint(fileStore: FileArtifactStore = FileArtifactStore()) -> (UUID, Int, Double)? {
         let url = fileStore.configsDirectoryURL().appendingPathComponent("recording_checkpoint.json")
         let bakURL = url.appendingPathExtension("BAK")
@@ -237,9 +239,11 @@ final class AudioFileWriter: @unchecked Sendable {
                   let sampleRate = dict["sampleRate"] as? Double,
                   let timestamp = dict["timestamp"] as? TimeInterval else { continue }
 
-            // Only recover if checkpoint is less than 1 hour old
-            guard Date().timeIntervalSince1970 - timestamp < 3600 else {
-                AppLog.audio.info("Checkpoint expired: \(Int((Date().timeIntervalSince1970 - timestamp) / 60))min old — discarding")
+            // Recover checkpoints up to 24h old — covers overnight and
+            // morning-after scenarios where the user records, the app crashes,
+            // and they don't reopen until the next day.
+            guard Date().timeIntervalSince1970 - timestamp < maxCheckpointAge else {
+                AppLog.audio.info("Checkpoint expired: \(Int((Date().timeIntervalSince1970 - timestamp) / 3600))h old — discarding")
                 return nil
             }
 

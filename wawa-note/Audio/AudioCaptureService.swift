@@ -514,12 +514,13 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // a new one. Bluetooth handoffs emit multiple notifications (route change
         // + engine config change) that would otherwise start overlapping rebuilds.
         rebuildTask?.cancel()
-        rebuildTask = Task { [weak self] in
+        rebuildTask = Task { @MainActor [weak self] in
             await self?._rebuildEngineForCurrentRoute(forceBuiltInMic: forceBuiltInMic, reason: reason)
         }
         await rebuildTask?.value
     }
 
+    @MainActor
     private func _rebuildEngineForCurrentRoute(forceBuiltInMic: Bool, reason: String) async {
         let wasRecording = state == .recording
         guard state == .recording || state == .paused else {
@@ -615,7 +616,12 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         currentInputPortName = portName
         currentInputPortIcon = sessionManager.currentInputIcon
         if wasRecording { startTimer() }
-        reRegisterEngineObserver(for: self.engine!)
+        guard let engine = self.engine else {
+            AppLog.audio.error("rebuildEngine(\(reason)): engine nil after build — stopping")
+            stopRecording()
+            return
+        }
+        reRegisterEngineObserver(for: engine)
         AppLog.event("audio", "rebuildEngine(\(reason)): recording continued on \(portName) (\(portType)) @ \(Int(sampleRate))Hz")
     }
 
@@ -626,12 +632,13 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private func rebuildEngineLightweight(reason: String) async {
         // Serialize with full rebuilds — same Task chain prevents overlap.
         rebuildTask?.cancel()
-        rebuildTask = Task { [weak self] in
+        rebuildTask = Task { @MainActor [weak self] in
             await self?._rebuildEngineLightweight(reason: reason)
         }
         await rebuildTask?.value
     }
 
+    @MainActor
     private func _rebuildEngineLightweight(reason: String) async {
         let wasRecording = state == .recording
         guard state == .recording || state == .paused else {
@@ -657,13 +664,19 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         currentInputPortName = sessionManager.currentInputPortName
         currentInputPortIcon = sessionManager.currentInputIcon
         if wasRecording { startTimer() }
-        reRegisterEngineObserver(for: self.engine!)
+        guard let engine = self.engine else {
+            AppLog.audio.error("rebuildEngineLightweight(\(reason)): engine nil after build — stopping")
+            stopRecording()
+            return
+        }
+        reRegisterEngineObserver(for: engine)
         AppLog.event("audio", "rebuildEngineLightweight(\(reason)): engine replaced — \(currentInputPortName)")
     }
 
     /// Build a new AVAudioEngine, install the tap, prepare, and start.
     /// Returns true on success. On failure, cleans up and calls stopRecording().
     @discardableResult
+    @MainActor
     private func buildAndStartEngine(reason: String) -> Bool {
         let sampleRate = sessionManager.sampleRate > 0 ? sessionManager.sampleRate : 44100
         let engine = AVAudioEngine()

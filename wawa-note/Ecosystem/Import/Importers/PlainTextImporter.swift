@@ -18,7 +18,7 @@ struct PlainTextImporter: FormatImporter {
     }
 
     func importFromURL(_ url: URL) async throws -> ImportResult {
-        let text = try String(contentsOf: url, encoding: .utf8)
+        let text = try await Task.detached { try String(contentsOf: url, encoding: .utf8) }.value
         let title = url.deletingPathExtension().lastPathComponent
         let firstLine = text.split(separator: "\n").first.map(String.init) ?? title
 

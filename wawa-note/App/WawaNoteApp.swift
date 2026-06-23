@@ -33,6 +33,8 @@ struct WawaNoteApp: App {
             Person.self,
             GraphEdge.self,
             Entity.self,
+            TaskItem.self,
+            AgentSuggestion.self,
             QueueEntry.self,
             ProjectFrame.self,
             ChangeRecord.self,
@@ -64,14 +66,7 @@ struct WawaNoteApp: App {
         sharedEventStore = EKEventStore()
         calendarSyncService = CalendarSyncService(eventStore: sharedEventStore)
 
-        // Restore anarlog sync bookmark and trigger initial scan
-        let syncSvc = AnarlogSyncService()
-        syncSvc.modelContainer = modelContainer
-        if syncSvc.hasWatchedFolder {
-            Task { @MainActor in
-                await syncSvc.scanAndImport()
-            }
-        }
+        // Anarlog: import/export only (KAN-258)
 
         // Run one-time data migrations via centralized registry
         let migrationContext = ModelContext(modelContainer)
@@ -232,8 +227,12 @@ struct WawaNoteApp: App {
                 let allItems = try ctx.fetch(FetchDescriptor<KnowledgeItem>())
                 // Exclude trash items — matches InboxView.needsReviewCount logic
                 let trashFolderID = (try? TrashService(context: ctx).trashFolder())?.id
+                /// Items needing review: in inbox, not trashed, not yet analyzed.
+                /// Matches InboxView.needsReviewCount so badge reflects visible content.
                 let inboxCount = allItems.filter { item in
-                    item.inboxDate != nil && (trashFolderID == nil || item.folderID != trashFolderID)
+                    item.inboxDate != nil
+                    && item.analysisProviderId == nil
+                    && (trashFolderID == nil || item.folderID != trashFolderID)
                 }.count
                 try? await UNUserNotificationCenter.current().setBadgeCount(inboxCount)
             } catch {

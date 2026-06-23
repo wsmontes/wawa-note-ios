@@ -23,7 +23,11 @@ struct ContentView: View {
     @StateObject private var chatViewModel = ChatViewModel()
     @Query(filter: #Predicate<KnowledgeItem> { $0.inboxDate != nil }) private var inboxItems: [KnowledgeItem]
 
-    private var inboxPendingCount: Int { inboxItems.count }
+    /// Items needing review: in inbox AND not yet analyzed.
+    /// Matches InboxView default "Needs Review" filter count.
+    private var inboxPendingCount: Int {
+        inboxItems.filter { $0.analysisProviderId == nil }.count
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {

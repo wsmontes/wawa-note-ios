@@ -13,14 +13,17 @@ final class JSONImporter: FormatImporter, @unchecked Sendable {
     }
 
     func canRead(data: Data) -> Bool {
-        if let str = String(data: data.prefix(100), encoding: .utf8) {
-            return str.trimmingCharacters(in: .whitespaces).hasPrefix("{")
-        }
-        return false
+        // Probe for Wawa Note JSON structure to avoid claiming unrelated JSON files
+        guard let str = String(data: data.prefix(2048), encoding: .utf8) else { return false }
+        let trimmed = str.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("{") else { return false }
+        // Must contain at least one Wawa Note top-level key
+        let wawaKeys = ["\"version\"", "\"schema\"", "\"item\"", "\"meeting\"", "\"exportedAt\""]
+        return wawaKeys.contains { trimmed.contains($0) }
     }
 
     func importFromURL(_ url: URL) async throws -> ImportResult {
-        let data = try Data(contentsOf: url)
+        let data = try await Task.detached { try Data(contentsOf: url) }.value
         let decoder = JSONDecoder()
 
         struct ImportJSON: Codable {

@@ -37,7 +37,7 @@ struct KnowledgeDetailView: View {
     @State private var isAnalyzing = false
     @State private var analysisError: String?
     @State private var selectedModel: String = ""
-    @State private var selectedLocale = "pt-BR"
+    @State private var selectedLocale = "en-US"
     @State private var showLocalePicker = false
     @State private var isEditing = false
     @State private var editedTitle = ""
@@ -145,7 +145,7 @@ struct KnowledgeDetailView: View {
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.red.opacity(0.08))
+                    .background(.ultraThinMaterial)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .padding(.horizontal, 16)
                     .padding(.top, 12)
@@ -166,7 +166,7 @@ struct KnowledgeDetailView: View {
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.red.opacity(0.08))
+                    .background(.ultraThinMaterial)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .padding(.horizontal, 16)
                     .padding(.top, 12)
@@ -339,10 +339,7 @@ struct KnowledgeDetailView: View {
                             if let anarlogMD = try? AnarlogExporter().exportMarkdown(item: item) {
                                 ShareLink("Anarlog .md", item: anarlogMD)
                             }
-                            if let meetilyData = try? MeetilyExporter().exportJSON(item: item),
-                               let meetilyString = String(data: meetilyData, encoding: .utf8) {
-                                ShareLink("Meetily .json", item: meetilyString)
-                            }
+                            // Meetily export removed (KAN-258)
                             // Audio export — available even without transcript
                             if hasPlayableAudio, let url = audioPlaybackURL {
                                 ShareLink("Audio", item: url)
@@ -400,6 +397,13 @@ struct KnowledgeDetailView: View {
                 Task { @MainActor in
                     loadRawAnalysisJSON()
                     loadData()
+                    // If analysis ran but produced no visible results, surface a message
+                    if item.status == .analyzed || item.status == .failed,
+                       analysis == nil, rawAnalysisJSON.isEmpty {
+                        analysisError = "Analysis completed but no results were generated. The AI may have encountered an issue processing this item. Check Files for raw output."
+                    } else {
+                        analysisError = nil
+                    }
                 }
             }
         }
@@ -1613,7 +1617,7 @@ struct KnowledgeDetailView: View {
                         .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 8))
                 }
             }
-            .padding(12).background(Color.orange.opacity(0.06)).clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(12).background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 12))
             .padding(.horizontal, 16)
         }
     }
@@ -1701,12 +1705,12 @@ struct KnowledgeDetailView: View {
     // MARK: - Locale picker
 
     private let availableLocales: [(id: String, name: String)] = [
-        ("pt-BR", "Português (Brasil)"),
-        ("pt-PT", "Português (Portugal)"),
         ("en-US", "English (US)"),
-        ("es-ES", "Español"),
-        ("fr-FR", "Français"),
-        ("de-DE", "Deutsch"),
+        ("pt-BR", "Portuguese (Brazil)"),
+        ("pt-PT", "Portuguese (Portugal)"),
+        ("es-ES", "Spanish"),
+        ("fr-FR", "French"),
+        ("de-DE", "German"),
         ("it-IT", "Italiano"),
         ("ja-JP", "日本語"),
         ("zh-CN", "中文"),

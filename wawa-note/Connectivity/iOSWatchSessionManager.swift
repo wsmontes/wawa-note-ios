@@ -27,8 +27,8 @@ final class iOSWatchSessionManager: NSObject, WCSessionDelegate, @unchecked Send
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.coordinator.onStatusChange = { status in
-                self.sendStatus(status)
+            self.coordinator.onStatusChange = { [weak self] status in
+                self?.sendStatus(status)
             }
             self.sendStatus(self.coordinator.currentStatus())
         }

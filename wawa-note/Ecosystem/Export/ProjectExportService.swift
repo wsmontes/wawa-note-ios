@@ -467,7 +467,8 @@ final class InstanceExportService {
         }
         var dynAnalysis: DynamicAnalysisExport?
         if let d = try? store.readArtifact(DynamicAnalysis.self, fileName: "analysis.dynamic.json", meetingId: item.id) {
-            dynAnalysis = DynamicAnalysisExport(id: d.id.uuidString, providerId: d.providerId, model: d.model, schemaId: d.schemaId, resultsJSON: nil)
+            dynAnalysis = DynamicAnalysisExport(id: d.id.uuidString, providerId: d.providerId, model: d.model, schemaId: d.schemaId,
+                resultsJSON: (try? JSONEncoder().encode(d.results)).flatMap { String(data: $0, encoding: .utf8) })
         }
         var transcript: TranscriptExport?
         if let t = try? store.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id) {

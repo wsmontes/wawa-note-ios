@@ -93,11 +93,17 @@ final class LocationContextSensor: ContextSensor, @unchecked Sendable {
 private final class LocationDelegate: NSObject, CLLocationManagerDelegate {
     var onResult: ((CLLocation?, CLPlacemark?, Error?) -> Void)?
 
+    /// Retains CLGeocoder until its completion fires, preventing silent
+    /// cancellation if the geocoder is deallocated before the request completes.
+    private var activeGeocoder: CLGeocoder?
+
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.first, let callback = onResult else { return }
         onResult = nil
         let geocoder = CLGeocoder()
-        geocoder.reverseGeocodeLocation(location) { placemarks, error in
+        activeGeocoder = geocoder
+        geocoder.reverseGeocodeLocation(location) { [weak self] placemarks, error in
+            self?.activeGeocoder = nil
             callback(location, placemarks?.first, error)
         }
     }

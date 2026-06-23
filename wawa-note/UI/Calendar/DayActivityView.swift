@@ -339,7 +339,9 @@ struct DayActivityView: View {
                     Image(systemName: "chevron.right")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
+                        .frame(minWidth: 44, minHeight: 44)
                 }
+                .accessibilityLabel("View item: \(item.title)")
             }
         }
         .padding(12)

@@ -90,11 +90,16 @@ struct VADChunker {
 
             if combinedDuration <= maxDuration && gap < 1.0 {
                 // Merge: extend current to cover next
+                let duration = current.endTime - current.startTime
+                guard duration > 0 else {
+                    current = next  // zero-duration segment, replace with next
+                    continue
+                }
                 current = VADAudioSegment(
                     startTime: current.startTime,
                     endTime: next.endTime,
                     startFrame: current.startFrame,
-                    frameCount: AVAudioFrameCount((next.endTime - current.startTime) * Double(current.frameCount) / (current.endTime - current.startTime)),
+                    frameCount: AVAudioFrameCount((next.endTime - current.startTime) * Double(current.frameCount) / duration),
                     confidence: max(current.confidence, next.confidence)
                 )
             } else {

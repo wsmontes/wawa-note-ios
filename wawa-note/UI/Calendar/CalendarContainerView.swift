@@ -122,7 +122,7 @@ struct TimelineExplorerView: View {
                 Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
             }
             .padding(12)
-            .background(Color.blue.opacity(0.08))
+            .background(.thinMaterial)
             .padding(.horizontal, 16)
             .padding(.top, 8)
         }

@@ -34,10 +34,15 @@ struct PDFImporter: FormatImporter {
             bodyText: fullText.trimmingCharacters(in: .whitespacesAndNewlines)
         )
         item.isImported = true
-        item.importSourceURL = url.lastPathComponent
+        item.importSourceURL = url.absoluteString
 
         let pages = pdf.pageCount
-        let warnings: [String] = pages == 0 ? ["No text extracted from PDF"] : []
+        var warnings: [String] = []
+        if pages == 0 {
+            warnings.append("No pages in PDF")
+        } else if fullText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, pages > 0 {
+            warnings.append("PDF has \(pages) page(s) but no extractable text — may be image-only (try Vision OCR scan)")
+        }
 
         return ImportResult(knowledgeItem: item, artifacts: [:], warnings: warnings)
     }

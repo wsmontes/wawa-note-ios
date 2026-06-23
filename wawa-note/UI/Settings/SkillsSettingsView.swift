@@ -87,6 +87,7 @@ private struct SkillEditorView: View {
     let onSave: () -> Void
     let onReset: () -> Void
 
+    @Environment(\.dismiss) private var dismiss
     @State private var showResetConfirmation = false
 
     var body: some View {
@@ -175,7 +176,7 @@ private struct SkillEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { onSave() } // dismiss
+                Button("Cancel") { dismiss() }
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save", action: onSave)

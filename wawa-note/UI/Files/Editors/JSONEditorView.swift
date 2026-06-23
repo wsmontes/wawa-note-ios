@@ -86,7 +86,7 @@ struct JSONEditorView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(Color.red.opacity(0.08))
+                .background(.ultraThinMaterial)
             }
         }
         .navigationTitle(node.name)

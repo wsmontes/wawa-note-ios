@@ -41,6 +41,13 @@ final class ChatViewModel: ObservableObject {
     }
     private var cancellables = Set<AnyCancellable>()
     private var hasObservedContext = false
+
+    /// Wraps a throwing ChatService write operation with error logging,
+    /// so silent `try?` data loss is at least traceable in logs.
+    private func persistOrLog(_ label: String, _ block: () throws -> Void) {
+        do { try block() }
+        catch { AppLog.error("chat", "Persist failed (\(label)): \(error)") }
+    }
     private var pendingContext: ChatContext?
     private var projectColorCache: [UUID: String] = [:]
     private var greetingCache: [String: String] = [:]
@@ -49,7 +56,7 @@ final class ChatViewModel: ObservableObject {
     func projectColorHex(for projectID: UUID) -> String? {
         if let cached = projectColorCache[projectID] { return cached }
         guard let ctx = modelContext,
-              let project = try? services!.projects.fetch(id: projectID),
+              let project = try? services?.projects.fetch(id: projectID),
               let hex = project.colorHex else { return nil }
         projectColorCache[projectID] = hex
         return hex
@@ -160,7 +167,7 @@ final class ChatViewModel: ObservableObject {
             activeProjectName = nil
             activeProjectColorHex = nil
             guard let ctx = modelContext else { break }
-            let svc = services!.projects
+            guard let svc = services?.projects else { break }
             if let project = try? svc.fetch(id: id) {
                 activeProjectName = project.name
                 if let hex = project.colorHex {
@@ -180,7 +187,7 @@ final class ChatViewModel: ObservableObject {
             activeProjectColorHex = nil
             // Store the item ID for the agent to know which item is in focus
             if let ctx = modelContext,
-               let item = try? services!.items.fetchItem(id: itemID) {
+               let item = try? services?.items.fetchItem(id: itemID) {
                 // No project context injection for standalone items
                 // The agent will see the item context via activeItemID in ToolContext
                 _ = item
@@ -206,7 +213,7 @@ final class ChatViewModel: ObservableObject {
     private func resolveContext(_ context: ChatContext) -> ChatContext {
         guard case .item(let itemID) = context,
               let ctx = modelContext,
-              let item = try? services!.items.fetchItem(id: itemID),
+              let item = try? services?.items.fetchItem(id: itemID),
               let pid = item.projectID else {
             return context
         }
@@ -221,8 +228,8 @@ final class ChatViewModel: ObservableObject {
     private func injectProjectContext(project: Project, conversationId: UUID) {
         guard let ctx = modelContext else { return }
         let slug = project.slug.replacingOccurrences(of: "/", with: "-")
-        let tasks = (try? services!.derived.tasks(for: project.id)) ?? []
-        let items = (try? services!.projects.items(in: project.id)) ?? []
+        let tasks = (try? services?.derived.tasks(for: project.id)) ?? []
+        let items = (try? services?.projects.items(in: project.id)) ?? []
 
         // Only inject if the conversation is empty (first open)
         let existing = (try? chatService.messages(for: conversationId)) ?? []
@@ -404,7 +411,7 @@ final class ChatViewModel: ObservableObject {
             content: text, projectColorHex: activeProjectColorHex
         )
         messages.append(assistantMsg)
-        try? chatService.appendMessage(assistantMsg)
+        persistOrLog("assistant") { try chatService.appendMessage(assistantMsg) }
         state = .idle
     }
 
@@ -459,7 +466,7 @@ final class ChatViewModel: ObservableObject {
         ])
 
         let slugForContext = activeProjectID.flatMap { pid in
-            try? services!.projects.fetch(id: pid)?.slug.replacingOccurrences(of: "/", with: "-")
+            try? services?.projects.fetch(id: pid)?.slug.replacingOccurrences(of: "/", with: "-")
         }
         let toolContext = ToolContext(
             modelContext: ctx,
@@ -481,9 +488,9 @@ final class ChatViewModel: ObservableObject {
         // beginBackgroundTask gives us ~30s to finish the current iteration
         // and save progress before iOS suspends the app (see [#3]).
         var bgTaskID: UIBackgroundTaskIdentifier = .invalid
-        bgTaskID = UIApplication.shared.beginBackgroundTask(withName: "chat.agentLoop") {
+        bgTaskID = UIApplication.shared.beginBackgroundTask(withName: "chat.agentLoop") { [weak self] in
             AppLog.event("chat", "Background task expiring — cancelling AgentLoop")
-            self.streamTask?.cancel()
+            self?.streamTask?.cancel()
             if bgTaskID != .invalid {
                 UIApplication.shared.endBackgroundTask(bgTaskID)
                 bgTaskID = .invalid
@@ -624,7 +631,7 @@ final class ChatViewModel: ObservableObject {
         case "search":
             guard !arg.isEmpty else { response = "Usage: /search <query>"; break }
             guard let ctx = modelContext else { response = "Model context not available."; break }
-            let items = (try? services!.items.allItems()) ?? []
+            let items = (try? services?.items.allItems()) ?? []
             let results = SearchService(fileStore: FileArtifactStore()).searchNow(query: arg, in: items).prefix(5)
             guard !results.isEmpty else { response = "No results for \"\(arg)\"."; break }
             response = results.map { r in
@@ -681,7 +688,7 @@ final class ChatViewModel: ObservableObject {
 
         // Re-inject project context for the new conversation if applicable
         if let pid = activeProjectID, let ctx = modelContext,
-           let project = try? services!.projects.fetch(id: pid),
+           let project = try? services?.projects.fetch(id: pid),
            let conv = currentConversation {
             injectProjectContext(project: project, conversationId: conv.id)
             messages = (try? chatService.messages(for: conv.id)) ?? []
@@ -715,7 +722,7 @@ final class ChatViewModel: ObservableObject {
             case .project(let id):
                 activeProjectID = id
                 if let mctx = modelContext,
-                   let project = try? services!.projects.fetch(id: id) {
+                   let project = try? services?.projects.fetch(id: id) {
                     activeProjectName = project.name
                     activeProjectColorHex = project.colorHex ?? projectColorHex(for: id)
                 }
@@ -782,7 +789,7 @@ final class ChatViewModel: ObservableObject {
         let registry = AgentToolRegistry(tools: [ShellTool()])
 
         let slugForContext = activeProjectID.flatMap { pid in
-            try? services!.projects.fetch(id: pid)?.slug.replacingOccurrences(of: "/", with: "-")
+            try? services?.projects.fetch(id: pid)?.slug.replacingOccurrences(of: "/", with: "-")
         }
         let toolContext = ToolContext(
             modelContext: ctx,
@@ -804,9 +811,9 @@ final class ChatViewModel: ObservableObject {
         // beginBackgroundTask gives us ~30s to finish the current iteration
         // and save progress before iOS suspends the app (see [#3]).
         var bgTaskID: UIBackgroundTaskIdentifier = .invalid
-        bgTaskID = UIApplication.shared.beginBackgroundTask(withName: "chat.agentLoop") {
+        bgTaskID = UIApplication.shared.beginBackgroundTask(withName: "chat.agentLoop") { [weak self] in
             AppLog.event("chat", "Background task expiring — cancelling AgentLoop")
-            self.streamTask?.cancel()
+            self?.streamTask?.cancel()
             if bgTaskID != .invalid {
                 UIApplication.shared.endBackgroundTask(bgTaskID)
                 bgTaskID = .invalid
@@ -904,7 +911,7 @@ final class ChatViewModel: ObservableObject {
     /// For user choices/prompts, use sendInternalMessage instead.
     func runCommandDirectly(_ command: String) {
         guard let ctx = modelContext, let conv = currentConversation else { return }
-        let slug = activeProjectID.flatMap { pid in try? services!.projects.fetch(id: pid)?.slug.replacingOccurrences(of: "/", with: "-") }
+        let slug = activeProjectID.flatMap { pid in try? services?.projects.fetch(id: pid)?.slug.replacingOccurrences(of: "/", with: "-") }
         let toolCtx = ToolContext(modelContext: ctx, activeProjectID: activeProjectID, activeProjectName: activeProjectName, activeProjectSlug: slug)
         let result = ShellInterpreter.execute(command: command, context: toolCtx)
 

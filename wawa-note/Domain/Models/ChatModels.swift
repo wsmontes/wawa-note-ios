@@ -114,6 +114,12 @@ struct ChatConversation: Identifiable, Codable {
 // MARK: - Message
 
 struct ChatMessage: Identifiable, Codable {
+    /// Custom coding keys exclude the transient _blocksCache
+    enum CodingKeys: String, CodingKey {
+        case id, conversationId, role, content, createdAt, toolCalls, toolCallId
+        case citations, isThinking, projectColorHex, blocksJSON, isInternal
+    }
+
     let id: UUID
     let conversationId: UUID
     var role: AIRole
@@ -131,12 +137,20 @@ struct ChatMessage: Identifiable, Codable {
     var isInternal: Bool
 
     /// Parsed blocks from blocksJSON. Nil if no structured content (falls back to text parsing).
+    /// Decode-once cache: the reference-type wrapper allows mutation from the non-mutating
+    /// getter, avoiding repeated JSONDecoder() calls on every SwiftUI body recomputation.
     var blocks: [ChatBlock]? {
         get {
-            guard let json = blocksJSON, let data = json.data(using: .utf8) else { return nil }
-            return try? JSONDecoder().decode([ChatBlock].self, from: data)
+            if let cached = _blocksCache.value { return cached.isEmpty ? nil : cached }
+            guard let json = blocksJSON, let data = json.data(using: .utf8) else {
+                _blocksCache.value = []; return nil
+            }
+            let decoded = (try? JSONDecoder().decode([ChatBlock].self, from: data)) ?? []
+            _blocksCache.value = decoded
+            return decoded.isEmpty ? nil : decoded
         }
         set {
+            _blocksCache.value = newValue ?? []
             if let blocks = newValue, let data = try? JSONEncoder().encode(blocks) {
                 blocksJSON = String(data: data, encoding: .utf8)
             } else {
@@ -144,6 +158,9 @@ struct ChatMessage: Identifiable, Codable {
             }
         }
     }
+    /// Box to allow cache mutation from non-mutating getter (reference type).
+    private class BlocksCache { var value: [ChatBlock]? }
+    private var _blocksCache = BlocksCache()
 
     init(
         id: UUID = UUID(),

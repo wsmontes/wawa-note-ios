@@ -25,12 +25,15 @@ final class MotionActivitySensor: ContextSensor, @unchecked Sendable {
             let queue = OperationQueue()
             queue.maxConcurrentOperationCount = 1
 
+            let lock = OSAllocatedUnfairLock()
             var resumed = false
 
             // Timeout after 5s
             let timeoutWork = DispatchWorkItem {
-                guard !resumed else { return }
+                lock.lock()
+                guard !resumed else { lock.unlock(); return }
                 resumed = true
+                lock.unlock()
                 manager.stopActivityUpdates()
                 queue.cancelAllOperations()
                 continuation.resume(returning: [])
@@ -38,8 +41,10 @@ final class MotionActivitySensor: ContextSensor, @unchecked Sendable {
             DispatchQueue.global().asyncAfter(deadline: .now() + Self.timeoutSeconds, execute: timeoutWork)
 
             manager.startActivityUpdates(to: queue) { activity in
-                guard let activity, !resumed else { return }
+                lock.lock()
+                guard let activity, !resumed else { lock.unlock(); return }
                 resumed = true
+                lock.unlock()
                 timeoutWork.cancel()
                 manager.stopActivityUpdates()
                 queue.cancelAllOperations()

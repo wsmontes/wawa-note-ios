@@ -332,7 +332,7 @@ struct WriteAnalysisTool: AgentTool {
             "sectionCount": json.count
         ]
 
-        let fileStore = FileArtifactStore()
+        let fileStore = context.fileStore
         do {
             try fileStore.createMeetingDirectory(for: itemId)
 

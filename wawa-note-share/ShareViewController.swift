@@ -12,6 +12,9 @@ final class ShareViewController: UIViewController {
     private var savedFiles: [String] = []
     private var processingDone = false
     private var hasErrors = false
+    /// Serializes access to the completion path so that the group.notify and
+    /// safety timeout handlers don't race on UserDefaults writes + complete().
+    private let completionLock = OSAllocatedUnfairLock()
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -89,28 +92,34 @@ final class ShareViewController: UIViewController {
         }
 
         group.notify(queue: .main) { [weak self] in
-            self?.savedFiles = saved
+            guard let self else { return }
+            self.completionLock.lock()
+            guard !self.processingDone else { self.completionLock.unlock(); return }
+            self.savedFiles = saved
             if saved.isEmpty {
                 logger.info(" No files saved (errors: \(errorCount))")
-                self?.hasErrors = true
+                self.hasErrors = true
             } else {
                 let shared = UserDefaults(suiteName: appGroupIdentifier)
                 shared?.set(saved, forKey: pendingImportFilesKey)
                 logger.info(" Saved \(saved.count) files (errors: \(errorCount)): \(saved)")
                 // Open the main app to trigger import
                 if let url = URL(string: "wawanote://import") {
-                    self?.extensionContext?.open(url)
+                    self.extensionContext?.open(url)
                 }
             }
-            self?.processingDone = true
-            if self?.isViewLoaded == true, self?.view.window != nil {
-                self?.complete()
+            self.processingDone = true
+            self.completionLock.unlock()
+            if self.isViewLoaded, self.view.window != nil {
+                self.complete()
             }
         }
 
         // Safety timeout: complete anyway after deadline
         DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
-            guard let self, !self.processingDone else { return }
+            guard let self else { return }
+            self.completionLock.lock()
+            guard !self.processingDone else { self.completionLock.unlock(); return }
             logger.info(" Timed out waiting for attachments — completing with \(saved.count) files saved")
             self.savedFiles = saved
             if !saved.isEmpty {
@@ -122,6 +131,7 @@ final class ShareViewController: UIViewController {
                 }
             }
             self.processingDone = true
+            self.completionLock.unlock()
             if self.isViewLoaded, self.view.window != nil {
                 self.complete()
             }

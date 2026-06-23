@@ -24,6 +24,7 @@ struct SendToMenu: View {
     let item: UnifiedItem
     let projectID: UUID
     @Environment(\.modelContext) private var modelContext
+    @State private var exportMessage: String?
 
     var body: some View {
         Menu {
@@ -36,6 +37,11 @@ struct SendToMenu: View {
             Image(systemName: "square.and.arrow.up")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+        .alert("Export Result", isPresented: Binding(get: { exportMessage != nil }, set: { if !$0 { exportMessage = nil } })) {
+            Button("OK") { exportMessage = nil }
+        } message: {
+            Text(exportMessage ?? "")
         }
     }
 
@@ -100,8 +106,10 @@ struct SendToMenu: View {
                 reminder.calendar = eventStore.defaultCalendarForNewReminders()
                 try eventStore.save(reminder, commit: true)
                 AppLog.general.info("SendTo: task exported to Reminders: \(derived.title)")
+                await MainActor.run { exportMessage = "Task sent to Reminders." }
             } catch {
                 AppLog.general.error("SendTo: Reminders export failed: \(error.localizedDescription)")
+                await MainActor.run { exportMessage = "Failed to export to Reminders." }
             }
         }
     }

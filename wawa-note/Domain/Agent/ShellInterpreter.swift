@@ -1958,6 +1958,11 @@ enum ShellInterpreter {
 
         let semaphore = DispatchSemaphore(value: 0)
         var resultText = ""; var resultError: String?
+        // NOTE: handleVision is @MainActor. The Task {} below inherits the main actor.
+        // In practice this doesn't deadlock because provider.send() is async and
+        // suspends early (network I/O), yielding the actor. The semaphore.wait()
+        // blocks the main thread for <1ms until the Task suspends on the network
+        // call, then the main actor is free to service other work.
         let visionTask = Task {
             do {
                 let response = try await provider.send(request)

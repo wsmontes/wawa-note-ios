@@ -171,7 +171,7 @@ struct ProjectHomeView: View {
         let router = ImportRouter(importers: [
             JSONImporter(), MarkdownImporter(), PlainTextImporter(),
             SRTImporter(), ICSImporter(), PDFImporter(), HTMLImporter(), RTFImporter(),
-            AnarlogImporter(), MeetilyImporter()
+            AnarlogImporter()
         ])
         guard let importer = router.importer(for: url) else { return }
         do {

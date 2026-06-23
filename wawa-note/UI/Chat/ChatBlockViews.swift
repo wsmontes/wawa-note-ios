@@ -256,7 +256,7 @@ struct AIGeneratedBadge: View {
             Text(source ?? "AI").font(.system(size: 9))
             if let conf = confidence { ConfidenceBadge(value: conf) }
         }
-        .padding(.horizontal, 6).padding(.vertical, 2).background(Color.blue.opacity(0.08)).clipShape(Capsule())
+        .padding(.horizontal, 6).padding(.vertical, 2).background(.thinMaterial).clipShape(Capsule())
     }
 }
 
@@ -395,9 +395,6 @@ struct ProgressUpdateView: View {
                 }
             }.frame(height: 6)
         }
-        .padding(10)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     private var progressColor: Color {
@@ -405,5 +402,433 @@ struct ProgressUpdateView: View {
         if ratio >= 1.0 { return .green }
         if ratio >= 0.5 { return .blue }
         return .orange
+    }
+}
+
+// MARK: - Chat Block Router (from ChatView.swift)
+
+struct ChatBlockView: View {
+    let block: ChatBlock
+    var projectColorHex: String?
+    var onSendMessage: ((String) -> Void)?
+    var onRunCommand: ((String) -> Void)?
+    var onChooseOption: ((String) -> Void)?
+
+    var body: some View {
+        switch block {
+        case .text(let text):
+            Text(text).font(.body)
+        case .table(let data):
+            TableBlockView(table: TableBlock(title: data.title, headers: data.headers, rows: data.rows))
+        case .code(let data):
+            CodeBlockView(codeBlock: CodeBlock(code: data.code, language: data.language, caption: data.caption))
+        case .bulletList(let items):
+            BulletListView(items: items)
+        case .orderedList(let items):
+            OrderedListView(items: items)
+        case .projectContext(let ctx):
+            ProjectContextCardView(data: ctx, onRunCommand: onRunCommand)
+        case .taskCard(let task):
+            TaskCardView(data: task, onRunCommand: onRunCommand, onChooseOption: onChooseOption)
+        case .itemCard(let item):
+            ItemCardView(data: item, onRunCommand: onRunCommand, onChooseOption: onChooseOption)
+        case .searchResults(let results):
+            SearchResultsCardView(data: results)
+        case .analysisAccordion(let analysis):
+            AnalysisAccordionView(data: analysis)
+        case .choicePrompt(let prompt):
+            ChoicePromptView(data: prompt, onChooseOption: onChooseOption)
+        case .confirmation(let confirm):
+            ConfirmationView(data: confirm, onChooseOption: onChooseOption)
+        case .fileLink(let data):
+            FileLinkCardView(data: data, onRunCommand: onRunCommand)
+        case .documentHeader(let data):
+            DocumentHeaderCardView(data: data)
+        case .freeTextInput(let data):
+            FreeTextInputView(data: data, onSubmit: { text in onChooseOption?(text) })
+        case .progressUpdate(let data):
+            ProgressUpdateView(data: data)
+        }
+    }
+}
+
+// MARK: - Project Context Card
+
+struct ProjectContextCardView: View {
+    let data: ProjectContextData
+    var onRunCommand: ((String) -> Void)?
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .center, spacing: 12) {
+                RoundedRectangle(cornerRadius: 4).fill(Color.blue).frame(width: 4, height: 36)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(data.projectName).font(.subheadline).fontWeight(.semibold)
+                    HStack(spacing: 8) {
+                        HStack(spacing: 3) { Image(systemName: "checklist").font(.system(size: 9)); Text("\(data.taskCount)").font(.caption2) }.foregroundStyle(.secondary)
+                        HStack(spacing: 3) { Image(systemName: "doc").font(.system(size: 9)); Text("\(data.itemCount)").font(.caption2) }.foregroundStyle(.secondary)
+                        if data.signalCount > 0 {
+                            HStack(spacing: 3) { Image(systemName: "waveform.path.ecg").font(.system(size: 9)); Text("\(data.signalCount)").font(.caption2) }.foregroundStyle(.orange)
+                        }
+                    }
+                }
+                Spacer()
+            }
+            if expanded {
+                Divider().padding(.vertical, 6)
+                HStack(spacing: 6) {
+                    ForEach(["ls tasks/", "ls items/", "cat project.json"], id: \.self) { cmd in
+                        Button { onRunCommand?(cmd) } label: {
+                            Text(cmd).font(.caption2).padding(.horizontal, 8).padding(.vertical, 4)
+                                .background(.ultraThinMaterial).clipShape(Capsule())
+                        }.buttonStyle(.plain)
+                    }
+                }
+            }
+            Button { withAnimation { expanded.toggle() } } label: {
+                HStack(spacing: 2) {
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 9))
+                    Text(expanded ? "Less" : "Actions").font(.caption2)
+                }.foregroundStyle(.blue)
+            }.buttonStyle(.plain).padding(.top, 4)
+        }
+        .padding(12)
+        .background(.regularMaterial).clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+// MARK: - Task Card
+
+struct TaskCardView: View {
+    let data: TaskCardData
+    var onRunCommand: ((String) -> Void)?
+    var onChooseOption: ((String) -> Void)?
+    @State private var confirmed = false
+    @State private var dismissed = false
+    @State private var showActions = false
+    @State private var offsetX: CGFloat = 0
+    private let swipeThreshold: CGFloat = -80
+
+    var body: some View {
+        if dismissed { EmptyView() } else {
+            ZStack {
+                HStack(spacing: 0) {
+                    Spacer()
+                    Button {
+                        withAnimation(.spring(response: 0.3)) { confirmed = true; offsetX = 0 }
+                        let path = "tasks/\(data.taskID)"
+                        onRunCommand?("echo '{\"status\":\"done\"}' > \(path)")
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill").font(.title3)
+                            Text("Done").font(.caption2)
+                        }.foregroundStyle(.white).frame(width: 70).frame(maxHeight: .infinity).background(Color.green)
+                    }
+                    Button {
+                        withAnimation(.spring(response: 0.3)) { offsetX = 0 }
+                        onChooseOption?("Show me details about the task: \(data.title)")
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: "info.circle.fill").font(.title3)
+                            Text("Details").font(.caption2)
+                        }.foregroundStyle(.white).frame(width: 70).frame(maxHeight: .infinity).background(Color.blue)
+                    }
+                }.clipShape(RoundedRectangle(cornerRadius: 12))
+
+                VStack(spacing: 0) {
+                    HStack(spacing: 10) {
+                        Image(systemName: confirmed ? "checkmark.circle.fill" : "circle")
+                            .font(.title3).foregroundStyle(confirmed ? .green : .secondary)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(data.title).font(.subheadline).fontWeight(.semibold)
+                            HStack(spacing: 6) {
+                                priorityBadge(data.priority)
+                                if let o = data.owner { Text(o).font(.caption2).foregroundStyle(.secondary) }
+                            }
+                        }
+                        Spacer()
+                        if confirmed { Image(systemName: "checkmark").font(.caption).foregroundStyle(.green) }
+                        if !confirmed && !showActions {
+                            Image(systemName: "chevron.left").font(.system(size: 10)).foregroundStyle(.tertiary)
+                                .opacity(offsetX < -20 ? 0 : 0.4)
+                        }
+                    }
+                    if !confirmed && data.needsConfirmation && !showActions {
+                        HStack(spacing: 8) {
+                            Button {
+                                confirmed = true
+                                let path = "tasks/\(data.taskID)"
+                                onRunCommand?("echo '{\"status\":\"done\"}' > \(path)")
+                            } label: {
+                                Label("Confirm", systemImage: "checkmark").font(.caption2).fontWeight(.medium)
+                                    .frame(maxWidth: .infinity).padding(.vertical, 7)
+                                    .background(.thinMaterial).clipShape(RoundedRectangle(cornerRadius: 8))
+                            }.buttonStyle(.plain)
+                            Button { dismissed = true } label: {
+                                Label("Cancel", systemImage: "xmark").font(.caption2)
+                                    .frame(maxWidth: .infinity).padding(.vertical, 7)
+                                    .background(.thinMaterial).clipShape(RoundedRectangle(cornerRadius: 8))
+                            }.buttonStyle(.plain).foregroundStyle(.secondary)
+                        }.padding(.top, 10)
+                    }
+                }
+                .padding(12).background(.regularMaterial).clipShape(RoundedRectangle(cornerRadius: 12))
+                .offset(x: offsetX)
+                .gesture(DragGesture()
+                    .onChanged { value in
+                        guard !confirmed else { return }
+                        let translation = value.translation.width
+                        if translation < 0 { offsetX = max(translation, -150) }
+                        else if offsetX < 0 { offsetX = min(translation + offsetX, 0) }
+                    }
+                    .onEnded { value in
+                        guard !confirmed else { return }
+                        let velocity = value.predictedEndTranslation.width - value.translation.width
+                        if offsetX < swipeThreshold || velocity < -200 {
+                            withAnimation(.spring(response: 0.3)) { offsetX = -140 }
+                            showActions = true
+                        } else {
+                            withAnimation(.spring(response: 0.3)) { offsetX = 0 }
+                            showActions = false
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    func priorityBadge(_ p: String) -> some View {
+        let (color, icon): (Color, String) = {
+            switch p {
+            case "critical": (.red, "exclamationmark.triangle.fill")
+            case "high": (.orange, "arrow.up")
+            case "medium": (.blue, "minus")
+            default: (.secondary, "minus")
+            }
+        }()
+        return HStack(spacing: 2) {
+            Image(systemName: icon).font(.system(size: 8))
+            Text(p.capitalized).font(.caption2)
+        }.padding(.horizontal, 6).padding(.vertical, 2)
+        .background(color.opacity(0.12)).clipShape(Capsule()).foregroundStyle(color)
+    }
+}
+
+// MARK: - Item Card
+
+struct ItemCardView: View {
+    let data: ItemCardData
+    var onRunCommand: ((String) -> Void)?
+    var onChooseOption: ((String) -> Void)?
+    @State private var offsetX: CGFloat = 0
+    @State private var showActions = false
+    private let swipeThreshold: CGFloat = -80
+
+    var body: some View {
+        ZStack {
+            HStack(spacing: 0) {
+                Spacer()
+                Button {
+                    withAnimation(.spring(response: 0.3)) { offsetX = 0 }
+                    onChooseOption?("Show me details about: \(data.title)")
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "info.circle.fill").font(.title3)
+                        Text("Details").font(.caption2)
+                    }.foregroundStyle(.white).frame(width: 70).frame(maxHeight: .infinity).background(Color.blue)
+                }
+                if let uuid = UUID(uuidString: data.itemID) {
+                    Button {
+                        withAnimation(.spring(response: 0.3)) { offsetX = 0 }
+                        NotificationCenter.default.post(name: .pipelineCompleted, object: data.itemID, userInfo: ["action": "reprocess"])
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: "sparkles").font(.title3)
+                            Text("Analyze").font(.caption2)
+                        }.foregroundStyle(.white).frame(width: 70).frame(maxHeight: .infinity).background(Color.purple)
+                    }
+                }
+            }.clipShape(RoundedRectangle(cornerRadius: 12))
+
+            HStack(spacing: 10) {
+                Image(systemName: typeIcon(data.type)).font(.title3).foregroundStyle(typeColor(data.type)).frame(width: 32).padding(.vertical, 2)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(data.title).font(.subheadline).fontWeight(.medium).lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(data.type.capitalized).font(.caption2).foregroundStyle(.secondary)
+                        Text("·").foregroundStyle(.tertiary)
+                        Text(data.status.capitalized).font(.caption2).foregroundStyle(.secondary)
+                        if let dur = data.durationSeconds { Text("·").foregroundStyle(.tertiary); Text(formatDuration(dur)).font(.caption2).foregroundStyle(.secondary) }
+                    }
+                }
+                Spacer()
+                if !showActions {
+                    Image(systemName: "chevron.left").font(.system(size: 10)).foregroundStyle(.tertiary)
+                        .opacity(offsetX < -20 ? 0 : 0.4)
+                }
+            }
+            .padding(12).background(.regularMaterial).clipShape(RoundedRectangle(cornerRadius: 12))
+            .offset(x: offsetX)
+            .gesture(DragGesture()
+                .onChanged { value in
+                    let translation = value.translation.width
+                    if translation < 0 { offsetX = max(translation, -150) }
+                    else if offsetX < 0 { offsetX = min(translation + offsetX, 0) }
+                }
+                .onEnded { value in
+                    let velocity = value.predictedEndTranslation.width - value.translation.width
+                    if offsetX < swipeThreshold || velocity < -200 {
+                        withAnimation(.spring(response: 0.3)) { offsetX = -140 }
+                        showActions = true
+                    } else {
+                        withAnimation(.spring(response: 0.3)) { offsetX = 0 }
+                        showActions = false
+                    }
+                }
+            )
+        }
+    }
+    private func typeIcon(_ t: String) -> String {
+        switch t { case "audio": "mic.fill"; case "note": "doc.text.fill"; case "image": "photo.fill"; default: "doc.fill" }
+    }
+    private func typeColor(_ t: String) -> Color {
+        switch t { case "audio": .red; case "note": .blue; case "image": .purple; default: .secondary }
+    }
+    private func formatDuration(_ s: Double) -> String { let m = Int(s)/60; let sec = Int(s)%60; return "\(m):\(String(format:"%02d",sec))" }
+}
+
+// MARK: - Search Results + Analysis + Choice + Confirmation
+
+struct SearchResultsCardView: View {
+    let data: SearchResultsData
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("\"\(data.query)\" — \(data.results.count) results", systemImage: "magnifyingglass")
+                .font(.subheadline).fontWeight(.medium).foregroundStyle(.blue)
+            ForEach(data.results.prefix(5), id: \.itemID) { r in
+                HStack(spacing: 8) {
+                    Image(systemName: "doc.text").font(.system(size: 10)).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(r.title).font(.caption).fontWeight(.medium).lineLimit(1)
+                        Text(r.snippet).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+            }
+        }.padding(12).background(.regularMaterial).clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct AnalysisAccordionView: View {
+    let data: AnalysisData
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(data.sections, id: \.title) { section in
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(section.items.prefix(10), id: \.self) { item in
+                            HStack(alignment: .top, spacing: 6) {
+                                Circle().fill(.secondary).frame(width: 4, height: 4).padding(.top, 7)
+                                Text(item).font(.caption).foregroundStyle(.primary)
+                            }
+                        }
+                        if section.items.count > 10 {
+                            Text("... and \(section.items.count - 10) more").font(.caption2).foregroundStyle(.tertiary)
+                        }
+                    }.padding(.leading, 4).padding(.top, 2)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: sectionIcon(section.title)).font(.system(size: 10)).foregroundStyle(.blue)
+                        Text(section.title).font(.caption).fontWeight(.semibold)
+                        Text("(\(section.count))").font(.caption2).foregroundStyle(.secondary)
+                    }
+                }.padding(.vertical, 3)
+                if section.title != data.sections.last?.title { Divider().padding(.leading, 22) }
+            }
+        }.padding(12).background(.regularMaterial).clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+    private func sectionIcon(_ t: String) -> String {
+        switch t.lowercased() {
+        case let s where s.contains("decision"): "checkmark.shield"
+        case let s where s.contains("action"): "bolt"
+        case let s where s.contains("risk"): "exclamationmark.triangle"
+        case let s where s.contains("question"): "questionmark.circle"
+        case let s where s.contains("entit"): "person.2"
+        default: "doc.text"
+        }
+    }
+}
+
+struct ChoicePromptView: View {
+    let data: ChoicePromptData
+    var onChooseOption: ((String) -> Void)?
+    @State private var selectedIndex: Int?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(data.question).font(.subheadline).fontWeight(.semibold)
+            ForEach(Array(data.options.enumerated()), id: \.offset) { idx, option in
+                Button {
+                    selectedIndex = idx
+                    let prompt = option.value
+                    onChooseOption?(prompt)
+                } label: {
+                    HStack(spacing: 10) {
+                        if let sel = selectedIndex, sel == idx {
+                            Image(systemName: "checkmark.circle.fill").font(.caption).foregroundStyle(.green).frame(width: 20, height: 20)
+                        } else {
+                            Text("\(idx + 1)").font(.caption).fontWeight(.bold).foregroundStyle(.blue)
+                                .frame(width: 20, height: 20).background(Circle().fill(.blue.opacity(0.1)))
+                        }
+                        Text(option.label).font(.subheadline).lineLimit(2)
+                        Spacer()
+                        Image(systemName: "arrow.up.forward").font(.caption2).foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 10)
+                    .background(.thinMaterial).clipShape(RoundedRectangle(cornerRadius: 10))
+                    .opacity(selectedIndex != nil && selectedIndex != idx ? 0.5 : 1.0)
+                }.buttonStyle(.plain).disabled(selectedIndex != nil)
+            }
+        }.padding(12).background(.regularMaterial).clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct ConfirmationView: View {
+    let data: ConfirmationData
+    var onChooseOption: ((String) -> Void)?
+    @State private var resolved: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.title3)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(data.title).font(.subheadline).fontWeight(.semibold)
+                    Text(data.message).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                }
+            }
+            if !resolved {
+                HStack(spacing: 8) {
+                    Button {
+                        resolved = true; onChooseOption?(data.confirmValue)
+                    } label: {
+                        Label(data.confirmLabel, systemImage: "checkmark").font(.caption).fontWeight(.medium)
+                            .frame(maxWidth: .infinity).padding(.vertical, 8)
+                            .background(.thinMaterial).clipShape(RoundedRectangle(cornerRadius: 8))
+                    }.buttonStyle(.plain)
+                    Button {
+                        resolved = true; onChooseOption?(data.cancelValue)
+                    } label: {
+                        Text(data.cancelLabel).font(.caption).frame(maxWidth: .infinity).padding(.vertical, 8)
+                            .background(.thinMaterial).clipShape(RoundedRectangle(cornerRadius: 8))
+                    }.buttonStyle(.plain).foregroundStyle(.secondary)
+                }
+            } else {
+                HStack {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.caption)
+                    Text("Response sent").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }.padding(12).background(.regularMaterial).clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }

@@ -30,10 +30,7 @@
 		159BD3A70EF24F4CB6A967F5 /* ProjectUpdateFields.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FEB79C2D4634667A9777C7D /* ProjectUpdateFields.swift */; };
 		1B1E59C673CA472398A4692F /* MarkdownEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22E6296874D44763AC301D91 /* MarkdownEditorView.swift */; };
 		1BA7992376026ED73AFF90A3 /* AgentTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5A8A3B18B9BAD68974C2E1A /* AgentTool.swift */; };
-		1C4D46AC9F2548789886969A /* MeetilyImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DC1F74EDFCF435B8AE08D31 /* MeetilyImporter.swift */; };
 		1CC688D63060DF0FC4F11C74 /* OnThisDayService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 184EE776A44AD41F62BDBF22 /* OnThisDayService.swift */; };
-		1D0E5F84FBFD41518BE0729D /* TranscriptRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9055DD2056C4925A60A6299 /* TranscriptRenderer.swift */; };
-		1DCBDE7DA752482480155E41 /* AnarlogParticipantBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B995A94FEA0D4C8384FEA89B /* AnarlogParticipantBridge.swift */; };
 		1E20CAB1900D4E10B767A3BE /* MeetilyTemplateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2086ECCDDC13498C899FBEE1 /* MeetilyTemplateService.swift */; };
 		1E3DB54C7D6B745C9086F452 /* wawa-note-share.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 3E1574D38EA98364330C1DC5 /* wawa-note-share.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		21509F3B18304DA09A96F083 /* SummaryCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CF01E08E69645CA8C602EDC /* SummaryCache.swift */; };
@@ -61,12 +58,10 @@
 		4AFCC0EF21E9853BF95F50FA /* ProviderTemplates.swift in Sources */ = {isa = PBXBuildFile; fileRef = 832902E7908176DA271EE9E4 /* ProviderTemplates.swift */; };
 		4C9AAD69BD289F535AFC2AB1 /* AudioFileWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4EAB7C1FE1601DD8473DBF4 /* AudioFileWriter.swift */; };
 		4C9C4819BE619DD2ABB742A3 /* NoteEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF4471E5F66C4B14F9445C4C /* NoteEditorView.swift */; };
-		4D15F33B7FC448E2A7BDBF81 /* SpeakerLabeler.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8E71265D63B4090B22BF9DF /* SpeakerLabeler.swift */; };
 		4D4AE8AD999F1574278682CA /* TranscriptChunker.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA5DF0351C3B5F4530AECE40 /* TranscriptChunker.swift */; };
 		4D686FF974FFA61AE5090A24 /* SearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 766E7ACF3639A0A6D448037A /* SearchService.swift */; };
 		51C74F4718E1DC2D1E2D2A83 /* CalendarContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 057DA0B97EC0AF391126B91B /* CalendarContainerView.swift */; };
 		51CCFF37A3DB42DDA8309227 /* LiveOCRViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76AD79307BAA416DA8803768 /* LiveOCRViewModel.swift */; };
-		5225E6D2AD4C4E3D8EDA78B4 /* MeetilyExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDE10C4451D64CAC93EABC3E /* MeetilyExporter.swift */; };
 		526689F7479BB56F83BE5EBD /* AutomationSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E15DA9D342C5166E57E3328 /* AutomationSettings.swift */; };
 		5308CFA048FB9F21AD0F6AA3 /* ProviderAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C74F08DDAAADB711153E3A3C /* ProviderAdapter.swift */; };
 		53B68932BF161593E9693D8D /* PDFImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D0FD3968F8462B81F1BD55F /* PDFImporter.swift */; };
@@ -123,7 +118,6 @@
 		93D1872D5827A3DBDB40CCAE /* AppleSpeechTranscriptionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B54087E8A721C919FBFF440 /* AppleSpeechTranscriptionEngine.swift */; };
 		982F46E71D0834D05B414346 /* ContextCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD47DFA1A5083421BE7A9E9E /* ContextCaptureService.swift */; };
 		98E8614946736E82C077EBF8 /* ProjectTaskBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C07606D38930B50121D0D0FD /* ProjectTaskBoardView.swift */; };
-		9943EEFBF7A64C9AB0DB75ED /* AnarlogSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D7447BF72074C69A5136933 /* AnarlogSyncService.swift */; };
 		9AAD0596D5EC2ACA9245908B /* AudioRouteSensor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FFF472C700565AAC5D3A9FE /* AudioRouteSensor.swift */; };
 		9AD5A41232A5348337F4E46A /* AppDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20E2998EA822EE4AE9A9A516 /* AppDesign.swift */; };
 		9B353D551EE9E92ACD1247EE /* WawaNoteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76CCCBF0094EADF2DA0FC9AB /* WawaNoteApp.swift */; };
@@ -149,9 +143,7 @@
 		B74F62032A6A4E55B458A3A6 /* AgentToolRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = C52CE4062D46C8129ADF989F /* AgentToolRegistry.swift */; };
 		B7711C7A1B9E262CB4C1EDE6 /* analyze.md in Resources */ = {isa = PBXBuildFile; fileRef = 28AD7D467AB94A0942EE295B /* analyze.md */; };
 		B96E10B71EC07E4D994D46F1 /* SecureKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3FD3AEE0D481C3950558ADA /* SecureKeyStore.swift */; };
-		BC37A37A603446DD80DBC535 /* TemplateMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 842E7677B6B6477590DE7705 /* TemplateMapper.swift */; };
 		BCA5D90E11ACBF34B1CD85E4 /* AIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFFEF7E52701EDB74BE510DC /* AIService.swift */; };
-		BF0D646B848B414189671792 /* AnarlogSyncSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A13DC0E242A428D839BD056 /* AnarlogSyncSettingsView.swift */; };
 		BF53C6404E3CD326484B43BB /* ProjectService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF1C3F2ABB2564F0EE6FC21E /* ProjectService.swift */; };
 		BF56BEFB8D26AEC053A9E98C /* MarkdownImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A91CEB95213D33A7EE0705E0 /* MarkdownImporter.swift */; };
 		C0D844EEE2B986EBE44D4147 /* ContextWindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D07E7272C169D4BCDCA0B3B3 /* ContextWindowManager.swift */; };
@@ -174,21 +166,17 @@
 		D2B14042724808C527A0B5CB /* CaptureViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 325FB6A77A41BE640CFBB23C /* CaptureViewModel.swift */; };
 		D4C235A489E73AA8011C222D /* ask.md in Resources */ = {isa = PBXBuildFile; fileRef = 5A575F2A07E3CC0F8B5576CF /* ask.md */; };
 		D65A852DD993CCAFD57FCA9D /* RemoteTranscriptionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = C05597EAF93E071CB80F6776 /* RemoteTranscriptionEngine.swift */; };
-		D697241796EC418BAC8779BA /* STTAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5568D497EC0742FFBF071E13 /* STTAdapters.swift */; };
 		D74F488CBA694AA18D834B2C /* SkillsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB9EF4D69FC840FEA705C931 /* SkillsSettingsView.swift */; };
 		D88DFCAD7A1339CEB945EA77 /* AIProviderConfigModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C974FC1B673E2BB133B11E95 /* AIProviderConfigModel.swift */; };
 		D8C48BAC56F8C059D6545625 /* ProjectTimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85ADD2F0767931BA4DA1467E /* ProjectTimelineView.swift */; };
 		DB098C136D05104687514263 /* TranscriptionSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B5D294B214EBD9FCA08F5AC /* TranscriptionSettings.swift */; };
 		DB37FBE9B7A5E595C28D12F9 /* WatchMessageTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4242425358FD99838CC0F8F /* WatchMessageTypes.swift */; };
 		DBAB5E60D40FFED7ED6562C9 /* KnowledgeDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE60784A759E5F7BE68FF4BA /* KnowledgeDetailView.swift */; };
-		DC832E488E364EF181EF70CD /* ModelResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = F62B07B30DFC4523B77C88BC /* ModelResolver.swift */; };
 		DC9CEAD50143D0711A3DE714 /* navigation_config.json in Resources */ = {isa = PBXBuildFile; fileRef = 7946F61A8AB09FDB3F8AD759 /* navigation_config.json */; };
-		DED5C466E0BE423F96DE3B45 /* AnarlogConfigBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E8D74AFC9064BCEBA4FEC68 /* AnarlogConfigBridge.swift */; };
 		E07C07884BE4E7E3E6382710 /* TaskEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D71A47DE0B2E534CF50B199 /* TaskEditorView.swift */; };
 		E0BA9664841446A5B7EC42D6 /* AudioAssetResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97B78CEE2A1640D7B80B92C9 /* AudioAssetResolver.swift */; };
 		E184A6EDD6EC484EBD3E1581 /* ConfigProjectService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1600DD7039643D49B3AEB92 /* ConfigProjectService.swift */; };
 		E36AC9297F27409CB0D69B1A /* FileBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 917FE69C9CD04C72950E7520 /* FileBrowserView.swift */; };
-		E688A591A08742D49D5DC376 /* TranscriptPatchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA2B9011022D44B189615A40 /* TranscriptPatchService.swift */; };
 		E6AE684B25F84AB6A2EDE8AF /* ModelDownloadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F132015A365A45C9ACA43482 /* ModelDownloadView.swift */; };
 		E7764EE194F82A3146570B01 /* SRTImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8886244AA7D854A9BC48353 /* SRTImporter.swift */; };
 		E7BA8E7960AD2977767BB234 /* ProviderPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDE499C4C6FBD48305E55385 /* ProviderPickerView.swift */; };
@@ -271,7 +259,6 @@
 		09CC4F3B7260B7B261ADFB11 /* MeetingAnalysis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingAnalysis.swift; sourceTree = "<group>"; };
 		0B1BB3BC51AC6E643C5FA2AF /* InboxView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InboxView.swift; sourceTree = "<group>"; };
 		0B87E04CC864F986AC2C850B /* DaySummaryBuilder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DaySummaryBuilder.swift; sourceTree = "<group>"; };
-		0D7447BF72074C69A5136933 /* AnarlogSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnarlogSyncService.swift; sourceTree = "<group>"; };
 		11E6C28158D44FD1A373F2BF /* ChatBlockViews.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ChatBlockViews.swift; sourceTree = "<group>"; };
 		11F2D0C195A67F03669C5765 /* RecordingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingViewModel.swift; sourceTree = "<group>"; };
 		152FD3772795470B98B5CE77 /* ShellInterpreter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShellInterpreter.swift; sourceTree = "<group>"; };
@@ -279,10 +266,8 @@
 		184EE776A44AD41F62BDBF22 /* OnThisDayService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OnThisDayService.swift; sourceTree = "<group>"; };
 		1872111A302C7AE8CBC0740F /* FormatImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormatImporter.swift; sourceTree = "<group>"; };
 		1994C6DF57B3436597BA9299 /* AnarlogExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnarlogExporter.swift; sourceTree = "<group>"; };
-		1A13DC0E242A428D839BD056 /* AnarlogSyncSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnarlogSyncSettingsView.swift; sourceTree = "<group>"; };
 		1BB9787774CF93ED4A680AB9 /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
 		1BF14EC8F77346CF85442F55 /* SpeechAnalyzerEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechAnalyzerEngine.swift; sourceTree = "<group>"; };
-		1E8D74AFC9064BCEBA4FEC68 /* AnarlogConfigBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnarlogConfigBridge.swift; sourceTree = "<group>"; };
 		1ED64B0004D8160A1E774EFE /* ActiveModelPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveModelPicker.swift; sourceTree = "<group>"; };
 		2086ECCDDC13498C899FBEE1 /* MeetilyTemplateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetilyTemplateService.swift; sourceTree = "<group>"; };
 		20E2998EA822EE4AE9A9A516 /* AppDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDesign.swift; sourceTree = "<group>"; };
@@ -319,7 +304,6 @@
 		446C28973B9F54B2DDB9BE5D /* ProjectGraphView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectGraphView.swift; sourceTree = "<group>"; };
 		4B7C43279EE74EA698E4284D /* PrimaryActionButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrimaryActionButton.swift; sourceTree = "<group>"; };
 		4CC5AFE2064848D49A02176E /* ShellTool.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShellTool.swift; sourceTree = "<group>"; };
-		4DC1F74EDFCF435B8AE08D31 /* MeetilyImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetilyImporter.swift; sourceTree = "<group>"; };
 		523D314449E1E56659ED1269 /* ProjectListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectListView.swift; sourceTree = "<group>"; };
 		0EF5C6EE1D274ED6A22A3B31 /* IconPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconPickerView.swift; sourceTree = "<group>"; };
 		F0A45A55843B41368A573C49 /* ColorPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorPickerView.swift; sourceTree = "<group>"; };
@@ -328,7 +312,6 @@
 		53709EAC396B7E6E5BEABDDF /* AnnotationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationService.swift; sourceTree = "<group>"; };
 		53FB720519AF6C596294DDF0 /* PromoteToProjectSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromoteToProjectSheet.swift; sourceTree = "<group>"; };
 		553737A2054C4442A4DBF531 /* ContentExtractionService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ContentExtractionService.swift; sourceTree = "<group>"; };
-		5568D497EC0742FFBF071E13 /* STTAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STTAdapters.swift; sourceTree = "<group>"; };
 		565E66ACF816FDF39FF7C8B9 /* CalendarSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSyncService.swift; sourceTree = "<group>"; };
 		59D53246E02148F9880C58CE /* DayActivityView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DayActivityView.swift; sourceTree = "<group>"; };
 		5A575F2A07E3CC0F8B5576CF /* ask.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ask.md; sourceTree = "<group>"; };
@@ -363,7 +346,6 @@
 		82620239935DFA90CA53D65F /* ChatModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatModels.swift; sourceTree = "<group>"; };
 		832902E7908176DA271EE9E4 /* ProviderTemplates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderTemplates.swift; sourceTree = "<group>"; };
 		83D7DD93B7943C9055C6DA48 /* AppStatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStatusBadge.swift; sourceTree = "<group>"; };
-		842E7677B6B6477590DE7705 /* TemplateMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemplateMapper.swift; sourceTree = "<group>"; };
 		8473B4E7DB392AD331988803 /* AnthropicProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnthropicProvider.swift; sourceTree = "<group>"; };
 		8496C4D80436BE4CCBDFF326 /* ProjectConversionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectConversionService.swift; sourceTree = "<group>"; };
 		85ADD2F0767931BA4DA1467E /* ProjectTimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectTimelineView.swift; sourceTree = "<group>"; };
@@ -403,9 +385,6 @@
 		B4242425358FD99838CC0F8F /* WatchMessageTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchMessageTypes.swift; sourceTree = "<group>"; };
 		B59F685E926B6CA2EA17B13A /* AudioCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCaptureService.swift; sourceTree = "<group>"; };
 		B8560A237C436A032C38D72D /* CalendarContextSensor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarContextSensor.swift; sourceTree = "<group>"; };
-		B8E71265D63B4090B22BF9DF /* SpeakerLabeler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerLabeler.swift; sourceTree = "<group>"; };
-		B995A94FEA0D4C8384FEA89B /* AnarlogParticipantBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnarlogParticipantBridge.swift; sourceTree = "<group>"; };
-		BA2B9011022D44B189615A40 /* TranscriptPatchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptPatchService.swift; sourceTree = "<group>"; };
 		BA35513D7F4FC858E0D6621E /* TaskService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskService.swift; sourceTree = "<group>"; };
 		BA70DD32D85A83F607CF2D5A /* FocusModeSensor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusModeSensor.swift; sourceTree = "<group>"; };
 		BB368392179DB728FC00957C /* ToolContext.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToolContext.swift; sourceTree = "<group>"; };
@@ -436,7 +415,6 @@
 		CBD8B331A84C4E2E9F73ED36 /* WriteAnalysisTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WriteAnalysisTool.swift; sourceTree = "<group>"; };
 		CBF6ECE4B370149D2C8C5E51 /* wawa-noteTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = "wawa-noteTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD5C207DFBD75AC77625D48F /* iOSWatchSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSWatchSessionManager.swift; sourceTree = "<group>"; };
-		CDE10C4451D64CAC93EABC3E /* MeetilyExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetilyExporter.swift; sourceTree = "<group>"; };
 		CF4471E5F66C4B14F9445C4C /* NoteEditorView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NoteEditorView.swift; sourceTree = "<group>"; };
 		CF6FB14E2C4252EF2822C115 /* EmbeddingPipelineService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddingPipelineService.swift; sourceTree = "<group>"; };
 		D07E7272C169D4BCDCA0B3B3 /* ContextWindowManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ContextWindowManager.swift; sourceTree = "<group>"; };
@@ -466,11 +444,9 @@
 		F3E2C74AE8F8F586518746C3 /* KnowledgeItemService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeItemService.swift; sourceTree = "<group>"; };
 		F58AF17D2A708B7406877331 /* GraphEdgeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphEdgeService.swift; sourceTree = "<group>"; };
 		F606F4B7A83FB68B775F9EE7 /* ImportRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportRouter.swift; sourceTree = "<group>"; };
-		F62B07B30DFC4523B77C88BC /* ModelResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelResolver.swift; sourceTree = "<group>"; };
 		EC41D66B8DB780CA0A397BAB /* SendToMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SendToMenuView.swift; sourceTree = "<group>"; };
 		F63FECDA0CA220E10BB4F014 /* CalendarPermissionView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CalendarPermissionView.swift; sourceTree = "<group>"; };
 		F7BCE1FC738F8573CD3ABC3F /* JournalEditorView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JournalEditorView.swift; sourceTree = "<group>"; };
-		F9055DD2056C4925A60A6299 /* TranscriptRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptRenderer.swift; sourceTree = "<group>"; };
 		F939867A8E44FB5F3697E7E3 /* AIProviderConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderConfig.swift; sourceTree = "<group>"; };
 		FB1D428C8A48F546076DE263 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		FB515B983A4EBB487DAE0A43 /* ChatView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
@@ -653,7 +629,6 @@
 				FDE499C4C6FBD48305E55385 /* ProviderPickerView.swift */,
 				832902E7908176DA271EE9E4 /* ProviderTemplates.swift */,
 				2CF0F37BF2684ED2F9B58CC3 /* SettingsView.swift */,
-				1A13DC0E242A428D839BD056 /* AnarlogSyncSettingsView.swift */,
 				DB9EF4D69FC840FEA705C931 /* SkillsSettingsView.swift */,
 			);
 			path = Settings;
@@ -824,21 +799,10 @@
 				9F53C169C187477F8324CCEA /* AnarlogDocument.swift */,
 				EF0B25A6B42B40249D991868 /* AnarlogImporter.swift */,
 				1994C6DF57B3436597BA9299 /* AnarlogExporter.swift */,
-				0D7447BF72074C69A5136933 /* AnarlogSyncService.swift */,
-				842E7677B6B6477590DE7705 /* TemplateMapper.swift */,
-				1E8D74AFC9064BCEBA4FEC68 /* AnarlogConfigBridge.swift */,
-				B995A94FEA0D4C8384FEA89B /* AnarlogParticipantBridge.swift */,
-				BA2B9011022D44B189615A40 /* TranscriptPatchService.swift */,
-				B8E71265D63B4090B22BF9DF /* SpeakerLabeler.swift */,
-				F9055DD2056C4925A60A6299 /* TranscriptRenderer.swift */,
-				F62B07B30DFC4523B77C88BC /* ModelResolver.swift */,
-				5568D497EC0742FFBF071E13 /* STTAdapters.swift */,
 				87E09DC88DA541A483642060 /* VoiceActivityDetector.swift */,
 				A1B2C949491544F791AE85EE /* EvalSystem.swift */,
 				2086ECCDDC13498C899FBEE1 /* MeetilyTemplateService.swift */,
 				5CF01E08E69645CA8C602EDC /* SummaryCache.swift */,
-				4DC1F74EDFCF435B8AE08D31 /* MeetilyImporter.swift */,
-				CDE10C4451D64CAC93EABC3E /* MeetilyExporter.swift */,
 			);
 			path = Anarlog;
 			sourceTree = "<group>";
@@ -1365,22 +1329,10 @@
 				3B436BCC16364CCCBFB564D9 /* AnarlogDocument.swift in Sources */,
 				86D70AC6D739493E872A4D96 /* AnarlogImporter.swift in Sources */,
 				D06C9DCDC9D44FD18DC3289A /* AnarlogExporter.swift in Sources */,
-				9943EEFBF7A64C9AB0DB75ED /* AnarlogSyncService.swift in Sources */,
-				BC37A37A603446DD80DBC535 /* TemplateMapper.swift in Sources */,
-				DED5C466E0BE423F96DE3B45 /* AnarlogConfigBridge.swift in Sources */,
-				1DCBDE7DA752482480155E41 /* AnarlogParticipantBridge.swift in Sources */,
-				BF0D646B848B414189671792 /* AnarlogSyncSettingsView.swift in Sources */,
-				E688A591A08742D49D5DC376 /* TranscriptPatchService.swift in Sources */,
-				4D15F33B7FC448E2A7BDBF81 /* SpeakerLabeler.swift in Sources */,
-				1D0E5F84FBFD41518BE0729D /* TranscriptRenderer.swift in Sources */,
-				DC832E488E364EF181EF70CD /* ModelResolver.swift in Sources */,
-				D697241796EC418BAC8779BA /* STTAdapters.swift in Sources */,
 				D2505829C648429A921C3319 /* VoiceActivityDetector.swift in Sources */,
 				362E0F6420EA44EDB38543C7 /* EvalSystem.swift in Sources */,
 				1E20CAB1900D4E10B767A3BE /* MeetilyTemplateService.swift in Sources */,
 				21509F3B18304DA09A96F083 /* SummaryCache.swift in Sources */,
-				1C4D46AC9F2548789886969A /* MeetilyImporter.swift in Sources */,
-				5225E6D2AD4C4E3D8EDA78B4 /* MeetilyExporter.swift in Sources */,
 				3142C2FA4A8C4DF98BE82797 /* VADChunker.swift in Sources */,
 				B41D95F8F80B4C1787B66862 /* SpeechAnalyzerEngine.swift in Sources */,
 				E6AE684B25F84AB6A2EDE8AF /* ModelDownloadView.swift in Sources */,

@@ -20,7 +20,7 @@ final class ICSImporter: FormatImporter, @unchecked Sendable {
     }
 
     func importFromURL(_ url: URL) async throws -> ImportResult {
-        let text = try String(contentsOf: url, encoding: .utf8)
+        let text = try await Task.detached { try String(contentsOf: url, encoding: .utf8) }.value
         var warnings: [String] = []
 
         var title = url.deletingPathExtension().lastPathComponent
@@ -43,19 +43,26 @@ final class ICSImporter: FormatImporter, @unchecked Sendable {
 
         for line in unfolded {
             let trimmed = String(line)
-            if trimmed.hasPrefix("SUMMARY:") { title = String(trimmed.dropFirst(8)).trimmingCharacters(in: .whitespaces) }
-            if trimmed.hasPrefix("UID:") { eventUID = String(trimmed.dropFirst(4)).trimmingCharacters(in: .whitespaces) }
-            if trimmed.hasPrefix("LOCATION:") { location = String(trimmed.dropFirst(9)).trimmingCharacters(in: .whitespaces) }
-            if trimmed.hasPrefix("DESCRIPTION:") { description = String(trimmed.dropFirst(12)).trimmingCharacters(in: .whitespaces) }
-            if trimmed.hasPrefix("DTSTART:") {
-                let dateStr = String(trimmed.dropFirst(8))
-                startDate = parseICSDate(dateStr) ?? Date()
-            }
-            if trimmed.hasPrefix("DTEND:") {
-                let endStr = String(trimmed.dropFirst(6))
-                if let endDate = parseICSDate(endStr) {
+            // Use first colon to split property name from value, supporting
+            // ICS KEY parameters (e.g. "SUMMARY;LANGUAGE=en:Hello")
+            guard let colonIdx = trimmed.firstIndex(of: ":") else { continue }
+            let propName = String(trimmed[..<colonIdx])
+            // Strip any parameters (semicolon and everything after)
+            let baseProp = propName.components(separatedBy: ";").first ?? propName
+            let value = String(trimmed[trimmed.index(after: colonIdx)...]).trimmingCharacters(in: .whitespaces)
+
+            switch baseProp {
+            case "SUMMARY": title = value
+            case "UID": eventUID = value
+            case "LOCATION": location = value
+            case "DESCRIPTION": description = value
+            case "DTSTART":
+                startDate = parseICSDate(value) ?? Date()
+            case "DTEND":
+                if let endDate = parseICSDate(value) {
                     duration = endDate.timeIntervalSince(startDate)
                 }
+            default: break
             }
         }
 
@@ -77,10 +84,20 @@ final class ICSImporter: FormatImporter, @unchecked Sendable {
     }
 
     private func parseICSDate(_ str: String) -> Date? {
-        let cleaned = str.replacingOccurrences(of: "T", with: "").replacingOccurrences(of: "Z", with: "")
+        let cleaned = str.trimmingCharacters(in: .whitespaces)
+        // Try multiple ICS date formats: UTC (Z suffix), local, date-only
+        let formats = [
+            "yyyyMMdd'T'HHmmss'Z'",     // 20240101T120000Z
+            "yyyyMMdd'T'HHmmss",         // 20240101T120000
+            "yyyyMMdd",                   // 20240101 (date-only)
+        ]
         let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMddHHmmss"
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        return formatter.date(from: cleaned)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        for fmt in formats {
+            formatter.dateFormat = fmt
+            formatter.timeZone = fmt.hasSuffix("'Z'") ? TimeZone(secondsFromGMT: 0) : .current
+            if let date = formatter.date(from: cleaned) { return date }
+        }
+        return nil
     }
 }

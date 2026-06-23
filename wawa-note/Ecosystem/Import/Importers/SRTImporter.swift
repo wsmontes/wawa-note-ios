@@ -20,7 +20,9 @@ final class SRTImporter: FormatImporter, @unchecked Sendable {
     }
 
     func importFromURL(_ url: URL) async throws -> ImportResult {
-        let text = try String(contentsOf: url, encoding: .utf8)
+        let raw = try await Task.detached { try String(contentsOf: url, encoding: .utf8) }.value
+        // Normalize Windows line endings so \r\n\r\n block separators are detected
+        let text = raw.replacingOccurrences(of: "\r\n", with: "\n")
         var warnings: [String] = []
 
         var segments: [TranscriptSegment] = []

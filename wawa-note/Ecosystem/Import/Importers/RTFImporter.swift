@@ -15,7 +15,7 @@ struct RTFImporter: FormatImporter {
     }
 
     func importFromURL(_ url: URL) async throws -> ImportResult {
-        let data = try Data(contentsOf: url)
+        let data = try await Task.detached { try Data(contentsOf: url) }.value
 
         // Try NSAttributedString first, fall back to stripping RTF tags
         let text: String
@@ -23,12 +23,19 @@ struct RTFImporter: FormatImporter {
         if let attr = try? NSAttributedString(data: data, options: rtfOptions, documentAttributes: nil) {
             text = attr.string
         } else {
-            // Fallback: basic RTF tag stripping
+            // Fallback: basic RTF tag stripping. Note: deeply nested braces
+            // may produce garbled output — NSAttributedString path is preferred.
             guard let raw = String(data: data, encoding: .ascii) else {
                 throw NSError(domain: "RTFImporter", code: 1)
             }
-            text = raw
-                .replacingOccurrences(of: "\\{[^}]*\\}", with: "", options: .regularExpression)
+            var stripped = raw
+            // Iteratively remove innermost brace groups to handle nesting
+            for _ in 0..<10 {
+                let before = stripped
+                stripped = stripped.replacingOccurrences(of: "\\{[^{}]*\\}", with: "", options: .regularExpression)
+                if stripped == before { break } // no more groups to remove
+            }
+            text = stripped
                 .replacingOccurrences(of: "\\\\[a-z]+\\d*\\s?", with: "", options: .regularExpression)
                 .replacingOccurrences(of: "\\\n", with: "")
         }

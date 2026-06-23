@@ -275,6 +275,7 @@ struct ImportFormView: View {
                 // Use the FormatImporter to properly transform content
                 let result = try await importer.importFromURL(sourceURL)
                 let item = result.knowledgeItem
+                if !result.warnings.isEmpty { AppLog.general.warning("Import \(sourceURL.lastPathComponent): \(result.warnings)") }
 
                 // Apply user's edits on top of importer result
                 item.title = title

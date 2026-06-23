@@ -220,11 +220,7 @@ struct SettingsView: View {
 
                 // Anarlog Sync
                 Section {
-                    NavigationLink {
-                        AnarlogSyncSettingsView()
-                    } label: {
-                        Label("Anarlog Sync", systemImage: "arrow.triangle.2.circlepath")
-                    }
+                    // Anarlog Sync removed (KAN-258)
                 } header: {
                     Text("Synchronization")
                 } footer: {
@@ -271,20 +267,11 @@ struct SettingsView: View {
                     } label: {
                         Label("AI Lenses", systemImage: "eye")
                     }
-                    NavigationLink {
-                        ModelResolverSettingsView()
-                    } label: {
-                        Label("Model Resolution", systemImage: "arrow.triangle.branch")
-                    }
-                    NavigationLink {
-                        SummaryCacheManagementView()
-                    } label: {
-                        Label("Summary Cache", systemImage: "memories")
-                    }
+                    // Model Resolution + Summary Cache removed (KAN-258)
                 } header: {
                     Text("Advanced")
                 } footer: {
-                    Text("Fine-tune AI behavior. Lenses define analysis perspectives, Model Resolution sets fallback chains per task, and Summary Cache stores previous analysis results to avoid redundant API calls.")
+                    Text("Fine-tune AI behavior. Lenses define analysis perspectives for different content types.")
                 }
 
                 // MARK: Debug Logs (KAN-257)
@@ -482,113 +469,11 @@ struct LensesSettingsView: View {
 
 // MARK: - Model Resolver Settings
 
-struct ModelResolverSettingsView: View {
-    @State private var tiers: [ModelResolver.Task: [String]] = [:]
-    @State private var hasCustomTiers: Bool = false
-
-    var body: some View {
-        List {
-            ForEach(ModelResolver.Task.allCases, id: \.self) { task in
-                Section {
-                    ForEach(tiers[task] ?? [], id: \.self) { model in
-                        HStack {
-                            Text(model)
-                                .font(.system(.subheadline, design: .monospaced))
-                            Spacer()
-                            if model == (tiers[task]?.first ?? "") {
-                                Text("Primary")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color(.systemGray5))
-                                    .clipShape(Capsule())
-                            }
-                        }
-                    }
-                    if (tiers[task] ?? []).isEmpty {
-                        Text("No models configured for this task.")
-                            .foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Label(task.displayName, systemImage: task.icon)
-                }
-            }
-        }
-        .navigationTitle("Model Resolution")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                if hasCustomTiers {
-                    Button("Reset All") {
-                        ModelResolver.shared.resetAllToDefaults()
-                        loadTiers()
-                    }
-                }
-            }
-        }
-        .onAppear { loadTiers() }
-    }
-
-    private func loadTiers() {
-        var result: [ModelResolver.Task: [String]] = [:]
-        for task in ModelResolver.Task.allCases {
-            let models = ModelResolver.shared.models(for: task)
-            if !models.isEmpty { result[task] = models }
-        }
-        tiers = result
-
-        // Check if any task has custom tiers
-        let defaults = UserDefaults.standard
-        hasCustomTiers = defaults.data(forKey: "model_resolver_tiers") != nil
-    }
-}
-
+struct ModelResolverSettingsView: View { var body: some View { EmptyView() } }
 // MARK: - Summary Cache Management
 
-struct SummaryCacheManagementView: View {
-    @State private var stats = SummaryCache.shared.stats
-    @State private var showClearConfirmation = false
+struct SummaryCacheManagementView: View { var body: some View { EmptyView() } }
 
-    var body: some View {
-        List {
-            Section {
-                LabeledContent("Cached Summaries", value: "\(stats.entries)")
-                LabeledContent("Cache Hits", value: "\(stats.hits)")
-                LabeledContent("Cache Misses", value: "\(stats.misses)")
-                LabeledContent("Hit Rate", value: String(format: "%.1f%%", stats.hitRate * 100))
-            } header: {
-                Text("Statistics")
-            } footer: {
-                Text("The summary cache avoids redundant API calls by reusing analysis results when the transcript, template, and model haven't changed.")
-            }
-
-            Section {
-                Button(role: .destructive) {
-                    showClearConfirmation = true
-                } label: {
-                    Label("Clear Cache", systemImage: "trash")
-                }
-                .disabled(stats.entries == 0)
-            } header: {
-                Text("Maintenance")
-            }
-        }
-        .navigationTitle("Summary Cache")
-        .onAppear { stats = SummaryCache.shared.stats }
-        .confirmationDialog(
-            "Clear Summary Cache",
-            isPresented: $showClearConfirmation
-        ) {
-            Button("Clear All", role: .destructive) {
-                SummaryCache.shared.invalidateAll()
-                stats = SummaryCache.shared.stats
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This will remove \(stats.entries) cached summaries. Future analyses will require fresh API calls.")
-        }
-    }
-}
 
     private var hasWhisperProvider: Bool {
         guard let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext),

@@ -11,16 +11,27 @@ struct GitHubIssuesImporter: FormatImporter {
 
     func canRead(url: URL) -> Bool {
         guard url.pathExtension.lowercased() == "json" else { return false }
-        guard let data = try? Data(contentsOf: url) else { return false }
-        return (try? JSONDecoder().decode([GitHubIssueDTO].self, from: data)) != nil
+        // Only read first 4KB for format detection instead of loading entire file
+        guard let handle = try? FileHandle(forReadingFrom: url),
+              let prefix = try? handle.read(upToCount: 4096) else { return false }
+        try? handle.close()
+        return Self.probeForGitHubIssues(data: prefix)
     }
 
     func canRead(data: Data) -> Bool {
-        return (try? JSONDecoder().decode([GitHubIssueDTO].self, from: data)) != nil
+        return Self.probeForGitHubIssues(data: data)
+    }
+
+    private static func probeForGitHubIssues(data: Data) -> Bool {
+        guard let str = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespaces),
+              str.hasPrefix("[") else { return false }
+        // Check for expected GitHub issue keys in the first object
+        return str.contains("\"title\"") && str.contains("\"html_url\"")
+            && (str.contains("\"number\"") || str.contains("\"url\""))
     }
 
     func importFromURL(_ url: URL) async throws -> ImportResult {
-        let data = try Data(contentsOf: url)
+        let data = try await Task.detached { try Data(contentsOf: url) }.value
         let issues = try JSONDecoder().decode([GitHubIssueDTO].self, from: data)
 
         let item = KnowledgeItem(

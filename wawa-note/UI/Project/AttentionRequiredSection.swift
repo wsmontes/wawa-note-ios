@@ -131,7 +131,7 @@ private struct AttentionCard: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(card.color.opacity(0.08))
+        .background(card.color.opacity(0.15))
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
