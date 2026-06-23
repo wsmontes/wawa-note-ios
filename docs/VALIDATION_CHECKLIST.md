@@ -1,7 +1,8 @@
 # iPhone 14 Plus Validation Checklist
 
-**Date:** 2026-05-27
+**Date:** 2026-05-27 (updated 2026-06-22)
 **Build status:** BUILD SUCCEEDED (iPhone 14 Plus Simulator, Debug, Swift 6.0)
+**Last device test:** Pending — iPhone 14 Plus hardware validation not yet run
 
 ## Simulator Validation
 

@@ -319,3 +319,80 @@ RecordingCoordinator already publishes state changes and elapsed time via a 1-se
 - RecordingActivityAttributes + start/update/stop methods in RecordingCoordinator.
 - @preconcurrency import ActivityKit required for Swift 6 Sendable compatibility.
 - No Info.plist changes needed.
+
+---
+
+## ADR-0013: ShellInterpreter replaces 47 individual agent tools
+
+**Date:** 2026-06-02
+
+**Decision:** Replace 47 individual agent tool definitions with a single `run_command` tool backed by a Unix-inspired ShellInterpreter and VFS.
+
+**Motivation:**
+
+As the agent system grew, the tool list became unwieldy. Each new capability required a new tool definition, bloating the context window and making tool selection harder for the LLM. The Unix shell model is natively understood by LLMs, composable via pipes, and infinitely extensible without new tool definitions.
+
+**Consequences:**
+- Single `ShellTool.run_command` replaces all previous tools.
+- ShellInterpreter tokenizes and dispatches 24 commands (ls, cd, cat, find, grep, touch, echo, rm, mv, head, wc, history, extract, semantic, analyze, cal, person, export, vision, describe, progress, cleanup, recipe, help, ask_user).
+- VFSService maps domain objects to virtual filesystem paths (15 path types).
+- AgentLoop context window shrinks ~60% (one tool schema vs 47).
+- New capabilities added as new ShellInterpreter commands, not new tools.
+
+---
+
+## ADR-0014: Project frameworks as LLM-defined schemas
+
+**Date:** 2026-06-04
+
+**Decision:** Project frameworks use LLM-authored JSON schemas instead of hardcoded Swift enums, enabling users and AI to define custom frameworks without app updates.
+
+**Motivation:**
+
+Hardcoded framework types (meeting, research, etc.) cannot cover all user needs. A legal team needs different fields than a product team. LLM-defined schemas allow frameworks to adapt without code changes, while still being validated at runtime.
+
+**Consequences:**
+- FrameworkService loads schemas from `ai_config.json` and user overrides.
+- DynamicAnalysis renders UI from JSON schema, not hardcoded views.
+- 5 built-in frameworks shipped (meeting, research, brainstorm, journal, blank).
+- Users can add custom frameworks via config project.
+- Validation at pipeline run time — malformed schemas fail gracefully.
+
+---
+
+## ADR-0015: Chat blocks as structured output types
+
+**Date:** 2026-06-06
+
+**Decision:** Render LLM output as typed ChatBlock structs rather than raw markdown, enabling rich interactive UI elements in chat.
+
+**Motivation:**
+
+Raw markdown limits chat to text. Structured blocks enable: interactive task cards, collapsible analysis sections, choice prompts, progress bars, file previews. Each block type has a dedicated SwiftUI view builder.
+
+**Consequences:**
+- 18 ChatBlock types defined in ChatModels.swift.
+- ContentParser heuristically parses markdown into blocks.
+- Streaming renders partial blocks with `isStreaming` flag.
+- New block types added via enum case + view builder.
+- Block type JSON schemas documented in CHAT_BLOCK_RENDERING.md.
+
+---
+
+## ADR-0016: Anarlog ecosystem as import/export bridge
+
+**Date:** 2026-06-08
+
+**Decision:** Build the Anarlog ecosystem as a bidirectional import/export bridge with external tools, using watched folder sync and quality validation gates.
+
+**Motivation:**
+
+Users have meeting data in other systems (Meetily, manual transcripts). Anarlog provides a standard interchange format with quality validation (EvalSystem), speaker labeling, and template mapping, allowing data to flow in and out of Wawa Note without vendor lock-in.
+
+**Consequences:**
+- 15 files in Ecosystem/Anarlog/.
+- AnarlogSyncService watches folders for new files, auto-imports.
+- EvalSystem validates AI output quality before ingestion.
+- SpeakerLabeler cross-references Contacts for identity resolution.
+- VoiceActivityDetector integration for precise segment timing.
+- MeetilyImporter/Exporter for Meetily ecosystem compatibility.

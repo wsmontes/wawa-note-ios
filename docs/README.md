@@ -83,18 +83,15 @@ Documents that define the project. Read these before making architecture decisio
 
 | Document | Updated | Summary | Related JIRA |
 |---|---|---|---|
-| — | — | **No technical specs exist yet.** See gaps below. | — |
+| [AGENT_SYSTEM_ARCHITECTURE.md](AGENT_SYSTEM_ARCHITECTURE.md) | 2026-06-22 | AgentLoop, ShellInterpreter (24 commands), VFSService (15 paths), AgentMemoryStore, PromptStore, ToolContext | KAN-190 |
+| [CHAT_BLOCK_RENDERING.md](CHAT_BLOCK_RENDERING.md) | 2026-06-22 | 18 chat output types with streaming, ContentParser, JSON schemas, how to add new blocks | KAN-192 |
+| [CONTENT_PIPELINE.md](CONTENT_PIPELINE.md) | 2026-06-22 | 11-state machine, 8 framework templates, Phase 0/1, recovery, error codes | KAN-199 |
+| [PROVIDER_ROUTING.md](PROVIDER_ROUTING.md) | 2026-06-22 | ProviderRouter, BudgetTracker, MetricsTracker, CircuitBreaker, NetworkMonitor, LocalProviderScanner | KAN-202 |
 
 ### Missing Technical Specs (to be created)
 
 | Spec | Priority | Complexity | Source Files |
 |---|---|---|---|
-| AgentLoop + VFS + ShellInterpreter architecture | P0 | Very High | `Domain/Agent/AgentLoop.swift`, `ShellInterpreter.swift`, `VFSService.swift` |
-| Chat block rendering system (18 output types) | P0 | High | `UI/Chat/ChatBlockViews.swift`, `Domain/Models/ChatModels.swift` |
-| Content pipeline state machine (11 states, recovery) | P1 | High | `Domain/Services/ContentPipelineService.swift` |
-| Project ingestion pipeline (analysis→tasks→edges→signals→health) | P1 | High | `Domain/Services/ProjectIngestionPipeline.swift` |
-| Provider routing and resolution (offline-aware, fallback) | P1 | High | `Providers/ProviderRouter.swift`, `ActiveProviderManager.swift` |
-| Transcription engine dispatch (Apple vs Remote, VAD) | P2 | Medium | `Transcription/` |
 | Audio capture engine (PCM WAV, crash recovery, route changes) | P1 | Medium | `Audio/AudioCaptureService.swift`, `AudioFileWriter.swift` |
 | Project framework system (flexible schemas, DynamicAnalysis) | P2 | High | `Domain/Services/FrameworkService.swift` |
 | File storage architecture (FileArtifactStore, layout, recovery) | P1 | Medium | `Storage/FileArtifactStore.swift` |
@@ -103,18 +100,9 @@ Documents that define the project. Read these before making architecture decisio
 
 ## User Journeys
 
-*No dedicated user journey documents exist.* Key journeys that need documentation:
-
-| Journey | Steps | Priority |
-|---|---|---|
-| Record meeting → transcript → analysis → project | Capture → transcribe → AI analyze → review → ingest | P0 |
-| Import file → triage → assign to project | Share sheet / file picker → inbox → review → assign | P0 |
-| Chat with agent → create tasks/edges | AgentLoop → tool calling → project ingestion | P0 |
-| Scan document → OCR → extract text | VisionKit → text recognition → KnowledgeItem | P1 |
-| Create project → ingest items → dashboard | Project creation → pipeline → ProjectHomeView | P1 |
-| Provider setup → first recording | ProviderPicker → provider test → capture flow | P1 |
-| Settings → skills → prompt editing | SettingsView → SkillsSettingsView → PromptStore | P2 |
-| Anarlog sync → import → triage | Watched folder → AnarlogSyncService → import flow | P2 |
+| Document | Updated | Summary | Related JIRA |
+|---|---|---|---|
+| [USER_JOURNEYS.md](USER_JOURNEYS.md) | 2026-06-22 | 8 complete user journeys: record→analyze, import→triage, chat→tasks, scan→OCR, create project, provider setup, search, Anarlog sync | KAN-204 |
 
 ---
 

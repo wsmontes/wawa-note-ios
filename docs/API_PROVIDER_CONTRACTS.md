@@ -8,15 +8,24 @@ Provider-specific APIs should be isolated behind internal contracts.
 
 ## 2. Current provider implementations
 
-As of 2026-05-30, the following providers implement the AIProvider protocol:
+As of 2026-06-22, the following providers and infrastructure implement the AIProvider protocol:
 
 | Provider | File | Status |
 |---|---|---|
-| OpenAICompatibleProvider | `Providers/OpenAICompatibleProvider.swift` | Primary — handles OpenAI, LM Studio, Ollama, any /v1/chat/completions endpoint |
-| AnthropicProvider | `Providers/AnthropicProvider.swift` | Implemented — Claude models via Anthropic API |
-| GeminiProvider | `Providers/GeminiProvider.swift` | Implemented — Google Gemini models |
+| OpenAICompatibleProvider | `Providers/OpenAICompatibleProvider.swift` | Primary — handles OpenAI, DeepSeek, LM Studio, Ollama, OpenRouter, LocalAI, any /v1/chat/completions endpoint |
+| AnthropicProvider | `Providers/AnthropicProvider.swift` | Implemented — Claude models (Opus, Sonnet, Haiku) via Anthropic Messages API |
+| GeminiProvider | `Providers/GeminiProvider.swift` | Implemented — Google Gemini models (Pro, Flash) |
 | ProviderAdapter | `Providers/ProviderAdapter.swift` | Implemented — wraps provider selection + configuration |
-| ProviderRouter | `Providers/ProviderRouter.swift` | Implemented — routes requests by model/provider capability |
+| ProviderRouter | `Providers/ProviderRouter.swift` | Implemented — routes requests by model/provider capability, offline-aware |
+| ActiveProviderManager | `Providers/ActiveProviderManager.swift` | Implemented — tracks active provider selection |
+| AIConfigService | `Providers/AIConfigService.swift` | Implemented — config-driven model selection, request params, context budgets |
+| BudgetTracker | `Providers/BudgetTracker.swift` | Implemented — daily spending limits per provider |
+| MetricsTracker | `Providers/MetricsTracker.swift` | Implemented — latency, TTFT, tokens/sec, daily aggregates |
+| CircuitBreaker | `Providers/CircuitBreaker.swift` | Implemented — failure threshold with half-open recovery |
+| NetworkMonitor | `Providers/NetworkMonitor.swift` | Implemented — NWPathMonitor for connectivity |
+| LocalProviderScanner | `Providers/LocalProviderScanner.swift` | Implemented — Bonjour + port probe for Ollama, LM Studio, LocalAI |
+| ModelCache | `Providers/ModelCache.swift` | Implemented — 1-hour TTL for model lists |
+| RetryPolicy | `Providers/RetryPolicy.swift` | Implemented — exponential backoff with jitter |
 
 ## 3. AIProvider contract
 
