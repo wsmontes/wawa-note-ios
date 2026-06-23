@@ -100,7 +100,7 @@ struct ProjectHomeView: View {
     @State private var showFileImporter = false
 
     enum ProjectTab: String, CaseIterable {
-        case synthesis = "Síntese"
+        case synthesis = "Synthesis"
         case files = "Arquivos"
     }
 
@@ -174,6 +174,7 @@ struct ProjectHomeView: View {
         do {
             let result = try await importer.importFromURL(url)
             let item = result.knowledgeItem
+            if !result.warnings.isEmpty { AppLog.general.warning("Import \(url.lastPathComponent): \(result.warnings)") }
             modelContext.insert(item)
             try? modelContext.save()
             try? services.projects.addItem(item.id, to: project.id)
@@ -1324,26 +1325,144 @@ struct ProjectSynthesisView: View {
     }
 }
 
-/// Renders the synthesis body content from parsed JSON.
+/// Renders the synthesis body content as typed cards (KAN-255).
 struct SynthesisContentView: View {
     let synthesis: ProjectDerivedItem
     let derivedItems: [ProjectDerivedItem]
     let projectID: UUID
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Parse and render synthesis body
-            if let bodyJSON = synthesis.bodyJSON,
-               let data = bodyJSON.data(using: .utf8),
-               let body = try? JSONDecoder().decode(SynthesisBody.self, from: data) {
-                Text(.init(body.markdown))
-                    .padding()
-            } else {
-                Text("Synthesis pending...")
-                    .foregroundStyle(.secondary)
-                    .padding()
+        if let bodyJSON = synthesis.bodyJSON,
+           let data = bodyJSON.data(using: .utf8),
+           let body = try? JSONDecoder().decode(SynthesisBody.self, from: data) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if !body.metrics.isEmpty {
+                        MetricsStripView(metrics: body.metrics)
+                    }
+                    ForEach(body.sections.sorted(by: { $0.order < $1.order }), id: \.id) { section in
+                        if section.renderType != "metrics" {
+                            SectionCardView(section: section)
+                        }
+                    }
+                }
+                .padding(16)
+            }
+        } else {
+            Text("Synthesis pending...")
+                .foregroundStyle(.secondary)
+                .padding()
+        }
+    }
+}
+
+// MARK: - Synthesis Card Views (KAN-255)
+
+struct MetricsStripView: View {
+    let metrics: [SynthesisMetric]
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(metrics, id: \.id) { metric in
+                    MetricPill(metric: metric)
+                }
+            }
+            .padding(.horizontal, 4)
+        }
+    }
+}
+
+struct MetricPill: View {
+    let metric: SynthesisMetric
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 4) {
+                if let icon = metric.icon {
+                    Image(systemName: icon).font(.system(size: 10))
+                }
+                Text(formatted).font(.title3).fontWeight(.bold)
+            }
+            Text(metric.label).font(.caption2).lineLimit(1)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(statusColor.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(statusColor.opacity(0.3), lineWidth: 1))
+    }
+
+    private var formatted: String {
+        switch metric.format {
+        case "percentage": String(format: "%.0f%%", metric.value * 100)
+        case "days": "\(Int(metric.value))d"
+        case "score": String(format: "%.0f", metric.value)
+        default: metric.value >= 100 ? "\(Int(metric.value))" : String(format: "%.1f", metric.value)
+        }
+    }
+
+    private var statusColor: Color {
+        switch metric.status {
+        case "healthy": .green
+        case "warning": .orange
+        case "critical": .red
+        default: .secondary
+        }
+    }
+}
+
+struct SectionCardView: View {
+    let section: SynthesisSection
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: sectionIcon).font(.caption).foregroundStyle(sectionColor)
+                Text(section.title).font(.headline)
+            }
+            switch section.renderType {
+            case "cards", "table", "timeline":
+                Text(section.content).font(.body)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.regularMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            default:
+                Text(.init(section.content)).font(.body)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.regularMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
             }
         }
+        .padding(16)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+    }
+
+    private var sectionIcon: String {
+        let t = section.title.lowercased()
+        if t.contains("summary") || t.contains("resumo") { return "doc.text.fill" }
+        if t.contains("topic") || t.contains("tópico") { return "tag.fill" }
+        if t.contains("risk") || t.contains("risco") { return "exclamationmark.triangle.fill" }
+        if t.contains("task") || t.contains("tarefa") { return "checklist" }
+        if t.contains("decision") || t.contains("decisão") { return "checkmark.shield.fill" }
+        if t.contains("insight") { return "lightbulb.fill" }
+        if t.contains("action") || t.contains("ação") { return "bolt.fill" }
+        if t.contains("question") { return "questionmark.circle.fill" }
+        return "doc.text"
+    }
+
+    private var sectionColor: Color {
+        let t = section.title.lowercased()
+        if t.contains("risk") || t.contains("risco") { return .red }
+        if t.contains("task") || t.contains("tarefa") { return .blue }
+        if t.contains("decision") || t.contains("decisão") { return .green }
+        if t.contains("topic") || t.contains("tópico") { return .purple }
+        if t.contains("insight") { return .orange }
+        if t.contains("action") || t.contains("ação") { return .blue }
+        return .secondary
     }
 }
 
