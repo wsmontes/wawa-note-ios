@@ -87,14 +87,13 @@ Documents that define the project. Read these before making architecture decisio
 | [CHAT_BLOCK_RENDERING.md](CHAT_BLOCK_RENDERING.md) | 2026-06-22 | 18 chat output types with streaming, ContentParser, JSON schemas, how to add new blocks | KAN-192 |
 | [CONTENT_PIPELINE.md](CONTENT_PIPELINE.md) | 2026-06-22 | 11-state machine, 8 framework templates, Phase 0/1, recovery, error codes | KAN-199 |
 | [PROVIDER_ROUTING.md](PROVIDER_ROUTING.md) | 2026-06-22 | ProviderRouter, BudgetTracker, MetricsTracker, CircuitBreaker, NetworkMonitor, LocalProviderScanner | KAN-202 |
+| [AUDIO_CAPTURE_ENGINE.md](AUDIO_CAPTURE_ENGINE.md) | 2026-06-22 | PCM WAV recording, crash-safe checkpoints, route change handling, Watch integration | KAN-73, KAN-79 |
+| [PROJECT_FRAMEWORKS.md](PROJECT_FRAMEWORKS.md) | 2026-06-22 | 5 built-in frameworks, DynamicAnalysis, LensAnalysisService (5 lenses), custom framework creation | KAN-197 |
+| [FILE_STORAGE_ARCHITECTURE.md](FILE_STORAGE_ARCHITECTURE.md) | 2026-06-22 | FileArtifactStore, atomic writes, crash recovery, App Group, disk space, migration registry | KAN-57, KAN-58 |
 
-### Missing Technical Specs (to be created)
+### Missing Technical Specs
 
-| Spec | Priority | Complexity | Source Files |
-|---|---|---|---|
-| Audio capture engine (PCM WAV, crash recovery, route changes) | P1 | Medium | `Audio/AudioCaptureService.swift`, `AudioFileWriter.swift` |
-| Project framework system (flexible schemas, DynamicAnalysis) | P2 | High | `Domain/Services/FrameworkService.swift` |
-| File storage architecture (FileArtifactStore, layout, recovery) | P1 | Medium | `Storage/FileArtifactStore.swift` |
+*All priority technical specs are now documented. Remaining items are maintenance tasks (DocC catalog, docs organization).*
 
 ---
 
