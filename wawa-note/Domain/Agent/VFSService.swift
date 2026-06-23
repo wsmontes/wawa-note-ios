@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-9, KAN-43, KAN-141
+
 
 // MARK: - Internal VFS Path
 
@@ -102,7 +104,7 @@ enum VFSService {
             if let id = UUID(uuidString: inboxItemStr) {
                 return hasSubPath ? .inboxItemFile(id: id) : .inboxItem(id: id)
             }
-            let allItems = (try? KnowledgeItemService(context: context.modelContext).allItems()) ?? []
+            let allItems = (try? context.services.items.allItems()) ?? []
             if let matched = allItems.first(where: { $0.title.caseInsensitiveCompare(inboxItemStr) == .orderedSame }) {
                 return hasSubPath ? .inboxItemFile(id: matched.id) : .inboxItem(id: matched.id)
             }
@@ -311,7 +313,7 @@ enum VFSService {
     // MARK: - Helpers: project matching
 
     static func findProject(named: String, context: ToolContext) -> Project? {
-        let all = (try? ProjectService(context: context.modelContext).allProjects()) ?? []
+        let all = (try? context.services.projects.allProjects()) ?? []
         return all.first { projectMatches($0, dirName: named) }
     }
 
@@ -334,20 +336,20 @@ enum VFSService {
     private static func node(for vpath: VFSPath, context: ToolContext) -> VFSNode? {
         switch vpath {
         case .root:
-            let projects = (try? ProjectService(context: context.modelContext).allProjects()) ?? []
-            let allItems = (try? KnowledgeItemService(context: context.modelContext).allItems()) ?? []
+            let projects = (try? context.services.projects.allProjects()) ?? []
+            let allItems = (try? context.services.items.allItems()) ?? []
             return .directory(path: "/", name: "Workspace", childrenCount: 3,
                 metadata: VFSNodeMetadata(taskCount: allItems.count, itemCount: allItems.count))
         case .inbox:
-            let items = (try? KnowledgeItemService(context: context.modelContext).allItems()) ?? []
+            let items = (try? context.services.items.allItems()) ?? []
             return .directory(path: "/inbox", name: "Inbox", childrenCount: items.count)
         case .projects:
-            let projects = (try? ProjectService(context: context.modelContext).allProjects()) ?? []
+            let projects = (try? context.services.projects.allProjects()) ?? []
             return .directory(path: "/projects", name: "Projects", childrenCount: projects.count)
         case .project(_, let pid):
-            guard let p = try? ProjectService(context: context.modelContext).fetch(id: pid) else { return nil }
-            let tasks = (try? TaskService(context: context.modelContext).tasks(for: pid)) ?? []
-            let items = (try? ProjectService(context: context.modelContext).items(in: pid)) ?? []
+            guard let p = try? context.services.projects.fetch(id: pid) else { return nil }
+            let tasks = (try? context.services.derived.tasks(for: pid)) ?? []
+            let items = (try? context.services.projects.items(in: pid)) ?? []
             return .directory(path: "/projects/\(safeDirName(p))", name: p.name,
                 childrenCount: 7,
                 metadata: VFSNodeMetadata(
@@ -366,8 +368,8 @@ enum VFSService {
     private static func children(for vpath: VFSPath, context: ToolContext) -> [VFSNode] {
         switch vpath {
         case .root:
-            let projects = (try? ProjectService(context: context.modelContext).allProjects()) ?? []
-            let allItems = (try? KnowledgeItemService(context: context.modelContext).allItems()) ?? []
+            let projects = (try? context.services.projects.allProjects()) ?? []
+            let allItems = (try? context.services.items.allItems()) ?? []
             return [
                 .directory(path: "/inbox", name: "Inbox", childrenCount: allItems.count,
                     metadata: VFSNodeMetadata(itemCount: allItems.count)),
@@ -377,7 +379,7 @@ enum VFSService {
             ]
 
         case .inbox:
-            let allItems = (try? KnowledgeItemService(context: context.modelContext).allItems()) ?? []
+            let allItems = (try? context.services.items.allItems()) ?? []
             return allItems.map { item in
                 let itemPath = "/inbox/\(item.id.uuidString)"
                 return makeItemDirNode(item: item, path: itemPath, context: context)
@@ -387,10 +389,10 @@ enum VFSService {
             return itemFileChildren(slug: "inbox", itemID: id, context: context)
 
         case .projects:
-            let projects = (try? ProjectService(context: context.modelContext).allProjects()) ?? []
+            let projects = (try? context.services.projects.allProjects()) ?? []
             return projects.map { p in
-                let tasks = (try? TaskService(context: context.modelContext).tasks(for: p.id)) ?? []
-                let items = (try? ProjectService(context: context.modelContext).items(in: p.id)) ?? []
+                let tasks = (try? context.services.derived.tasks(for: p.id)) ?? []
+                let items = (try? context.services.projects.items(in: p.id)) ?? []
                 return .directory(
                     path: "/projects/\(safeDirName(p))", name: p.name,
                     childrenCount: 7,
@@ -405,9 +407,9 @@ enum VFSService {
             }
 
         case .project(let slug, let pid):
-            guard let p = try? ProjectService(context: context.modelContext).fetch(id: pid) else { return [] }
-            let tasks = (try? TaskService(context: context.modelContext).tasks(for: pid)) ?? []
-            let items = (try? ProjectService(context: context.modelContext).items(in: pid)) ?? []
+            guard let p = try? context.services.projects.fetch(id: pid) else { return [] }
+            let tasks = (try? context.services.derived.tasks(for: pid)) ?? []
+            let items = (try? context.services.projects.items(in: pid)) ?? []
             let isConfig = ConfigProjectService.isConfigProject(p)
             let base = "/projects/\(slug)"
 
@@ -438,7 +440,7 @@ enum VFSService {
             return nodes
 
         case .projectItems(let slug, let pid):
-            let items = (try? ProjectService(context: context.modelContext).items(in: pid)) ?? []
+            let items = (try? context.services.projects.items(in: pid)) ?? []
             let base = "/projects/\(slug)/items"
             return items.map { item in
                 let itemPath = "\(base)/\(item.id.uuidString)"
@@ -452,7 +454,7 @@ enum VFSService {
             return itemFileChildren(slug: slug, itemID: itemID, context: context)
 
         case .projectTasks(let slug, let pid):
-            let tasks = (try? TaskService(context: context.modelContext).tasks(for: pid)) ?? []
+            let tasks = (try? context.services.derived.tasks(for: pid)) ?? []
             let base = "/projects/\(slug)/tasks"
             return tasks.map { t in
                 .file(
@@ -467,7 +469,7 @@ enum VFSService {
             }
 
         case .projectPeople(let slug, let pid):
-            let gsvc = GraphEdgeService(context: context.modelContext)
+            let gsvc = context.services.edges
             let edges = (try? gsvc.edges(from: pid)) ?? []
             let peopleEdges = edges.filter { $0.edgeTypeRaw == "person" }
             let base = "/projects/\(slug)/people"
@@ -480,7 +482,7 @@ enum VFSService {
             }
 
         case .projectEdges(let slug, let pid):
-            let gsvc = GraphEdgeService(context: context.modelContext)
+            let gsvc = context.services.edges
             let outgoing = (try? gsvc.edges(from: pid)) ?? []
             let incoming = (try? gsvc.edges(to: pid)) ?? []
             let all = outgoing + incoming
@@ -509,7 +511,7 @@ enum VFSService {
             if let iid = itemID {
                 return analysisFilesForItem(slug: slug, itemID: iid, context: context)
             }
-            let items = (try? ProjectService(context: context.modelContext).items(in: pid)) ?? []
+            let items = (try? context.services.projects.items(in: pid)) ?? []
             let base = "/projects/\(slug)/analysis"
             return items.compactMap { item in
                 let dir = context.fileStore.itemDirectoryURL(for: item.id)
@@ -594,7 +596,7 @@ enum VFSService {
     // MARK: - Item children (files inside an item directory)
 
     private static func itemFileChildren(slug: String, itemID: UUID, context: ToolContext) -> [VFSNode] {
-        guard let item = try? KnowledgeItemService(context: context.modelContext).fetchItem(id: itemID) else { return [] }
+        guard let item = try? context.services.items.fetchItem(id: itemID) else { return [] }
         let base: String
         if slug == "inbox" {
             base = "/inbox/\(itemID.uuidString)"
@@ -800,19 +802,19 @@ enum VFSService {
     private static func fileContent(for vpath: VFSPath, context: ToolContext) -> String? {
         switch vpath {
         case .project(let slug, let pid):
-            guard let p = try? ProjectService(context: context.modelContext).fetch(id: pid) else { return nil }
+            guard let p = try? context.services.projects.fetch(id: pid) else { return nil }
             return formatProjectJSON(p, context: context)
 
         case .projectItem(_, _, let itemID):
-            guard let item = try? KnowledgeItemService(context: context.modelContext).fetchItem(id: itemID) else { return nil }
+            guard let item = try? context.services.items.fetchItem(id: itemID) else { return nil }
             return formatItemJSON(item, fileStore: context.fileStore)
 
         case .projectTask(_, _, let taskID):
-            guard let t = try? TaskService(context: context.modelContext).fetch(id: taskID) else { return nil }
+            guard let t = try? context.services.derived.fetch(id: taskID) else { return nil }
             return formatTaskJSON(t)
 
         case .inboxItem(let id):
-            guard let item = try? KnowledgeItemService(context: context.modelContext).fetchItem(id: id) else { return nil }
+            guard let item = try? context.services.items.fetchItem(id: id) else { return nil }
             return formatItemJSON(item, fileStore: context.fileStore)
 
         case .projectAnalysis(_, _, let itemID):
@@ -889,10 +891,10 @@ enum VFSService {
 
         switch file {
         case "body.md":
-            guard let item = try? KnowledgeItemService(context: context.modelContext).fetchItem(id: itemID) else { return nil }
+            guard let item = try? context.services.items.fetchItem(id: itemID) else { return nil }
             return item.bodyText
         case "metadata.json":
-            guard let item = try? KnowledgeItemService(context: context.modelContext).fetchItem(id: itemID) else { return nil }
+            guard let item = try? context.services.items.fetchItem(id: itemID) else { return nil }
             return formatItemJSON(item, fileStore: context.fileStore)
         case "audio.m4a":
             return nil // Binary, not readable as string
@@ -915,7 +917,7 @@ enum VFSService {
         let clean = stripJSONSuffix(str)
         if let id = UUID(uuidString: clean) { return id }
         // Fuzzy match
-        let allItems = (try? KnowledgeItemService(context: context.modelContext).allItems()) ?? []
+        let allItems = (try? context.services.items.allItems()) ?? []
         if let matched = allItems.first(where: { $0.title.caseInsensitiveCompare(clean) == .orderedSame }) {
             return matched.id
         }
@@ -930,25 +932,25 @@ enum VFSService {
     private static func writeFileContent(_ text: String, to vpath: VFSPath, context: ToolContext) throws {
         switch vpath {
         case .project(let slug, let pid):
-            guard let project = try? ProjectService(context: context.modelContext).fetch(id: pid) else {
+            guard let project = try? context.services.projects.fetch(id: pid) else {
                 throw VFSError.fileNotFound(path: "/projects/\(slug)/project.json")
             }
             try updateProjectFromJSON(project, jsonText: text, context: context)
 
         case .projectItem(_, _, let itemID):
-            guard let item = try? KnowledgeItemService(context: context.modelContext).fetchItem(id: itemID) else {
+            guard let item = try? context.services.items.fetchItem(id: itemID) else {
                 throw VFSError.fileNotFound(path: "item \(itemID)")
             }
             try updateItemFromJSON(item, jsonText: text, context: context)
 
         case .projectTask(_, _, let taskID):
-            guard let task = try? TaskService(context: context.modelContext).fetch(id: taskID) else {
+            guard let task = try? context.services.derived.fetch(id: taskID) else {
                 throw VFSError.fileNotFound(path: "task \(taskID)")
             }
             try updateTaskFromJSON(task, jsonText: text, context: context)
 
         case .inboxItem(let id):
-            guard let item = try? KnowledgeItemService(context: context.modelContext).fetchItem(id: id) else {
+            guard let item = try? context.services.items.fetchItem(id: id) else {
                 throw VFSError.fileNotFound(path: "/inbox/\(id)")
             }
             try updateItemFromJSON(item, jsonText: text, context: context)
@@ -1011,7 +1013,7 @@ enum VFSService {
             throw VFSError.fileNotFound(path: rawPath)
         }
 
-        guard let item = try? KnowledgeItemService(context: context.modelContext).fetchItem(id: itemID) else {
+        guard let item = try? context.services.items.fetchItem(id: itemID) else {
             throw VFSError.fileNotFound(path: rawPath)
         }
 
@@ -1026,7 +1028,7 @@ enum VFSService {
 
         case "project.json":
             if let projectID = item.projectID,
-               let project = try? ProjectService(context: context.modelContext).fetch(id: projectID) {
+               let project = try? context.services.projects.fetch(id: projectID) {
                 try updateProjectFromJSON(project, jsonText: content, context: context)
             }
 
@@ -1053,17 +1055,17 @@ enum VFSService {
         switch vpath {
         // Items → Trash
         case .projectItem(_, _, let itemID), .inboxItem(let itemID):
-            guard let item = try? KnowledgeItemService(context: context.modelContext).fetchItem(id: itemID) else {
+            guard let item = try? context.services.items.fetchItem(id: itemID) else {
                 throw VFSError.fileNotFound(path: "item")
             }
             try TrashService(context: context.modelContext).moveToTrash(item)
 
         // Tasks → permanent
         case .projectTask(_, _, let taskID):
-            guard let task = try? TaskService(context: context.modelContext).fetch(id: taskID) else {
+            guard let task = try? context.services.derived.fetch(id: taskID) else {
                 throw VFSError.fileNotFound(path: "task")
             }
-            try TaskService(context: context.modelContext).deleteTask(task)
+            try context.services.derived.deleteTask(task)
 
         // Individual files inside items
         case .projectItemContents(_, _, let itemID), .inboxItemFile(let itemID):
@@ -1117,18 +1119,18 @@ enum VFSService {
     private static func moveNode(from src: VFSPath, to dst: VFSPath, context: ToolContext) throws {
         switch (src, dst) {
         case (.inboxItem(let itemID), .projectItems(_, let pid)):
-            try ProjectService(context: context.modelContext).addItem(itemID, to: pid)
-            guard let item = try? KnowledgeItemService(context: context.modelContext).fetchItem(id: itemID) else {
+            try context.services.projects.addItem(itemID, to: pid)
+            guard let item = try? context.services.items.fetchItem(id: itemID) else {
                 throw VFSError.fileNotFound(path: "\(src) -> \(dst)")
             }
-            try KnowledgeItemService(context: context.modelContext).removeFromInbox(item)
+            try context.services.items.removeFromInbox(item)
 
         case (.projectItem(_, _, let itemID), .projectItems(_, let dpid)):
-            try ProjectService(context: context.modelContext).addItem(itemID, to: dpid)
+            try context.services.projects.addItem(itemID, to: dpid)
 
         case (.projectItem(_, _, let itemID), .inbox):
-            try ProjectService(context: context.modelContext).removeItem(itemID)
-            if let item = try? KnowledgeItemService(context: context.modelContext).fetchItem(id: itemID) {
+            try context.services.projects.removeItem(itemID)
+            if let item = try? context.services.items.fetchItem(id: itemID) {
                 item.inboxDate = Date()
                 try context.modelContext.save()
             }
@@ -1141,8 +1143,8 @@ enum VFSService {
     // MARK: - JSON Formatting for reads
 
     private static func formatProjectJSON(_ p: Project, context: ToolContext) -> String {
-        let tasks = (try? TaskService(context: context.modelContext).tasks(for: p.id)) ?? []
-        let items = (try? ProjectService(context: context.modelContext).items(in: p.id)) ?? []
+        let tasks = (try? context.services.derived.tasks(for: p.id)) ?? []
+        let items = (try? context.services.projects.items(in: p.id)) ?? []
         let dict: [String: Any] = [
             "name": p.name, "slug": p.slug, "dirName": safeDirName(p),
             "status": p.statusRaw, "healthScore": p.healthScore as Any,
@@ -1227,7 +1229,7 @@ enum VFSService {
         let newTitle = json["title"] as? String
         let newBody = json["body"] as? String
         let newTags = json["tags"] as? [String]
-        try? KnowledgeItemService(context: context.modelContext).updateItem(item, title: newTitle, bodyText: newBody, tags: newTags)
+        try? context.services.items.updateItem(item, title: newTitle, bodyText: newBody, tags: newTags)
 
         // Status & flags
         if let v = json["isFlagged"] as? Bool { item.isFlagged = v }
@@ -1270,7 +1272,7 @@ enum VFSService {
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw VFSError.invalidJSON
         }
-        let svc = TaskService(context: context.modelContext)
+        let svc = context.services.derived
         var newStatus: TaskStatus?
         if let s = json["status"] as? String {
             guard let status = TaskStatus(rawValue: s) else {
@@ -1515,7 +1517,7 @@ enum VFSService {
     }
 
     private static func matchTask(_ q: String, in pid: UUID, context: ToolContext) -> UUID? {
-        let tasks = (try? TaskService(context: context.modelContext).tasks(for: pid)) ?? []
+        let tasks = (try? context.services.derived.tasks(for: pid)) ?? []
         if let m = tasks.first(where: { $0.title.caseInsensitiveCompare(q) == .orderedSame }) { return m.id }
         let c = tasks.filter { $0.title.localizedCaseInsensitiveContains(q) }
         if c.count == 1 { return c[0].id }
@@ -1524,7 +1526,7 @@ enum VFSService {
     }
 
     private static func matchItem(_ q: String, in pid: UUID, context: ToolContext) -> UUID? {
-        let items = (try? ProjectService(context: context.modelContext).items(in: pid)) ?? []
+        let items = (try? context.services.projects.items(in: pid)) ?? []
         if let m = items.first(where: { $0.title.caseInsensitiveCompare(q) == .orderedSame }) { return m.id }
         let c = items.filter { $0.title.localizedCaseInsensitiveContains(q) }
         if c.count == 1 { return c[0].id }

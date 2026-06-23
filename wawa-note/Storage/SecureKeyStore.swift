@@ -1,5 +1,7 @@
 import Foundation
 import Security
+// Related JIRA: KAN-11, KAN-117
+
 
 enum SecureKeyStoreError: Error {
     case saveFailed

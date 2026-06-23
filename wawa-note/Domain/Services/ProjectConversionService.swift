@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-8, KAN-34
+
 
 struct ConversionPreview: Codable, Sendable {
     let projectName: String

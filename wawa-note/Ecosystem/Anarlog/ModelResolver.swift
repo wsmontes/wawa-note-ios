@@ -1,5 +1,7 @@
 import Foundation
 import OSLog
+// Related JIRA: KAN-9, KAN-42
+
 
 /// Tiered model fallback system for AI tasks.
 ///

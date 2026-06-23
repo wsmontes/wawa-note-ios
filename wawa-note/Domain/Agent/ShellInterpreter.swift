@@ -2,6 +2,8 @@ import Foundation
 import SwiftData
 import Contacts
 import EventKit
+// Related JIRA: KAN-9, KAN-43, KAN-118
+
 
 // MARK: - Shell Command
 
@@ -369,8 +371,8 @@ enum ShellInterpreter {
 
         switch vpath {
         case .root:
-            let projects = (try? ProjectService(context: ctx.modelContext).allProjects()) ?? []
-            let allItems = (try? KnowledgeItemService(context: ctx.modelContext).allItems()) ?? []
+            let projects = (try? ctx.services.projects.allProjects()) ?? []
+            let allItems = (try? ctx.services.items.allItems()) ?? []
             let inboxCount = allItems.filter { $0.inboxDate != nil }.count
             var lines = ["Wawa Note Workspace", "====================", ""]
             lines.append("\(projects.count) project(s)")
@@ -384,7 +386,7 @@ enum ShellInterpreter {
 
         case .inbox:
             if let err = checkSandboxGlobal(ctx) { return err }
-            let allItems = (try? KnowledgeItemService(context: ctx.modelContext).allItems()) ?? []
+            let allItems = (try? ctx.services.items.allItems()) ?? []
             var items = allItems.filter { $0.inboxDate != nil }
             if let tag = tagFilter { items = items.filter { $0.tags.contains(tag) } }
             if let type = typeFilter { items = items.filter { $0.typeRaw == type } }
@@ -397,21 +399,21 @@ enum ShellInterpreter {
             return ok(lines.joined(separator: "\n"))
 
         case .projects:
-            let projects = (try? ProjectService(context: ctx.modelContext).allProjects()) ?? []
+            let projects = (try? ctx.services.projects.allProjects()) ?? []
             if projects.isEmpty { return ok("/projects/ is empty") }
             var lines = ["/projects/ (\(projects.count) project(s)) — use cd with the directory name", ""]
             for p in projects {
-                let taskCount = (try? TaskService(context: ctx.modelContext).tasks(for: p.id).count) ?? 0
+                let taskCount = (try? ctx.services.derived.tasks(for: p.id).count) ?? 0
                 lines.append("  \(VFSService.safeDirName(p))/    \"\(p.name)\"  [\(p.statusRaw)]  \(taskCount) tasks")
             }
             return ok(lines.joined(separator: "\n"))
 
         case .project(let slug, let pid):
-            guard let p = try? ProjectService(context: ctx.modelContext).fetch(id: pid) else {
+            guard let p = try? ctx.services.projects.fetch(id: pid) else {
                 return shellErr("ls: /projects/\(slug): not found")
             }
-            let tasks = (try? TaskService(context: ctx.modelContext).tasks(for: pid)) ?? []
-            let items = (try? ProjectService(context: ctx.modelContext).items(in: pid)) ?? []
+            let tasks = (try? ctx.services.derived.tasks(for: pid)) ?? []
+            let items = (try? ctx.services.projects.items(in: pid)) ?? []
             var lines = ["/projects/\(slug)/  (\(p.name))", ""]
             lines.append("project.json   \(p.statusRaw.capitalized)  health=\(p.healthStatus ?? "N/A")  tasks=\(tasks.count)  items=\(items.count)")
             lines.append("items/         \(items.count) item(s)")
@@ -423,7 +425,7 @@ enum ShellInterpreter {
             return ok(lines.joined(separator: "\n"))
 
         case .projectItems(let slug, let pid):
-            let items = (try? ProjectService(context: ctx.modelContext).items(in: pid)) ?? []
+            let items = (try? ctx.services.projects.items(in: pid)) ?? []
             var filtered = items
             if let status = statusFilter { filtered = filtered.filter { $0.statusRaw == status } }
             if let type = typeFilter { filtered = filtered.filter { $0.typeRaw == type } }
@@ -445,7 +447,7 @@ enum ShellInterpreter {
             return ok(lines.joined(separator: "\n"), blocks: cards)
 
         case .projectTasks(let slug, let pid):
-            var tasks = (try? TaskService(context: ctx.modelContext).tasks(for: pid)) ?? []
+            var tasks = (try? ctx.services.derived.tasks(for: pid)) ?? []
             if let status = statusFilter, status != "true" { tasks = tasks.filter { $0.statusRaw == status } }
             tasks = Array(tasks.prefix(limit))
             if tasks.isEmpty { return ok("No tasks", blocks: [.text("No tasks yet. Use touch tasks/ --title \"...\" to create one.")]) }
@@ -474,7 +476,7 @@ enum ShellInterpreter {
             return ok(lines.joined(separator: "\n"))
 
         case .projectEdges(let slug, let pid):
-            let gsvc = GraphEdgeService(context: ctx.modelContext)
+            let gsvc = ctx.services.edges
             let outgoing = (try? gsvc.edges(from: pid)) ?? []
             let incoming = (try? gsvc.edges(to: pid)) ?? []
             let all = outgoing + incoming
@@ -503,7 +505,7 @@ enum ShellInterpreter {
                 return shellErr("cat: analysis/\(iid.uuidString.prefix(8)).json: No analysis found")
             }
             // List both analysis and transcript files
-            let items = (try? ProjectService(context: ctx.modelContext).items(in: pid)) ?? []
+            let items = (try? ctx.services.projects.items(in: pid)) ?? []
             var fileEntries: [(prefix: String, hasAnalysis: Bool, hasTranscript: Bool)] = []
             for item in items {
                 let dir = ctx.fileStore.itemDirectoryURL(for: item.id)
@@ -555,7 +557,7 @@ enum ShellInterpreter {
             return ok(lines.joined(separator: "\n"))
 
         case .projectPeople(let slug, let pid):
-            let gsvc = GraphEdgeService(context: ctx.modelContext)
+            let gsvc = ctx.services.edges
             let edges = (try? gsvc.edges(from: pid)) ?? []
             let peopleEdges = edges.filter { $0.edgeTypeRaw == "person" }
             if peopleEdges.isEmpty {
@@ -589,11 +591,11 @@ enum ShellInterpreter {
 
         switch vpath {
         case .project(let slug, let pid):
-            guard let p = try? ProjectService(context: ctx.modelContext).fetch(id: pid) else {
+            guard let p = try? ctx.services.projects.fetch(id: pid) else {
                 return shellErr("cat: /projects/\(slug)/project.json: not found")
             }
-            let tasks = (try? TaskService(context: ctx.modelContext).tasks(for: pid)) ?? []
-            let items = (try? ProjectService(context: ctx.modelContext).items(in: pid)) ?? []
+            let tasks = (try? ctx.services.derived.tasks(for: pid)) ?? []
+            let items = (try? ctx.services.projects.items(in: pid)) ?? []
             if jsonOutput {
                 let dict: [String: Any] = [
                     "name": p.name, "slug": p.slug, "dirName": VFSService.safeDirName(p), "status": p.statusRaw,
@@ -619,7 +621,7 @@ enum ShellInterpreter {
 
         case .projectItem(_, _, let itemID):
             if let err = checkSandbox(itemID, ctx) { return err }
-            guard let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) else {
+            guard let item = try? ctx.services.items.fetchItem(id: itemID) else {
                 return shellErr("cat: item not found")
             }
             if jsonOutput {
@@ -633,7 +635,7 @@ enum ShellInterpreter {
             return ok(VFSService.formatItemFull(item, fileStore: ctx.fileStore))
 
         case .projectTask(_, _, let taskID):
-            guard let task = try? TaskService(context: ctx.modelContext).fetch(id: taskID) else {
+            guard let task = try? ctx.services.derived.fetch(id: taskID) else {
                 return shellErr("cat: task not found")
             }
             if jsonOutput {
@@ -654,7 +656,7 @@ enum ShellInterpreter {
 
         case .inboxItem(let id):
             if let err = checkSandbox(id, ctx) { return err }
-            guard let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: id) else {
+            guard let item = try? ctx.services.items.fetchItem(id: id) else {
                 return shellErr("cat: /inbox/\(id.uuidString.prefix(8)).json: not found")
             }
             return ok(VFSService.formatItemFull(item, fileStore: ctx.fileStore))
@@ -742,7 +744,7 @@ enum ShellInterpreter {
             return ok("/inbox/")
 
         case .project(let slug, let pid):
-            let name = (try? ProjectService(context: ctx.modelContext).fetch(id: pid))?.name ?? slug
+            let name = (try? ctx.services.projects.fetch(id: pid))?.name ?? slug
             ctx.activeProjectID = pid
             ctx.activeProjectName = name
             ctx.activeProjectSlug = slug
@@ -751,7 +753,7 @@ enum ShellInterpreter {
             return ok("/projects/\(slug)/  (\(name))")
 
         case .projectItems(let slug, let pid):
-            let name = (try? ProjectService(context: ctx.modelContext).fetch(id: pid))?.name ?? slug
+            let name = (try? ctx.services.projects.fetch(id: pid))?.name ?? slug
             ctx.activeProjectID = pid
             ctx.activeProjectName = name
             ctx.activeProjectSlug = slug
@@ -759,7 +761,7 @@ enum ShellInterpreter {
             return ok("/projects/\(slug)/items/")
 
         case .projectTasks(let slug, let pid):
-            let name = (try? ProjectService(context: ctx.modelContext).fetch(id: pid))?.name ?? slug
+            let name = (try? ctx.services.projects.fetch(id: pid))?.name ?? slug
             ctx.activeProjectID = pid
             ctx.activeProjectName = name
             ctx.activeProjectSlug = slug
@@ -784,7 +786,7 @@ enum ShellInterpreter {
 
         // Tasks directory
         if case .projectTasks(_, let pid) = vpath {
-            var tasks = (try? TaskService(context: ctx.modelContext).tasks(for: pid)) ?? []
+            var tasks = (try? ctx.services.derived.tasks(for: pid)) ?? []
             if let s = statusFilter, s != "true" { tasks = tasks.filter { $0.statusRaw == s } }
             tasks = Array(tasks.prefix(limit))
             if tasks.isEmpty { return ok("No matching tasks") }
@@ -803,17 +805,17 @@ enum ShellInterpreter {
         let sinceDays = Int(cmd.flags["since"] ?? "0") ?? 0
         let allItems: [KnowledgeItem] = {
             if let sandboxed = ctx.sandboxedItemID,
-               let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: sandboxed) {
+               let item = try? ctx.services.items.fetchItem(id: sandboxed) {
                 return [item]
             }
-            return (try? KnowledgeItemService(context: ctx.modelContext).allItems()) ?? []
+            return (try? ctx.services.items.allItems()) ?? []
         }()
         var results = allItems
         if let tag = tagFilter { results = results.filter { $0.tags.contains(tag) } }
         if let type = typeFilter { results = results.filter { $0.typeRaw == type } }
         if let status = statusFilter { results = results.filter { $0.statusRaw == status } }
         if let pslug = projectFilter {
-            let allProjects = (try? ProjectService(context: ctx.modelContext).allProjects()) ?? []
+            let allProjects = (try? ctx.services.projects.allProjects()) ?? []
             if let proj = allProjects.first(where: { VFSService.projectMatches($0, dirName: pslug) }) { results = results.filter { $0.projectID == proj.id } }
         }
         if sinceDays > 0 { results = results.filter { $0.createdAt >= Date().addingTimeInterval(-Double(sinceDays)*86400) } }
@@ -837,7 +839,7 @@ enum ShellInterpreter {
         var lines = ["Found \(results.count) items:", ""]
         var cards: [ChatBlock] = []
         for item in results {
-            let pn = item.projectID.flatMap { pid in (try? ProjectService(context: ctx.modelContext).fetch(id: pid)).map { VFSService.safeDirName($0) } } ?? "-"
+            let pn = item.projectID.flatMap { pid in (try? ctx.services.projects.fetch(id: pid)).map { VFSService.safeDirName($0) } } ?? "-"
             lines.append("  \(VFSService.typeIcon(item.typeRaw)) \(item.title)  project=\(pn)")
             cards.append(.itemCard(ItemCardData(itemID: item.id.uuidString, title: item.title, type: item.typeRaw, status: item.statusRaw, durationSeconds: item.durationSeconds, projectSlug: pn, hasTranscript: false, hasAnalysis: false)))
         }
@@ -868,7 +870,7 @@ enum ShellInterpreter {
                 if matches.isEmpty { return ok("grep: no matches for '\(query)'") }
                 return ok("grep: \(matches.count) match(es) for '\(query)'\n" + matches.prefix(limit).joined(separator: "\n"))
             case .projectItem(_, _, let itemID):
-                guard let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) else {
+                guard let item = try? ctx.services.items.fetchItem(id: itemID) else {
                     return shellErr("grep: item not found")
                 }
                 let text = VFSService.formatItemFull(item, fileStore: ctx.fileStore)
@@ -885,10 +887,10 @@ enum ShellInterpreter {
         if let err = checkSandboxGlobal(ctx) { return err }
         let allItems: [KnowledgeItem] = {
             if let sandboxed = ctx.sandboxedItemID,
-               let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: sandboxed) {
+               let item = try? ctx.services.items.fetchItem(id: sandboxed) {
                 return [item]
             }
-            return (try? KnowledgeItemService(context: ctx.modelContext).allItems()) ?? []
+            return (try? ctx.services.items.allItems()) ?? []
         }()
         let results = SearchService(fileStore: ctx.fileStore).searchNow(query: query, in: allItems)
             .prefix(limit)
@@ -940,7 +942,7 @@ enum ShellInterpreter {
                 return shellErr("touch: --url is required for webBookmark items. Usage: touch /inbox/ --type webBookmark --title \"Name\" --url \"https://...\"")
             }
             // Create item
-            let svc = KnowledgeItemService(context: ctx.modelContext)
+            let svc = ctx.services.items
             guard let item = try? svc.createItem(type: kt, title: t, bodyText: body, tags: tags, inboxDate: Date()) else {
                 return shellErr("touch: failed to create item — database error")
             }
@@ -952,9 +954,9 @@ enum ShellInterpreter {
                 }
             }
             let resolvedProjectID = vpath.projectID ?? ctx.activeProjectID
-            let proj = resolvedProjectID.flatMap { try? ProjectService(context: ctx.modelContext).fetch(id: $0) }
+            let proj = resolvedProjectID.flatMap { try? ctx.services.projects.fetch(id: $0) }
             if let p = proj {
-                try? ProjectService(context: ctx.modelContext).addItem(item.id, to: p.id)
+                try? ctx.services.projects.addItem(item.id, to: p.id)
             }
             let loc = proj != nil ? "/projects/\(VFSService.safeDirName(proj!))/items/" : "/inbox/"
             let card = ItemCardData(
@@ -980,7 +982,7 @@ enum ShellInterpreter {
             // Create a new project: touch /projects/ --name "Project Name" --summary "..."
             guard let name = cmd.flags["name"] else { return shellErr("touch: --name is required to create a project") }
             let summary = cmd.flags["summary"]
-            let project = try? ProjectService(context: ctx.modelContext).create(name: name, origin: .llm)
+            let project = try? ctx.services.projects.create(name: name, summary: summary)
             guard let p = project else { return shellErr("touch: failed to create project") }
             ctx.activeProjectID = p.id; ctx.activeProjectSlug = p.slug; ctx.activeProjectName = p.name
             return ok("✅ Created project: \(p.name) (\(p.slug))")
@@ -994,7 +996,7 @@ enum ShellInterpreter {
                 AppLog.agent.warning("touch: invalid priority '\(priority)' — valid: \(valid). Using medium.")
             }
             let due = dueStr.flatMap { ISO8601DateFormatter().date(from: $0) }
-            guard let task = try? TaskService(context: ctx.modelContext).create(
+            guard let task = try? ctx.services.derived.create(
                 title: t, projectID: pid, priority: prio,
                 ownerName: owner, dueAt: due, createdBy: .llm) else {
                 return shellErr("touch: failed to create task — database error")
@@ -1013,7 +1015,7 @@ enum ShellInterpreter {
             }
             let email = cmd.flags["email"]
             let role = cmd.flags["role"]
-            let person = try? PersonService(context: ctx.modelContext).findOrCreate(
+            let person = try? ctx.services.persons.findOrCreate(
                 displayName: name, email: email, role: role
             )
             guard let p = person else { return shellErr("touch: failed to create person") }
@@ -1029,7 +1031,7 @@ enum ShellInterpreter {
             }
             let edgeType = EdgeType(rawValue: cmd.flags["type"] ?? "relatesTo") ?? .relatesTo
             let weight = Double(cmd.flags["weight"] ?? "1.0") ?? 1.0
-            let edge = try? GraphEdgeService(context: ctx.modelContext).create(
+            let edge = try? ctx.services.edges.create(
                 fromID: fromID, toID: toID, edgeType: edgeType, weight: weight,
                 provenanceItemID: nil, provenanceSegmentIDs: []
             )
@@ -1040,7 +1042,7 @@ enum ShellInterpreter {
             // If path ends with a filename-like segment, try to create anyway in current context
             if let t = fallbackTitle, let pid = ctx.activeProjectID {
                 let prio = TaskPriority(rawValue: priority) ?? .medium
-                guard let task = try? TaskService(context: ctx.modelContext).create(
+                guard let task = try? ctx.services.derived.create(
                     title: t, projectID: pid, priority: prio,
                     ownerName: owner, dueAt: nil, createdBy: .llm
                 ) else {
@@ -1070,13 +1072,13 @@ enum ShellInterpreter {
 
         switch vpath {
         case .projectTask(_, _, let taskID):
-            guard let task = try? TaskService(context: ctx.modelContext).fetch(id: taskID) else {
+            guard let task = try? ctx.services.derived.fetch(id: taskID) else {
                 return shellErr("echo: task not found")
             }
             let rawJSON = body
             do {
                 try VFSService.updateTaskFromJSON(task, jsonText: rawJSON, context: ctx)
-                if let t = try? TaskService(context: ctx.modelContext).fetch(id: taskID) {
+                if let t = try? ctx.services.derived.fetch(id: taskID) {
                     return ok("Updated: \(t.title)")
                 }
                 return ok("Updated")
@@ -1085,7 +1087,7 @@ enum ShellInterpreter {
             }
 
         case .projectItem(_, _, let itemID):
-            guard let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) else {
+            guard let item = try? ctx.services.items.fetchItem(id: itemID) else {
                 return shellErr("echo: item not found")
             }
             // Delegate to VFSService for full field coverage
@@ -1098,16 +1100,20 @@ enum ShellInterpreter {
             }
 
         case .project(let slug, let pid):
-            var fields = ProjectUpdateFields()
-            if let newSummary = json["summary"] as? String { fields.summary = newSummary }
-            if let newIntention = json["intention"] as? String { fields.intention = newIntention }
-            if let newStatus = json["status"] as? String,
-               let status = ProjectStatus(rawValue: newStatus) { fields.status = status }
-            if fields.hasChanges {
-                _ = try? ProjectService(context: ctx.modelContext).update(
-                    id: pid, fields: fields, origin: .llm
-                )
+            guard let project = try? ctx.services.projects.fetch(id: pid) else {
+                return shellErr("echo: project not found")
             }
+            if let newSummary = json["summary"] as? String {
+                project.summary = newSummary
+            }
+            if let newIntention = json["intention"] as? String {
+                project.intention = newIntention
+            }
+            if let newStatus = json["status"] as? String,
+               let status = ProjectStatus(rawValue: newStatus) {
+                project.status = status
+            }
+            try? ctx.modelContext.save()
             return ok("Updated project \(slug)")
 
         case .agentPrompts:
@@ -1161,7 +1167,7 @@ enum ShellInterpreter {
                     try VFSService.writeItemFile(target, content: content, context: ctx)
                     let action = cmd.appendMode ? "Appended to" : "Written to"
                     // Emit fileLink so user can tap to open the document
-                    if let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) {
+                    if let item = try? ctx.services.items.fetchItem(id: itemID) {
                         let snippet = String(body.prefix(100))
                         return ok("\(action) \(target)", blocks: [.fileLink(FileLinkData(
                             itemID: item.id.uuidString, title: item.title,
@@ -1209,24 +1215,24 @@ enum ShellInterpreter {
 
         switch vpath {
         case .projectItem(_, _, let itemID):
-            guard let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) else {
+            guard let item = try? ctx.services.items.fetchItem(id: itemID) else {
                 return shellErr("rm: item not found")
             }
             try? TrashService(context: ctx.modelContext).moveToTrash(item)
             return ok("Moved '\(item.title)' to trash. Use the app to restore or permanently delete.")
 
         case .inboxItem(let id):
-            guard let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: id) else {
+            guard let item = try? ctx.services.items.fetchItem(id: id) else {
                 return shellErr("rm: item not found")
             }
             try? TrashService(context: ctx.modelContext).moveToTrash(item)
             return ok("Moved '\(item.title)' to trash.")
 
         case .projectTask(_, _, let taskID):
-            guard let task = try? TaskService(context: ctx.modelContext).fetch(id: taskID) else {
+            guard let task = try? ctx.services.derived.fetch(id: taskID) else {
                 return shellErr("rm: task not found")
             }
-            try? TaskService(context: ctx.modelContext).deleteTask(task)
+            try? ctx.services.derived.deleteTask(task)
             return ok("Deleted task '\(task.title)'. This is permanent.")
 
         case .projectItemContents(_, _, let itemID), .inboxItemFile(let itemID):
@@ -1249,7 +1255,7 @@ enum ShellInterpreter {
             if target.contains("edges/"), let pid = ctx.activeProjectID {
                 let edgeIDStr = target.components(separatedBy: "edges/").last?
                     .replacingOccurrences(of: ".json", with: "").trimmingCharacters(in: .whitespaces)
-                let gsvc = GraphEdgeService(context: ctx.modelContext)
+                let gsvc = ctx.services.edges
                 let edges = (try? gsvc.edges(from: pid)) ?? []
                 if let id = UUID(uuidString: edgeIDStr ?? ""),
                    let edge = edges.first(where: { $0.id == id }) {
@@ -1280,21 +1286,21 @@ enum ShellInterpreter {
 
         switch (src, dst) {
         case (.inboxItem(let itemID), .projectItems(_, let pid)):
-            try? ProjectService(context: ctx.modelContext).addItem(itemID, to: pid)
-            if let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) {
-                try? KnowledgeItemService(context: ctx.modelContext).removeFromInbox(item)
+            try? ctx.services.projects.addItem(itemID, to: pid)
+            if let item = try? ctx.services.items.fetchItem(id: itemID) {
+                try? ctx.services.items.removeFromInbox(item)
             }
-            let destName = (try? ProjectService(context: ctx.modelContext).fetch(id: pid)).map { VFSService.safeDirName($0) } ?? "?"
+            let destName = (try? ctx.services.projects.fetch(id: pid)).map { VFSService.safeDirName($0) } ?? "?"
             return ok("Moved item to /projects/\(destName)/items/")
 
         case (.projectItem(let sslug, _, let itemID), .projectItems(let dslug, let dpid)):
             if sslug == dslug { return ok("Item is already in /projects/\(dslug)/items/") }
-            try? ProjectService(context: ctx.modelContext).addItem(itemID, to: dpid)
+            try? ctx.services.projects.addItem(itemID, to: dpid)
             return ok("Moved item from /projects/\(sslug)/ to /projects/\(dslug)/")
 
         case (.projectItem(let slug, let spid, let itemID), .inbox):
-            try? ProjectService(context: ctx.modelContext).removeItem(itemID)
-            if let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) {
+            try? ctx.services.projects.removeItem(itemID)
+            if let item = try? ctx.services.items.fetchItem(id: itemID) {
                 item.inboxDate = Date()
                 try? ctx.modelContext.save()
             }
@@ -1316,7 +1322,7 @@ enum ShellInterpreter {
 
         switch vpath {
         case .projectItems(let slug, let pid):
-            let items = (try? ProjectService(context: ctx.modelContext).items(in: pid)) ?? []
+            let items = (try? ctx.services.projects.items(in: pid)) ?? []
             let preview = items.prefix(count)
             var lines = ["/projects/\(slug)/items/ (first \(preview.count) of \(items.count))", ""]
             for (i, item) in preview.enumerated() {
@@ -1325,7 +1331,7 @@ enum ShellInterpreter {
             return ok(lines.joined(separator: "\n"))
 
         case .projectTasks(let slug, let pid):
-            let tasks = (try? TaskService(context: ctx.modelContext).tasks(for: pid)) ?? []
+            let tasks = (try? ctx.services.derived.tasks(for: pid)) ?? []
             let preview = tasks.prefix(count)
             var lines = ["/projects/\(slug)/tasks/ (first \(preview.count) of \(tasks.count))", ""]
             for t in preview {
@@ -1334,7 +1340,7 @@ enum ShellInterpreter {
             return ok(lines.joined(separator: "\n"))
 
         case .inbox:
-            let items = ((try? KnowledgeItemService(context: ctx.modelContext).allItems()) ?? [])
+            let items = ((try? ctx.services.items.allItems()) ?? [])
                 .filter { $0.inboxDate != nil }
                 .prefix(count)
             var lines = ["/inbox/ (first \(items.count))", ""]
@@ -1361,18 +1367,18 @@ enum ShellInterpreter {
 
         switch vpath {
         case .projectItems(_, let pid):
-            var items = (try? ProjectService(context: ctx.modelContext).items(in: pid)) ?? []
+            var items = (try? ctx.services.projects.items(in: pid)) ?? []
             if let s = statusFilter { items = items.filter { $0.statusRaw == s } }
             if let t = typeFilter { items = items.filter { $0.typeRaw == t } }
             return ok("\(items.count) item(s)")
 
         case .projectTasks(_, let pid):
-            var tasks = (try? TaskService(context: ctx.modelContext).tasks(for: pid)) ?? []
+            var tasks = (try? ctx.services.derived.tasks(for: pid)) ?? []
             if let s = statusFilter { tasks = tasks.filter { $0.statusRaw == s } }
             return ok("\(tasks.count) task(s)")
 
         case .inbox:
-            let items = ((try? KnowledgeItemService(context: ctx.modelContext).allItems()) ?? [])
+            let items = ((try? ctx.services.items.allItems()) ?? [])
                 .filter { $0.inboxDate != nil }
             return ok("\(items.count) inbox item(s)")
 
@@ -1431,7 +1437,7 @@ enum ShellInterpreter {
         guard let idStr = cmd.args.first, let itemID = UUID(uuidString: idStr) else {
             return shellErr("extract: usage: extract <item-id>")
         }
-        guard let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) else {
+        guard let item = try? ctx.services.items.fetchItem(id: itemID) else {
             return shellErr("extract: item not found")
         }
         let extractSvc = ContentExtractionService(modelContext: ctx.modelContext, fileStore: ctx.fileStore)
@@ -1491,7 +1497,7 @@ enum ShellInterpreter {
         guard cmd.args.count >= 1 else { return shellErr("semantic: usage: semantic \"query\" [--limit N]") }
         let query = cmd.args.joined(separator: " ")
         let limit = Int(cmd.flags["limit"] ?? "10") ?? 10
-        let allItems = (try? KnowledgeItemService(context: ctx.modelContext).allItems()) ?? []
+        let allItems = (try? ctx.services.items.allItems()) ?? []
         guard let provider = try? ProviderRouter.resolveActive(context: ctx.modelContext) else {
             return shellErr("semantic: no AI provider configured. Semantic search requires an embedding model.")
         }
@@ -1573,7 +1579,7 @@ enum ShellInterpreter {
 
         // ── Source 3: Transcript grep ─────────────────────────────
         var transcriptHits: [String] = []
-        let allItems = (try? KnowledgeItemService(context: ctx.modelContext).allItems()) ?? []
+        let allItems = (try? ctx.services.items.allItems()) ?? []
         for item in allItems where item.type == .audio {
             guard let transcript = try? ctx.fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id),
                   !transcript.segments.isEmpty else { continue }
@@ -1676,7 +1682,7 @@ enum ShellInterpreter {
         }
 
         // SwiftData Person entity
-        let persons = (try? PersonService(context: ctx.modelContext).search(name)) ?? []
+        let persons = (try? ctx.services.persons.search(name)) ?? []
         if !persons.isEmpty {
             lines.append("### PERSON ENTITY")
             for p in persons.prefix(1) {
@@ -1774,7 +1780,7 @@ enum ShellInterpreter {
         guard let idStr = cmd.args.first, let itemID = UUID(uuidString: idStr) else {
             return shellErr("analyze: usage: analyze <item-id>")
         }
-        guard let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) else {
+        guard let item = try? ctx.services.items.fetchItem(id: itemID) else {
             return shellErr("analyze: item \(idStr) not found")
         }
         // Set flag: mark item as ready for analysis by setting analysisProviderId to "pending"
@@ -1896,7 +1902,7 @@ enum ShellInterpreter {
         guard let idStr = cmd.args.first, let itemID = UUID(uuidString: idStr) else {
             return shellErr("cleanup: usage: cleanup <item-id>   Deletes the raw audio file for processed items to free disk space.")
         }
-        guard let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) else {
+        guard let item = try? ctx.services.items.fetchItem(id: itemID) else {
             return shellErr("cleanup: item \(idStr) not found")
         }
         guard item.type == .audio else { return shellErr("cleanup: only audio items have raw audio files to clean up.") }
@@ -1927,7 +1933,7 @@ enum ShellInterpreter {
         guard let idStr = cmd.args.first, let itemID = UUID(uuidString: idStr) else {
             return shellErr("vision: usage: vision <item-id> [--question \"...\"] [--save-as-note]")
         }
-        guard let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) else {
+        guard let item = try? ctx.services.items.fetchItem(id: itemID) else {
             return shellErr("vision: item \(idStr) not found")
         }
         let dir = ctx.fileStore.itemDirectoryURL(for: item.id)
@@ -1958,11 +1964,11 @@ enum ShellInterpreter {
                 let analysisData = try? JSONEncoder().encode(["question": question, "response": resultText, "timestamp": Date().ISO8601Format()])
                 try? analysisData?.write(to: dir.appendingPathComponent("vision_analysis.json"))
                 if saveAsNote, !resultText.isEmpty {
-                    let svc = KnowledgeItemService(context: ctx.modelContext)
+                    let svc = ctx.services.items
                     if let note = try? svc.createItem(type: .note, title: "Vision: \(item.title)",
                         bodyText: "# Image Analysis\n\n**Question:** \(question)\n\n\(resultText)",
                         tags: ["vision", "ai-analysis"], inboxDate: Date()) {
-                        if let pid = item.projectID { try? ProjectService(context: ctx.modelContext).addItem(note.id, to: pid) }
+                        if let pid = item.projectID { try? ctx.services.projects.addItem(note.id, to: pid) }
                         AppLog.general.info("Vision: saved result as note \(note.title)")
                     }
                 }
@@ -2015,7 +2021,7 @@ enum ShellInterpreter {
         let format = cmd.flags["format"] ?? "md"
         let ext = format == "json" ? "json" : "md"
         // Try as item ID
-        if let id = UUID(uuidString: target), let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: id) {
+        if let id = UUID(uuidString: target), let item = try? ctx.services.items.fetchItem(id: id) {
             let output: String
             if format == "json" {
                 let exporter = JSONExporter()
@@ -2032,10 +2038,10 @@ enum ShellInterpreter {
             return ok("Exported to \(url.path)\n\n\(output.prefix(500))\(output.count > 500 ? "..." : "")")
         }
         // Try as project ID
-        if let pid = UUID(uuidString: target), let project = try? ProjectService(context: ctx.modelContext).fetch(id: pid) {
-            let pSvc = ProjectService(context: ctx.modelContext)
+        if let pid = UUID(uuidString: target), let project = try? ctx.services.projects.fetch(id: pid) {
+            let pSvc = ctx.services.projects
             let items = (try? pSvc.items(in: pid)) ?? []
-            let tasks = (try? TaskService(context: ctx.modelContext).tasks(for: pid)) ?? []
+            let tasks = (try? ctx.services.derived.tasks(for: pid)) ?? []
             let output = ProjectExportService().exportMarkdown(project: project, items: items, tasks: tasks, edges: [])
             let dir = ctx.fileStore.exportsDirectoryURL(for: pid)
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

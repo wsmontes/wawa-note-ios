@@ -1,6 +1,8 @@
 import Foundation
 import OSLog
 import CryptoKit
+// Related JIRA: KAN-7, KAN-28
+
 
 // MARK: - Summary Cache
 

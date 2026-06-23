@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-152
+
 
 /// Manages the special wawa-note-config project that contains all app configuration as editable files.
 /// This project is auto-created on first launch and hidden from regular project lists.

@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-8, KAN-35
+
 
 // MARK: - Graph Node
 
@@ -80,6 +82,7 @@ extension CGFloat { func clamped(to range: ClosedRange<CGFloat>) -> CGFloat { Sw
 struct ProjectGraphView: View {
     let projectID: UUID
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var services: ServiceContainer
     @State private var nodes: [GraphNode] = []
     @State private var edges: [GraphEdgeItem] = []
     @State private var isLoading = true
@@ -280,7 +283,7 @@ struct ProjectGraphView: View {
     // MARK: Load
 
     private func loadGraph() async {
-        let edgeSvc = GraphEdgeService(context: modelContext)
+        let edgeSvc = services.edges
         let loadedEdges = (try? edgeSvc.neighborhood(of: projectID, radius: 2)) ?? []
         var nodeMap: [UUID: GraphNode] = [:]
 
@@ -302,7 +305,7 @@ struct ProjectGraphView: View {
             nodeMap[edge.fromID]?.degree += 1
             nodeMap[edge.toID]?.degree += 1
         }
-        if let proj = try? ProjectService(context: modelContext).fetch(id: projectID) {
+        if let proj = try? services.projects.fetch(id: projectID) {
             nodeMap[projectID] = GraphNode(id: projectID, label: proj.name, subtitle: "Project", kind: .project, degree: nodeMap.count)
         }
 

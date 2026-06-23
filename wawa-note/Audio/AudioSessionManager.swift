@@ -1,6 +1,8 @@
 import AVFoundation
 import UIKit
 import OSLog
+// Related JIRA: KAN-5, KAN-15, KAN-96
+
 
 enum AudioSessionError: Error {
     case configurationFailed

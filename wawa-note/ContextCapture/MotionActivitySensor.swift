@@ -1,6 +1,8 @@
 import CoreMotion
 import Foundation
 import OSLog
+// Related JIRA: KAN-151
+
 
 final class MotionActivitySensor: ContextSensor, @unchecked Sendable {
     let sensorName = "motion_activity"

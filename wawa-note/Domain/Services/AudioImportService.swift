@@ -2,6 +2,8 @@ import AVFoundation
 import AudioToolbox
 import UniformTypeIdentifiers
 import OSLog
+// Related JIRA: KAN-12, KAN-62
+
 
 struct ImportMetadata {
     let duration: TimeInterval

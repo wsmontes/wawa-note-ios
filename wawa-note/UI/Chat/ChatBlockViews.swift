@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-9, KAN-46
+
 
 // MARK: - Block Rendering Views
 /// Extracted from ChatView.swift for file size management.

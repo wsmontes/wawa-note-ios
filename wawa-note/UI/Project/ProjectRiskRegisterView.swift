@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-8, KAN-41
+
 
 // MARK: - DEPRECATED: Subsumed by file browser with type filter (2026-06-18)
 struct RiskItem: Identifiable {
@@ -15,6 +17,7 @@ struct RiskItem: Identifiable {
 struct ProjectRiskRegisterView: View {
     let projectID: UUID
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var services: ServiceContainer
     @State private var risks: [RiskItem] = []
     @State private var isLoading = true
     @State private var showNewTask = false
@@ -93,7 +96,7 @@ struct ProjectRiskRegisterView: View {
 
     private func loadRisks() async {
         let store = FileArtifactStore()
-        let projSvc = ProjectService(context: modelContext)
+        let projSvc = services.projects
         guard let items = try? projSvc.items(in: projectID) else {
             isLoading = false
             return

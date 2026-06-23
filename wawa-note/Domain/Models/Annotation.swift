@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-11, KAN-55
+
 
 @Model
 final class Annotation {

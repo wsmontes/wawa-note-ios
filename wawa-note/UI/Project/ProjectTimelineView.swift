@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-8, KAN-39
+
 
 // MARK: - Enriched Timeline Models
 
@@ -64,6 +66,7 @@ struct TimelineConnector: Identifiable {
 struct ProjectTimelineView: View {
     let projectID: UUID
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var services: ServiceContainer
     @State private var clusters: [TimelineCluster] = []
     @State private var connectors: [TimelineConnector] = []
     @State private var isLoading = true
@@ -323,7 +326,7 @@ struct ProjectTimelineView: View {
             return TimelineCluster(weekStart: start, label: label, events: evts.sorted { $0.date > $1.date })
         }.sorted { $0.weekStart > $1.weekStart }
 
-        let edgeSvc = GraphEdgeService(context: modelContext)
+        let edgeSvc = services.edges
         let eventIDs = Set(allEvents.map(\.id))
         if let allEdges = try? edgeSvc.recentEdges(limit: 500) {
             self.connectors = allEdges.compactMap { edge in

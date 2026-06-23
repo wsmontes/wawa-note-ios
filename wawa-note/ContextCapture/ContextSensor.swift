@@ -1,4 +1,6 @@
 import Foundation
+// Related JIRA: KAN-151
+
 
 struct CapturedAnnotation: Sendable {
     let source: String

@@ -1,6 +1,8 @@
 import CoreLocation
 import Foundation
 import OSLog
+// Related JIRA: KAN-151
+
 
 final class LocationContextSensor: ContextSensor, @unchecked Sendable {
     let sensorName = "location_context"

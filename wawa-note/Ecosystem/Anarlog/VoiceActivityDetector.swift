@@ -1,6 +1,8 @@
 import Foundation
 import AVFoundation
 import OSLog
+// Related JIRA: KAN-6, KAN-23
+
 
 // MARK: - Voice Activity Detector
 

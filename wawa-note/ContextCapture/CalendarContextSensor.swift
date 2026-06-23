@@ -1,6 +1,8 @@
 import Foundation
 import EventKit
 import OSLog
+// Related JIRA: KAN-151
+
 
 final class CalendarContextSensor: ContextSensor, @unchecked Sendable {
     let sensorName = "calendar_context"

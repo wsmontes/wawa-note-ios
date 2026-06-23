@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-8, KAN-40
+
 
 // MARK: - DEPRECATED: Subsumed by file browser with type filter (2026-06-18)
 struct PersonSummary: Identifiable {
@@ -14,6 +16,7 @@ struct PersonSummary: Identifiable {
 struct ProjectPeopleView: View {
     let projectID: UUID
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var services: ServiceContainer
     @State private var people: [PersonSummary] = []
     @State private var isLoading = true
 
@@ -71,7 +74,7 @@ struct ProjectPeopleView: View {
     }
 
     private func loadPeople() async {
-        let projSvc = ProjectService(context: modelContext)
+        let projSvc = services.projects
         let taskSvc = TaskService(context: modelContext)
         let store = FileArtifactStore()
         guard let tasks = try? taskSvc.tasks(for: projectID),

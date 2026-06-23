@@ -1,5 +1,7 @@
 import AVFoundation
 import Foundation
+// Related JIRA: KAN-151
+
 
 final class AudioRouteSensor: ContextSensor, @unchecked Sendable {
     let sensorName = "audio_route"

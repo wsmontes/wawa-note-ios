@@ -1,5 +1,7 @@
 import AVFoundation
 import OSLog
+// Related JIRA: KAN-6, KAN-22
+
 
 final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable {
     let id = "remote-whisper"

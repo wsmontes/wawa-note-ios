@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-5, KAN-14
+
 
 // MARK: - Notifications
 

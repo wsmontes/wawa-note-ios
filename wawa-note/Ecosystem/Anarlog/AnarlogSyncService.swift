@@ -1,6 +1,8 @@
 import Foundation
 import SwiftData
 import OSLog
+// Related JIRA: KAN-12, KAN-67
+
 
 /// Manages bidirectional sync between a watched folder and Wawa Note's SwiftData store.
 ///

@@ -1,5 +1,7 @@
 import Foundation
 import AVFoundation
+// Related JIRA: KAN-5, KAN-18
+
 
 /// What kind of audio is available for playback/export.
 enum AudioAssetState: Equatable, Sendable {

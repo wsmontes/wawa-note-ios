@@ -1,5 +1,7 @@
 @preconcurrency import AVFoundation
 import OSLog
+// Related JIRA: KAN-6, KAN-23, KAN-79
+
 
 struct AudioChunk {
     let url: URL

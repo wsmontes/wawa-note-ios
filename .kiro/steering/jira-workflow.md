@@ -6,41 +6,36 @@ inclusion: always
 
 This project is tracked in Atlassian JIRA (project key: **KAN**, site: wawasoftbc.atlassian.net).
 
-## CLI Tool
-
-Use `scripts/jira-cli.py` for all JIRA operations. Reads credentials from `.env` (see `.env.example`).
-
-```bash
-python scripts/jira-cli.py show KAN-XX --comments --links   # Read issue + AC
-python scripts/jira-cli.py move KAN-XX "In Progress"        # Start work
-python scripts/jira-cli.py comment KAN-XX "progress note"   # Update
-python scripts/jira-cli.py move KAN-XX Done                 # Complete
-python scripts/jira-cli.py create "Summary" -t Bug -p KAN   # New issue
-python scripts/jira-cli.py search --labels "sprint:1"       # Find work
-python scripts/jira-cli.py link KAN-XX KAN-YY               # Connect issues
-```
-
 ## Mandatory workflow
 
-1. **Every code change must reference a JIRA issue.** Branch: `KAN-XX/description`. Commit: `KAN-XX: what`.
-2. **Before starting**, read the issue for acceptance criteria and linked docs.
-3. **After completing**, transition to Done and comment with what was delivered.
-4. **New scope = new issue.** Never silently expand scope — create a JIRA issue.
-5. **Source files have `// Related JIRA:` comments.** Keep them accurate.
+1. **Every code change must reference a JIRA issue.** Branch names: `KAN-XX/description`. Commit messages: `KAN-XX: what changed`.
+2. **Before starting work**, check the issue for acceptance criteria, related issues, and Confluence doc links.
+3. **After completing work**, transition the issue to Done and comment with what was delivered.
+4. **New scope = new issue.** Never silently expand scope. If you discover additional work, create a JIRA issue for it.
+5. **Every Swift file has `// Related JIRA:` comments.** Keep them accurate. Add keys when files gain new responsibilities.
+
+## JIRA client
+
+A Python client exists at the workspace level: `C:\workspace\_archive\wawasoft_jira_client.py`
+
+```python
+from wawasoft_jira_client import JiraClient
+c = JiraClient()
+c.jira("show KAN-73 --comments --links")
+c.jira("move KAN-73 \"In Progress\"")
+c.jira("comment KAN-73 'Fixed: AudioChunker now outputs PCM WAV'")
+c.jira("move KAN-73 Done")
+c.jira("create KAN 'New issue title' --type Bug --priority High")
+```
 
 ## Priority order
 
-1. `sprint:1` issues (current sprint)
-2. `P0` / Highest priority (critical bugs)
-3. `P1` / High priority (broken flows)
-4. Issues that unblock others (check Blocks links)
+When choosing what to work on, prefer issues labeled:
+1. `sprint:1` (current sprint)
+2. `P0` or priority=Highest (critical bugs)
+3. `P1` (high-impact improvements)
+4. Issues that unblock other issues (check "Blocks" links)
 
-## Code review workflow
+## Confluence
 
-When the user reviews an already-completed issue:
-1. Issue moves from Done → **In Review**
-2. User comments with findings (or asks AI to investigate)
-3. If approved: move back to **Done** with "Review passed" comment
-4. If changes needed: move to **In Progress**, fix, then back through the flow
-
-Use the same issue — don't create separate review tickets.
+Architecture docs are linked from JIRA issues via remote links. When making architecture decisions, update the relevant Confluence page AND `docs/DECISIONS.md`.

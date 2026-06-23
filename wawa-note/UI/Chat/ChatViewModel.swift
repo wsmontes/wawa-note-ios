@@ -1,6 +1,8 @@
 import SwiftUI
 import SwiftData
 import Combine
+// Related JIRA: KAN-9, KAN-44, KAN-47
+
 
 @MainActor
 final class ChatViewModel: ObservableObject {
@@ -29,6 +31,7 @@ final class ChatViewModel: ObservableObject {
 
     private let chatService = ChatService()
     private var modelContext: ModelContext?
+    private var services: ServiceContainer?
     private var streamTask: Task<Void, Never>?
     private var greetingTask: Task<Void, Never>?
 
@@ -46,7 +49,7 @@ final class ChatViewModel: ObservableObject {
     func projectColorHex(for projectID: UUID) -> String? {
         if let cached = projectColorCache[projectID] { return cached }
         guard let ctx = modelContext,
-              let project = try? ProjectService(context: ctx).fetch(id: projectID),
+              let project = try? services!.projects.fetch(id: projectID),
               let hex = project.colorHex else { return nil }
         projectColorCache[projectID] = hex
         return hex
@@ -62,6 +65,7 @@ final class ChatViewModel: ObservableObject {
 
     func setup(modelContext: ModelContext) {
         self.modelContext = modelContext
+        self.services = ServiceContainer(context: modelContext)
     }
 
     // MARK: - Context
@@ -156,7 +160,7 @@ final class ChatViewModel: ObservableObject {
             activeProjectName = nil
             activeProjectColorHex = nil
             guard let ctx = modelContext else { break }
-            let svc = ProjectService(context: ctx)
+            let svc = services!.projects
             if let project = try? svc.fetch(id: id) {
                 activeProjectName = project.name
                 if let hex = project.colorHex {
@@ -176,7 +180,7 @@ final class ChatViewModel: ObservableObject {
             activeProjectColorHex = nil
             // Store the item ID for the agent to know which item is in focus
             if let ctx = modelContext,
-               let item = try? KnowledgeItemService(context: ctx).fetchItem(id: itemID) {
+               let item = try? services!.items.fetchItem(id: itemID) {
                 // No project context injection for standalone items
                 // The agent will see the item context via activeItemID in ToolContext
                 _ = item
@@ -202,7 +206,7 @@ final class ChatViewModel: ObservableObject {
     private func resolveContext(_ context: ChatContext) -> ChatContext {
         guard case .item(let itemID) = context,
               let ctx = modelContext,
-              let item = try? KnowledgeItemService(context: ctx).fetchItem(id: itemID),
+              let item = try? services!.items.fetchItem(id: itemID),
               let pid = item.projectID else {
             return context
         }
@@ -217,8 +221,8 @@ final class ChatViewModel: ObservableObject {
     private func injectProjectContext(project: Project, conversationId: UUID) {
         guard let ctx = modelContext else { return }
         let slug = project.slug.replacingOccurrences(of: "/", with: "-")
-        let tasks = (try? TaskService(context: ctx).tasks(for: project.id)) ?? []
-        let items = (try? ProjectService(context: ctx).items(in: project.id)) ?? []
+        let tasks = (try? services!.derived.tasks(for: project.id)) ?? []
+        let items = (try? services!.projects.items(in: project.id)) ?? []
 
         // Only inject if the conversation is empty (first open)
         let existing = (try? chatService.messages(for: conversationId)) ?? []
@@ -455,7 +459,7 @@ final class ChatViewModel: ObservableObject {
         ])
 
         let slugForContext = activeProjectID.flatMap { pid in
-            try? ProjectService(context: ctx).fetch(id: pid)?.slug.replacingOccurrences(of: "/", with: "-")
+            try? services!.projects.fetch(id: pid)?.slug.replacingOccurrences(of: "/", with: "-")
         }
         let toolContext = ToolContext(
             modelContext: ctx,
@@ -620,7 +624,7 @@ final class ChatViewModel: ObservableObject {
         case "search":
             guard !arg.isEmpty else { response = "Usage: /search <query>"; break }
             guard let ctx = modelContext else { response = "Model context not available."; break }
-            let items = (try? KnowledgeItemService(context: ctx).allItems()) ?? []
+            let items = (try? services!.items.allItems()) ?? []
             let results = SearchService(fileStore: FileArtifactStore()).searchNow(query: arg, in: items).prefix(5)
             guard !results.isEmpty else { response = "No results for \"\(arg)\"."; break }
             response = results.map { r in
@@ -677,7 +681,7 @@ final class ChatViewModel: ObservableObject {
 
         // Re-inject project context for the new conversation if applicable
         if let pid = activeProjectID, let ctx = modelContext,
-           let project = try? ProjectService(context: ctx).fetch(id: pid),
+           let project = try? services!.projects.fetch(id: pid),
            let conv = currentConversation {
             injectProjectContext(project: project, conversationId: conv.id)
             messages = (try? chatService.messages(for: conv.id)) ?? []
@@ -711,7 +715,7 @@ final class ChatViewModel: ObservableObject {
             case .project(let id):
                 activeProjectID = id
                 if let mctx = modelContext,
-                   let project = try? ProjectService(context: mctx).fetch(id: id) {
+                   let project = try? services!.projects.fetch(id: id) {
                     activeProjectName = project.name
                     activeProjectColorHex = project.colorHex ?? projectColorHex(for: id)
                 }
@@ -778,7 +782,7 @@ final class ChatViewModel: ObservableObject {
         let registry = AgentToolRegistry(tools: [ShellTool()])
 
         let slugForContext = activeProjectID.flatMap { pid in
-            try? ProjectService(context: ctx).fetch(id: pid)?.slug.replacingOccurrences(of: "/", with: "-")
+            try? services!.projects.fetch(id: pid)?.slug.replacingOccurrences(of: "/", with: "-")
         }
         let toolContext = ToolContext(
             modelContext: ctx,
@@ -900,7 +904,7 @@ final class ChatViewModel: ObservableObject {
     /// For user choices/prompts, use sendInternalMessage instead.
     func runCommandDirectly(_ command: String) {
         guard let ctx = modelContext, let conv = currentConversation else { return }
-        let slug = activeProjectID.flatMap { pid in try? ProjectService(context: ctx).fetch(id: pid)?.slug.replacingOccurrences(of: "/", with: "-") }
+        let slug = activeProjectID.flatMap { pid in try? services!.projects.fetch(id: pid)?.slug.replacingOccurrences(of: "/", with: "-") }
         let toolCtx = ToolContext(modelContext: ctx, activeProjectID: activeProjectID, activeProjectName: activeProjectName, activeProjectSlug: slug)
         let result = ShellInterpreter.execute(command: command, context: toolCtx)
 

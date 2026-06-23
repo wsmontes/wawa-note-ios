@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-8, KAN-40
+
 
 // MARK: - DEPRECATED: Subsumed by file browser with type filter (2026-06-18)
 struct EntitySummary: Identifiable {
@@ -13,6 +15,7 @@ struct EntitySummary: Identifiable {
 struct ProjectEntitiesView: View {
     let projectID: UUID
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var services: ServiceContainer
     @State private var entities: [EntitySummary] = []
     @State private var selectedKind: String?
     @State private var isLoading = true
@@ -100,7 +103,7 @@ struct ProjectEntitiesView: View {
     }
 
     private func loadEntities() async {
-        let projSvc = ProjectService(context: modelContext)
+        let projSvc = services.projects
         let store = FileArtifactStore()
         guard let items = try? projSvc.items(in: projectID) else {
             isLoading = false

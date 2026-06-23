@@ -1,5 +1,7 @@
 import Foundation
 import UniformTypeIdentifiers
+// Related JIRA: KAN-12, KAN-62
+
 
 struct PlainTextImporter: FormatImporter {
     let formatIdentifier = "txt"

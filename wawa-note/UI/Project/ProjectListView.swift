@@ -1,20 +1,24 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-8, KAN-10, KAN-34
+
 
 enum ProjectSortOrder: CaseIterable { case recent, name, created }
 
 struct ProjectListView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var recordingCoordinator: RecordingCoordinator
+    @EnvironmentObject private var services: ServiceContainer
     @Query(sort: \Project.updatedAt, order: .reverse) private var projects: [Project]
     @Query(sort: \KnowledgeItem.updatedAt) private var allItems: [KnowledgeItem]
-    @Query(sort: \TaskItem.createdAt) private var allTasks: [TaskItem]
+    @Query(sort: \ProjectDerivedItem.createdAt) private var allDerivedItems: [ProjectDerivedItem]
     @State private var showNewProject = false
+    @State private var newProjectName = ""
     @State private var searchText = ""
+    @State private var createError: String?
     @State private var listRefreshID = UUID()
+    @FocusState private var isNameFieldFocused: Bool
     @State private var sortOrder: ProjectSortOrder = .recent
-    @State private var onboardingSuggestion: ProjectSuggestion?
-    @State private var showPromoteSheet = false
     @State private var itemCounts: [UUID: Int] = [:]
     @State private var taskCounts: [UUID: Int] = [:]
     @State private var openTaskCounts: [UUID: Int] = [:]
@@ -66,81 +70,41 @@ struct ProjectListView: View {
             }
         }
         .sheet(isPresented: $showNewProject) {
-            CreateProjectSheet()
+            newProjectSheet
         }
         .onAppear {
             computeCounts()
+            // Rebuild list to force @Query refresh on tab switch
             listRefreshID = UUID()
-            // Check for orphan items that could become a project
-            let detector = InboxCriticalMassDetector(context: modelContext)
-            if detector.checkAndSuggest() != nil {
-                let pendingRaw = SuggestionStatus.pending.rawValue
-                let creationRaw = SuggestionType.projectCreation.rawValue
-                let descriptor = FetchDescriptor<ProjectSuggestion>(
-                    predicate: #Predicate {
-                        $0.suggestionTypeRaw == creationRaw && $0.statusRaw == pendingRaw
-                    }
-                )
-                let all = (try? modelContext.fetch(descriptor)) ?? []
-                onboardingSuggestion = all.first
-            }
         }
         .onChange(of: allItems.count) { _ in computeCounts() }
-        .onChange(of: allTasks.count) { _ in computeCounts() }
+        .onChange(of: allDerivedItems.count) { _ in computeCounts() }
     }
 
     private var emptyState: some View {
-        VStack(spacing: 24) {
-            Spacer().frame(height: 60)
+        VStack(spacing: 16) {
+            Spacer().frame(height: 80)
             Image(systemName: "folder.badge.questionmark")
                 .font(.system(size: 48))
                 .foregroundStyle(.secondary)
-            Text("Welcome to Wawa Note")
-                .font(.title2).fontWeight(.semibold)
-            Text("Capture meetings, notes, or documents.\nThey become living projects with tasks, decisions, and connections.")
-                .font(.subheadline).foregroundStyle(.secondary)
+            Text("No projects yet")
+                .font(.title3)
+                .fontWeight(.medium)
+            Text("Capture audio, scan documents, or create notes — then promote them to projects.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-            VStack(spacing: 12) {
-                Button("Create a project") { showNewProject = true }
-                    .buttonStyle(.borderedProminent)
-                    .frame(maxWidth: 280)
+                .padding(.horizontal, 40)
+            Button("Create Project") {
+                showNewProject = true
             }
-            .padding(.horizontal, 32)
+            .buttonStyle(.bordered)
             Spacer()
         }
     }
 
     private var listView: some View {
         List {
-            // Onboarding suggestion card
-            if let suggestion = onboardingSuggestion {
-                Section {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Image(systemName: "lightbulb.fill").foregroundStyle(.yellow)
-                            Text(suggestion.title).font(.subheadline).fontWeight(.semibold)
-                        }
-                        Text(suggestion.body).font(.caption).foregroundStyle(.secondary)
-                        HStack {
-                            Spacer()
-                            Button("Dismiss") {
-                                try? ProjectSuggestionService(context: modelContext).dismiss(suggestion)
-                                onboardingSuggestion = nil
-                            }
-                            .buttonStyle(.bordered).controlSize(.small)
-                            Button("Create Project") { showNewProject = true }
-                                .buttonStyle(.borderedProminent).controlSize(.small)
-                        }
-                    }
-                    .padding(12)
-                    .background(Color(.secondarySystemGroupedBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-            }
-
             ForEach(sortedProjects) { project in
                 NavigationLink(value: project.id) {
                     projectRow(project)
@@ -154,17 +118,13 @@ struct ProjectListView: View {
                 }
                 .swipeActions(edge: .trailing) {
                     Button {
-                        let newStatus: ProjectStatus = project.status == .archived ? .active : .archived
-                        _ = try? ProjectService(context: modelContext).update(
-                            id: project.id,
-                            fields: ProjectUpdateFields(status: newStatus),
-                            origin: .user
-                        )
+                        project.status = project.status == .archived ? .active : .archived
+                        try? modelContext.save()
                     } label: {
                         Label(project.status == .archived ? "Restore" : "Archive", systemImage: project.status == .archived ? "arrow.uturn.backward" : "archivebox")
                     }.tint(.orange)
                     Button(role: .destructive) {
-                        let svc = ProjectService(context: modelContext)
+                        let svc = services.projects
                         try? svc.deleteProject(project)
                     } label: {
                         Label("Delete", systemImage: "trash")
@@ -180,7 +140,7 @@ struct ProjectListView: View {
             Button("Cancel", role: .cancel) { projectToDelete = nil }
             Button("Delete", role: .destructive) {
                 if let p = projectToDelete {
-                    let svc = ProjectService(context: modelContext)
+                    let svc = services.projects
                     try? svc.deleteProject(p)
                     projectToDelete = nil
                 }
@@ -247,7 +207,8 @@ struct ProjectListView: View {
 
     private func computeCounts() {
         itemCounts = Dictionary(grouping: allItems, by: { $0.projectID ?? UUID() }).mapValues { $0.count }
-        let taskGroups = Dictionary(grouping: allTasks, by: { $0.projectID ?? UUID() })
+        let taskDerived = allDerivedItems.filter { $0.typeRaw == ProjectDerivedType.task.rawValue }
+        let taskGroups = Dictionary(grouping: taskDerived, by: { $0.projectID })
         taskCounts = taskGroups.mapValues { $0.count }
         openTaskCounts = taskGroups.mapValues { $0.filter { $0.statusRaw == "todo" }.count }
     }
@@ -260,8 +221,66 @@ struct ProjectListView: View {
         }
     }
 
+    private var newProjectSheet: some View {
+        NavigationStack {
+            Form {
+                Section("Project Name") {
+                    TextField("e.g., Q3 Product Launch", text: $newProjectName)
+                        .focused($isNameFieldFocused)
+                }
+
+                if let error = createError {
+                    Section {
+                        HStack {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                            Text(error).font(.caption).foregroundStyle(.red)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("New Project")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismissSheet() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Create") { createProject() }
+                        .fontWeight(.semibold)
+                        .disabled(newProjectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .onAppear {
+                isNameFieldFocused = true
+            }
+        }
+    }
+
     private func dismissSheet() {
+        newProjectName = ""
+        createError = nil
         showNewProject = false
+    }
+
+    private func createProject() {
+        let trimmed = newProjectName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        createError = nil
+        let svc = services.projects
+        do {
+            let project = try svc.create(name: trimmed)
+            project.nameIsAutoGenerated = false
+            var prov = project.provenance
+            prov.mark(field: "name", origin: .user)
+            project.fieldProvenanceJSON = prov.encode()
+            try modelContext.save()
+            newProjectName = ""
+            createError = nil
+            showNewProject = false
+        } catch {
+            createError = error.localizedDescription
+            AppLog.general.error("ProjectListView: create project failed: \(error)")
+        }
     }
 }
 

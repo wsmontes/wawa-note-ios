@@ -4,6 +4,8 @@ import UIKit
 import Network
 import JavaScriptCore
 import PDFKit
+// Related JIRA: KAN-7, KAN-26, KAN-31
+
 
 // MARK: - Pipeline Agent Templates
 

@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-12, KAN-64
+
 
 struct ProjectExportService {
     private let fileStore = FileArtifactStore()

@@ -3,6 +3,8 @@ import SwiftData
 import EventKit
 import Contacts
 import UniformTypeIdentifiers
+// Related JIRA: KAN-8, KAN-34
+
 
 // MARK: - Send To Action
 

@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-8, KAN-35, KAN-90
+
 
 @MainActor
 final class GraphEdgeService {

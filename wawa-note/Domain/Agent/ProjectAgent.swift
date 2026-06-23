@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-8, KAN-27
+
 
 /// ProjectAgent — runs AgentLoop scoped to a project's items.
 /// Generates synthesis, emits signals, creates connections.

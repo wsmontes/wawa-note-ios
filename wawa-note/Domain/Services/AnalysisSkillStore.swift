@@ -1,5 +1,7 @@
 import Foundation
 import OSLog
+// Related JIRA: KAN-7, KAN-33
+
 
 // MARK: - Extended Skill Template
 

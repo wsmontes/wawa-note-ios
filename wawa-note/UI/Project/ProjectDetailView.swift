@@ -1,6 +1,8 @@
 import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
+// Related JIRA: KAN-8, KAN-10
+
 
 // MARK: - Shared Signal Helpers
 
@@ -90,299 +92,36 @@ struct ProjectHomeView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var chatState: ChatOverlayState
     @EnvironmentObject private var coordinator: RecordingCoordinator
+    @EnvironmentObject private var services: ServiceContainer
+    @State private var selectedTab: ProjectTab = .synthesis
     @State private var showCaptureSheet = false
     @State private var showNoteEditor = false
     @State private var showFileImporter = false
 
-    // Project Info editing state
-    @State private var infoExpanded = false
-    @State private var editingName = ""
-    @State private var editingSummary = ""
-    @State private var editingIntention = ""
-    @State private var showSummaryEditor = false
-    @State private var showIntentionEditor = false
-    @State private var showIconPicker = false
-    @State private var showColorPicker = false
-    @State private var showFrameworkPicker = false
-    @State private var showAllFiles = false
-    @State private var isUpdating = false
-    @State private var updateError: String?
-    @State private var suggestions: [ProjectSuggestion] = []
-    @State private var suggestionService: ProjectSuggestionService?
-
-    // Queries para o dashboard
-    @Query private var projectItems: [KnowledgeItem]
-    @Query private var projectTasks: [ProjectDerivedItem]
-
-    private var itemCount: Int { projectItems.count }
-    private var taskCount: Int { projectTasks.filter { $0.typeRaw == "task" }.count }
-    private var openTaskCount: Int {
-        projectTasks.filter { $0.typeRaw == "task" && ($0.statusRaw == "todo" || $0.statusRaw == "inProgress") }.count
-    }
-
-    @Query private var heroDecisions: [ProjectDerivedItem]
-    @Query private var heroRisks: [ProjectDerivedItem]
-    @Query private var heroQuestions: [ProjectDerivedItem]
-    @Query private var heroConnections: [ProjectDerivedItem]
-
-    private var decisionCount: Int { heroDecisions.count }
-    private var riskCount: Int { heroRisks.count }
-    private var questionCount: Int { heroQuestions.count }
-    private var connectionCount: Int { heroConnections.count }
-
-    init(project: Project) {
-        self.project = project
-        let pid = project.id
-        _projectItems = Query(filter: #Predicate { $0.projectID == pid }, sort: \KnowledgeItem.updatedAt, order: .reverse)
-        let pid2 = project.id
-        _projectTasks = Query(filter: #Predicate { $0.projectID == pid2 }, sort: \ProjectDerivedItem.updatedAt, order: .reverse)
-        let pid3 = project.id; let dRaw = ProjectDerivedType.decision.rawValue
-        _heroDecisions = Query(filter: #Predicate { $0.projectID == pid3 && $0.typeRaw == dRaw })
-        let pid4 = project.id; let sRaw = ProjectDerivedType.signal.rawValue
-        _heroRisks = Query(filter: #Predicate { $0.projectID == pid4 && $0.typeRaw == sRaw })
-        let pid5 = project.id; let qRaw = ProjectDerivedType.question.rawValue
-        _heroQuestions = Query(filter: #Predicate { $0.projectID == pid5 && $0.typeRaw == qRaw })
-        let pid6 = project.id; let cRaw = ProjectDerivedType.connection.rawValue
-        _heroConnections = Query(filter: #Predicate { $0.projectID == pid6 && $0.typeRaw == cRaw })
+    enum ProjectTab: String, CaseIterable {
+        case synthesis = "Síntese"
+        case files = "Arquivos"
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                // Agent suggestions
-                if !suggestions.isEmpty {
-                    VStack(spacing: 8) {
-                        ForEach(suggestions) { suggestion in
-                            SuggestionCardView(suggestion: suggestion) { action in
-                                handleSuggestion(suggestion, action: action)
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
+        VStack(spacing: 0) {
+            // Segment control
+            Picker("View", selection: $selectedTab) {
+                ForEach(ProjectTab.allCases, id: \.rawValue) { tab in
+                    Text(tab.rawValue).tag(tab)
                 }
-
-                // Attention Required
-                AttentionRequiredSection(projectID: project.id)
-                    .padding(.horizontal)
-
-                // Hero stats
-                HeroStatsCard(project: project, itemCount: itemCount, taskCount: taskCount, openTaskCount: openTaskCount,
-                              decisionCount: decisionCount, riskCount: riskCount, questionCount: questionCount, connectionCount: connectionCount)
-                    .padding(.horizontal)
-
-                // Recent activity
-                RecentActivitySection(projectID: project.id)
-                    .padding(.horizontal)
-
-                // Pending tasks
-                PendingSection(projectID: project.id)
-                    .padding(.horizontal)
-
-                // Decisions
-                if decisionCount > 0 {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Decisions").font(.headline)
-                        ForEach(heroDecisions.prefix(3)) { d in
-                            HStack(spacing: 8) {
-                                Image(systemName: "hammer.fill").foregroundStyle(.orange).frame(width: 20)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(d.title).font(.subheadline)
-                                    Text("From analysis · \(d.createdAt.formatted(.relative(presentation: .numeric)))")
-                                        .font(.caption2).foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
-                    .padding(16).background(Color(.secondarySystemGroupedBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
-                }
-
-                // Risks
-                if riskCount > 0 {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Risks").font(.headline)
-                        ForEach(heroRisks.prefix(3)) { r in
-                            HStack(spacing: 8) {
-                                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow).frame(width: 20)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(r.title).font(.subheadline)
-                                    Text("\(r.createdAt.formatted(.relative(presentation: .numeric)))")
-                                        .font(.caption2).foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
-                    .padding(16).background(Color(.secondarySystemGroupedBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
-                }
-
-                // Open Questions
-                if questionCount > 0 {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Open Questions").font(.headline)
-                        ForEach(heroQuestions.prefix(3)) { q in
-                            HStack(spacing: 8) {
-                                Image(systemName: "questionmark.bubble.fill").foregroundStyle(.blue).frame(width: 20)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(q.title).font(.subheadline)
-                                    Text("\(q.createdAt.formatted(.relative(presentation: .numeric)))")
-                                        .font(.caption2).foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
-                    .padding(16).background(Color(.secondarySystemGroupedBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
-                }
-
-                // Synthesis
-                if project.synthesis != nil {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Synthesis").font(.headline).padding(.horizontal)
-                        ProjectSynthesisView(project: project)
-                            .frame(maxHeight: 200)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                            .padding(.horizontal)
-                    }
-                } else if !projectItems.isEmpty {
-                    VStack(spacing: 8) {
-                        Button {
-                            isUpdating = true
-                            updateError = nil
-                            Task {
-                                do {
-                                    let agent = ProjectAgent(projectID: project.id, context: modelContext)
-                                    _ = try await agent.generateSynthesis()
-                                } catch {
-                                    updateError = error.localizedDescription
-                                }
-                                isUpdating = false
-                            }
-                        } label: {
-                            HStack {
-                                if isUpdating {
-                                    ProgressView().scaleEffect(0.8)
-                                }
-                                Label(isUpdating ? "Updating..." : "Update Project", systemImage: "arrow.triangle.2.circlepath")
-                                    .frame(maxWidth: .infinity)
-                            }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(isUpdating)
-
-                        if let error = updateError {
-                            Text(error).font(.caption).foregroundStyle(.red)
-                        }
-                    }
-                    .padding(.horizontal)
-                }
-
-                // Project Info (collapsible)
-                DisclosureGroup("Project Info", isExpanded: $infoExpanded) {
-                    VStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Name").font(.caption).foregroundStyle(.secondary)
-                            TextField("Project name", text: $editingName)
-                                .textFieldStyle(.roundedBorder)
-                                .onSubmit { saveProjectName() }
-                        }
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Summary").font(.caption).foregroundStyle(.secondary)
-                            Button { showSummaryEditor = true } label: {
-                                HStack {
-                                    Text(editingSummary.isEmpty ? "Add summary..." : editingSummary)
-                                        .lineLimit(2)
-                                        .foregroundStyle(editingSummary.isEmpty ? .tertiary : .primary)
-                                    Spacer()
-                                    Image(systemName: "pencil")
-                                }
-                            }
-                        }
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Intention").font(.caption).foregroundStyle(.secondary)
-                            Button { showIntentionEditor = true } label: {
-                                HStack {
-                                    Text(editingIntention.isEmpty ? "Add intention..." : editingIntention)
-                                        .lineLimit(2)
-                                        .foregroundStyle(editingIntention.isEmpty ? .tertiary : .primary)
-                                    Spacer()
-                                    Image(systemName: "pencil")
-                                }
-                            }
-                        }
-
-                        HStack {
-                            Text("Icon").font(.caption).foregroundStyle(.secondary)
-                            Spacer()
-                            Button { showIconPicker = true } label: {
-                                HStack {
-                                    Image(systemName: project.iconName ?? "folder.fill")
-                                    Text(project.iconName ?? "folder.fill").font(.caption)
-                                    Image(systemName: "chevron.right").font(.caption)
-                                }
-                            }
-                        }
-
-                        HStack {
-                            Text("Color").font(.caption).foregroundStyle(.secondary)
-                            Spacer()
-                            Button { showColorPicker = true } label: {
-                                HStack {
-                                    Circle().fill(project.colorHex.flatMap { Color(hex: $0) } ?? .gray).frame(width: 16, height: 16)
-                                    Text(project.colorHex ?? "Default").font(.caption)
-                                    Image(systemName: "chevron.right").font(.caption)
-                                }
-                            }
-                        }
-
-                        HStack {
-                            Text("Framework").font(.caption).foregroundStyle(.secondary)
-                            Spacer()
-                            Button { showFrameworkPicker = true } label: {
-                                HStack {
-                                    Text(project.frameworkId ?? "None").font(.caption)
-                                    Image(systemName: "chevron.right").font(.caption)
-                                }
-                            }
-                        }
-                    }
-                    .padding(.vertical, 8)
-                }
-                .padding(.horizontal)
-
-                // Files (condensed)
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Files").font(.headline)
-                        Spacer()
-                        Text("\(itemCount) items").font(.caption).foregroundStyle(.secondary)
-                    }
-                    ForEach(projectItems.prefix(5)) { item in
-                        HStack {
-                            Image(systemName: item.type == .audio ? "recordingtape" : "doc.text")
-                                .foregroundStyle(.secondary)
-                            VStack(alignment: .leading) {
-                                Text(item.title).font(.subheadline).lineLimit(1)
-                                Text(item.type.rawValue.capitalized).font(.caption2).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                        }
-                    }
-                    if itemCount > 5 {
-                        Button("View all \(itemCount) files") { showAllFiles = true }
-                            .font(.caption)
-                    }
-                }
-                .padding(16)
-                .background(Color(.secondarySystemGroupedBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .padding(.horizontal)
-
-                Spacer().frame(height: 16)
             }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
             .padding(.top, 8)
+
+            // Content
+            switch selectedTab {
+            case .synthesis:
+                ProjectSynthesisView(project: project)
+            case .files:
+                ItemsView(projectID: project.id)
+            }
         }
         .navigationTitle(project.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -412,16 +151,6 @@ struct ProjectHomeView: View {
         .sheet(isPresented: $showNoteEditor) {
             NoteEditorView(mode: .create(type: .note, folderID: nil, initialTag: nil))
         }
-        .sheet(isPresented: $showAllFiles) {
-            NavigationStack {
-                ItemsView(projectID: project.id)
-                    .navigationTitle("Files")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) { Button("Close") { showAllFiles = false } }
-                    }
-            }
-        }
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.json, .plainText, .pdf, .html, .rtf, .audio, .image]) { result in
             if case .success(let url) = result {
                 Task { await handleImportedFile(url) }
@@ -429,67 +158,7 @@ struct ProjectHomeView: View {
         }
         .onAppear {
             chatState.context = .project(project.id)
-            editingName = project.name
-            editingSummary = project.summary ?? ""
-            editingIntention = project.intention ?? ""
-            suggestionService = ProjectSuggestionService(context: modelContext)
-            suggestions = suggestionService?.pending(for: project.id) ?? []
         }
-        .sheet(isPresented: $showSummaryEditor) { TextEditorSheet(title: "Summary", text: $editingSummary, onSave: { saveSummary() }) }
-        .sheet(isPresented: $showIntentionEditor) { TextEditorSheet(title: "Intention", text: $editingIntention, onSave: { saveIntention() }) }
-        .sheet(isPresented: $showIconPicker) { IconPickerView(selectedIcon: Binding(get: { project.iconName ?? "folder.fill" }, set: { saveIcon($0) })) }
-        .sheet(isPresented: $showColorPicker) { ColorPickerView(selectedHex: Binding(get: { project.colorHex ?? "#007AFF" }, set: { saveColor($0) })) }
-        .sheet(isPresented: $showFrameworkPicker) { FrameworkPickerView(project: project) }
-    }
-
-    private func generateSynthesis() async {
-        let agent = ProjectAgent(projectID: project.id, context: modelContext)
-        _ = try? await agent.generateSynthesis()
-    }
-
-    private func handleSuggestion(_ suggestion: ProjectSuggestion, action: SuggestionAction) {
-        guard let svc = suggestionService else { return }
-        switch action {
-        case .accept:
-            try? svc.accept(suggestion)
-        case .dismiss:
-            try? svc.dismiss(suggestion)
-        }
-        suggestions = svc.pending(for: project.id)
-    }
-
-    private func saveProjectName() {
-        let trimmed = editingName.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty, trimmed != project.name else { return }
-        _ = try? ProjectService(context: modelContext).update(
-            id: project.id, fields: ProjectUpdateFields(name: trimmed), origin: .user
-        )
-    }
-
-    private func saveSummary() {
-        guard editingSummary != (project.summary ?? "") else { return }
-        _ = try? ProjectService(context: modelContext).update(
-            id: project.id, fields: ProjectUpdateFields(summary: editingSummary), origin: .user
-        )
-    }
-
-    private func saveIntention() {
-        guard editingIntention != (project.intention ?? "") else { return }
-        _ = try? ProjectService(context: modelContext).update(
-            id: project.id, fields: ProjectUpdateFields(intention: editingIntention), origin: .user
-        )
-    }
-
-    private func saveIcon(_ icon: String) {
-        _ = try? ProjectService(context: modelContext).update(
-            id: project.id, fields: ProjectUpdateFields(iconName: icon), origin: .user
-        )
-    }
-
-    private func saveColor(_ hex: String) {
-        _ = try? ProjectService(context: modelContext).update(
-            id: project.id, fields: ProjectUpdateFields(colorHex: hex), origin: .user
-        )
     }
 
     private func handleImportedFile(_ url: URL) async {
@@ -506,15 +175,15 @@ struct ProjectHomeView: View {
             let item = result.knowledgeItem
             modelContext.insert(item)
             try? modelContext.save()
-            try? ProjectService(context: modelContext).addItem(item.id, to: project.id)
+            try? services.projects.addItem(item.id, to: project.id)
         } catch {
             AppLog.general.error("Import failed: \(error.localizedDescription)")
         }
     }
 
     private func exportMarkdown() {
-        let items = (try? ProjectService(context: modelContext).items(in: project.id)) ?? []
-        let derivedTasks = (try? ProjectDerivedItemService(context: modelContext).fetch(for: project.id, type: .task)) ?? []
+        let items = (try? services.projects.items(in: project.id)) ?? []
+        let derivedTasks = (try? services.derived.fetch(for: project.id, type: .task)) ?? []
         let edges = (try? GraphEdgeService(context: modelContext).neighborhood(of: project.id, radius: 2)) ?? []
         let exporter = ProjectExportService()
 
@@ -607,8 +276,6 @@ enum UnifiedItem: Identifiable {
             case .task: .teal
             case .signal: .orange
             case .connection: .blue
-            case .decision: .yellow
-            case .question: .mint
             }
         }
     }
@@ -622,8 +289,6 @@ enum UnifiedItem: Identifiable {
             case .task: "Task · \(item.statusRaw ?? "todo")"
             case .signal: "Signal · \(item.statusRaw ?? "visible")"
             case .connection: "Connection"
-            case .decision: "Decision"
-            case .question: "Question"
             }
         }
     }
@@ -683,7 +348,7 @@ struct ItemsView: View {
                                 }
                             } else if case .derived(let di) = item {
                                 Button(role: .destructive) {
-                                    try? ProjectDerivedItemService(context: modelContext).delete(di)
+                                    try? services.derived.delete(di)
                                     loadItems()
                                 } label: {
                                     Label("Delete", systemImage: "trash")
@@ -795,8 +460,8 @@ struct ItemsView: View {
     }
 
     private func loadItems() {
-        let knowledgeItems = (try? ProjectService(context: modelContext).items(in: projectID)) ?? []
-        let derivedItems = (try? ProjectDerivedItemService(context: modelContext).fetch(for: projectID)) ?? []
+        let knowledgeItems = (try? services.projects.items(in: projectID)) ?? []
+        let derivedItems = (try? services.derived.fetch(for: projectID)) ?? []
         var combined: [UnifiedItem] = []
         combined.append(contentsOf: knowledgeItems.map { .knowledge($0) })
         combined.append(contentsOf: derivedItems.map { .derived($0) })
@@ -1013,20 +678,20 @@ struct BoardView: View {
             case .cancelled: .cancelled
             }
         }()
-        try? ProjectDerivedItemService(context: modelContext).updateStatus(task, to: derivedStatus)
+        try? services.derived.updateStatus(task, to: derivedStatus)
         let generator = UIImpactFeedbackGenerator(style: .medium)
         generator.impactOccurred()
         loadData()
     }
 
     private func deleteTask(_ task: ProjectDerivedItem) {
-        try? ProjectDerivedItemService(context: modelContext).delete(task)
+        try? services.derived.delete(task)
         loadData()
     }
 
     private func loadData() {
-        tasks = (try? ProjectDerivedItemService(context: modelContext).fetch(for: projectID, type: .task)) ?? []
-        items = (try? ProjectService(context: modelContext).items(in: projectID)) ?? []
+        tasks = (try? services.derived.fetch(for: projectID, type: .task)) ?? []
+        items = (try? services.projects.items(in: projectID)) ?? []
     }
 }
 
@@ -1711,7 +1376,7 @@ struct ProjectSynthesisView: View {
 
     @MainActor
     private func loadData() {
-        let svc = ProjectDerivedItemService(context: modelContext)
+        let svc = services.derived
         synthesis = try? svc.fetchSynthesis(for: project.id).first
         derivedItems = (try? svc.fetch(for: project.id)) ?? []
         isLoading = false
@@ -1760,7 +1425,7 @@ struct EmptySynthesisView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
             // Check if there are items to process
-            let items = (try? ProjectService(context: modelContext).items(in: project.id)) ?? []
+            let items = (try? services.projects.items(in: project.id)) ?? []
             if items.isEmpty {
                 Text("Add items to this project to get started.")
                     .font(.caption)
@@ -1779,60 +1444,6 @@ struct EmptySynthesisView: View {
                 .buttonStyle(.bordered)
             }
             Spacer()
-        }
-    }
-}
-
-// MARK: - SuggestionCardView
-
-enum SuggestionAction { case accept, dismiss }
-
-struct SuggestionCardView: View {
-    let suggestion: ProjectSuggestion
-    let onAction: (SuggestionAction) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(suggestion.title, systemImage: "brain.head.profile")
-                .font(.subheadline).fontWeight(.semibold)
-            Text(suggestion.body)
-                .font(.caption).foregroundStyle(.secondary)
-            HStack {
-                Spacer()
-                Button("Dismiss") { onAction(.dismiss) }
-                    .buttonStyle(.bordered).controlSize(.small)
-                Button("Update") { onAction(.accept) }
-                    .buttonStyle(.borderedProminent).controlSize(.small)
-            }
-        }
-        .padding(12)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-}
-
-// MARK: - TextEditorSheet
-
-struct TextEditorSheet: View {
-    let title: String
-    @Binding var text: String
-    let onSave: () -> Void
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            TextEditor(text: $text)
-                .padding()
-                .navigationTitle(title)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { dismiss() }
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Save") { onSave(); dismiss() }
-                    }
-                }
         }
     }
 }

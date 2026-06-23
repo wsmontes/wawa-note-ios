@@ -88,6 +88,8 @@ enum Haptics {
 // MARK: - Accessibility Modifiers
 
 import SwiftUI
+// Related JIRA: KAN-10
+
 
 extension View {
     /// Standard hit target for interactive elements (44pt minimum per HIG).

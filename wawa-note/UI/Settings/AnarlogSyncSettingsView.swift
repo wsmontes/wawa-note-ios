@@ -1,5 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
+// Related JIRA: KAN-12, KAN-67
+
 
 /// Settings view for anarlog folder sync configuration.
 ///

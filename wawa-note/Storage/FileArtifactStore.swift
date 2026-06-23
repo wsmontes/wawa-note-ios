@@ -1,5 +1,7 @@
 import Foundation
 import OSLog
+// Related JIRA: KAN-11, KAN-55
+
 
 enum FileArtifactStoreError: Error {
     case fileNotFound

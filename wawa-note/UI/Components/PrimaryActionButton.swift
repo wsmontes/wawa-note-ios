@@ -1,4 +1,6 @@
 import SwiftUI
+// Related JIRA: KAN-10
+
 
 /// Floating action button for the primary action on each screen.
 /// Follows HIG: large hit target, clear label, haptic feedback, Dynamic Type.

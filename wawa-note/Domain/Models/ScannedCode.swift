@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-135
+
 
 // MARK: - Scanned Code Model
 

@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-8, KAN-41
+
 
 // MARK: - DEPRECATED: Subsumed by file browser with type filter (2026-06-18)
 struct DecisionItem: Identifiable {
@@ -15,6 +17,7 @@ struct DecisionItem: Identifiable {
 struct ProjectDecisionsView: View {
     let projectID: UUID
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var services: ServiceContainer
     @State private var decisions: [DecisionItem] = []
     @State private var isLoading = true
     @State private var searchText = ""
@@ -91,7 +94,7 @@ struct ProjectDecisionsView: View {
 
     private func loadDecisions() async {
         let store = FileArtifactStore()
-        let projSvc = ProjectService(context: modelContext)
+        let projSvc = services.projects
         guard let items = try? projSvc.items(in: projectID) else {
             isLoading = false
             return

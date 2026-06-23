@@ -1,4 +1,6 @@
 import Foundation
+// Related JIRA: KAN-9, KAN-147
+
 
 enum TemplateActivation: String, Codable, Sendable {
     case manual      // User explicitly invokes

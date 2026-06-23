@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-8, KAN-38, KAN-55
+
 
 // MARK: - FieldOrigin
 
@@ -857,6 +859,22 @@ final class ProjectDerivedItem {
     var resolvedAt: Date?          // For signals: when resolved
     var resolutionReason: String?  // For signals: why resolved
     var reprocessContext: String?  // If created via reprocess, the context used
+    var ownerPersonID: UUID?       // Referential integrity with Person model
+
+    @Transient var taskBody: TaskBody? {
+        guard type == .task, let json = bodyJSON, let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(TaskBody.self, from: data)
+    }
+
+    @Transient var signalBody: SignalBody? {
+        guard type == .signal, let json = bodyJSON, let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(SignalBody.self, from: data)
+    }
+
+    @Transient var synthesisBody: SynthesisBody? {
+        guard type == .synthesis, let json = bodyJSON, let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(SynthesisBody.self, from: data)
+    }
 
     var type: ProjectDerivedType {
         get { ProjectDerivedType(rawValue: typeRaw) ?? .synthesis }

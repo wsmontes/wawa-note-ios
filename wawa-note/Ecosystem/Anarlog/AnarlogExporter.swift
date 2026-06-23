@@ -1,5 +1,7 @@
 import Foundation
 import OSLog
+// Related JIRA: KAN-12, KAN-63
+
 
 /// Exports Wawa Note KnowledgeItem records as anarlog-compatible `.md` files.
 ///

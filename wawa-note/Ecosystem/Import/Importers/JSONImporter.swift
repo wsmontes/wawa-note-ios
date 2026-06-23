@@ -1,5 +1,7 @@
 import Foundation
 import UniformTypeIdentifiers
+// Related JIRA: KAN-12, KAN-62
+
 
 final class JSONImporter: FormatImporter, @unchecked Sendable {
     let formatIdentifier = "json"

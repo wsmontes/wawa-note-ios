@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-54, KAN-144
+
 
 struct DaySummary {
     let date: Date

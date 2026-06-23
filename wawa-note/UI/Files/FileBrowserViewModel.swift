@@ -1,6 +1,8 @@
 import SwiftUI
 import SwiftData
 import Combine
+// Related JIRA: KAN-141
+
 
 /// View model for the file browser. Manages VFS navigation state and file operations.
 @MainActor

@@ -1,16 +1,24 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-8, KAN-38
 
+
+/// TaskService is now a thin facade over ProjectDerivedItemService.
+/// It exists for backward compatibility during the migration period.
+/// New code should use ProjectDerivedItemService directly.
+@available(*, deprecated, message: "Use ProjectDerivedItemService directly")
 @MainActor
 final class TaskService {
     private let context: ModelContext
-    private let edgeService: GraphEdgeService
+    private let derivedService: ProjectDerivedItemService
 
     init(context: ModelContext, edgeService: GraphEdgeService? = nil) {
         self.context = context
-        self.edgeService = edgeService ?? GraphEdgeService(context: context)
+        let edges = edgeService ?? GraphEdgeService(context: context)
+        self.derivedService = ProjectDerivedItemService(context: context, edgeService: edges)
     }
 
+    /// Creates a task as a ProjectDerivedItem. Returns a TaskItem shim for legacy callers.
     func create(
         title: String,
         projectID: UUID? = nil,
@@ -22,98 +30,72 @@ final class TaskService {
         confidence: Double? = nil,
         createdBy: FieldOrigin = .user
     ) throws -> TaskItem {
-        let task = TaskItem(
+        guard let projectID else {
+            // Tasks without a project go into a legacy TaskItem (orphaned tasks)
+            let task = TaskItem(title: title, priority: priority, ownerName: ownerName, dueAt: dueAt, sourceItemID: sourceItemID, sourceSegmentIDs: sourceSegmentIDs, confidence: confidence)
+            task.createdBy = createdBy
+            context.insert(task)
+            try context.save()
+            return task
+        }
+
+        let body = TaskBody(description: nil, sourceSegmentIDs: sourceSegmentIDs.isEmpty ? nil : sourceSegmentIDs, aiGenerated: createdBy != .user, suggestedByItemID: sourceItemID)
+        let bodyData = try? JSONEncoder().encode(body)
+        let bodyStr = bodyData.flatMap { String(data: $0, encoding: .utf8) }
+
+        let derived = try derivedService.createTask(
             title: title,
+            projectID: projectID,
+            sourceItemID: sourceItemID,
             priority: priority,
             ownerName: ownerName,
             dueAt: dueAt,
-            sourceItemID: sourceItemID,
-            sourceSegmentIDs: sourceSegmentIDs,
-            confidence: confidence
+            bodyJSON: bodyStr
         )
+
+        // Return a shim TaskItem for legacy callers that expect the old type
+        let task = TaskItem(id: derived.id, title: title, priority: priority, ownerName: ownerName, dueAt: dueAt, sourceItemID: sourceItemID, sourceSegmentIDs: sourceSegmentIDs, confidence: confidence)
         task.projectID = projectID
         task.createdBy = createdBy
-        // Mark initial field provenance
-        var prov = FieldProvenance.empty
-        let origin = createdBy
-        prov.mark(field: "title", origin: origin)
-        prov.mark(field: "status", origin: origin)
-        prov.mark(field: "priority", origin: origin)
-        if ownerName != nil { prov.mark(field: "ownerName", origin: origin) }
-        if dueAt != nil { prov.mark(field: "dueAt", origin: origin) }
-        task.fieldProvenanceJSON = prov.encode()
-        context.insert(task)
-        try context.save()
-
-        if let source = sourceItemID {
-            try edgeService.create(fromID: source, toID: task.id, edgeType: .produced,
-                                   provenanceItemID: source, provenanceSegmentIDs: sourceSegmentIDs)
-        }
-        if let projectID {
-            try edgeService.create(fromID: task.id, toID: projectID, edgeType: .belongsTo)
-        }
-
         return task
     }
 
-    func fetch(id: UUID) throws -> TaskItem? {
-        var descriptor = FetchDescriptor<TaskItem>(predicate: #Predicate { $0.id == id })
-        descriptor.fetchLimit = 1
-        return try context.fetch(descriptor).first
-    }
-
+    /// Fetches tasks for a project as ProjectDerivedItem, returns as TaskItem shims.
     func tasks(for projectID: UUID) throws -> [TaskItem] {
-        var descriptor = FetchDescriptor<TaskItem>(predicate: #Predicate { $0.projectID == projectID })
-        descriptor.sortBy = [SortDescriptor(\.createdAt, order: .reverse)]
-        return try context.fetch(descriptor)
+        let derived = try derivedService.fetch(for: projectID, type: .task)
+        return derived.map { d in
+            let task = TaskItem(id: d.id, title: d.title, priority: TaskPriority(rawValue: d.priorityRaw ?? "medium") ?? .medium, ownerName: d.ownerName, dueAt: d.dueAt)
+            task.projectID = d.projectID
+            if let statusRaw = d.statusRaw {
+                task.statusRaw = statusRaw
+            }
+            return task
+        }
     }
 
-    func tasksByStatus(_ status: TaskStatus) throws -> [TaskItem] {
-        let raw = status.rawValue
-        var descriptor = FetchDescriptor<TaskItem>(predicate: #Predicate { $0.statusRaw == raw })
-        descriptor.sortBy = [SortDescriptor(\.dueAt, order: .forward)]
-        return try context.fetch(descriptor)
-    }
-
-    func tasksForOwner(_ name: String) throws -> [TaskItem] {
-        var descriptor = FetchDescriptor<TaskItem>(predicate: #Predicate { $0.ownerName == name })
-        descriptor.sortBy = [SortDescriptor(\.dueAt, order: .forward)]
-        return try context.fetch(descriptor)
+    func fetch(id: UUID) throws -> TaskItem? {
+        guard let d = try derivedService.fetch(id: id), d.type == .task else { return nil }
+        let task = TaskItem(id: d.id, title: d.title, priority: TaskPriority(rawValue: d.priorityRaw ?? "medium") ?? .medium, ownerName: d.ownerName, dueAt: d.dueAt)
+        task.projectID = d.projectID
+        if let statusRaw = d.statusRaw { task.statusRaw = statusRaw }
+        return task
     }
 
     func updateStatus(_ task: TaskItem, to status: TaskStatus) throws {
-        let prev = task.status.rawValue
-        task.status = status
-        task.updatedAt = Date()
-        try context.save()
-        VersioningService.shared.recordChange(entityType: "TaskItem", entityID: task.id, projectID: task.projectID,
-            field: "status", previousValue: prev, newValue: status.rawValue, origin: .user, context: context)
-    }
-
-    func updateTask(
-        _ task: TaskItem,
-        title: String? = nil,
-        ownerName: String? = nil,
-        priority: TaskPriority? = nil,
-        dueAt: Date? = nil
-    ) throws {
-        let vs = VersioningService.shared; let ctx = context; let pid = task.projectID; let tid = task.id
-        if let title { let prev = task.title; task.title = title; vs.recordChange(entityType: "TaskItem", entityID: tid, projectID: pid, field: "title", previousValue: prev, newValue: title, origin: .user, context: ctx) }
-        if let ownerName { let prev = task.ownerName; task.ownerName = ownerName; vs.recordChange(entityType: "TaskItem", entityID: tid, projectID: pid, field: "ownerName", previousValue: prev, newValue: ownerName, origin: .user, context: ctx) }
-        if let priority { let prev = task.priority.rawValue; task.priority = priority; vs.recordChange(entityType: "TaskItem", entityID: tid, projectID: pid, field: "priority", previousValue: prev, newValue: priority.rawValue, origin: .user, context: ctx) }
-        if let dueAt { let prev = task.dueAt?.ISO8601Format(); task.dueAt = dueAt; vs.recordChange(entityType: "TaskItem", entityID: tid, projectID: pid, field: "dueAt", previousValue: prev, newValue: dueAt.ISO8601Format(), origin: .user, context: ctx) }
-        task.updatedAt = Date()
-        try context.save()
+        guard let d = try derivedService.fetch(id: task.id) else { return }
+        let derivedStatus: ProjectDerivedStatus = {
+            switch status {
+            case .todo: return .todo
+            case .inProgress: return .inProgress
+            case .done: return .done
+            case .cancelled: return .cancelled
+            }
+        }()
+        try derivedService.updateStatus(d, to: derivedStatus)
     }
 
     func deleteTask(_ task: TaskItem) throws {
-        // Remove associated edges
-        let tid = task.id
-        let outgoing = try context.fetch(FetchDescriptor<GraphEdge>(predicate: #Predicate { $0.fromID == tid }))
-        for edge in outgoing { context.delete(edge) }
-        let incoming = try context.fetch(FetchDescriptor<GraphEdge>(predicate: #Predicate { $0.toID == tid }))
-        for edge in incoming { context.delete(edge) }
-        context.delete(task)
-        try context.save()
+        guard let d = try derivedService.fetch(id: task.id) else { return }
+        try derivedService.delete(d)
     }
 }

@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-136
+
 
 // MARK: - Live OCR Scanner View
 

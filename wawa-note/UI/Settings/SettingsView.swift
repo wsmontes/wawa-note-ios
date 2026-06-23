@@ -2,6 +2,8 @@ import SwiftUI
 import SwiftData
 import OSLog
 import Speech
+// Related JIRA: KAN-10, KAN-52
+
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext

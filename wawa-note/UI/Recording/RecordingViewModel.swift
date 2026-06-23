@@ -1,6 +1,8 @@
 import Combine
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-5, KAN-50
+
 
 enum RecordingUIState: Equatable {
     case idle

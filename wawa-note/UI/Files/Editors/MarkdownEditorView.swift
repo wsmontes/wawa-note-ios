@@ -1,4 +1,6 @@
 import SwiftUI
+// Related JIRA: KAN-141, KAN-137
+
 
 /// Markdown file editor with Edit and Preview modes.
 struct MarkdownEditorView: View {

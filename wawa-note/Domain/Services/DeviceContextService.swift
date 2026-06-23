@@ -3,6 +3,8 @@ import EventKit
 import Contacts
 import CoreLocation
 import SwiftData
+// Related JIRA: KAN-151
+
 
 // MARK: - Device Context Enrichment
 

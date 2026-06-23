@@ -49,18 +49,9 @@ docs/*            — documentação
 
 This project is tracked at https://wawasoftbc.atlassian.net (project key: **KAN**).
 
-**CLI Tool:** `scripts/jira-cli.py` — full-featured JIRA CLI. Setup: copy `.env.example` to `.env`.
-
-```bash
-python scripts/jira-cli.py show KAN-73 --comments     # Read issue
-python scripts/jira-cli.py move KAN-73 "In Progress"  # Start work
-python scripts/jira-cli.py comment KAN-73 "Fixed"     # Update progress
-python scripts/jira-cli.py move KAN-73 Done           # Complete
-python scripts/jira-cli.py create "New bug" -t Bug    # New issue
-```
-
 - **Branch names** must include the JIRA key: `KAN-73/fix-aac-speech-gaps`
-- **Commit messages** must reference the issue: `KAN-73: switch AudioChunker to PCM WAV`
+- **Commit messages** must reference the issue: `KAN-73: switch AudioChunker to PCM WAV output`
+- **PRs** should mention the issue key in the title or description for auto-linking
 - Every source file has `// Related JIRA: KAN-XX` comments — keep them current
 
 ### Setup de Desenvolvimento

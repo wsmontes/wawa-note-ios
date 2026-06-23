@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-9, KAN-52
+
 
 @Model
 final class AIProviderConfigModel {

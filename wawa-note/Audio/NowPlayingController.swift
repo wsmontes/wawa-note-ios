@@ -1,5 +1,7 @@
 import MediaPlayer
 import OSLog
+// Related JIRA: KAN-5, KAN-19
+
 
 @MainActor
 final class NowPlayingController {

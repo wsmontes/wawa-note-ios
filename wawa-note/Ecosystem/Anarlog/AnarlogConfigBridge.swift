@@ -1,5 +1,7 @@
 import Foundation
 import OSLog
+// Related JIRA: KAN-12, KAN-63
+
 
 /// Bidirectional bridge between anarlog's `config/anarlog.json` and
 /// Wawa Note's `AIConfigService` + `SecureKeyStore`.

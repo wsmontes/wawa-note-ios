@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-10, KAN-52
+
 
 struct ProviderPickerView: View {
     @Query(sort: \AIProviderConfigModel.name) private var providers: [AIProviderConfigModel]

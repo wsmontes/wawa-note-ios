@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-54, KAN-144
+
 
 struct DayActivityView: View {
     let date: Date

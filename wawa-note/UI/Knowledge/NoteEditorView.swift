@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+// Related JIRA: KAN-10, KAN-137
+
 
 struct NoteEditorView: View {
     @Environment(\.dismiss) private var dismiss

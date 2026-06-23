@@ -2,6 +2,8 @@ import SwiftUI
 import SwiftData
 import AVFoundation
 import PDFKit
+// Related JIRA: KAN-12, KAN-62
+
 
 // MARK: - Import kind
 

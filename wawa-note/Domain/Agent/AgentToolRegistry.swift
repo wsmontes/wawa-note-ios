@@ -1,4 +1,6 @@
 import Foundation
+// Related JIRA: KAN-9, KAN-45
+
 
 final class AgentToolRegistry: @unchecked Sendable {
     private let tools: [String: any AgentTool]

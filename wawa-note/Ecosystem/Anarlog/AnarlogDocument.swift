@@ -1,4 +1,6 @@
 import Foundation
+// Related JIRA: KAN-12, KAN-63
+
 
 // MARK: - Anarlog Frontmatter Types
 

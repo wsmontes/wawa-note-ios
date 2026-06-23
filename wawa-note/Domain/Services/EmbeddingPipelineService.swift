@@ -1,6 +1,8 @@
 import Foundation
 import SwiftData
 import OSLog
+// Related JIRA: KAN-150
+
 
 @MainActor
 final class EmbeddingPipelineService {

@@ -1,5 +1,7 @@
 import WatchConnectivity
 import OSLog
+// Related JIRA: KAN-153
+
 
 final class iOSWatchSessionManager: NSObject, WCSessionDelegate, @unchecked Sendable {
     private let coordinator: RecordingCoordinator

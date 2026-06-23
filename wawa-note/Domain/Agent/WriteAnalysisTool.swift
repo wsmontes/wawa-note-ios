@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+// Related JIRA: KAN-7, KAN-26, KAN-76
+
 
 // MARK: - Analysis Schema
 
