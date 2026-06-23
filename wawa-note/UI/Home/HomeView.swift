@@ -227,9 +227,9 @@ final class HomeViewModel: ObservableObject {
 
     private func importImageFile(_ url: URL, deleteSource: Bool, modelContext: ModelContext, pipeline: ContentPipelineService) async {
         guard let data = try? Data(contentsOf: url), let image = UIImage(data: data) else { return }
-        let itemService = services.items
+        let itemService = services?.items
         let title = url.lastPathComponent
-        guard let item = try? itemService.createItem(type: .image, title: title, bodyText: nil, inboxDate: Date()) else { return }
+        guard let item = try? itemService?.createItem(type: KnowledgeItemType.image, title: title, bodyText: nil, folderID: nil, durationSeconds: nil, languageCode: nil, tags: [], inboxDate: Date()) else { return }
         // Save image
         let dir = FileArtifactStore().itemDirectoryURL(for: item.id)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -783,7 +783,7 @@ struct HomeView: View {
 
     private func processPhotoItem(_ image: UIImage) async -> [KnowledgeItem] {
         let itemService = services.items
-        guard let item = try? itemService.createItem(type: .image, title: "Photo", bodyText: nil) else { return [] }
+        guard let item = try? itemService.createItem(type: KnowledgeItemType.image, title: "Photo", bodyText: nil, folderID: nil, durationSeconds: nil, languageCode: nil, tags: [], inboxDate: Date()) else { return [] }
         let store = FileArtifactStore()
         let dir = store.itemDirectoryURL(for: item.id)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
