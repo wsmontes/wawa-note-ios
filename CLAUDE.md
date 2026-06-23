@@ -256,6 +256,60 @@ let request = AIRequest(model: model, messages: [...],
 2. Build and run on device when available.
 3. Update this file and `docs/DECISIONS.md` when architectural decisions change.
 4. Prefer editing existing files to creating new ones (pbxproj limitation).
+5. **Always reference JIRA issues** — see JIRA Workflow below.
+
+## JIRA Workflow
+
+**Project:** KAN at https://wawasoftbc.atlassian.net
+**CLI Tool:** `scripts/jira-cli.py` (reads `.env` for credentials)
+**Setup:** Copy `.env.example` to `.env` and fill in your API token.
+
+### Before starting work
+
+1. **Check the board** — `python scripts/jira-cli.py search --labels "sprint:1" --status open`
+2. **Read the issue** — `python scripts/jira-cli.py show KAN-XX --comments --links`
+3. **Transition to In Progress** — `python scripts/jira-cli.py move KAN-XX "In Progress"`
+4. **Create branch with issue key** — `git checkout -b KAN-XX/short-description`
+
+### During work
+
+5. **Commit messages must include JIRA key** — `git commit -m "KAN-73: fix AAC decoding"`
+6. **Reference related issues** — `KAN-73, KAN-79: switch AudioChunker to PCM WAV`
+7. **Comment progress** — `python scripts/jira-cli.py comment KAN-XX "Implemented PCM path"`
+
+### After completing work
+
+8. **Transition to Done** — `python scripts/jira-cli.py move KAN-XX Done`
+9. **Link related issues** — `python scripts/jira-cli.py link KAN-XX KAN-YY --type Relates`
+10. **Create new issues for discovered work** — `python scripts/jira-cli.py create "Summary" --type Bug`
+
+### CLI quick reference
+
+```bash
+python scripts/jira-cli.py me                          # Who am I
+python scripts/jira-cli.py mine                        # My open issues
+python scripts/jira-cli.py search "keyword"            # Search
+python scripts/jira-cli.py search --labels P0          # By label
+python scripts/jira-cli.py show KAN-73 -c -l           # Details + comments + links
+python scripts/jira-cli.py recent -n 10                # Recent updates
+python scripts/jira-cli.py children KAN-5              # Epic children
+python scripts/jira-cli.py create "Summary" -t Bug     # Create
+python scripts/jira-cli.py move KAN-XX Done            # Transition
+python scripts/jira-cli.py comment KAN-XX "text"       # Comment
+python scripts/jira-cli.py link KAN-XX KAN-YY          # Link
+python scripts/jira-cli.py label KAN-XX add "tag"      # Label
+python scripts/jira-cli.py jql "project = KAN AND ..." # Raw JQL
+```
+
+### JIRA reference in code
+
+Every Swift file has a `// Related JIRA: KAN-XX` comment after imports. Keep them accurate when modifying files.
+
+### Sprint priorities
+
+- **Sprint 1 (sprint:1):** P0 bugs + dogfooding + state machine
+- **Sprint 2 (sprint:2):** God object splits + DI + tests
+- **Sprint 3 (sprint:3):** Chat UX + onboarding + kanban
 
 ## When uncertain
 
