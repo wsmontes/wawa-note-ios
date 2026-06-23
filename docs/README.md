@@ -247,9 +247,9 @@ Documents from the meeting-recorder MVP era. All superseded by current architect
 |---|---|---|
 | Source-of-truth docs | 10 | `docs/*.md` (root-level authoritative) |
 | Architecture docs | 5 | `docs/*.md` |
-| Feature specs | 5 | `docs/*.md` |
-| Technical specs | 0 | *(none yet)* |
-| User journeys | 0 | *(none yet)* |
+| Feature specs | 9 | `docs/*.md` |
+| Technical specs | 7 | `docs/*.md` |
+| User journeys | 1 | `docs/*.md` |
 | Plans & roadmaps | 9 | `docs/*.md` + `docs/superpowers/` |
 | Operations guides | 4 | `docs/*.md` + `../CLAUDE.md` |
 | Audits & reviews | 6 | `docs/*.md` |
@@ -257,7 +257,8 @@ Documents from the meeting-recorder MVP era. All superseded by current architect
 | TODO lists | 6 | `docs/*.md` |
 | Archived (history) | 9 | `docs/history/` |
 | Deprecated | 1 | `docs/deprecated/` |
-| **Total** | **58** | |
+| Superpowers plans | 12 | `docs/superpowers/` |
+| **Total** | **67** | (45 root + 22 in subdirectories) |
 
 ---
 

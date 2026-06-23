@@ -1,8 +1,7 @@
 # JIRA Issues — Documentation Sprint
 
 **Updated:** 2026-06-22
-**Method:** `python3 scripts/jira-cli.py create --project KAN ... "Summary last"`
-**Workaround:** Summary must be the LAST positional argument (after all flags)
+**Status:** ✅ Documentation sprint complete — 13 of 13 JIRA issues created, 45 docs synced to Confluence
 
 ---
 
