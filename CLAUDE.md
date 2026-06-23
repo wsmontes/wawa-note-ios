@@ -1,6 +1,6 @@
 # CLAUDE.md — Wawa Note
 
-Updated: 2026-06-12
+Updated: 2026-06-22
 
 ## Dev workflow (automated)
 
@@ -55,14 +55,16 @@ Records meetings, transcribes audio, extracts structured intelligence, organizes
 
 Read these before making architecture decisions:
 
-1. `docs/deep-research-report.md` — strategic direction, competitive analysis, target architecture.
-2. `docs/IMPLEMENTATION_PLAN_V2.md` — actionable task plan with 5 waves.
-3. `docs/APPLE_TECH_INVENTORY.md` — Apple/iPhone 14 Plus technical constraints.
-4. `docs/CODING_STANDARDS.md` — coding rules and conventions.
-5. `docs/API_PROVIDER_CONTRACTS.md` — provider and transcription abstractions.
-6. `docs/SECURITY_PRIVACY.md` — permissions, secrets, privacy modes.
-7. `docs/DECISIONS.md` — architecture decision records.
-8. `docs/expert_panel_review.md` — expert feedback and UX recommendations.
+1. `docs/README.md` — **central documentation index** — every doc with freshness date, summary, JIRA refs.
+2. `docs/DOCUMENTATION_GAP_ANALYSIS.md` — feature × docs × JIRA coverage matrix.
+3. `docs/deep-research-report.md` — strategic direction, competitive analysis, target architecture.
+4. `docs/IMPLEMENTATION_PLAN_V2.md` — actionable task plan with 5 waves.
+5. `docs/APPLE_TECH_INVENTORY.md` — Apple/iPhone 14 Plus technical constraints.
+6. `docs/CODING_STANDARDS.md` — coding rules and conventions.
+7. `docs/API_PROVIDER_CONTRACTS.md` — provider and transcription abstractions.
+8. `docs/SECURITY_PRIVACY.md` — permissions, secrets, privacy modes.
+9. `docs/DECISIONS.md` — architecture decision records.
+10. `docs/expert_panel_review.md` — expert feedback and UX recommendations.
 
 Archived docs (meeting-recorder MVP era) live in `docs/history/`.
 
@@ -84,17 +86,23 @@ The codebase is in **late-stage transformation** from meeting recorder to knowle
 
 ### What's solid
 
-- **KnowledgeItem** — polymorphic model: meeting, note, journalEntry, webBookmark, image.
+- **KnowledgeItem** — polymorphic model: meeting, note, journalEntry, webBookmark, image, scanEvent.
 - **Project, TaskItem, Person, GraphEdge, Entity** — all first-class SwiftData models with services.
-- **Agent system** — AgentLoop with streaming, tool calling (GetItem, ListItems, SearchKnowledge, GraphAndTaskTools).
-- **Content pipeline** — unified extract → analyze → ingest for all item types.
-- **Import pipeline** — 10 importers via FormatImporter protocol + Share Extension.
+- **Agent system** — AgentLoop with streaming, 24-command ShellInterpreter, VFS (virtual filesystem), AgentMemoryStore (pattern learning), PromptStore (editable templates), sub-agent spawning, dynamic model routing.
+- **Content pipeline** — unified extract → analyze → ingest with 11-state machine, 8 framework templates (meeting, research, brainstorm, journal, coaching, legal, product, blank).
+- **Chat blocks** — 18 rich output types: text, table, code, projectContext, taskCard, itemCard, searchResults, analysisAccordion, choicePrompt, confirmation, fileLink, documentHeader, freeTextInput, progressUpdate, bulletList, orderedList.
+- **Import pipeline** — 10 importers via FormatImporter protocol + Share Extension + Anarlog/Meetily ecosystem (15 files, watched folder sync).
 - **Export pipeline** — Markdown, JSON, SRT, CSV, Graph JSON + Reminders export + Calendar create.
 - **Context sensors** — Calendar, AudioRoute, Location, Battery, MotionActivity, FocusMode.
-- **iOS integrations** — Calendar read/write, Reminders export, Watch Connectivity, Live Activities, Vision OCR document scanner (multi-page), Core Spotlight indexing, Contacts speaker matching, Face ID gate.
-- **Provider abstraction** — OpenAI, Anthropic, Gemini, OpenAI-compatible + remote/local transcription engines.
+- **iOS integrations** — Calendar read/write, Reminders export, Watch Connectivity, Live Activities, Vision OCR document scanner (multi-page), Core Spotlight indexing, Contacts speaker matching, Face ID gate, barcode/QR scanning (13 symbologies), Live OCR (real-time Vision text + Core Motion).
+- **Provider abstraction** — OpenAI, Anthropic, Gemini, OpenAI-compatible + remote/local transcription engines + provider infrastructure (BudgetTracker, MetricsTracker, CircuitBreaker, NetworkMonitor, LocalProviderScanner, ModelCache, RetryPolicy).
 - **Calendar timeline** — MonthGrid, DayActivity, OnThisDay, unified EKEvent + KnowledgeItem view.
-- **27 unit tests** in `CoreServicesTests.swift`.
+- **Project frameworks** — 5 built-in frameworks with DynamicAnalysis + 5 lens types via LensAnalysisService.
+- **TrashService** — soft-delete with empty trash and restore.
+- **ConfigProjectService** — system configuration as a VFS-accessible project.
+- **PostRecordingAutomationService** — auto-transcribe/analyze after capture.
+- **EvalSystem** — AI output quality validation gates.
+- **27 unit tests** in `CoreServicesTests.swift` (+ IngestionPipeline, StoreRecovery, AnarlogDocument, ServiceContainer, ProjectDerivedItem tests).
 
 ### Navigation (current)
 
@@ -135,6 +143,8 @@ The codebase is in **late-stage transformation** from meeting recorder to knowle
 | Core Spotlight indexing | OUT | Implemented |
 | Contacts speaker matching | IN | Implemented |
 | Face ID biometric gate | INTERNAL | Implemented |
+| Barcode/QR scanning (13 symbologies) | IN | Implemented |
+| Live OCR (real-time Vision + Core Motion) | IN | Implemented |
 | App Intents / Siri | — | Not implemented (needs extension target) |
 | WeatherKit sensor | — | Not implemented (needs entitlement) |
 
@@ -143,35 +153,39 @@ The codebase is in **late-stage transformation** from meeting recorder to knowle
 ```text
 wawa-note/
   App/                WawaNoteApp.swift
-  Audio/              Capture, Playback, Session, FileWriter
-  Connectivity/       Watch session, RecordingCoordinator
-  ContextCapture/     Calendar, Location, Focus, Motion, Battery, AudioRoute sensors
+  Audio/              AudioCaptureService, AudioFileWriter, AudioPlaybackService, AudioSessionManager, AudioSegmentConcatenator, AudioAssetResolver, NowPlayingController
+  Connectivity/       iOSWatchSessionManager, RecordingCoordinator, WatchMessageTypes
+  ContextCapture/     ContextCaptureService, CalendarContextSensor, LocationContextSensor, FocusModeSensor, MotionActivitySensor, BatterySensor, AudioRouteSensor
   Domain/
-    Agent/            AgentLoop, AgentTool, ToolRegistry, ContextWindow, Tools/
+    Agent/            AgentLoop, ShellInterpreter (24 commands), VFSService (15 path types), AgentTool (protocol), AgentToolRegistry, ToolContext, ContextWindowManager, AgentMemoryStore, PromptStore, ContentParser
+    Agent/Tools/      ShellTool, ProjectTools (SynthesizeProject, EmitSignal, CreateConnection, RequestReprocess)
     Calendar/         CalendarEvent, CalendarSyncService, TimelineEntry, DaySummary, OnThisDay
-    Models/           KnowledgeItem, Folder, Annotation, ProjectModels (Project, TaskItem, Person, GraphEdge, Entity), ChatModels, CrossReferenceModels
-    Services/         KnowledgeItemService, ProjectService, TaskService, PersonService, GraphEdgeService, ContentPipelineService, ContentExtractionService, SearchService, ChatService, ...
+    Models/           KnowledgeItem, Folder, Annotation, ProjectModels (Project, TaskItem, Person, GraphEdge, Entity, ProjectFrame, ChangeRecord, ProjectSnapshot, ProjectDerivedItem, QueueEntry), ChatModels (ChatConversation, ChatMessage, ChatBlock 18 types), MeetingAnalysis, TranscriptSegment, ScannedCode, AIProviderConfigModel
+    Protocols/        ServiceContainer
+    Services/         KnowledgeItemService, ProjectService, TaskService, PersonService, GraphEdgeService, EntityService, ContentPipelineService, ContentExtractionService, ProjectIngestionPipeline, ChatService, SearchService, AnnotationService, TrashService, DerivationService, ProjectDerivedItemService, AnalysisService, AnalysisSkillService, ConfigProjectService, PostRecordingAutomationService, InboxCriticalMassDetector, BackgroundWorker, FieldAuthorityService, AIConfigService, ProcessingQueueService
   Ecosystem/
+    Anarlog/          AnarlogImporter, AnarlogExporter, AnarlogSyncService, AnarlogDocument, EvalSystem, SpeakerLabeler, VoiceActivityDetector, TranscriptRenderer, TranscriptPatchService, STTAdapters, TemplateMapper, ModelResolver, MeetilyImporter, MeetilyExporter, SummaryCache
     Export/           ExportService, MarkdownExporter, JSONExporter, ProjectExportService, TaskRemindersService
-    Import/           ImportRouter, FormatImporter, ICS/JSON/Markdown/SRT/PDF/HTML/RTF/GitHubIssues importers
-    Spotlight/        (SpotlightIndexService in SearchService.swift)
-  LocalIntelligence/  EmbeddingService, SemanticSearchService
-  Providers/          AIProvider, OpenAICompatibleProvider, AnthropicProvider, GeminiProvider, ProviderAdapter, ProviderRouter
-  Security/           (BiometricGateService in WawaNoteApp.swift)
+    Import/           ImportRouter, FormatImporter, PlainText/Markdown/JSON/PDF/HTML/RTF/SRT/ICS/GitHubIssues/AudioImportService importers
+    Spotlight/        SpotlightIndexService (in SearchService.swift)
+  LocalIntelligence/  EmbeddingService, SemanticSearchService, ModelDownloadService, ModelRegistry
+  Providers/          AIProvider (protocol), OpenAICompatibleProvider, AnthropicProvider, GeminiProvider, ProviderRouter, ActiveProviderManager, ProviderAdapter, AIConfigService, ModelPolicy, BudgetTracker, MetricsTracker, CircuitBreaker, NetworkMonitor, LocalProviderScanner, ModelCache, RetryPolicy
+  Security/           BiometricGateService (in WawaNoteApp.swift)
   Storage/            FileArtifactStore, SecureKeyStore
-  Transcription/      AppleSpeechTranscriptionEngine, RemoteTranscriptionEngine
+  Transcription/      AppleSpeechTranscriptionEngine, RemoteTranscriptionEngine, VADChunker, SpeechAnalyzerEngine, TranscriptChunker
   UI/
-    Capture/          ScannerView, ScannerViewModel (in HomeView.swift)
+    Capture/          ScannerView, ScannerViewModel, BarcodeScannerView, BarcodeScannerViewModel, LiveOCRView, LiveOCRViewModel
     Home/             HomeView, CaptureViewModel
     Inbox/            InboxView
-    Explore/          ExploreView
-    Chat/             ChatView, ChatViewModel
-    Project/          ProjectDetailView, ProjectTimelineView, ProjectGraphView, ProjectTaskBoardView, PromoteToProjectSheet
-    Knowledge/        KnowledgeDetailView, ConnectionsFeedView
-    Calendar/         CalendarContainerView (TimelineExplorerView, MonthGridView, DayCellView, DayActivityView, OnThisDayView)
-    Components/       ContentView, CreationSheetView, PermissionPromptView, PrimaryActionButton, EmptyStateView
+    Explore/          ExploreView, ProjectListView
+    Chat/             ChatView, ChatViewModel, ChatBlockViews (18 block renderers)
+    Project/          ProjectDetailView, ProjectHomeView, ProjectTimelineView, ProjectGraphView, ProjectTaskBoardView, ProjectPeopleView, ProjectEntitiesView, ProjectDecisionsView, ProjectRiskRegisterView, HeroStatsCard, AttentionRequiredSection, PendingSection, RecentActivitySection, UnifiedItem, SendToMenuView, PromoteToProjectSheet, CreateProjectSheet, ProjectExportActions, TaskEditorView
+    Knowledge/        KnowledgeDetailView, ConnectionsFeedView, NoteEditorView, JournalEditorView
+    Calendar/         CalendarContainerView, MonthGridView, DayCellView, DayActivityView, CalendarPermissionView
+    Components/       ContentView, CreationSheetView, PermissionPromptView, PrimaryActionButton, EmptyStateView, AudioPlayerView, ActiveModelPicker, ModelDownloadView, AppStatusBadge, ColorPickerView, IconPickerView, FrameworkPickerView
     Import/           ImportFormView
-    Settings/         SettingsView, ProviderPickerView, ProviderConnectView
+    Settings/         SettingsView, ProviderPickerView, ProviderConnectView, ProviderCard, ProviderDetailView, ProviderEditorView, ProviderTemplates, AnarlogSyncSettingsView, SkillsSettingsView
+    Recording/        RecordingViewModel
   Utilities/          Logging, AppDesign
 ```
 
