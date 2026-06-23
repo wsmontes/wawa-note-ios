@@ -1341,7 +1341,8 @@ struct SynthesisContentView: View {
                         MetricsStripView(metrics: body.metrics)
                     }
                     ForEach(body.sections.sorted(by: { $0.order < $1.order }), id: \.id) { section in
-                        if section.renderType != "metrics" {
+                        let render = section.renderType.lowercased().trimmingCharacters(in: .whitespaces)
+                        if render != "metrics" && render != "metric" {
                             SectionCardView(section: section)
                         }
                     }
@@ -1392,21 +1393,30 @@ struct MetricPill: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(statusColor.opacity(0.3), lineWidth: 1))
     }
 
+    /// LLM-variation-proof: case-insensitive, aliases for common LLM outputs.
     private var formatted: String {
-        switch metric.format {
-        case "percentage": String(format: "%.0f%%", metric.value * 100)
-        case "days": "\(Int(metric.value))d"
-        case "score": String(format: "%.0f", metric.value)
-        default: metric.value >= 100 ? "\(Int(metric.value))" : String(format: "%.1f", metric.value)
+        let f = metric.format.lowercased()
+        switch f {
+        case "percentage", "percent", "pct", "%": return String(format: "%.0f%%", metric.value * 100)
+        case "days", "day", "dias", "jours": return "\(Int(metric.value))d"
+        case "score", "pontuacao", "pontuação", "note": return String(format: "%.0f", metric.value)
+        case "count", "number", "contagem", "nombre": return metric.value >= 100 ? "\(Int(metric.value))" : String(format: "%.1f", metric.value)
+        default: return metric.value >= 100 ? "\(Int(metric.value))" : String(format: "%.1f", metric.value)
         }
     }
 
+    /// LLM-variation-proof: case-insensitive, aliases for common LLM outputs.
     private var statusColor: Color {
-        switch metric.status {
-        case "healthy": .green
-        case "warning": .orange
-        case "critical": .red
-        default: .secondary
+        let s = metric.status.lowercased()
+        switch s {
+        case "healthy", "ok", "good", "green", "saudavel", "saudável", "bon", "sain":
+            return .green
+        case "warning", "warn", "attention", "yellow", "atencao", "atenção", "orange":
+            return .orange
+        case "critical", "crit", "danger", "red", "error", "critico", "crítico", "critique":
+            return .red
+        default:
+            return .secondary
         }
     }
 }
@@ -1420,8 +1430,10 @@ struct SectionCardView: View {
                 Image(systemName: sectionIcon).font(.caption).foregroundStyle(sectionColor)
                 Text(section.title).font(.headline)
             }
-            switch section.renderType {
-            case "cards", "table", "timeline":
+            /// LLM-variation-proof: case-insensitive renderType dispatch.
+            let render = section.renderType.lowercased().trimmingCharacters(in: .whitespaces)
+            switch render {
+            case "cards", "table", "timeline", "card", "tabela", "tableau", "tabla":
                 Text(section.content).font(.body)
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1441,28 +1453,57 @@ struct SectionCardView: View {
         .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
     }
 
+    /// LLM-variation-proof: matches across English, Portuguese, Spanish, French, German, Italian.
     private var sectionIcon: String {
-        let t = section.title.lowercased()
-        if t.contains("summary") || t.contains("resumo") { return "doc.text.fill" }
-        if t.contains("topic") || t.contains("tópico") { return "tag.fill" }
-        if t.contains("risk") || t.contains("risco") { return "exclamationmark.triangle.fill" }
-        if t.contains("task") || t.contains("tarefa") { return "checklist" }
-        if t.contains("decision") || t.contains("decisão") { return "checkmark.shield.fill" }
-        if t.contains("insight") { return "lightbulb.fill" }
-        if t.contains("action") || t.contains("ação") { return "bolt.fill" }
-        if t.contains("question") { return "questionmark.circle.fill" }
+        let t = canonicalTopic
+        if t == "summary" { return "doc.text.fill" }
+        if t == "topic" || t == "theme" { return "tag.fill" }
+        if t == "risk" { return "exclamationmark.triangle.fill" }
+        if t == "task" || t == "action" { return "checklist" }
+        if t == "decision" { return "checkmark.shield.fill" }
+        if t == "insight" { return "lightbulb.fill" }
+        if t == "action" || t == "next_step" { return "bolt.fill" }
+        if t == "question" { return "questionmark.circle.fill" }
+        if t == "entity" || t == "person" { return "person.2.fill" }
         return "doc.text"
     }
 
+    /// LLM-variation-proof: matches across English, Portuguese, Spanish, French, German, Italian.
     private var sectionColor: Color {
-        let t = section.title.lowercased()
-        if t.contains("risk") || t.contains("risco") { return .red }
-        if t.contains("task") || t.contains("tarefa") { return .blue }
-        if t.contains("decision") || t.contains("decisão") { return .green }
-        if t.contains("topic") || t.contains("tópico") { return .purple }
-        if t.contains("insight") { return .orange }
-        if t.contains("action") || t.contains("ação") { return .blue }
+        let t = canonicalTopic
+        if t == "risk" { return .red }
+        if t == "task" || t == "action" { return .blue }
+        if t == "decision" { return .green }
+        if t == "topic" || t == "theme" { return .purple }
+        if t == "insight" { return .orange }
+        if t == "summary" { return .primary }
+        if t == "question" { return .yellow }
         return .secondary
+    }
+
+    /// Normalizes a section title to a canonical topic key, handling multilingual
+    /// LLM outputs. Returns the canonical English topic name.
+    private var canonicalTopic: String {
+        let t = section.title.lowercased().trimmingCharacters(in: .whitespaces)
+        // Summary
+        if t.contains("summary") || t.contains("resumo") || t.contains("résumé") || t.contains("zusammenfassung") || t.contains("sommario") || t.contains("resumen") { return "summary" }
+        // Topic / Theme
+        if t.contains("topic") || t.contains("tópico") || t.contains("theme") || t.contains("thème") || t.contains("thema") || t.contains("tema") || t.contains("sujet") { return "topic" }
+        // Risk
+        if t.contains("risk") || t.contains("risco") || t.contains("risque") || t.contains("risiko") || t.contains("riesgo") || t.contains("rischio") { return "risk" }
+        // Task / Action
+        if t.contains("task") || t.contains("tarefa") || t.contains("tâche") || t.contains("aufgabe") || t.contains("tarea") || t.contains("azione") { return "task" }
+        // Decision
+        if t.contains("decision") || t.contains("decisão") || t.contains("décision") || t.contains("entscheidung") || t.contains("decisión") || t.contains("decisione") { return "decision" }
+        // Insight
+        if t.contains("insight") || t.contains("insight") || t.contains("aperçu") || t.contains("erkenntnis") || t.contains("intuizione") || t.contains("cross") || t.contains("cruzado") { return "insight" }
+        // Action / Next Step
+        if t.contains("action") || t.contains("ação") || t.contains("accion") || t.contains("azione") || t.contains("next step") || t.contains("próximo") || t.contains("proximo") || t.contains("suivant") || t.contains("siguiente") { return "action" }
+        // Question
+        if t.contains("question") || t.contains("questão") || t.contains("questao") || t.contains("pergunta") || t.contains("frage") || t.contains("pregunta") || t.contains("domanda") { return "question" }
+        // Entity / Person
+        if t.contains("entity") || t.contains("entidade") || t.contains("entité") || t.contains("entität") || t.contains("person") || t.contains("pessoa") || t.contains("personne") { return "entity" }
+        return "unknown"
     }
 }
 
