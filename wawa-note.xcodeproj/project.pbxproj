@@ -161,7 +161,6 @@
 		D06C9DCDC9D44FD18DC3289A /* AnarlogExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1994C6DF57B3436597BA9299 /* AnarlogExporter.swift */; };
 		D152CDB77463601A6585C90A /* CoreServicesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3136430A5FDBA2E5E31FF07 /* CoreServicesTests.swift */; };
 		D20AFAE2F407C32C0EF4576E /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB1D428C8A48F546076DE263 /* ShareViewController.swift */; };
-		D23BF9768E864959A0713A58 /* AnarlogDocumentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7207222C40524456A553D69E /* AnarlogDocumentTests.swift */; };
 		D2505829C648429A921C3319 /* VoiceActivityDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87E09DC88DA541A483642060 /* VoiceActivityDetector.swift */; };
 		D2B14042724808C527A0B5CB /* CaptureViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 325FB6A77A41BE640CFBB23C /* CaptureViewModel.swift */; };
 		D4C235A489E73AA8011C222D /* ask.md in Resources */ = {isa = PBXBuildFile; fileRef = 5A575F2A07E3CC0F8B5576CF /* ask.md */; };
@@ -321,7 +320,6 @@
 		6B01706F85B6302255D7E8A4 /* GeminiProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiProvider.swift; sourceTree = "<group>"; };
 		6B44C2AE3A9F27C75FDAD614 /* PlainTextImporter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PlainTextImporter.swift; sourceTree = "<group>"; };
 		6FC445035743033C8F992E5D /* ProjectExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectExportService.swift; sourceTree = "<group>"; };
-		7207222C40524456A553D69E /* AnarlogDocumentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnarlogDocumentTests.swift; sourceTree = "<group>"; };
 		7342384CB91C4305BA404612 /* FileEditorRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileEditorRouter.swift; sourceTree = "<group>"; };
 		7394D93A2BF19F119E4FB10E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		757646688032D55A74708DD4 /* PostRecordingAutomationService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PostRecordingAutomationService.swift; sourceTree = "<group>"; };
@@ -942,7 +940,6 @@
 			isa = PBXGroup;
 			children = (
 				C3136430A5FDBA2E5E31FF07 /* CoreServicesTests.swift */,
-				7207222C40524456A553D69E /* AnarlogDocumentTests.swift */,
 				B3499F3FBEA143629A73279841C31E25 /* ProjectDerivedItemTests.swift */,
 			);
 			path = "wawa-noteTests";
@@ -1151,7 +1148,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				D152CDB77463601A6585C90A /* CoreServicesTests.swift in Sources */,
-				D23BF9768E864959A0713A58 /* AnarlogDocumentTests.swift in Sources */,
 				FF1DC35DE74B45F0A472365A52B19505 /* ProjectDerivedItemTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
