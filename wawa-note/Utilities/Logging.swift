@@ -1,20 +1,140 @@
 import Foundation
 import OSLog
-// Related JIRA: KAN-11
+// Related JIRA: KAN-11, KAN-257
 
 
-// MARK: - OSLog
+// MARK: - OSLog (KAN-257: Standardized 7-category logging)
 
 enum AppLog {
     private static let subsystem = Bundle.main.bundleIdentifier ?? "com.wawa-note"
 
-    static let audio = Logger(subsystem: subsystem, category: "audio")
-    static let transcription = Logger(subsystem: subsystem, category: "transcription")
-    static let provider = Logger(subsystem: subsystem, category: "provider")
-    static let storage = Logger(subsystem: subsystem, category: "storage")
-    static let general = Logger(subsystem: subsystem, category: "general")
-    static let agent = Logger(subsystem: subsystem, category: "agent")
-    static let config = Logger(subsystem: subsystem, category: "config")
+    // INFRA: app lifecycle, memory, disk, network, background tasks, crash recovery
+    static let infra = Logger(subsystem: subsystem, category: "infra")
+    // ERRORS: all errors with severity, context, stack trace, recovery action
+    static let error = Logger(subsystem: subsystem, category: "error")
+    // USER_INTERACTION: taps, navigation, recordings, imports/exports, project ops
+    static let user = Logger(subsystem: subsystem, category: "user")
+    // DATA_INPUT: files imported, recordings captured, text entered, URLs bookmarked
+    static let input = Logger(subsystem: subsystem, category: "input")
+    // DATA_OUTPUT: exports, items created, analysis artifacts, cards rendered
+    static let output = Logger(subsystem: subsystem, category: "output")
+    // LLM_COMMUNICATION: full request/response, tool calls, tokens, latency
+    static let llm = Logger(subsystem: subsystem, category: "llm")
+    // OUTCOMES: tasks created, insights generated, cards rendered from LLM calls
+    static let outcome = Logger(subsystem: subsystem, category: "outcome")
+
+    // Legacy aliases — migrate callers gradually
+    @available(*, deprecated, message: "Use AppLog.infra")
+    static let audio = Logger(subsystem: subsystem, category: "infra")
+    @available(*, deprecated, message: "Use AppLog.infra")
+    static let transcription = Logger(subsystem: subsystem, category: "infra")
+    @available(*, deprecated, message: "Use AppLog.llm")
+    static let provider = Logger(subsystem: subsystem, category: "llm")
+    @available(*, deprecated, message: "Use AppLog.infra")
+    static let storage = Logger(subsystem: subsystem, category: "infra")
+    @available(*, deprecated, message: "Use AppLog.infra")
+    static let general = Logger(subsystem: subsystem, category: "infra")
+    @available(*, deprecated, message: "Use AppLog.llm")
+    static let agent = Logger(subsystem: subsystem, category: "llm")
+    @available(*, deprecated, message: "Use AppLog.infra")
+    static let config = Logger(subsystem: subsystem, category: "infra")
+}
+
+// MARK: - Correlation ID (KAN-257)
+
+/// Links all logs from a single operation (analysis run, recording, import).
+struct CorrelationID: Sendable, CustomStringConvertible {
+    let value: String
+    let operation: String
+
+    var description: String { "\(operation):\(value.prefix(8))" }
+
+    static func new(operation: String) -> CorrelationID {
+        CorrelationID(value: UUID().uuidString, operation: operation)
+    }
+
+    static let app = CorrelationID(value: "app", operation: "system")
+}
+
+// MARK: - Structured Log Entry (KAN-257)
+
+struct LogEntry: Codable, Sendable {
+    let timestamp: String
+    let level: String
+    let category: String
+    let correlation: String?
+    let message: String
+    let metadata: [String: String]?
+}
+
+// MARK: - AppLog Convenience Methods (KAN-257)
+
+extension AppLog {
+    /// Log a user event with optional correlation ID.
+    static func event(_ category: Logger, _ message: String, cat: String = "general", correlation: CorrelationID? = nil) {
+        var msg = message
+        if let cid = correlation { msg = "[\(cid)] \(msg)" }
+        category.notice("\(msg, privacy: .public)")
+        FileLogService.shared.log(category: cat, level: "event", message: msg)
+    }
+
+    /// Log a warning with optional correlation ID.
+    static func warn(_ category: Logger, _ message: String, cat: String = "general", correlation: CorrelationID? = nil) {
+        var msg = message
+        if let cid = correlation { msg = "[\(cid)] \(msg)" }
+        category.warning("\(msg, privacy: .public)")
+        FileLogService.shared.log(category: cat, level: "warn", message: msg)
+    }
+
+    /// Log an error with optional correlation ID.
+    static func logError(_ category: Logger, _ message: String, cat: String = "general", correlation: CorrelationID? = nil) {
+        var msg = message
+        if let cid = correlation { msg = "[\(cid)] \(msg)" }
+        category.error("\(msg, privacy: .public)")
+        FileLogService.shared.log(category: cat, level: "error", message: msg)
+    }
+}
+
+// MARK: - LLM Communication Logging (KAN-257)
+
+extension AppLog {
+    /// Log an LLM request with privacy-annotated metadata.
+    static func llmRequest(
+        model: String, provider: String,
+        messageCount: Int, toolCount: Int,
+        maxTokens: Int?, temperature: Double?,
+        correlation: CorrelationID? = nil
+    ) {
+        var msg = "LLM_REQ model=\(model) provider=\(provider) messages=\(messageCount) tools=\(toolCount)"
+        if let mt = maxTokens { msg += " maxTokens=\(mt)" }
+        if let t = temperature { msg += " temp=\(t)" }
+        if let cid = correlation { msg = "[\(cid)] \(msg)" }
+        AppLog.llm.notice("\(msg, privacy: .public)")
+        FileLogService.shared.log(category: "llm", level: "request", message: msg)
+    }
+
+    /// Log an LLM response with token usage and latency.
+    static func llmResponse(
+        model: String, contentLength: Int, toolCalls: Int,
+        inputTokens: Int, outputTokens: Int, latencyMs: Int64,
+        correlation: CorrelationID? = nil
+    ) {
+        var msg = "LLM_RES model=\(model) contentLen=\(contentLength) toolCalls=\(toolCalls) tokensIn=\(inputTokens) tokensOut=\(outputTokens) latencyMs=\(latencyMs)"
+        if let cid = correlation { msg = "[\(cid)] \(msg)" }
+        AppLog.llm.notice("\(msg, privacy: .public)")
+        FileLogService.shared.log(category: "llm", level: "response", message: msg)
+    }
+
+    /// Log a tool call execution.
+    static func llmToolCall(
+        tool: String, argsLength: Int, resultLength: Int,
+        isError: Bool, correlation: CorrelationID? = nil
+    ) {
+        var msg = "LLM_TOOL tool=\(tool) argsLen=\(argsLength) resultLen=\(resultLength) error=\(isError)"
+        if let cid = correlation { msg = "[\(cid)] \(msg)" }
+        AppLog.llm.notice("\(msg, privacy: .public)")
+        FileLogService.shared.log(category: "llm", level: "tool", message: msg)
+    }
 }
 
 // MARK: - FileLogService (persistent, crash-safe)
@@ -177,6 +297,41 @@ final class FileLogService: @unchecked Sendable {
         if !fileManager.fileExists(atPath: currentLogURL.path) {
             try? "".write(to: currentLogURL, atomically: true, encoding: .utf8)
         }
+    }
+
+    // MARK: - JSON Export (KAN-257)
+
+    /// Export logs as structured JSON array for sharing or external analysis.
+    func exportLogsJSON() -> Data {
+        let text = retrieveLogs()
+        let lines = text.split(separator: "\n")
+        let jsonLines: [[String: String]] = lines.compactMap { line in
+            let raw = String(line)
+            let parts = raw.split(separator: "]", maxSplits: 3, omittingEmptySubsequences: false)
+            guard parts.count >= 3 else { return nil }
+            let ts = String(parts[0].dropFirst())
+            let level = String(parts[1].dropFirst().trimmingCharacters(in: .whitespaces))
+            let category = String(parts[2].dropFirst().trimmingCharacters(in: .whitespaces))
+            let message = parts.count > 3 ? String(parts[3].dropFirst().trimmingCharacters(in: .whitespaces)) : ""
+            return ["timestamp": ts, "level": level, "category": category, "message": message]
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: jsonLines, options: .prettyPrinted) else {
+            return Data("[]".utf8)
+        }
+        return data
+    }
+
+    /// Total size of all log files in bytes.
+    var totalLogSize: Int64 {
+        var size: Int64 = 0
+        if let e = fileManager.enumerator(at: cachesDir, includingPropertiesForKeys: [.fileSizeKey]) {
+            for case let url as URL in e where url.lastPathComponent.hasPrefix("wawa-debug") {
+                if let values = try? url.resourceValues(forKeys: [.fileSizeKey]) {
+                    size += Int64(values.fileSize ?? 0)
+                }
+            }
+        }
+        return size
     }
 }
 

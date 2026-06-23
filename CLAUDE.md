@@ -1,6 +1,6 @@
 # CLAUDE.md — Wawa Note
 
-Updated: 2026-06-22
+Updated: 2026-06-23
 
 ## Dev workflow (automated)
 
@@ -65,6 +65,7 @@ Read these before making architecture decisions:
 8. `docs/SECURITY_PRIVACY.md` — permissions, secrets, privacy modes.
 9. `docs/DECISIONS.md` — architecture decision records.
 10. `docs/expert_panel_review.md` — expert feedback and UX recommendations.
+11. `docs/logging-standards.md` — **KAN-257** — 7-category logging system, LLM communication capture, correlation IDs, retrieval.
 
 Archived docs (meeting-recorder MVP era) live in `docs/history/`.
 
@@ -263,6 +264,49 @@ let request = AIRequest(model: model, messages: [...],
 ```
 
 `requestParams` handles internally: reasoning model detection (temperature → nil), feature config ceiling, model preset caps, and context window for chunking. Services only own their system/user prompts.
+
+## Logging standards (KAN-257)
+
+**Use `AppLog` with one of 7 standardized categories.** Never use `print()` or `NSLog()`.
+
+```swift
+// CORRECT — 7 categories per KAN-257
+AppLog.infra   // app lifecycle, memory, disk, network, background tasks
+AppLog.error   // errors with severity, context, recovery action
+AppLog.user    // taps, navigation, recordings, imports/exports
+AppLog.input   // files imported, recordings captured, text entered
+AppLog.output  // exports, items created, artifacts, cards rendered
+AppLog.llm     // full LLM request/response, tool calls, tokens, latency
+AppLog.outcome // what was produced from each LLM call (tasks, insights, cards)
+
+// WRONG
+print("User tapped save")
+NSLog("Error: \(error)")
+```
+
+**LLM calls must be logged** with `AppLog.llmRequest()` / `AppLog.llmResponse()` / `AppLog.llmToolCall()`:
+
+```swift
+let cid = CorrelationID.new(operation: "chat")
+AppLog.llmRequest(model: model, provider: "openai", messageCount: 3, toolCount: 5,
+    maxTokens: 4096, temperature: nil, correlation: cid)
+let response = try await provider.send(request)
+AppLog.llmResponse(model: model, contentLength: response.content.count, toolCalls: 0,
+    inputTokens: usage.in, outputTokens: usage.out, latencyMs: elapsed, correlation: cid)
+```
+
+**User interactions must be logged** with correlation IDs:
+
+```swift
+AppLog.event(AppLog.user, "Recording started: title=\(title)", cat: "user")
+AppLog.event(AppLog.user, "Project viewed: \(project.name)", cat: "user")
+```
+
+**Convenience methods** available: `AppLog.event()`, `AppLog.warn()`, `AppLog.logError()`
+
+**Log retrieval:** Settings > Debug > Export Logs (JSON). Console.app filter: subsystem `com.wawa-note`. File: `~/Library/Caches/wawa-debug.log`. Docs: `docs/logging-standards.md`.
+
+**Legacy categories** (`AppLog.audio`, `.general`, `.agent`, etc.) are deprecated — use new categories above. Legacy aliases still compile but emit warnings.
 
 ## Implementation behavior
 

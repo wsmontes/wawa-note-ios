@@ -8,6 +8,8 @@ import Speech
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \KnowledgeItem.updatedAt) private var allItems: [KnowledgeItem]
+    @State private var showLogShareSheet = false
+    @State private var logShareURL: URL?
     @Query(sort: \Folder.name) private var folders: [Folder]
 
     @State private var transcriptionMode: TranscriptionMode = TranscriptionSettings.shared.mode
@@ -284,8 +286,37 @@ struct SettingsView: View {
                 } footer: {
                     Text("Fine-tune AI behavior. Lenses define analysis perspectives, Model Resolution sets fallback chains per task, and Summary Cache stores previous analysis results to avoid redundant API calls.")
                 }
+
+                // MARK: Debug Logs (KAN-257)
+                Section {
+                    HStack {
+                        Text("Log Size")
+                        Spacer()
+                        Text(ByteCountFormatter().string(fromByteCount: FileLogService.shared.totalLogSize))
+                            .foregroundStyle(.secondary)
+                    }
+                    Button {
+                        let data = FileLogService.shared.exportLogsJSON()
+                        let tempURL = FileManager.default.temporaryDirectory
+                            .appendingPathComponent("wawa-logs-\(ISO8601DateFormatter().string(from: Date())).json")
+                        try? data.write(to: tempURL)
+                        logShareURL = tempURL
+                        showLogShareSheet = true
+                    } label: {
+                        Label("Export Logs (JSON)", systemImage: "square.and.arrow.up")
+                    }
+                } header: {
+                    Text("Debug")
+                } footer: {
+                    Text("Exports timestamped logs as JSON for external analysis. View in Console.app with subsystem filter: com.wawa-note.")
+                }
             }
             .navigationTitle("Settings")
+            .sheet(isPresented: $showLogShareSheet) {
+                if let url = logShareURL {
+                    ActivityView(activityItems: [url])
+                }
+            }
             .onAppear {
                 // Ensure auto-analysis model comes from the user's configured
                 // providers, never from hardcoded defaults. If the current
@@ -577,4 +608,16 @@ struct SummaryCacheManagementView: View {
         if usable.isEmpty { return [Locale(identifier: "en-US").identifier] }
         return usable.map(\.identifier)
     }
+}
+
+// MARK: - UIActivityViewController Wrapper (KAN-257)
+
+struct ActivityView: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

@@ -189,6 +189,7 @@ final class HomeViewModel: ObservableObject {
         do {
             let result = try await importer.importFromURL(url)
             let item = result.knowledgeItem
+            if !result.warnings.isEmpty { AppLog.general.warning("Import \(url.lastPathComponent): \(result.warnings)") }
             await MainActor.run {
                 modelContext.insert(item)
                 try? modelContext.save()
@@ -473,7 +474,10 @@ struct HomeView: View {
                 VStack(spacing: 0) {
                     Divider()
                     HStack(spacing: 10) {
-                        Button(action: { captureVM.startRecording() }) {
+                        Button(action: {
+                            AppLog.event(AppLog.user, "Recording initiated from Home tab", cat: "user")
+                            captureVM.startRecording()
+                        }) {
                             VStack(spacing: 2) {
                                 Image(systemName: "record.circle.fill").font(.title3).symbolRenderingMode(.hierarchical)
                                 Text("Record").font(.caption2)
@@ -546,7 +550,7 @@ struct HomeView: View {
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
             .contentShape(Rectangle())
-            .onTapGesture { navigateToProject = project }
+            .simultaneousGesture(TapGesture().onEnded { navigateToProject = project })
             .onLongPressGesture(minimumDuration: 0.4) {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     if isExpanded { expandedProjectIDs.remove(project.id) }
@@ -620,7 +624,7 @@ struct HomeView: View {
         }
         .padding(.vertical, 6)
         .contentShape(Rectangle())
-        .onTapGesture { navigateToItem = item }
+        .simultaneousGesture(TapGesture().onEnded { navigateToItem = item })
         .swipeActions(edge: .leading) {
             Button {
                 try? services.items.removeFromInbox(item)
