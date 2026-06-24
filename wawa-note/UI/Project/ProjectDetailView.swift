@@ -100,13 +100,13 @@ struct ProjectHomeView: View {
     @EnvironmentObject private var chatState: ChatOverlayState
     @EnvironmentObject private var coordinator: RecordingCoordinator
     @EnvironmentObject private var services: ServiceContainer
-    @State private var selectedTab: ProjectTab = .synthesis
+    @State private var selectedTab: ProjectTab = .chat
     @State private var showCaptureSheet = false
     @State private var showNoteEditor = false
     @State private var showFileImporter = false
 
     enum ProjectTab: String, CaseIterable {
-        case synthesis = "Overview"
+        case chat = "Chat"
         case items = "Items"
         case files = "Files"
     }
@@ -125,8 +125,8 @@ struct ProjectHomeView: View {
 
             // Content
             switch selectedTab {
-            case .synthesis:
-                ProjectSynthesisView(project: project)
+            case .chat:
+                ProjectChatView(project: project)
             case .items:
                 ProjectItemsView(projectID: project.id)
             case .files:
@@ -263,6 +263,26 @@ struct ProjectHomeView: View {
         let vc = UIActivityViewController(activityItems: [allVTT], applicationActivities: nil)
         if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
            let root = scene.windows.first?.rootViewController { root.present(vc, animated: true) }
+    }
+}
+
+// MARK: - Project Chat View
+
+struct ProjectChatView: View {
+    let project: Project
+    @StateObject private var chatVM = ChatViewModel()
+    @Environment(\.modelContext) private var modelContext
+
+    var body: some View {
+        ChatView(viewModel: chatVM, compact: false)
+            .onAppear {
+                chatVM.setup(modelContext: modelContext)
+                chatVM.activeProjectID = project.id
+                chatVM.activeProjectName = project.name
+                if let hex = project.colorHex {
+                    chatVM.activeProjectColorHex = hex
+                }
+            }
     }
 }
 
