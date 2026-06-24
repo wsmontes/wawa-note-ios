@@ -105,7 +105,33 @@
 
 ---
 
-## What Was Actually Fixed (Code Changes)
+## User-Facing Changes (What You'll See on iPhone)
+
+> Deployed to iPhone 14 Plus and iPhone 15. Open the app and check:
+
+| Tab | What Changed |
+|---|---|
+| **Capture** | Empty state now shows guidance ("Ready to Capture — Tap the mic..."). Logo smaller. Projects and Inbox scroll together in one list. Toolbar buttons have VoiceOver labels. |
+| **Inbox** | "Mark Reviewed" → "Remove from Inbox" (label matches behavior). Trash filter shows Restore instead of Trash on trashed items. CTA buttons in empty states ("Record", "Import"). Titles show 2 lines instead of 1. |
+| **Explore** | Tabs renamed: "Synthesis"→"Overview", "Arquivos"→"Files". New "Items" tab with aggregated task/signal/decision cards. Kanban Board accessible via toolbar icon (rectangle.split.3x1). Delete project now asks for confirmation. Project names use larger font. |
+| **Chat** | Model name shown in input bar (e.g. "gpt-5.5"). Mode picker (Auto/Deep/Fast) has accessibility labels. Agent tool calls show human-friendly counts. |
+| **Settings** | Debug section with log size + JSON export. API Budget section (daily limit, spent today, tier indicator). |
+| **Recording** | Media services reset now recovers recording instead of stopping. Silence detection more reliable (thread-safe). |
+| **Transcription** | Cloud fallback respects your "Allow Cloud" preference (Settings). Items no longer stuck in "transcribing" — they fail with visible error. |
+| **Performance** | OpenAI streaming now works (incremental responses). Circuit breaker protects from API overload. Logs track LLM calls with token counts and latency. |
+
+## Resolution Breakdown: Code Fix vs Verified-OK
+
+| Category | Code Changes | Verified as Already OK | Total |
+|---|---|---|---|
+| **Real code fixes** | 23 issues (13 files, ~400 LOC) | — | 23 |
+| **Already implemented** | — | 150 issues | 150 |
+| **Documented/Documented** | 20 issues (comments, docs) | — | 20 |
+| **Total** | **43** | **150** | **193** |
+
+**Key:** "Code Changes" = new code written. "Verified as OK" = feature already existed in codebase. "Documented" = architectural issue noted with plan.
+
+## What Was Actually Fixed (Code Details)
 
 | Area | Files Changed | Key Changes |
 |---|---|---|
@@ -122,13 +148,25 @@
 
 **Total: 13 files modified, ~400 lines of new code, 0 regressions.**
 
+## Follow-Up JIRAs Created (Post-Audit Recommendations)
+
+| JIRA | Description | Priority | Effort |
+|---|---|---|---|
+| **KAN-512** | Whisper: add response_format=verbose_json for timed segments | P1 | M (~2h) |
+| **KAN-513** | Add SRT and VTT transcript export formats | P2 | S (~1h) |
+| **KAN-514** | Integrate VADChunker for silence skipping | P2 | M (~3h) |
+| **KAN-515** | Fix device language: pt-BR→pt strips region code | P1 | XS (~15min) |
+| **KAN-516** | Wire pipelineStage progress to pipeline execution | P1 | M (~2h) |
+| **KAN-517** | Recording start confirmation before capture | P2 | S (~1h) |
+
+**Total Sprint 3 budget: ~9.25h (6 issues, all estimated)**
+
 ## Recommended Next Steps for PO
 
-1. **Review the Epics in JIRA:** Each child issue has full description, severity, file:line references
-2. **Prioritize by severity:** Start with P0/P1 items for next sprint
-3. **Validate on device:** Deployed to iPhone 14 Plus and iPhone 15 — test the UX changes
-4. **Create sprint:** Move selected issues into Sprint 3 with estimates
-5. **Schedule follow-up audits:** Calendar/Reminders, Spotlight, Watch app not yet audited
+1. **Validate on device:** Deployed to iPhone 14 Plus + iPhone 15 — test the UX changes listed above
+2. **Prioritize follow-ups:** 6 new JIRAs (KAN-512 to 517) ready for Sprint 3 — ~9h total
+3. **Review Epics in JIRA:** Each of the 193 child issues has full description, severity, file:line refs
+4. **Schedule next audits:** Calendar/Reminders, Spotlight, Watch app not yet covered
 
 ## JIRA Links
 
