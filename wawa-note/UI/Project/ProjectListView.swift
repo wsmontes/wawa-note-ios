@@ -169,7 +169,7 @@ struct ProjectListView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(project.name)
-                        .font(.subheadline).fontWeight(.medium)
+                        .font(.body).fontWeight(.medium)
                     Text(project.updatedAt.formatted(date: .abbreviated, time: .omitted))
                         .font(.caption).foregroundStyle(.secondary)
                 }

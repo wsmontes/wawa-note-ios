@@ -65,8 +65,14 @@ struct ProjectDetailLink: View {
         Group {
             if let project {
                 ProjectDetailView(project: project)
+            } else if resolutionAttempted {
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle").font(.system(size: 36)).foregroundStyle(.orange)
+                    Text("Project not found").font(.headline)
+                    Text("It may have been deleted or moved.").font(.subheadline).foregroundStyle(.secondary)
+                }
             } else {
-                Color.clear
+                ProgressView("Loading project...")
                     .onAppear { resolveIfNeeded() }
             }
         }
@@ -131,18 +137,27 @@ struct ProjectHomeView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button { showCaptureSheet = true } label: {
-                        Label("Add Item", systemImage: "plus")
+                HStack(spacing: 16) {
+                    NavigationLink {
+                        BoardView(projectID: project.id)
+                    } label: {
+                        Image(systemName: "rectangle.split.3x1")
+                            .font(.subheadline)
                     }
-                    Button { exportMarkdown() } label: {
-                        Label("Export Markdown", systemImage: "doc.richtext")
+                    .accessibilityLabel("Kanban Board")
+                    Menu {
+                        Button { showCaptureSheet = true } label: {
+                            Label("Add Item", systemImage: "plus")
+                        }
+                        Button { exportMarkdown() } label: {
+                            Label("Export Markdown", systemImage: "doc.richtext")
+                        }
+                        Button { exportJSON() } label: {
+                            Label("Export JSON", systemImage: "doc.text")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
                     }
-                    Button { exportJSON() } label: {
-                        Label("Export JSON", systemImage: "doc.text")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
                 }
             }
         }
