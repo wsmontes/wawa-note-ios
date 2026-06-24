@@ -330,6 +330,7 @@ struct DerivedItemCard: View {
             Image(systemName: typeIcon)
                 .font(.body).foregroundStyle(typeColor)
                 .frame(width: 28)
+                .accessibilityLabel(item.type.rawValue.capitalized)
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title).font(.subheadline).fontWeight(.medium).lineLimit(2)
                 HStack(spacing: 8) {

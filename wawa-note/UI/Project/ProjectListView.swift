@@ -189,9 +189,9 @@ struct ProjectListView: View {
             }
 
             HStack(spacing: AppSpacing.md) {
-                Label("\(itemCount)", systemImage: "doc")
+                Label(itemCount == 1 ? "1 item" : "\(itemCount) items", systemImage: "doc")
                     .font(.caption2).foregroundStyle(.secondary)
-                Label("\(taskCount)", systemImage: "checklist")
+                Label(taskCount == 1 ? "1 task" : "\(taskCount) tasks", systemImage: "checklist")
                     .font(.caption2).foregroundStyle(.secondary)
                 if openTasks > 0 {
                     Label("\(openTasks) open", systemImage: "circle")
