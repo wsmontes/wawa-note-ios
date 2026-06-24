@@ -16,8 +16,7 @@ import OSLog
 ///
 /// Unlike VADAudioChunker (which splits by fixed time), VADChunker
 /// splits by actual speech boundaries — smarter and more efficient.
-@MainActor
-struct VADChunker {
+struct VADChunker: @unchecked Sendable {
     private let vad: VoiceActivityDetector
     private let maxChunkDuration: TimeInterval
     private let logger = Logger(subsystem: "com.wawa.note", category: "VADChunker")
@@ -129,10 +128,12 @@ struct VADChunker {
         }
         try sourceFile.read(into: buffer, frameCount: frameCount)
 
+        // KAN-514: Force 16kHz mono for SFSpeechRecognizer compatibility.
+        // AVAudioFile handles format conversion internally when settings differ from source.
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: format.sampleRate,
-            AVNumberOfChannelsKey: format.channelCount,
+            AVSampleRateKey: 16000,
+            AVNumberOfChannelsKey: 1,
             AVLinearPCMBitDepthKey: 16,
             AVLinearPCMIsFloatKey: false,
             AVLinearPCMIsBigEndianKey: false

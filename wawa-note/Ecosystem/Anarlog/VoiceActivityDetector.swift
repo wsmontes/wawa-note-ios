@@ -18,8 +18,7 @@ import OSLog
 ///
 /// Reference: Meetily's `vad.rs` — ContinuousVadProcessor with Silero VAD.
 /// For ML-based VAD, convert Silero ONNX → CoreML via coremltools.
-@MainActor
-final class VoiceActivityDetector: ObservableObject {
+final class VoiceActivityDetector: ObservableObject, @unchecked Sendable {
     private let logger = Logger(subsystem: "com.wawa.note", category: "VAD")
 
     /// Positive speech threshold — RMS level above this is definitely speech.
