@@ -1,6 +1,6 @@
 import SwiftUI
 import SwiftData
-// Related JIRA: KAN-8, KAN-10, KAN-34
+// Related JIRA: KAN-8, KAN-10, KAN-34, KAN-526
 
 
 enum ProjectSortOrder: CaseIterable { case recent, name, created }
@@ -24,6 +24,8 @@ struct ProjectListView: View {
     @State private var openTaskCounts: [UUID: Int] = [:]
     @State private var showDeleteConfirmation = false
     @State private var projectToDelete: Project?
+    @State private var editingProjectName: Project?
+    @State private var editedName: String = ""
 
     private var sortedProjects: [Project] {
         let nonConfig = projects.filter { !ConfigProjectService.isConfigProject($0) }
@@ -155,52 +157,70 @@ struct ProjectListView: View {
 
     private func projectRow(_ project: Project) -> some View {
         let itemCount = itemCounts[project.id] ?? 0
-        let taskCount = taskCounts[project.id] ?? 0
-        let openTasks = openTaskCounts[project.id] ?? 0
+        let isEditing = editingProjectName?.id == project.id
+        let colorHex = project.colorHex ?? ProjectPalette.allHexes.first!
 
-        return VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            HStack(spacing: AppSpacing.md) {
-                Image(systemName: project.iconName ?? "folder.fill")
-                    .font(.title3)
-                    .foregroundStyle(Color(hex: project.colorHex ?? ProjectPalette.allHexes.first!))
-                    .frame(width: 32, height: 32)
-                    .background(Color(hex: project.colorHex ?? ProjectPalette.allHexes.first!).opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm))
+        return HStack(spacing: 12) {
+            Image(systemName: project.iconName ?? "folder.fill")
+                .font(.title3)
+                .foregroundStyle(Color(hex: colorHex))
+                .frame(width: 32, height: 32)
+                .background(Color(hex: colorHex).opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
 
-                VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 2) {
+                if isEditing {
+                    TextField("Project Name", text: $editedName)
+                        .font(.body).fontWeight(.medium)
+                        .textFieldStyle(.plain)
+                        .onSubmit { commitNameEdit(project) }
+                        .onExitCommand { cancelNameEdit() }
+                        .focused($isNameFieldFocused)
+                } else {
                     Text(project.name)
                         .font(.body).fontWeight(.medium)
-                    Text(project.updatedAt.formatted(date: .abbreviated, time: .omitted))
-                        .font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .onTapGesture { startEditing(project) }
                 }
-
-                Spacer()
-
-                Text(project.status.rawValue.capitalized)
-                    .font(.caption2)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(statusColor(project.status).opacity(0.15))
-                    .clipShape(Capsule())
+                Text(project.updatedAt.formatted(date: .abbreviated, time: .omitted))
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
-            if let summary = project.summary, !summary.isEmpty {
-                Text(summary)
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
-            }
+            Spacer()
 
-            HStack(spacing: AppSpacing.md) {
-                Label(itemCount == 1 ? "1 item" : "\(itemCount) items", systemImage: "doc")
-                    .font(.caption2).foregroundStyle(.secondary)
-                Label(taskCount == 1 ? "1 task" : "\(taskCount) tasks", systemImage: "checklist")
-                    .font(.caption2).foregroundStyle(.secondary)
-                if openTasks > 0 {
-                    Label("\(openTasks) open", systemImage: "circle")
-                        .font(.caption2).foregroundStyle(.orange)
-                }
-            }
+            Text(itemCount == 1 ? "1 item" : "\(itemCount) items")
+                .font(.caption).foregroundStyle(.secondary)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Color(.systemGray5))
+                .clipShape(Capsule())
         }
-        .padding(.horizontal, AppSpacing.lg)
-        .padding(.vertical, AppSpacing.md)
+        .padding(.vertical, 8)
+    }
+
+    private func startEditing(_ project: Project) {
+        editingProjectName = project
+        editedName = project.name
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            isNameFieldFocused = true
+        }
+    }
+
+    private func commitNameEdit(_ project: Project) {
+        let trimmed = editedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { cancelNameEdit(); return }
+        project.name = trimmed
+        project.nameIsAutoGenerated = false
+        var prov = project.provenance
+        prov.mark(field: "name", origin: .user)
+        project.fieldProvenanceJSON = prov.encode()
+        try? modelContext.save()
+        editingProjectName = nil
+        editedName = ""
+    }
+
+    private func cancelNameEdit() {
+        editingProjectName = nil
+        editedName = ""
     }
 
     // MARK: Counts
