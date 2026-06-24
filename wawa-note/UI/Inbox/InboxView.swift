@@ -193,11 +193,19 @@ struct InboxView: View {
                             }
                         }
                         .swipeActions(edge: .trailing) {
-                            Button { showFolderPicker = item } label: {
-                                Label("Move to Project", systemImage: "folder.badge.plus")
-                            }.tint(.blue)
-                            Button(role: .destructive) { itemToDelete = item; showDeleteConfirmation = true } label: {
-                                Label("Trash", systemImage: "trash")
+                            if filterMode == .trash {
+                                Button {
+                                    try? TrashService(context: modelContext).restore(item)
+                                } label: {
+                                    Label("Restore", systemImage: "arrow.uturn.backward")
+                                }.tint(.green)
+                            } else {
+                                Button { showFolderPicker = item } label: {
+                                    Label("Move to Project", systemImage: "folder.badge.plus")
+                                }.tint(.blue)
+                                Button(role: .destructive) { itemToDelete = item; showDeleteConfirmation = true } label: {
+                                    Label("Trash", systemImage: "trash")
+                                }
                             }
                         }
                     }
