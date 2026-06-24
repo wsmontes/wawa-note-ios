@@ -344,7 +344,12 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         let nc = NotificationCenter.default
         let q = OperationQueue.main
         observers.append(nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: q) { [weak self] n in self?.handleInterruption(n) })
-        observers.append(nc.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: q) { [weak self] _ in self?.stopRecording() })
+        observers.append(nc.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: q) { [weak self] _ in
+            AppLog.audio.warning("Media services were reset — attempting engine rebuild")
+            Task { @MainActor [weak self] in
+                await self?.rebuildEngineForCurrentRoute(forceBuiltInMic: true, reason: "mediaServicesReset")
+            }
+        })
 
         // Route changes: Bluetooth connect/disconnect, headset plug/unplug, etc.
         // When the route changes during recording, the existing tap may be
@@ -754,7 +759,12 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // Re-register all non-engine-scoped observers
         let q = OperationQueue.main
         observers.append(nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: q) { [weak self] n in self?.handleInterruption(n) })
-        observers.append(nc.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: q) { [weak self] _ in self?.stopRecording() })
+        observers.append(nc.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: q) { [weak self] _ in
+            AppLog.audio.warning("Media services were reset — attempting engine rebuild")
+            Task { @MainActor [weak self] in
+                await self?.rebuildEngineForCurrentRoute(forceBuiltInMic: true, reason: "mediaServicesReset")
+            }
+        })
         observers.append(nc.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: q) { [weak self] n in self?.handleRouteChange(n) })
         // Engine-scoped observer for the new engine
         observers.append(nc.addObserver(forName: .AVAudioEngineConfigurationChange, object: newEngine, queue: q) { [weak self] n in self?.handleEngineConfigChange(n) })
