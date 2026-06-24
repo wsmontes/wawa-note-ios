@@ -75,6 +75,27 @@ final class ChatViewModel: ObservableObject {
         self.services = ServiceContainer(context: modelContext)
     }
 
+    // MARK: - Project Context
+
+    /// Sets the chat into a project-scoped context.
+    /// Called by ProjectChatView to properly switch the chat's context to a specific
+    /// project. This triggers conversation loading, project-aware greeting generation,
+    /// context injection (synthetic cd/ls), and scopes all ToolContext/VFS operations
+    /// to this project's items.
+    func setProjectContext(project: Project) {
+        activeProjectID = project.id
+        activeProjectName = project.name
+        if let hex = project.colorHex {
+            activeProjectColorHex = hex
+        } else {
+            let fallback = ProjectPalette.allHexes.first!
+            projectColorCache[project.id] = fallback
+            activeProjectColorHex = fallback
+        }
+        projectColorCache[project.id] = activeProjectColorHex
+        switchToContext(.project(project.id))
+    }
+
     // MARK: - Context
 
     func observeContext(from overlay: ChatOverlayState) {

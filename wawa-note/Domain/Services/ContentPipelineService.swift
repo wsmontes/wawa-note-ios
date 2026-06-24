@@ -78,40 +78,6 @@ enum PipelineTemplate {
     - Use snake_case for section keys
     """
 
-    /// Build a framework-aware prompt that includes the project's schema sections.
-    static func forFramework(_ framework: ProjectFramework) -> String {
-        let props = framework.itemAnalysis.outputSchema.properties
-        let sectionList = props.keys.sorted().map { "  - \"\($0)\"" }.joined(separator: "\n")
-        let desc = framework.description
-
-        return """
-        You are a content analysis agent in Wawa Note. Process the item described in the first message.
-
-        ## FRAMEWORK: \(framework.name)
-        \(desc)
-
-        ## TOOLS
-        - run_command: extract, ls, cat, grep, echo
-        - write_analysis: save your structured analysis
-
-        ## STEPS
-        1. EXTRACT: use `extract <item-id>`
-        2. ANALYZE: decide which sections apply, produce JSON, call write_analysis
-
-        ## AVAILABLE SECTIONS (choose which apply):
-        \(sectionList)
-
-        ## RULES
-        - ALWAYS start with extract
-        - Include a "summary" section with a one-paragraph synthesis
-        - ONLY include sections that have meaningful content from the source
-        - Skip sections where nothing relevant was found — omit them entirely
-        - You may add up to 3 custom sections beyond the available list if the content warrants it
-        - Be specific and reference what was actually said
-        - Use the exact section key names from the available list
-        """
-    }
-
     /// Lightweight pipeline: extract and analyze only. No project ingestion.
     static let extractAndAnalyze: String = """
     You are a content processing agent. Extract text from the given item and analyze it. \
@@ -321,7 +287,7 @@ final class ContentPipelineService: ObservableObject {
             ]
 
             let catalogPrompt = Self.buildCatalogPrompt()
-            let systemPrompt = catalogPrompt + "\n\n" + (resolvedFramework.map { PipelineTemplate.forFramework($0) } ?? PipelineTemplate.standard)
+            let systemPrompt = catalogPrompt + "\n\n" + PipelineTemplate.standard
             let pipelineDef = PipelineStore.shared.active
             let iterationBudget = pipelineDef?.params?.maxIterations ?? 15
             let agentMode: AgentMode = pipelineDef?.params?.agentMode == "deep" ? .deep : (pipelineDef?.params?.agentMode == "fast" ? .fast : .auto)
