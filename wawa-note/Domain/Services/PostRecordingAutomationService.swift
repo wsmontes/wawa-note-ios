@@ -49,7 +49,7 @@ final class ProjectIngestionState: ObservableObject {
 // MARK: - Shared context builder
 
 /// Shared logic for building AI prompt context from KnowledgeItems and analysis artifacts.
-/// Used by ProjectIngestionPipeline and ProjectConversionService.
+/// Used by ProjectConversionService.
 enum ItemContextBuilder {
 
     static func buildItemContext(item: KnowledgeItem, fileStore: FileArtifactStore) -> String {

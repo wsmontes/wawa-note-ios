@@ -2,6 +2,61 @@ import Foundation
 // Related JIRA: KAN-11, KAN-60
 
 
+// MARK: - Ingestion models (Codable)
+
+struct IngestionResponse: Codable {
+    var item_project_view: String?
+    var project_item_view: String?
+    var connections: [IngestionConnection]?
+    var task_updates: [IngestionTaskUpdate]?
+    var new_tasks: [IngestionNewTask]?
+    var edge_reinforcements: [IngestionReinforcement]?
+    var insights: [IngestionInsight]?
+    var project_summary_contribution: String?
+    var project_summary_update: String?
+    var signals: [IngestionSignal]?
+}
+
+struct IngestionConnection: Codable {
+    var from_title: String
+    var to_title: String
+    var type: String
+    var explanation: String?
+}
+
+struct IngestionTaskUpdate: Codable {
+    var task_title: String
+    var new_status: String
+    var reason: String?
+}
+
+struct IngestionNewTask: Codable {
+    var title: String
+    var priority: String?
+    var reason: String?
+    var confidence: Double?
+}
+
+struct IngestionReinforcement: Codable {
+    var from_title: String?
+    var to_title: String?
+    var note: String?
+}
+
+struct IngestionInsight: Codable {
+    var text: String
+    var confidence: Double?
+}
+
+struct IngestionSignal: Codable {
+    var type: String
+    var title: String
+    var body: String?
+    var impact: Double?
+    var urgency: Double?
+    var related_item_titles: [String]?
+}
+
 /// Actor for CPU-intensive work that should NOT run on @MainActor.
 /// Handles JSON parsing, prompt building, text processing — anything
 /// that doesn't need SwiftData ModelContext access.

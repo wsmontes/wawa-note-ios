@@ -15,7 +15,6 @@ struct WawaNoteApp: App {
 
     private let ingestionState: ProjectIngestionState
     private let contentPipeline: ContentPipelineService
-    private let ingestionPipeline: ProjectIngestionPipeline
     private let processingQueue: ProcessingQueueService
     private let serviceContainer: ServiceContainer
 
@@ -51,8 +50,7 @@ struct WawaNoteApp: App {
         }
 
         ingestionState = ProjectIngestionState()
-        ingestionPipeline = ProjectIngestionPipeline(ingestionState: ingestionState)
-        contentPipeline = ContentPipelineService(ingestionPipeline: ingestionPipeline, ingestionState: ingestionState, modelContainer: modelContainer)
+        contentPipeline = ContentPipelineService(ingestionState: ingestionState, modelContainer: modelContainer)
         processingQueue = ProcessingQueueService()
         processingQueue.setPipeline(contentPipeline)
 
@@ -254,7 +252,6 @@ struct WawaNoteApp: App {
         .environmentObject(calendarSyncService)
         .environmentObject(ingestionState)
         .environmentObject(contentPipeline)
-        .environmentObject(ingestionPipeline)
         .environmentObject(processingQueue)
         .environmentObject(serviceContainer)
     }

@@ -171,13 +171,6 @@ final class ContentPipelineService: ObservableObject {
             // cleared analysisProviderId and wants a fresh analysis run.
             guard forceReanalysis || item.analysisProviderId == nil || !AutomationSettings.shared.autoAnalyze else {
                 AppLog.provider.info("ContentPipeline: item \(itemID) already analyzed, skipping")
-                // Still run ingestion if item is in a project
-                if let projectID = item.projectID {
-                    // Fast path: parse analysis.json directly (no LLM call)
-                    _ = await ingestionPipeline.ingestFromAnalysis(itemID: itemID, projectID: projectID, using: modelContext)
-                    // Also run LLM-based ingestion for summary update + connections
-                    await ingestionPipeline.ingest(itemID: itemID, projectID: projectID, using: modelContext)
-                }
                 return
             }
 
@@ -528,29 +521,6 @@ final class ContentPipelineService: ObservableObject {
                 SpotlightIndexService().indexItem(fresh)
             }
             // Keep status visible so user can see agent trace
-        }
-    }
-
-    /// Run only Phase 3 (project ingestion) for an item that has already been
-    /// extracted and analyzed. Use this when assigning a fully-processed item
-    /// to a project — avoids redundant re-transcription and re-analysis.
-    func ingestOnly(_ itemID: UUID, projectID: UUID, using modelContext: ModelContext) {
-        guard activeJobs[itemID] == nil else {
-            AppLog.provider.info("ContentPipeline: item \(itemID) already processing, deferring ingestion to running job")
-            return
-        }
-
-        activeJobs[itemID] = Task { @MainActor in
-            defer {
-                activeJobs[itemID] = nil
-                endBackgroundTask()
-                NotificationCenter.default.post(name: .pipelineCompleted, object: itemID.uuidString)
-            }
-            beginBackgroundTask()
-
-            NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
-                                            userInfo: ["stage": PipelineStage.ingesting.rawValue])
-            await ingestionPipeline.ingest(itemID: itemID, projectID: projectID, using: modelContext)
         }
     }
 
