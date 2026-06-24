@@ -1,7 +1,7 @@
 import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
-// Related JIRA: KAN-8, KAN-10
+// Related JIRA: KAN-8, KAN-10, KAN-525
 
 
 // MARK: - Shared Signal Helpers
@@ -477,6 +477,8 @@ struct ItemsView: View {
     }
 
     @EnvironmentObject private var services: ServiceContainer
+    @State private var showExportAllShareSheet = false
+    @State private var exportAllText: String?
     var body: some View {
         List {
             if filteredItems.isEmpty {
@@ -484,6 +486,7 @@ struct ItemsView: View {
             } else {
                 ForEach(filteredItems) { item in
                     unifiedRow(item)
+                        .contextMenu { contextMenuItems(for: item) }
                         .swipeActions(edge: .trailing) {
                             if case .knowledge(let ki) = item {
                                 Button(role: .destructive) {
@@ -509,6 +512,10 @@ struct ItemsView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 8) {
+                    Button { exportAllFiles() } label: {
+                        Label("Export All", systemImage: "square.and.arrow.up")
+                    }
+                    .font(.caption)
                     Menu {
                         ForEach(ItemSortOrder.allCases, id: \.self) { order in
                             Button { sortOrder = order } label: {
@@ -520,6 +527,11 @@ struct ItemsView: View {
                     }
                     filterMenu
                 }
+            }
+        }
+        .sheet(isPresented: $showExportAllShareSheet) {
+            if let text = exportAllText {
+                ActivityView(activityItems: [text])
             }
         }
         .onAppear { loadItems() }
@@ -590,7 +602,12 @@ struct ItemsView: View {
                 .foregroundStyle(item.displayColor)
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title).font(.body).lineLimit(1)
-                Text(item.subtitle).font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Text(item.subtitle).font(.caption).foregroundStyle(.secondary)
+                    if case .knowledge(let ki) = item, let size = fileSizeString(for: ki) {
+                        Text(size).font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
             }
             Spacer()
             if item.isSource, case .knowledge(let ki) = item, ki.inboxDate != nil {
@@ -603,6 +620,58 @@ struct ItemsView: View {
             SendToMenu(item: item, projectID: projectID)
         }
         .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private func contextMenuItems(for item: UnifiedItem) -> some View {
+        Button { shareItem(item) } label: {
+            Label("Share", systemImage: "square.and.arrow.up")
+        }
+        if case .knowledge(let ki) = item {
+            NavigationLink {
+                KnowledgeDetailView(item: ki)
+            } label: {
+                Label("View Details", systemImage: "doc.text")
+            }
+        }
+    }
+
+    private func shareItem(_ item: UnifiedItem) {
+        let text = "\(item.title)\n\(item.subtitle)\n\(item.createdAt.formatted())"
+        let vc = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let root = scene.windows.first?.rootViewController { root.present(vc, animated: true) }
+    }
+
+    private func exportAllFiles() {
+        let lines = unifiedItems.map { item -> String in
+            var parts = ["- \(item.title)"]
+            if case .knowledge(let ki) = item {
+                if let size = fileSizeString(for: ki) { parts.append("(\(size))") }
+            }
+            parts.append(item.subtitle)
+            parts.append(item.createdAt.formatted(date: .abbreviated, time: .shortened))
+            return parts.joined(separator: " — ")
+        }
+        let text = "Files Export — \(projectID.uuidString.prefix(8))\n\n" + lines.joined(separator: "\n")
+        exportAllText = text
+        showExportAllShareSheet = true
+    }
+
+    private func fileSizeString(for item: KnowledgeItem) -> String? {
+        let store = FileArtifactStore()
+        let dir = store.itemDirectoryURL(for: item.id)
+        guard let enumerator = FileManager.default.enumerator(at: dir, includingPropertiesForKeys: [.fileSizeKey]) else { return nil }
+        var totalBytes: Int64 = 0
+        while let fileURL = enumerator.nextObject() as? URL {
+            guard fileURL.isFileURL else { continue }
+            if let attrs = try? fileURL.resourceValues(forKeys: [.fileSizeKey]),
+               let size = attrs.fileSize {
+                totalBytes += Int64(size)
+            }
+        }
+        guard totalBytes > 0 else { return nil }
+        return ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
     }
 
     private func loadItems() {
