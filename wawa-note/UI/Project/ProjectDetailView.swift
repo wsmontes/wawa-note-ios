@@ -255,7 +255,9 @@ struct ProjectHomeView: View {
     private func exportVTT() {
         let svc = InstanceExportService()
         let items = (try? services.projects.items(in: project.id)) ?? []
-        var allVTT = "WEBVTT\n\n"
+        // Each svc.exportVTT call already includes "WEBVTT\n\n" header,
+        // so concatenate them directly without adding a redundant header.
+        var allVTT = ""
         for item in items {
             if let vtt = svc.exportVTT(for: item.id) { allVTT += vtt + "\n" }
         }
