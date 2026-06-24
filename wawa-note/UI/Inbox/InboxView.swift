@@ -166,7 +166,7 @@ struct InboxView: View {
                         }
                         .contextMenu {
                             Button { archiveItem(item) } label: {
-                                Label("Mark Reviewed", systemImage: "checkmark.circle")
+                                Label("Remove from Inbox", systemImage: "checkmark.circle")
                             }
                             Button { showFolderPicker = item } label: {
                                 Label("Move to Project", systemImage: "folder.badge.plus")
@@ -188,7 +188,7 @@ struct InboxView: View {
                                 }.tint(.green)
                             } else {
                                 Button { archiveItem(item) } label: {
-                                    Label("Mark Reviewed", systemImage: "checkmark.circle")
+                                    Label("Remove from Inbox", systemImage: "checkmark.circle")
                                 }.tint(.green)
                             }
                         }
