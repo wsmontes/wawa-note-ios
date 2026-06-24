@@ -235,7 +235,7 @@ struct InboxView: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title.isEmpty ? "Untitled" : item.title)
-                    .font(.body).lineLimit(1)
+                    .font(.body).lineLimit(2)
                     .foregroundStyle((item.inboxDate != nil && item.analysisProviderId == nil) ? .primary : .secondary)
 
                 HStack(spacing: 6) {

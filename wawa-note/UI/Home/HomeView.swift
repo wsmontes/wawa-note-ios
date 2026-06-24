@@ -498,28 +498,28 @@ struct HomeView: View {
                                 Text("Scan").font(.caption2)
                             }.foregroundStyle(.primary).frame(width: 60, height: 52)
                             .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
-                        }
+                        }.accessibilityLabel("Scan Documents").accessibilityHint("Scan a document or QR code")
                         Button(action: { showPhotoSourceMenu = true }) {
                             VStack(spacing: 4) {
                                 Image(systemName: "photo").font(.subheadline)
                                 Text("Photo").font(.caption2)
                             }.foregroundStyle(.primary).frame(width: 60, height: 52)
                             .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
-                        }
+                        }.accessibilityLabel("Take Photo").accessibilityHint("Take a photo or choose from gallery")
                         Button(action: { importVM.showFilePicker = true }) {
                             VStack(spacing: 4) {
                                 Image(systemName: "square.and.arrow.down").font(.subheadline)
                                 Text("Import").font(.caption2)
                             }.foregroundStyle(.primary).frame(width: 60, height: 52)
                             .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
-                        }
+                        }.accessibilityLabel("Import File").accessibilityHint("Import a file from your device")
                         Button(action: { showCreationSheet = true }) {
                             VStack(spacing: 4) {
                                 Image(systemName: "plus.circle").font(.subheadline)
                                 Text("New").font(.caption2)
                             }.foregroundStyle(.primary).frame(width: 60, height: 52)
                             .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
-                        }
+                        }.accessibilityLabel("Create New Item").accessibilityHint("Create a new note, task, or journal entry")
                     }
                     .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 6).background(.bar)
                     .shadow(color: .black.opacity(0.08), radius: 4, y: -2)

@@ -216,12 +216,13 @@ struct ChatView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 12) {
                     Picker("Mode", selection: $viewModel.mode) {
-                        Image(systemName: "circle.grid.3x3").tag(AgentMode.auto)
-                        Image(systemName: "brain.head.profile").tag(AgentMode.deep)
-                        Image(systemName: "bolt").tag(AgentMode.fast)
+                        Image(systemName: "circle.grid.3x3").tag(AgentMode.auto).accessibilityLabel("Auto")
+                        Image(systemName: "brain.head.profile").tag(AgentMode.deep).accessibilityLabel("Deep")
+                        Image(systemName: "bolt").tag(AgentMode.fast).accessibilityLabel("Fast")
                     }
                     .pickerStyle(.segmented)
                     .frame(width: 110)
+                    .accessibilityLabel("Agent Mode")
                     ActiveModelPicker(selectedModel: $viewModel.selectedModel, label: "Model")
                 }
             }
