@@ -241,6 +241,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// clipping for non-built-in inputs.
     private var adaptiveGain: Float = 4.0
     private var silenceConsecutiveSeconds: Double = 0
+    /// Protects adaptiveGain and silenceConsecutiveSeconds accessed from both
+    /// the real-time audio I/O thread and the main actor (silenceDetected).
+    private let silenceLock = NSLock()
 
     private func updateAudioLevel(from buffer: AVAudioPCMBuffer) {
         guard let ch = buffer.floatChannelData else { return }
@@ -252,6 +255,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // Adaptive gain: slowly move toward target peak of 0.7 for normal speech.
         // Adjusts by ±2% per buffer (~90ms convergence) — fast enough to adapt
         // within a few seconds of speech, slow enough to not oscillate on pauses.
+        // Protected by silenceLock (real-time audio thread + main actor access).
+        silenceLock.lock()
         if normalized > 0.01 && normalized < 1.0 {
             if normalized > 0.85 {
                 adaptiveGain = max(1.0, adaptiveGain * 0.98)  // Reduce gain (too hot)
@@ -271,6 +276,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             self.silenceConsecutiveSeconds = 0
         }
         let isSilent = self.silenceConsecutiveSeconds >= 60.0
+        silenceLock.unlock()
 
         levelLock.withLock {
             rawLevel = normalized
