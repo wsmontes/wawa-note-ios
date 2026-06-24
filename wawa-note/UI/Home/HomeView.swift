@@ -555,6 +555,8 @@ struct HomeView: View {
             .padding(.horizontal, 16).padding(.vertical, 12)
             .contentShape(Rectangle())
             .simultaneousGesture(TapGesture().onEnded { navigateToProject = project })
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint("Opens project details")
             .onLongPressGesture(minimumDuration: 0.4) {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     if isExpanded { expandedProjectIDs.remove(project.id) }
@@ -629,6 +631,8 @@ struct HomeView: View {
         .padding(.vertical, 6)
         .contentShape(Rectangle())
         .simultaneousGesture(TapGesture().onEnded { navigateToItem = item })
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Opens item details")
         .swipeActions(edge: .leading) {
             Button {
                 try? services.items.removeFromInbox(item)
