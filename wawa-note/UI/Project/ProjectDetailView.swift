@@ -100,7 +100,7 @@ struct ProjectHomeView: View {
     @State private var showFileImporter = false
 
     enum ProjectTab: String, CaseIterable {
-        case synthesis = "Synthesis"
+        case synthesis = "Overview"
         case items = "Items"
         case files = "Files"
     }
@@ -1672,7 +1672,7 @@ struct EmptySynthesisView: View {
                 .foregroundStyle(.secondary)
             Text("No synthesis yet")
                 .font(.headline)
-            Text("The Project Agent generates a synthesis once items are added and analyzed.")
+            Text("An AI-generated overview will appear here once items are added and analyzed.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

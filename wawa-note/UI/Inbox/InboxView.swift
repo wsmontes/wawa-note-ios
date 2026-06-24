@@ -341,6 +341,27 @@ struct InboxView: View {
                 Text(emptyDescription)
                     .font(.subheadline).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center).padding(.horizontal, 40)
+                if filterMode == .needsReview || filterMode == .all {
+                    HStack(spacing: 12) {
+                        NavigationLink(destination: { EmptyView() }) {
+                            Label("Record", systemImage: "record.circle")
+                                .font(.caption).padding(.horizontal, 12).padding(.vertical, 6)
+                                .background(.thinMaterial).clipShape(Capsule())
+                        }
+                        NavigationLink(destination: { EmptyView() }) {
+                            Label("Import", systemImage: "square.and.arrow.down")
+                                .font(.caption).padding(.horizontal, 12).padding(.vertical, 6)
+                                .background(.thinMaterial).clipShape(Capsule())
+                        }
+                    }.padding(.top, 8)
+                }
+                if filterMode == .unassigned {
+                    NavigationLink(value: "explore:projects") {
+                        Label("Browse Projects", systemImage: "folder")
+                            .font(.caption).padding(.horizontal, 12).padding(.vertical, 6)
+                            .background(.thinMaterial).clipShape(Capsule())
+                    }.padding(.top, 8)
+                }
             }
             Spacer()
         }
