@@ -39,6 +39,30 @@ final class CaptureViewModel: ObservableObject {
             .sink { [weak self] in self?.recordingState = $0 }
             .store(in: &cancellables)
 
+        // KAN-516: Subscribe to pipeline stage changes for post-recording progress
+        NotificationCenter.default.publisher(for: .contentPipelineStageChanged)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] note in
+                guard let self, let savedId = self.savedItemId,
+                      note.object as? String == savedId.uuidString else { return }
+                if let stage = note.userInfo?["stage"] as? String {
+                    self.pipelineStage = stage.lowercased().contains("transcrib") ? .transcribing : .analyzing
+                }
+                if let tool = note.userInfo?["tool"] as? String { self.pipelineStage = .analyzing }
+                if note.userInfo?["phase"] as? String == "completed" { self.pipelineStage = nil }
+            }
+            .store(in: &cancellables)
+
+        // Reset pipeline stage when pipeline fully completes
+        NotificationCenter.default.publisher(for: .pipelineCompleted)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] note in
+                guard let self, let savedId = self.savedItemId,
+                      note.object as? String == savedId.uuidString else { return }
+                self.pipelineStage = nil
+            }
+            .store(in: &cancellables)
+
         coordinator.$elapsedTime
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.elapsedTimeFormatted = coordinator.elapsedTimeFormatted }

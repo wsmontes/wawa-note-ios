@@ -155,6 +155,12 @@ struct ProjectHomeView: View {
                         Button { exportJSON() } label: {
                             Label("Export JSON", systemImage: "doc.text")
                         }
+                        Button { exportSRT() } label: {
+                            Label("Export SRT", systemImage: "captions.bubble")
+                        }
+                        Button { exportVTT() } label: {
+                            Label("Export VTT", systemImage: "captions.bubble.fill")
+                        }
                     } label: {
                         Image(systemName: "ellipsis.circle")
                     }
@@ -229,6 +235,32 @@ struct ProjectHomeView: View {
         guard let data = try? JSONEncoder().encode(export),
               let json = String(data: data, encoding: .utf8) else { return }
         let vc = UIActivityViewController(activityItems: [json], applicationActivities: nil)
+        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let root = scene.windows.first?.rootViewController { root.present(vc, animated: true) }
+    }
+
+    private func exportSRT() {
+        let svc = InstanceExportService()
+        let items = (try? services.projects.items(in: project.id)) ?? []
+        var allSRT = ""
+        for item in items {
+            if let srt = svc.exportSRT(for: item.id) { allSRT += srt + "\n\n" }
+        }
+        guard !allSRT.isEmpty else { return }
+        let vc = UIActivityViewController(activityItems: [allSRT], applicationActivities: nil)
+        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let root = scene.windows.first?.rootViewController { root.present(vc, animated: true) }
+    }
+
+    private func exportVTT() {
+        let svc = InstanceExportService()
+        let items = (try? services.projects.items(in: project.id)) ?? []
+        var allVTT = "WEBVTT\n\n"
+        for item in items {
+            if let vtt = svc.exportVTT(for: item.id) { allVTT += vtt + "\n" }
+        }
+        guard allVTT.count > 10 else { return }
+        let vc = UIActivityViewController(activityItems: [allVTT], applicationActivities: nil)
         if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
            let root = scene.windows.first?.rootViewController { root.present(vc, animated: true) }
     }

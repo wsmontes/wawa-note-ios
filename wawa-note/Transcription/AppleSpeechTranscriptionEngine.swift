@@ -120,9 +120,8 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             }
         }
 
-        // Auto-detect: prioritize the device language, then system preferred languages
-        let deviceLang = Locale.current.language.languageCode?.identifier ?? "en"
-        let deviceLocale = Locale(identifier: deviceLang)
+        // Auto-detect: use full locale identifier (e.g. pt-BR, not pt) for SFSpeechRecognizer
+        let deviceLocale = Locale(identifier: Locale.current.identifier)
         if !locales.contains(where: { $0.identifier == deviceLocale.identifier }),
            let _ = SFSpeechRecognizer(locale: deviceLocale) {
             locales.insert(deviceLocale, at: max(0, locales.count - 1))

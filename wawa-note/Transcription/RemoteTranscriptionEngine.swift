@@ -195,20 +195,41 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
                     throw TranscriptionError.recognitionFailed("Remote transcription error")
                 }
 
-                guard let json = try JSONSerialization.jsonObject(with: resData) as? [String: Any],
-                      let text = json["text"] as? String else {
+                guard let json = try JSONSerialization.jsonObject(with: resData) as? [String: Any] else {
                     let body = String(data: resData, encoding: .utf8) ?? "<no body>"
                     AppLog.transcription.error("Parse error: \(body.prefix(300))")
                     throw TranscriptionError.recognitionFailed("Remote transcription error")
                 }
 
-                return Transcript(
-                    languageCode: json["language"] as? String,
-                    segments: [TranscriptSegment(
+                // KAN-512: Parse verbose_json segments with fallback to plain text
+                let segments: [TranscriptSegment]
+                if let jsonSegments = json["segments"] as? [[String: Any]], !jsonSegments.isEmpty {
+                    segments = jsonSegments.compactMap { seg in
+                        guard let text = seg["text"] as? String else { return nil }
+                        return TranscriptSegment(
+                            meetingId: meetingId,
+                            startTime: seg["start"] as? Double ?? 0,
+                            endTime: seg["end"] as? Double,
+                            text: text.trimmingCharacters(in: .whitespacesAndNewlines),
+                            confidence: seg["avg_logprob"] as? Double,
+                            languageCode: json["language"] as? String,
+                            sourceEngineId: id
+                        )
+                    }
+                } else if let text = json["text"] as? String {
+                    // Fallback for providers that don't support verbose_json
+                    segments = [TranscriptSegment(
                         meetingId: meetingId, startTime: 0,
                         text: text.trimmingCharacters(in: .whitespacesAndNewlines),
                         sourceEngineId: id
-                    )],
+                    )]
+                } else {
+                    throw TranscriptionError.recognitionFailed("No text or segments in response")
+                }
+
+                return Transcript(
+                    languageCode: json["language"] as? String,
+                    segments: segments,
                     sourceEngineId: id
                 )
             } catch let error as TranscriptionError {
@@ -253,6 +274,11 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
             write("Content-Disposition: form-data; name=\"prompt\"\(lb)\(lb)")
             write("\(prompt)\(lb)")
         }
+
+        // KAN-512: Request verbose_json for per-segment timestamps
+        write("--\(boundary)\(lb)")
+        write("Content-Disposition: form-data; name=\"response_format\"\(lb)\(lb)")
+        write("verbose_json\(lb)")
 
         let filename = audioURL.lastPathComponent
         let mimeType: String = {
