@@ -124,8 +124,8 @@ struct ProjectListView: View {
                         Label(project.status == .archived ? "Restore" : "Archive", systemImage: project.status == .archived ? "arrow.uturn.backward" : "archivebox")
                     }.tint(.orange)
                     Button(role: .destructive) {
-                        let svc = services.projects
-                        try? svc.deleteProject(project)
+                        projectToDelete = project
+                        showDeleteConfirmation = true
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }

@@ -409,16 +409,20 @@ struct HomeView: View {
 
     private var defaultSurface: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 4) {
-                Image(.wawaSymbolGradient)
-                    .resizable().aspectRatio(contentMode: .fit)
-                    .frame(width: 96, height: 96)
-                    .shadow(color: .blue.opacity(0.15), radius: 16, y: 4)
-                Text("wawa-note").font(.title2).fontWeight(.semibold)
-                Text("Your Knowledge, Your Process.")
-                    .font(.subheadline).foregroundStyle(.secondary)
+            if projects.isEmpty && inboxItems.isEmpty {
+                EmptyStateView(tab: .capture)
+            } else {
+                VStack(spacing: 4) {
+                    Image(.wawaSymbolGradient)
+                        .resizable().aspectRatio(contentMode: .fit)
+                        .frame(width: 48, height: 48)
+                        .shadow(color: .blue.opacity(0.15), radius: 16, y: 4)
+                    Text("wawa-note").font(.title2).fontWeight(.semibold)
+                    Text("Your Knowledge, Your Process.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                .padding(.top, 0).padding(.bottom, 20)
             }
-            .padding(.top, 0).padding(.bottom, 20)
 
             if !projects.isEmpty {
                 let recentProjects = Array(projects.prefix(5))
