@@ -14,7 +14,6 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var processingQueue: ProcessingQueueService
     @State private var showSettings = false
-    @State private var showChat = false
     @State private var showQueue = false
     @State private var selectedTab = 0
     @State private var keyboardHeight: CGFloat = 0
@@ -31,20 +30,7 @@ struct ContentView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            TabView(selection: Binding(
-                get: { selectedTab },
-                set: { newValue in
-                    if newValue == 3 {
-                        showChat = true
-                        chatState.isActive = true
-                        chatViewModel.syncContextIfNeeded()
-                    } else {
-                        showChat = false
-                        chatState.isActive = false
-                        selectedTab = newValue
-                    }
-                }
-            )) {
+            TabView(selection: $selectedTab) {
                 NavigationStack {
                     HomeView()
                         .toolbar {
@@ -83,37 +69,6 @@ struct ContentView: View {
                     .tabItem { Label("Explore", systemImage: "rectangle.grid.1x2") }
                     .tag(2)
 
-                Color.clear
-                    .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }
-                    .tag(3)
-            }
-            .animation(.easeInOut(duration: 0.25), value: selectedTab)
-            .ignoresSafeArea(.keyboard, edges: .bottom)
-
-            if showChat {
-                Color.black.opacity(0.3)
-                    .ignoresSafeArea()
-                    .onTapGesture { showChat = false; chatState.isActive = false }
-                    .gesture(
-                        DragGesture(minimumDistance: 20)
-                            .onEnded { value in
-                                if value.translation.height > 50, abs(value.translation.width) < 30 {
-                                    showChat = false
-                                    chatState.isActive = false
-                                }
-                            }
-                    )
-                    .transition(.opacity)
-
-                ChatView(viewModel: chatViewModel, compact: true, autoFocus: true, onDismiss: {
-                    showChat = false
-                    chatState.isActive = false
-                })
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .padding(.horizontal, 8)
-                    .frame(maxHeight: UIScreen.main.bounds.height * 0.6, alignment: .bottom)
-                    .padding(.bottom, max(0, keyboardHeight - safeAreaBottom))
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
