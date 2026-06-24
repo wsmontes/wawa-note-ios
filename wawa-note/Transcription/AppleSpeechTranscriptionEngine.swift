@@ -383,8 +383,14 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                     // kAFAssistantErrorDomain Code=1101 = local recognizer rejected audio format.
                     // Retry once with cloud recognition if it was forced on-device.
                     if nsError.domain.contains("AssistantError") && forceOnDevice {
+                        // Respect user's cloud transcription preference (KAN-476)
+                        guard UserDefaults.standard.bool(forKey: "transcription_allow_cloud") else {
+                            AppLog.transcription.warning("Cloud fallback blocked by user preference — marking as failed")
+                            continuation.resume(throwing: TranscriptionError.recognitionFailed("Cloud fallback blocked by user preference"))
+                            return
+                        }
                         hasResumed = true
-                        AppLog.transcription.warning("Local recognizer rejected audio, falling back to cloud recognition")
+                        AppLog.transcription.warning("Local recognizer rejected audio, falling back to cloud recognition — audio will be sent to Apple servers")
                         let cloudRequest = SFSpeechURLRecognitionRequest(url: recognitionURL)
                         cloudRequest.shouldReportPartialResults = false
                         cloudRequest.addsPunctuation = true

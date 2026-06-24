@@ -244,7 +244,11 @@ final class ContentPipelineService: ObservableObject {
                             catch { AppLog.provider.error("ContentPipeline: save failed (transcribe→pendingReview): \(error.localizedDescription)") }
                         }
                     } else {
-                        AppLog.provider.warning("ContentPipeline: pre-transcription failed for item \(itemID)")
+                        AppLog.provider.warning("ContentPipeline: pre-transcription failed for item \(itemID) — marking as failed")
+                        if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+                            fresh.status = .failed
+                            try? modelContext.save()
+                        }
                     }
                 }
                 if item.type == .image, item.bodyText == nil {
