@@ -288,7 +288,7 @@ struct ProjectItemsView: View {
                     Text(f.rawValue).tag(f)
                 }
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
             .padding(.horizontal, 16).padding(.vertical, 8)
 
             if isLoading {

@@ -320,6 +320,107 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
             reasoningContent: reasoningContent, usage: usage, toolCalls: toolCalls, finishReason: finishReason)
     }
 
+    // MARK: - Streaming (KAN-347)
+
+    func sendStreaming(_ request: AIRequest) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    let url = baseURL.appendingPathComponent(endpointPath)
+                    let effectiveModel = request.model.isEmpty ? model : request.model
+
+                    var body = buildRequestBody(request: request, model: effectiveModel)
+                    body["stream"] = true
+                    body["stream_options"] = ["include_usage": true]
+
+                    var urlRequest = URLRequest(url: url)
+                    urlRequest.httpMethod = "POST"
+                    urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+                    urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
+                    urlRequest.timeoutInterval = 300
+
+                    let (bytes, _) = try await URLSession.shared.bytes(for: urlRequest)
+                    var fullText = ""
+                    var toolCalls: [String: (id: String, name: String, args: String)] = [:]
+
+                    for try await line in bytes.lines {
+                        guard line.hasPrefix("data: ") else { continue }
+                        let dataStr = String(line.dropFirst(6))
+                        if dataStr == "[DONE]" { break }
+                        guard let data = dataStr.data(using: .utf8),
+                              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+
+                        if let choices = obj["choices"] as? [[String: Any]], let choice = choices.first {
+                            if let delta = choice["delta"] as? [String: Any] {
+                                if let content = delta["content"] as? String, !content.isEmpty {
+                                    fullText += content
+                                    continuation.yield(.textDelta(content))
+                                }
+                                if let tcDelta = delta["tool_calls"] as? [[String: Any]] {
+                                    for tc in tcDelta {
+                                        let idx = tc["index"] as? Int ?? 0
+                                        let id = tc["id"] as? String ?? ""
+                                        let fn = tc["function"] as? [String: Any]
+                                        let name = fn?["name"] as? String ?? ""
+                                        let args = fn?["arguments"] as? String ?? ""
+                                        let key = "\(idx)"
+                                        if var existing = toolCalls[key] {
+                                            existing.args += args
+                                            toolCalls[key] = existing
+                                        } else {
+                                            toolCalls[key] = (id: id, name: name, args: args)
+                                        }
+                                        continuation.yield(.toolCallDelta(id: id.isEmpty ? "\(idx)" : id, name: name, arguments: args))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    continuation.yield(.finished(nil))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+
+    /// Extracts the body-building logic from send() for reuse in sendStreaming().
+    private func buildRequestBody(request: AIRequest, model effectiveModel: String) -> [String: Any] {
+        let bodyMessages: [[String: Any]] = request.messages.map { msg in
+            let textContent = msg.content.compactMap { block -> String? in
+                if case .text(let t) = block { return t }; return nil
+            }.joined(separator: "\n")
+            var m: [String: Any] = ["role": msg.role.apiName, "content": textContent]
+            if let tcs = msg.toolCalls, !tcs.isEmpty {
+                m["tool_calls"] = tcs.map { tc -> [String: Any] in
+                    ["id": tc.id, "type": "function", "function": ["name": tc.name, "arguments": tc.arguments]]
+                }
+            }
+            if let tci = msg.toolCallId { m["tool_call_id"] = tci }
+            return m
+        }
+
+        let preset = AIConfigService.shared.presetFor(model: effectiveModel)
+        var body: [String: Any] = ["model": effectiveModel, "messages": bodyMessages]
+        if let t = request.temperature, preset?.supportsTemperature ?? true { body["temperature"] = t }
+        if let mt = request.maxTokens {
+            body[preset?.usesMaxCompletionTokens == true ? "max_completion_tokens" : "max_tokens"] = mt
+        }
+        if let fmt = request.responseFormat, AIConfigService.shared.supportsJSONFormat(for: effectiveModel) {
+            switch fmt {
+            case .jsonObject: body["response_format"] = ["type": "json_object"]
+            case .jsonSchema(let name, let schemaJSON):
+                if let schemaData = schemaJSON.data(using: .utf8), let schema = try? JSONSerialization.jsonObject(with: schemaData) {
+                    body["response_format"] = ["type": "json_schema", "json_schema": ["name": name, "schema": schema]]
+                }
+            }
+        }
+        if let stop = request.stop, !stop.isEmpty { body["stop"] = stop }
+        return body
+    }
+
     // MARK: - Embeddings
 
     func embed(_ text: String, model: String) async throws -> [Float] {

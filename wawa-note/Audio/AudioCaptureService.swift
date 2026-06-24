@@ -18,6 +18,11 @@ enum AudioCaptureState: Equatable {
 /// Audio capture service — microphone → file.
 /// No live transcription. Transcription happens post-recording via
 /// ContentExtractionService → TranscriptionEngine.
+/// All public mutating methods MUST be called from @MainActor (RecordingCoordinator).
+/// @Published writes are safe: rebuild tasks use Task { @MainActor }, audio tap
+/// callback only writes to lock-protected raw values (levelLock + silenceLock).
+/// KAN-418: Cannot mark class @MainActor because real-time audio I/O callbacks
+/// need non-isolated access for lock-protected samples.
 final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     // MARK: Published

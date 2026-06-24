@@ -108,6 +108,13 @@ actor AIService {
         AsyncThrowingStream { continuation in
             Task {
                 do {
+                    // Check circuit breaker (KAN-348)
+                    if let cb = circuitBreaker {
+                        guard cb.allowRequest() else {
+                            continuation.finish(throwing: ProviderError.requestFailed(statusCode: -1))
+                            return
+                        }
+                    }
                     let budgetState = BudgetState.from(budget)
                     let selection = await modelPolicy.selectModel(
                         for: feature, budget: budgetState,

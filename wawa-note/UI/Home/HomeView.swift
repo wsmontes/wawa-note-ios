@@ -424,27 +424,24 @@ struct HomeView: View {
                 .padding(.top, 0).padding(.bottom, 20)
             }
 
+            if !projects.isEmpty || !inboxItems.isEmpty {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
             if !projects.isEmpty {
                 let recentProjects = Array(projects.prefix(5))
                 Text("Projects").font(.caption).foregroundStyle(.secondary).textCase(.uppercase)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20).padding(.bottom, 6)
-                List {
+                VStack(spacing: 0) {
                     ForEach(recentProjects) { project in projectRow(project) }
-                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                        .listRowBackground(Color(.systemBackground))
-                        .listRowSeparator(.hidden)
+                        .padding(.horizontal, 16).padding(.vertical, 4)
                     if projects.count > 5 {
                         NavigationLink(value: "explore:projects") {
                             Text("See all \(projects.count) projects →").font(.caption).foregroundStyle(.blue)
-                        }
-                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                        .listRowBackground(Color(.systemBackground))
+                        }.padding(.horizontal, 16).padding(.vertical, 6)
                     }
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .frame(minHeight: min(CGFloat(recentProjects.count) * 52, 260))
+                .background(Color(.systemBackground))
             }
 
             if !inboxItems.isEmpty {
@@ -452,25 +449,25 @@ struct HomeView: View {
                 Text("Inbox").font(.caption).foregroundStyle(.secondary).textCase(.uppercase)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20).padding(.bottom, 6).padding(.top, 16)
-                List {
+                VStack(spacing: 0) {
                     ForEach(recentInbox) { item in inboxRow(item) }
-                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                        .listRowBackground(Color(.systemBackground))
-                        .listRowSeparator(.hidden)
+                        .padding(.horizontal, 16).padding(.vertical, 4)
                     if inboxItems.count > 5 {
                         NavigationLink(value: "explore:inbox") {
                             Text("See all \(inboxItems.count) inbox items →").font(.caption).foregroundStyle(.blue)
-                        }
-                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                        .listRowBackground(Color(.systemBackground))
+                        }.padding(.horizontal, 16).padding(.vertical, 6)
                     }
                 }
+                .background(Color(.systemBackground))
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .frame(minHeight: min(CGFloat(recentInbox.count) * 52, 260))
             }
 
             if projects.isEmpty && inboxItems.isEmpty { Spacer() }
+                    } // LazyVStack
+                } // ScrollView
+            }
         }
         .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { expandedProjectIDs = [] } }
         .safeAreaInset(edge: .bottom) {
