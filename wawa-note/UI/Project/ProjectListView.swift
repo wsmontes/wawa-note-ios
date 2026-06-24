@@ -174,7 +174,6 @@ struct ProjectListView: View {
                         .font(.body).fontWeight(.medium)
                         .textFieldStyle(.plain)
                         .onSubmit { commitNameEdit(project) }
-                        .onExitCommand { cancelNameEdit() }
                         .focused($isNameFieldFocused)
                 } else {
                     Text(project.name)

@@ -278,7 +278,8 @@ final class ContentPipelineService: ObservableObject {
             ]
 
             let catalogPrompt = Self.buildCatalogPrompt()
-            let systemPrompt = catalogPrompt + "\n\n" + PipelineTemplate.standard
+            let fieldFilterPrompt = AnalysisFieldSettings.enabledFieldsPrompt()
+            let systemPrompt = catalogPrompt + "\n\n" + fieldFilterPrompt + "\n\n" + PipelineTemplate.standard
             let pipelineDef = PipelineStore.shared.active
             let iterationBudget = pipelineDef?.params?.maxIterations ?? 15
             let agentMode: AgentMode = pipelineDef?.params?.agentMode == "deep" ? .deep : (pipelineDef?.params?.agentMode == "fast" ? .fast : .auto)

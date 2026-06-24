@@ -234,6 +234,11 @@ struct SettingsView: View {
                     } label: {
                         Label("Analysis Skills", systemImage: "sparkles")
                     }
+                    NavigationLink {
+                        AnalysisSchemaSettingsView()
+                    } label: {
+                        Label("Analysis Fields", systemImage: "square.grid.3x3")
+                    }
                 } header: {
                     Text("AI Analysis")
                 } footer: {
@@ -473,6 +478,52 @@ struct ModelResolverSettingsView: View { var body: some View { EmptyView() } }
 // MARK: - Summary Cache Management
 
 struct SummaryCacheManagementView: View { var body: some View { EmptyView() } }
+
+// MARK: - Analysis Schema Settings
+
+struct AnalysisSchemaSettingsView: View {
+    var body: some View {
+        List {
+            Section {
+                Text("Choose which fields the AI should include when analyzing content.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+
+            Section {
+                ForEach(AnalysisFieldSettings.allFields, id: \.self) { field in
+                    HStack {
+                        Image(systemName: AnalysisFieldSettings.icon(for: field))
+                            .foregroundStyle(.tint)
+                            .frame(width: 28)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(AnalysisFieldSettings.displayName(for: field))
+                                .font(.subheadline)
+                            Text("Include in analysis output")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Toggle("", isOn: Binding(
+                            get: { AnalysisFieldSettings.isEnabled(field) },
+                            set: { AnalysisFieldSettings.setEnabled(field, enabled: $0) }
+                        ))
+                        .labelsHidden()
+                    }
+                }
+            } header: {
+                Text("Enabled Fields")
+            } footer: {
+                let enabled = AnalysisFieldSettings.allFields.filter { AnalysisFieldSettings.isEnabled($0) }
+                let disabled = AnalysisFieldSettings.allFields.filter { !AnalysisFieldSettings.isEnabled($0) }
+                if !disabled.isEmpty {
+                    Text("\(enabled.count) of \(AnalysisFieldSettings.allFields.count) fields enabled. Disabled fields will be excluded from AI analysis instructions.")
+                } else {
+                    Text("All fields enabled. The AI will include whatever fields are relevant to the content.")
+                }
+            }
+        }
+        .navigationTitle("Analysis Fields")
+    }
+}
 
 
     private var hasWhisperProvider: Bool {

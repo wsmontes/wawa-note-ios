@@ -1,6 +1,6 @@
 import Foundation
 import SwiftData
-// Related JIRA: KAN-5, KAN-16
+// Related JIRA: KAN-5, KAN-16, KAN-528
 
 
 // MARK: - Shared UserDefaults Keys
@@ -38,6 +38,9 @@ enum UserDefaultsKey {
     static let hasShownWelcome = "has_shown_welcome"
     static let onboardedV1 = "_onboarded_v1"
     static let onboardedV2 = "_onboarded_v2"
+
+    // Analysis fields
+    static let analysisFieldPrefix = "analysis_field_enabled_"
 
     // Model
     static let modelResolverTiers = "model_resolver_tiers"
@@ -133,5 +136,80 @@ struct AutomationSettings: @unchecked Sendable {
                 defaults.set("", forKey: Key.autoAnalysisModel)
             }
         }
+    }
+}
+
+// MARK: - Analysis Field Settings
+
+/// Controls which analysis fields the AI agent is asked to produce.
+/// Each field can be toggled on/off. When a field is disabled, the agent
+/// is instructed to skip it in the analysis output.
+struct AnalysisFieldSettings {
+    /// All available field identifiers
+    static let allFields = [
+        "summary",
+        "decisions",
+        "action_items",
+        "risks",
+        "questions",
+        "entities",
+        "dates"
+    ]
+
+    /// Display labels for each field
+    static func displayName(for field: String) -> String {
+        switch field {
+        case "summary": return "Summary"
+        case "decisions": return "Decisions"
+        case "action_items": return "Action Items"
+        case "risks": return "Risks"
+        case "questions": return "Questions"
+        case "entities": return "Entities"
+        case "dates": return "Important Dates"
+        default: return field.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+
+    /// System icon for each field
+    static func icon(for field: String) -> String {
+        switch field {
+        case "summary": return "text.alignleft"
+        case "decisions": return "checkmark.shield"
+        case "action_items": return "checklist"
+        case "risks": return "exclamationmark.triangle"
+        case "questions": return "questionmark.circle"
+        case "entities": return "tag"
+        case "dates": return "calendar"
+        default: return "doc.text"
+        }
+    }
+
+    private static func key(for field: String) -> String {
+        UserDefaultsKey.analysisFieldPrefix + field
+    }
+
+    /// Get whether a field is enabled
+    static func isEnabled(_ field: String) -> Bool {
+        // All fields enabled by default
+        UserDefaults.standard.object(forKey: key(for: field)) as? Bool ?? true
+    }
+
+    /// Set whether a field is enabled
+    static func setEnabled(_ field: String, enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: key(for: field))
+    }
+
+    /// Build a prompt section instructing the agent which fields to include
+    static func enabledFieldsPrompt() -> String {
+        let enabled = allFields.filter { isEnabled($0) }
+        let disabled = allFields.filter { !isEnabled($0) }
+
+        guard !disabled.isEmpty else { return "" }
+
+        var prompt = "\n## ANALYSIS FIELD FILTERING\n"
+        prompt += "Only produce these analysis fields: \(enabled.map { displayName(for: $0) }.joined(separator: ", ")).\n"
+        prompt += "Do NOT produce: \(disabled.map { displayName(for: $0) }.joined(separator: ", ")).\n"
+        prompt += "If all fields are enabled, produce whatever is relevant to the content.\n"
+        return prompt
     }
 }
