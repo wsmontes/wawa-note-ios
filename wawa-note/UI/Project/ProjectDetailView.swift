@@ -277,11 +277,7 @@ struct ProjectChatView: View {
         ChatView(viewModel: chatVM, compact: false)
             .onAppear {
                 chatVM.setup(modelContext: modelContext)
-                chatVM.activeProjectID = project.id
-                chatVM.activeProjectName = project.name
-                if let hex = project.colorHex {
-                    chatVM.activeProjectColorHex = hex
-                }
+                chatVM.setProjectContext(project: project)
             }
     }
 }

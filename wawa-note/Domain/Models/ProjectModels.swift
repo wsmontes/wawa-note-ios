@@ -993,6 +993,7 @@ struct TaskBody: Codable, Sendable {
 }
 
 /// Structured body for synthesis-type derived items.
+@available(*, deprecated, message: "Project synthesis was removed in KAN-523")
 struct SynthesisBody: Codable, Sendable {
     var markdown: String              // Full synthesis in markdown
     var sections: [SynthesisSection]  // Parsed sections for rendering
@@ -1001,6 +1002,7 @@ struct SynthesisBody: Codable, Sendable {
     var generatedAt: Date
 }
 
+@available(*, deprecated, message: "Project synthesis was removed in KAN-523")
 struct SynthesisSection: Codable, Sendable {
     var id: String
     var title: String
@@ -1009,6 +1011,7 @@ struct SynthesisSection: Codable, Sendable {
     var order: Int
 }
 
+@available(*, deprecated, message: "Project synthesis was removed in KAN-523")
 struct SynthesisMetric: Codable, Sendable {
     var id: String
     var label: String
