@@ -93,7 +93,6 @@ enum PipelineTemplate {
 /// The agent decides strategy based on content size, type, and complexity.
 @MainActor
 final class ContentPipelineService: ObservableObject {
-    private let ingestionPipeline: ProjectIngestionPipeline
     private let ingestionState: ProjectIngestionState
     private let modelContainer: ModelContainer
 
@@ -103,8 +102,7 @@ final class ContentPipelineService: ObservableObject {
     private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
     private var backgroundTaskCount = 0
 
-    init(ingestionPipeline: ProjectIngestionPipeline, ingestionState: ProjectIngestionState, modelContainer: ModelContainer) {
-        self.ingestionPipeline = ingestionPipeline
+    init(ingestionState: ProjectIngestionState, modelContainer: ModelContainer) {
         self.ingestionState = ingestionState
         self.modelContainer = modelContainer
     }
