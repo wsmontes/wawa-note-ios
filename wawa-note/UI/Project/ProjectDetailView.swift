@@ -322,10 +322,8 @@ struct ProjectItemsView: View {
     @State private var isLoading = true
 
     enum ItemFilter: String, CaseIterable {
-        case all = "All"
-        case tasks = "Tasks"
-        case signals = "Signals"
-        case decisions = "Decisions"
+        case all = "All Items"
+        case actions = "Action Items"
         case questions = "Questions"
     }
 
@@ -368,13 +366,13 @@ struct ProjectItemsView: View {
 
     private var filteredItems: [ProjectDerivedItem] {
         let items = derivedItems.filter { $0.type != .synthesis && $0.type != .connection }
+        let filtered: [ProjectDerivedItem]
         switch filter {
-        case .all: return items
-        case .tasks: return items.filter { $0.type == .task }
-        case .signals: return items.filter { $0.type == .signal }
-        case .decisions: return items.filter { $0.type == .decision }
-        case .questions: return items.filter { $0.type == .question }
+        case .all: filtered = items
+        case .actions: filtered = items.filter { $0.type == .task && ($0.statusRaw == "todo" || $0.statusRaw == "inProgress") }
+        case .questions: filtered = items.filter { $0.type == .question }
         }
+        return filtered.sorted { $0.createdAt > $1.createdAt }
     }
 
     private func loadData() {
