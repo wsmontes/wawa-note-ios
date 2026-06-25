@@ -18,8 +18,20 @@ private enum ReprocessMode: CustomStringConvertible {
 }
 
 struct KnowledgeDetailView: View {
-    let item: KnowledgeItem
+    let itemID: UUID
+    @Query private var items: [KnowledgeItem]
     @Environment(\.modelContext) private var modelContext
+
+    init(itemID: UUID) {
+        self.itemID = itemID
+        _items = Query(
+            filter: #Predicate<KnowledgeItem> { $0.id == itemID },
+            sort: \KnowledgeItem.createdAt
+        )
+    }
+
+    /// Always non-nil when items is non-empty (which we guard in body).
+    private var item: KnowledgeItem { items.first! }
     @EnvironmentObject private var contentPipeline: ContentPipelineService
     @EnvironmentObject private var processingQueue: ProcessingQueueService
     @EnvironmentObject private var chatState: ChatOverlayState
@@ -85,8 +97,13 @@ struct KnowledgeDetailView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
+        if items.isEmpty {
+            ContentUnavailableView(
+                "Item not found", systemImage: "doc.text.magnifyingglass",
+                description: Text("This item may have been deleted."))
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
                 header
                     .padding(.horizontal, 16)
 
@@ -391,10 +408,13 @@ struct KnowledgeDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: .pipelineCompleted)) { n in
             if n.object as? String == item.id.uuidString {
                 pipelineStage = ""
-                // Force SwiftUI to re-render with fresh data — the managed object
-                // may have been updated in another context.
                 refreshID = UUID()
                 Task { @MainActor in
+                    // Re-resolve audio now that concatenation has completed.
+                    // The RecordingCoordinator concat Task runs before the pipeline;
+                    // when .pipelineCompleted fires, audio.m4a should exist.
+                    // Without this the view may show stale .segmentsAvailable state.
+                    await resolveAudioAsset()
                     loadRawAnalysisJSON()
                     loadData()
                     // If analysis ran but produced no visible results, surface a message
@@ -444,6 +464,7 @@ struct KnowledgeDetailView: View {
                 loadData()
             }
         }
+        } // else block
     }
 
     // MARK: - Header
@@ -1378,7 +1399,7 @@ struct KnowledgeDetailView: View {
 
             ForEach(backlinks, id: \.edge.id) { link in
                     NavigationLink {
-                        KnowledgeDetailView(item: link.sourceItem)
+                        KnowledgeDetailView(itemID: link.sourceItem.id)
                     } label: {
                         HStack(spacing: 10) {
                             Image(systemName: edgeIcon(for: link.edge.edgeType))

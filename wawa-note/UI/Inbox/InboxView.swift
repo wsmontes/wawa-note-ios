@@ -160,7 +160,7 @@ struct InboxView: View {
                 Section {
                     ForEach(items) { item in
                         NavigationLink {
-                            KnowledgeDetailView(item: item)
+                            KnowledgeDetailView(itemID: item.id)
                         } label: {
                             inboxRow(item)
                         }

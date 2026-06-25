@@ -425,31 +425,35 @@ final class RecordingCoordinator: ObservableObject {
         // but the pipeline is gated behind concat so audio.m4a is ready.
         if let itemId, let manifest = finalizedManifest {
             Task {
-                // 1. Concatenate segments into audio.m4a (AAC)
+                // 1. Concatenate segments into audio.m4a (AAC) — file I/O, safe off MainActor
                 let concatOK = await AudioSegmentConcatenator.concatenate(manifest: manifest, meetingId: itemId)
 
-                // 2. Debug validation report
-                logRecordingArtifactReport(itemId: itemId)
+                // 2. All remaining steps touch MainActor-isolated state (modelContext,
+                //    processingQueue, etc.) — run them on MainActor.
+                await MainActor.run { [self] in
+                    // 3. Debug validation report
+                    logRecordingArtifactReport(itemId: itemId)
 
-                guard concatOK else {
-                    AppLog.audio.error("RecordingCoordinator: concatenation failed — marking item as failed")
-                    updateItemStatus(itemId: itemId, to: .failed)
-                    return
-                }
+                    guard concatOK else {
+                        AppLog.audio.error("RecordingCoordinator: concatenation failed — marking item as failed")
+                        updateItemStatus(itemId: itemId, to: .failed)
+                        return
+                    }
 
-                // 3. Clear crash checkpoint — recording stopped successfully
-                AudioFileWriter.clearCrashCheckpoint()
+                    // 4. Clear crash checkpoint — recording stopped successfully
+                    AudioFileWriter.clearCrashCheckpoint()
 
-                // 4. Mark as queued so the detail view shows the right status
-                updateItemStatus(itemId: itemId, to: .queuedForTranscription)
+                    // 5. Mark as queued so the detail view shows the right status
+                    updateItemStatus(itemId: itemId, to: .queuedForTranscription)
 
-                // 4. Route through ProcessingQueue when available
-                if let queue = processingQueue {
-                    AppLog.event("audio", "Enqueuing item \(itemId.uuidString.prefix(8)) into ProcessingQueue")
-                    queue.enqueue(itemID: itemId, trigger: .newCapture)
-                } else if let pipeline = contentPipeline {
-                    AppLog.event("audio", "Pipeline (direct) for item \(itemId.uuidString.prefix(8))")
-                    pipeline.process(itemId, using: modelContext)
+                    // 6. Route through ProcessingQueue when available
+                    if let queue = processingQueue {
+                        AppLog.event("audio", "Enqueuing item \(itemId.uuidString.prefix(8)) into ProcessingQueue")
+                        queue.enqueue(itemID: itemId, trigger: .newCapture)
+                    } else if let pipeline = contentPipeline {
+                        AppLog.event("audio", "Pipeline (direct) for item \(itemId.uuidString.prefix(8))")
+                        pipeline.process(itemId, using: modelContext)
+                    }
                 }
             }
         }

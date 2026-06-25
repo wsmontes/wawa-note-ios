@@ -631,7 +631,7 @@ struct ItemsView: View {
         }
         if case .knowledge(let ki) = item {
             NavigationLink {
-                KnowledgeDetailView(item: ki)
+                KnowledgeDetailView(itemID: ki.id)
             } label: {
                 Label("View Details", systemImage: "doc.text")
             }
@@ -864,7 +864,7 @@ struct BoardView: View {
     // MARK: Knowledge Item Card
 
     private func knowledgeItemCard(_ item: KnowledgeItem) -> some View {
-        NavigationLink { KnowledgeDetailView(item: item) } label: {
+        NavigationLink { KnowledgeDetailView(itemID: item.id) } label: {
             HStack(spacing: 10) {
                 Image(systemName: item.type.icon).foregroundStyle(item.type.color).frame(width: 24)
                 VStack(alignment: .leading, spacing: 2) {

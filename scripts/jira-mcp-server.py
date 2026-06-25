@@ -204,7 +204,7 @@ def execute_tool(name: str, arguments: dict) -> str:
         return result.get("output") or result.get("error", "Comment failed")
 
     elif name == "jira_create_issue":
-        args = ["create", arguments.get("project", "KAN"), arguments["summary"]]
+        args = ["create", arguments["summary"], "--project", arguments.get("project", "KAN")]
         if arguments.get("type"): args += ["--type", arguments["type"]]
         if arguments.get("priority"): args += ["--priority", arguments["priority"]]
         if arguments.get("parent"): args += ["--parent", arguments["parent"]]

@@ -97,7 +97,7 @@ final class AgentLoop: @unchecked Sendable {
         history: [ChatMessage] = [],
         provider: any AIProvider,
         maxIterations overrideIterations: Int? = nil,
-        timeoutSeconds: TimeInterval = 600 // 10-minute default safety net
+        timeoutSeconds: TimeInterval = 300 // 5-minute default safety net (was 600s)
     ) -> AsyncThrowingStream<AgentStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             Task {
@@ -117,7 +117,7 @@ final class AgentLoop: @unchecked Sendable {
                         maxIterations: overrideIterations ?? self.maxIterations,
                         toolRegistry: AgentToolRegistry(tools: tools),
                         deadline: startTime.addingTimeInterval(timeoutSeconds),
-                        streamTimeout: 300  // autonomous: 5min without events before timeout
+                        streamTimeout: 120  // autonomous: 2min without events before timeout (was 300s)
                     )
                 } catch {
                     continuation.yield(.error(error))
@@ -210,23 +210,39 @@ final class AgentLoop: @unchecked Sendable {
             // prevent infinite hangs (e.g. network drop, server hang).
             let lastEventLock = NSLock()
             var lastStreamEvent = Date()
+            var streamTimedOut = false
             let streamTask = Task {
-                for try await event in stream {
-                    lastEventLock.withLock { lastStreamEvent = Date() }
-                    switch event {
-                    case .textDelta(let d): fullContent += d; continuation.yield(.textDelta(d))
-                    case .thinkingDelta(let t):
-                        thinkingContent += t
-                        continuation.yield(.textDelta("[thinking]\(t)[/thinking]"))
-                    case .toolCallDelta(let id, let name, let args):
-                        if !currentTCID.isEmpty && id != currentTCID, let n = currentTCName {
-                            pendingToolCalls.append((id: currentTCID, name: n, arguments: currentTCArgs)); currentTCArgs = ""
+                await withTaskCancellationHandler {
+                    do {
+                        for try await event in stream {
+                            // Cooperative cancellation — ensures streamTask.cancel()
+                            // actually unblocks streamTask.value within one event cycle.
+                            if Task.isCancelled { break }
+                            lastEventLock.withLock { lastStreamEvent = Date() }
+                            switch event {
+                            case .textDelta(let d): fullContent += d; continuation.yield(.textDelta(d))
+                            case .thinkingDelta(let t):
+                                thinkingContent += t
+                                continuation.yield(.textDelta("[thinking]\(t)[/thinking]"))
+                            case .toolCallDelta(let id, let name, let args):
+                                if !currentTCID.isEmpty && id != currentTCID, let n = currentTCName {
+                                    pendingToolCalls.append((id: currentTCID, name: n, arguments: currentTCArgs)); currentTCArgs = ""
+                                }
+                                currentTCID = id
+                                if let n = name { currentTCName = n }
+                                if let a = args { currentTCArgs += a }
+                            case .finished: break
+                            }
                         }
-                        currentTCID = id
-                        if let n = name { currentTCName = n }
-                        if let a = args { currentTCArgs += a }
-                    case .finished: break
+                    } catch {
+                        // Stream error or CancellationError — exit cleanly.
+                        // The heartbeat+finish path handles timeout via streamTimedOut,
+                        // so we don't need to rethrow here.
                     }
+                } onCancel: {
+                    // Stream cancelled — the next suspension point in the for-loop
+                    // (AsyncThrowingStream.next()) will throw CancellationError because
+                    // withTaskCancellationHandler arms the task for cooperative cancellation.
                 }
             }
 
@@ -237,8 +253,17 @@ final class AgentLoop: @unchecked Sendable {
                     let elapsed = Date().timeIntervalSince(lastEventLock.withLock { lastStreamEvent })
                     if elapsed > streamTimeout {
                         AppLog.agent.error("Agent stream heartbeat timeout — no event for \(Int(elapsed))s (limit: \(Int(streamTimeout))s)")
+                        streamTimedOut = true
                         streamTask.cancel()
-                        continuation.yield(.textDelta("\n\n[Response timed out after \(Int(elapsed))s of inactivity. Please retry.]"))
+                        // Finish the agent's output stream so ContentPipelineService
+                        // sees the iteration end (via .truncated event) and can retry
+                        // or complete — prevents the pipeline from hanging alongside
+                        // the stuck provider stream.
+                        continuation.yield(.truncated(
+                            reason: "Agent stream timed out after \(Int(elapsed))s of inactivity",
+                            progress: "\(iteration)/\(iterations) iterations"
+                        ))
+                        continuation.finish()
                         return
                     }
                     try? await Task.sleep(nanoseconds: 5_000_000_000) // check every 5s
@@ -246,7 +271,15 @@ final class AgentLoop: @unchecked Sendable {
             }
 
             defer { heartbeatTask.cancel() }
-            try await streamTask.value
+            // streamTask.value throws CancellationError when cancelled, which
+            // propagates to runAutonomous → caught → .error yielded → pipeline retries.
+            // Even if the provider's stream survives cancellation (rare), streamTimedOut
+            // is checked below as a fallback.
+            if !streamTimedOut {
+                try await streamTask.value
+            } else {
+                streamTask.cancel()
+            }
             // ── End heartbeat ─────────────────────────────────────
             if !currentTCID.isEmpty, let n = currentTCName {
                 pendingToolCalls.append((id: currentTCID, name: n, arguments: currentTCArgs))

@@ -23,7 +23,7 @@ source "$SCRIPT_DIR/device-config.sh"
 build_predicate() {
     local mode="${1:-all}"
     # Core: our app's process + relevant event messages
-    local base='process == "Wawa Note"'
+    local base='process == "wawa-note"'
     base="$base OR eventMessage CONTAINS[c] \"wawa\""
     base="$base OR eventMessage CONTAINS[c] \"audio\""
     base="$base OR eventMessage CONTAINS[c] \"recording\""

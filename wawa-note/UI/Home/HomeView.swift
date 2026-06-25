@@ -325,7 +325,7 @@ struct HomeView: View {
             await importVM.backfillEmbeddingsIfNeeded(items: allItems)
             await importVM.scanSharedDirectoryAndImport()
         }
-        .navigationDestination(item: $navigateToItem) { KnowledgeDetailView(item: $0) }
+        .navigationDestination(item: $navigateToItem) { KnowledgeDetailView(itemID: $0.id) }
         .navigationDestination(item: $navigateToProject) { ProjectDetailView(project: $0) }
         .fileImporter(isPresented: $importVM.showFilePicker, allowedContentTypes: importVM.importRouter.allUTTypes(), allowsMultipleSelection: true) { importVM.handleFilePick($0) }
         .sheet(item: $importVM.pendingImport) { imp in

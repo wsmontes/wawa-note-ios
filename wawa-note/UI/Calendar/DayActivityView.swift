@@ -82,7 +82,7 @@ struct DayActivityView: View {
                         ForEach(onThisDayEntries) { entry in
                             NavigationLink {
                                 if let item = entry.wawaItem {
-                                    KnowledgeDetailView(item: item)
+                                    KnowledgeDetailView(itemID: item.id)
                                 }
                             } label: {
                                 onThisDayCard(entry)
@@ -125,7 +125,7 @@ struct DayActivityView: View {
         VStack(alignment: .leading, spacing: 8) {
             if let journal = journalToday {
                 NavigationLink {
-                    KnowledgeDetailView(item: journal)
+                    KnowledgeDetailView(itemID: journal.id)
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: "book.fill")
@@ -205,7 +205,7 @@ struct DayActivityView: View {
                 ForEach(dayItems) { item in
                     let entry = TimelineEntry(item: item)
                     NavigationLink {
-                        KnowledgeDetailView(item: item)
+                        KnowledgeDetailView(itemID: item.id)
                     } label: {
                         activityCard(entry)
                     }
@@ -334,7 +334,7 @@ struct DayActivityView: View {
 
             if event.isFromWawaNote, let item = event.item {
                 NavigationLink {
-                    KnowledgeDetailView(item: item)
+                    KnowledgeDetailView(itemID: item.id)
                 } label: {
                     Image(systemName: "chevron.right")
                         .font(.caption2)

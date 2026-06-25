@@ -69,7 +69,15 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private var currentMeetingId: UUID?
     private var observers: [NSObjectProtocol] = []
     private var levelSmoothTask: Task<Void, Never>?
-    private var rebuildTask: Task<Void, Never>?   // Serializes engine rebuilds
+    // Route change debounce — replaces rebuildTask?.cancel() pattern.
+    // When multiple route change notifications arrive in rapid succession
+    // (AirPods emit 3 in <100ms: engineConfigChange + oldDeviceUnavailable +
+    // newDeviceAvailable), we pause immediately on the first one, then debounce
+    // subsequent ones and rebuild once after the route settles.
+    private var isRebuilding = false
+    private var pendingRouteChange = false
+    private var routeChangeDebounceTask: Task<Void, Never>?
+    private var routeChangeDebounceStart: Date?
     private var rawLevel: Float = 0
     private let levelLock = NSLock()
 
@@ -372,7 +380,13 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // routeChangeNotification fires (e.g., Bluetooth HFP handoff). The
         // engine is scoped to the current engine instance.
         if let eng = engine {
-            observers.append(nc.addObserver(forName: .AVAudioEngineConfigurationChange, object: eng, queue: q) { [weak self] n in self?.handleEngineConfigChange(n) })
+            observers.append(nc.addObserver(forName: .AVAudioEngineConfigurationChange, object: eng, queue: q) { [weak self] n in
+                // Engine config changes don't carry AVAudioSessionRouteChangeReasonKey.
+                // handleRouteChange handles this — the guard uses optional binding and
+                // falls through to generic debounce path with nil reason.
+                AppLog.audio.info("Engine config change — routing through unified debounce path")
+                self?.handleRouteChange(n)
+            })
         }
     }
 
@@ -435,56 +449,18 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     private func handleRouteChange(_ n: Notification) {
         guard state == .recording || state == .paused else { return }
-        guard let reasonValue = n.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
-              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
 
-        AppLog.audio.info("Route change: \(reason.rawValue) — input: \(self.sessionManager.currentInputPortName)")
+        // Engine config changes don't carry a RouteChangeReasonKey. Treat them
+        // as generic route changes — same debounce + rebuild path applies.
+        let reasonValue = n.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+        let reason = reasonValue.flatMap { AVAudioSession.RouteChangeReason(rawValue: $0) }
+        let reasonLabel = reason.map { "\($0.rawValue)" } ?? "engineConfigurationChange"
 
-        switch reason {
-        case .oldDeviceUnavailable:
-            // Previous device disconnected. If another input is available,
-            // rebuild on it. If nothing is available, pause — don't stop.
-            if sessionManager.isInputAvailable {
-                AppLog.audio.info("Route change: device gone but other input available — rebuilding")
-                audioInterruptionReason = "Audio device disconnected — switching input."
-                Task { @MainActor [weak self] in
-                    await self?.rebuildEngineForCurrentRoute(forceBuiltInMic: false, reason: "oldDeviceUnavailable")
-                }
-            } else {
-                AppLog.audio.warning("Route change: device gone, no input available — pausing")
-                audioInterruptionReason = "Audio device disconnected — no microphone available."
-                engine?.pause()
-                state = .paused
-                stopTimer()
-            }
-        case .newDeviceAvailable:
-            // New device appeared (e.g., AirPods connected). Rebuild the engine
-            // for the new route instead of stopping the recording.
-            AppLog.audio.info("Route change: new device — rebuilding for new route")
-            audioInterruptionReason = "Audio device connected — switching."
-            Task { @MainActor [weak self] in
-                await self?.rebuildEngineForCurrentRoute(forceBuiltInMic: false, reason: "newDeviceAvailable")
-            }
-        case .override:
-            // System overrode the route (e.g., Siri). If input is still
-            // available, rebuild. Otherwise pause until it returns.
-            if sessionManager.isInputAvailable {
-                AppLog.audio.info("Route change: override but input available — rebuilding")
-                audioInterruptionReason = "Audio route changed — adapting."
-                Task { @MainActor [weak self] in
-                    await self?.rebuildEngineForCurrentRoute(forceBuiltInMic: false, reason: "override")
-                }
-            } else {
-                AppLog.audio.warning("Route change: override, no input — pausing")
-                audioInterruptionReason = "Audio route overridden by system."
-                engine?.pause()
-                state = .paused
-                stopTimer()
-            }
-        case .categoryChange:
-            // Another app may have changed the audio category (e.g., VoIP app,
-            // navigation voice guidance). If our category is no longer
-            // .playAndRecord, the session may not support recording — reconfigure.
+        AppLog.audio.info("Route change: \(reasonLabel) — input: \(self.sessionManager.currentInputPortName)")
+
+        // Special case: categoryChange is handled separately — another app
+        // stole the audio category. If we can't get it back, stop entirely.
+        if reason == .categoryChange {
             if self.sessionManager.session.category != .playAndRecord {
                 AppLog.audio.warning("Route change: category changed to \(self.sessionManager.session.category.rawValue) — reconfiguring for recording")
                 do {
@@ -495,19 +471,109 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                     self.stopRecording()
                 }
             }
-        default:
-            break
+            return
+        }
+
+        // All other route change reasons: pause, debounce, rebuild, resume.
+        let wasRecording = state == .recording
+        engine?.pause()
+        state = .paused
+        if wasRecording { stopTimer() }
+        audioInterruptionReason = interruptionMessage(for: reason)
+
+        // Debounce: reset timer on each new notification so we rebuild
+        // once after the route settles. Cap at 5s to prevent runaway.
+        routeChangeDebounceTask?.cancel()
+        if routeChangeDebounceStart == nil {
+            routeChangeDebounceStart = Date()
+        }
+
+        if Date().timeIntervalSince(routeChangeDebounceStart!) > 5.0 {
+            AppLog.audio.warning("Route change debounce cap reached — forcing rebuild")
+            routeChangeDebounceStart = nil
+            performRebuild()
+            return
+        }
+
+        let delay = sessionManager.settleDelayNs // 750ms BT, 500ms otherwise
+        routeChangeDebounceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: delay)
+            guard !Task.isCancelled else { return }
+            self?.routeChangeDebounceStart = nil
+            await self?.performRebuild()
         }
     }
 
-    private func handleEngineConfigChange(_ n: Notification) {
-        guard state == .recording || state == .paused else { return }
-        AppLog.audio.info("Engine config change — input: \(self.sessionManager.currentInputPortName)")
-        // iOS may have cleared the tap internally (e.g., Bluetooth handoff).
-        // Rebuild the engine without deactivating the session (lightweight).
-        audioInterruptionReason = "Audio engine reconfigured — adapting."
+    /// Human-readable interruption reason for the UI.
+    private func interruptionMessage(for reason: AVAudioSession.RouteChangeReason?) -> String {
+        guard let reason else { return "Audio engine reconfigured — adapting." }
+        switch reason {
+        case .newDeviceAvailable:  return "Audio device connected — switching."
+        case .oldDeviceUnavailable: return "Audio device disconnected — switching input."
+        case .override:             return "Audio route changed — adapting."
+        default:                    return "Audio route changed."
+        }
+    }
+
+    // MARK: - Rebuild orchestration
+
+    /// Attempt a rebuild with up to 3 retries. On success, resumes recording.
+    /// On total failure, vibrates and stays paused with an error message.
+    private func performRebuild() {
+        guard !isRebuilding else {
+            // Already rebuilding — flag for retry when current one completes.
+            pendingRouteChange = true
+            return
+        }
+        isRebuilding = true
+
         Task { @MainActor [weak self] in
-            await self?.rebuildEngineLightweight(reason: "engineConfigChange")
+            guard let self else { return }
+            defer { self.isRebuilding = false }
+
+            let forceOnAttempt = 2 // 0-indexed: attempt 2 = force built-in mic
+            let backoffNs: [UInt64] = [0, 500_000_000, 1_000_000_000]
+
+            for attempt in 0..<3 {
+                let forceBuiltIn = attempt >= forceOnAttempt
+                if attempt > 0 {
+                    try? await Task.sleep(nanoseconds: backoffNs[attempt])
+                }
+
+                let reason = forceBuiltIn ? "routeChange-forceBuiltIn" : "routeChange"
+                let success = await self._rebuildEngineForCurrentRoute(
+                    forceBuiltInMic: forceBuiltIn, reason: reason
+                )
+
+                if success {
+                    self.state = .recording
+                    self.startTimer()
+                    self.audioInterruptionReason = nil
+                    AppLog.audio.info("performRebuild: succeeded on attempt \(attempt + 1)")
+
+                    // If another route change arrived while we were rebuilding,
+                    // schedule a fresh debounce cycle.
+                    if self.pendingRouteChange {
+                        self.pendingRouteChange = false
+                        self.routeChangeDebounceStart = nil
+                        let delay = self.sessionManager.settleDelayNs
+                        self.routeChangeDebounceTask = Task { @MainActor [weak self] in
+                            try? await Task.sleep(nanoseconds: delay)
+                            guard !Task.isCancelled else { return }
+                            self?.routeChangeDebounceStart = nil
+                            await self?.performRebuild()
+                        }
+                    }
+                    return
+                }
+
+                AppLog.audio.warning("performRebuild: attempt \(attempt + 1) failed")
+            }
+
+            // All 3 attempts failed.
+            AudioServicesPlayAlertSound(kSystemSoundID_Vibrate)
+            self.audioInterruptionReason = "No microphone available"
+            AppLog.audio.error("performRebuild: all 3 attempts failed — staying paused")
         }
     }
 
@@ -516,7 +582,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// Force the built-in microphone as the recording input, rebuild the engine,
     /// and resume recording. Used as a last resort when Bluetooth fails.
     func forceBuiltInMicRecovery() async {
-        await rebuildEngineForCurrentRoute(forceBuiltInMic: true, reason: "forceBuiltInMic")
+        _ = await rebuildEngineForCurrentRoute(forceBuiltInMic: true, reason: "forceBuiltInMic")
     }
 
     // MARK: - Engine rebuild (shared by route change, recovery, and config change)
@@ -525,28 +591,20 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// build new engine → open new segment → resume. Used for route changes and
     /// forced built-in mic recovery. When `forceBuiltInMic` is true, sets the
     /// preferred input to the built-in microphone before building the engine.
-    private func rebuildEngineForCurrentRoute(forceBuiltInMic: Bool, reason: String) async {
-        // Serialize rebuilds: cancel any in-progress rebuild before starting
-        // a new one. Bluetooth handoffs emit multiple notifications (route change
-        // + engine config change) that would otherwise start overlapping rebuilds.
-        rebuildTask?.cancel()
-        rebuildTask = Task { @MainActor [weak self] in
-            await self?._rebuildEngineForCurrentRoute(forceBuiltInMic: forceBuiltInMic, reason: reason)
-        }
-        await rebuildTask?.value
+    private func rebuildEngineForCurrentRoute(forceBuiltInMic: Bool, reason: String) async -> Bool {
+        // Direct call — no more cancellation. performRebuild handles retry.
+        await _rebuildEngineForCurrentRoute(forceBuiltInMic: forceBuiltInMic, reason: reason)
     }
 
     @MainActor
-    private func _rebuildEngineForCurrentRoute(forceBuiltInMic: Bool, reason: String) async {
-        let wasRecording = state == .recording
+    private func _rebuildEngineForCurrentRoute(forceBuiltInMic: Bool, reason: String) async -> Bool {
         guard state == .recording || state == .paused else {
             AppLog.audio.warning("rebuildEngine(\(reason)): unexpected state \(String(describing: self.state))")
-            return
+            return false
         }
         guard let meetingId = currentMeetingId else {
-            AppLog.audio.error("rebuildEngine(\(reason)): no meetingId — stopping")
-            stopRecording()
-            return
+            AppLog.audio.error("rebuildEngine(\(reason)): no meetingId — cannot rebuild")
+            return false
         }
 
         AppLog.audio.info("rebuildEngine(\(reason)): starting — forceBuiltInMic=\(forceBuiltInMic)")
@@ -574,8 +632,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             try sessionManager.configureForRecording()
         } catch {
             AppLog.audio.error("rebuildEngine(\(reason)): session reconfigure failed — \(error.localizedDescription)")
-            stopRecording()
-            return
+            return false
         }
 
         // 4. Optionally force built-in mic
@@ -591,7 +648,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         }
 
         // 5. Build new engine
-        guard buildAndStartEngine(reason: reason) else { return }
+        guard buildAndStartEngine(reason: reason) else { return false }
 
         // 6. Open new segment for the new route
         let nextIndex = nextSegmentIndexProvider?() ?? 0
@@ -600,8 +657,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false
         ) else {
             AppLog.audio.error("rebuildEngine(\(reason)): failed to create audio format")
-            stopRecording()
-            return
+            return false
         }
         do {
             try fileWriter.startNextSegmentForExistingRecording(
@@ -609,8 +665,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             )
         } catch {
             AppLog.audio.error("rebuildEngine(\(reason)): failed to open new segment — \(error.localizedDescription)")
-            stopRecording()
-            return
+            return false
         }
 
         // 7. Notify coordinator of new segment
@@ -627,66 +682,16 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         )
         onSegmentCreated?(closedInfo, segment)
 
-        // 8. Commit
-        if wasRecording { state = .recording } else { state = .paused }
+        // 8. Commit (caller handles state = .recording and startTimer)
         currentInputPortName = portName
         currentInputPortIcon = sessionManager.currentInputIcon
-        if wasRecording { startTimer() }
         guard let engine = self.engine else {
-            AppLog.audio.error("rebuildEngine(\(reason)): engine nil after build — stopping")
-            stopRecording()
-            return
+            AppLog.audio.error("rebuildEngine(\(reason)): engine nil after build")
+            return false
         }
         reRegisterEngineObserver(for: engine)
         AppLog.event("audio", "rebuildEngine(\(reason)): recording continued on \(portName) (\(portType)) @ \(Int(sampleRate))Hz")
-    }
-
-    /// Lightweight engine rebuild: replace the engine WITHOUT deactivating the
-    /// audio session. Used for AVAudioEngineConfigurationChange where iOS has
-    /// already cleared the tap but the session is still valid. Deactivating
-    /// during Bluetooth HFP handoff would kill the SCO link.
-    private func rebuildEngineLightweight(reason: String) async {
-        // Serialize with full rebuilds — same Task chain prevents overlap.
-        rebuildTask?.cancel()
-        rebuildTask = Task { @MainActor [weak self] in
-            await self?._rebuildEngineLightweight(reason: reason)
-        }
-        await rebuildTask?.value
-    }
-
-    @MainActor
-    private func _rebuildEngineLightweight(reason: String) async {
-        let wasRecording = state == .recording
-        guard state == .recording || state == .paused else {
-            AppLog.audio.warning("rebuildEngineLightweight(\(reason)): unexpected state \(String(describing: self.state))")
-            return
-        }
-
-        AppLog.audio.info("rebuildEngineLightweight(\(reason)): replacing engine (session stays active)")
-
-        // 1. Tear down old engine (session stays active)
-        if let oldEngine = engine {
-            // Don't call removeTap — iOS already cleared it
-            oldEngine.stop()
-            oldEngine.reset()
-        }
-        self.engine = nil
-
-        // 2. Build new engine (no session deactivation)
-        guard buildAndStartEngine(reason: "lightweight-\(reason)") else { return }
-
-        // 3. Commit
-        if wasRecording { state = .recording } else { state = .paused }
-        currentInputPortName = sessionManager.currentInputPortName
-        currentInputPortIcon = sessionManager.currentInputIcon
-        if wasRecording { startTimer() }
-        guard let engine = self.engine else {
-            AppLog.audio.error("rebuildEngineLightweight(\(reason)): engine nil after build — stopping")
-            stopRecording()
-            return
-        }
-        reRegisterEngineObserver(for: engine)
-        AppLog.event("audio", "rebuildEngineLightweight(\(reason)): engine replaced — \(currentInputPortName)")
+        return true
     }
 
     /// Build a new AVAudioEngine, install the tap, prepare, and start.
@@ -778,7 +783,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         })
         observers.append(nc.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: q) { [weak self] n in self?.handleRouteChange(n) })
         // Engine-scoped observer for the new engine
-        observers.append(nc.addObserver(forName: .AVAudioEngineConfigurationChange, object: newEngine, queue: q) { [weak self] n in self?.handleEngineConfigChange(n) })
+        observers.append(nc.addObserver(forName: .AVAudioEngineConfigurationChange, object: newEngine, queue: q) { [weak self] n in
+            AppLog.audio.info("Engine config change — routing through unified debounce path")
+            self?.handleRouteChange(n)
+        })
     }
 }
 

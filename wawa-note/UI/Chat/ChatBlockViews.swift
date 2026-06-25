@@ -202,14 +202,9 @@ struct CodeBlockView: View {
 
 struct KnowledgeItemNavigationView: View {
     let itemID: UUID
-    @Environment(\.modelContext) private var modelContext
 
     var body: some View {
-        if let item = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
-            KnowledgeDetailView(item: item)
-        } else {
-            Text("Item not found").font(.headline).foregroundStyle(.secondary)
-        }
+        KnowledgeDetailView(itemID: itemID)
     }
 }
 

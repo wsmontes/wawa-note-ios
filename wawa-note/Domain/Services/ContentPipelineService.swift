@@ -311,6 +311,13 @@ final class ContentPipelineService: ObservableObject {
                 executorModel: executorModel, advisorModel: advisorModel
             )
 
+            // Set status to .analyzing so the UI shows what's happening
+            // (not stuck at .pendingReview while the agent runs).
+            if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+                fresh.status = .analyzing
+                try? modelContext.save()
+            }
+
             // Report progress to UI
             var toolLog: [String] = []
             var agentEvents: [PipelineAgentEvent] = []
@@ -539,12 +546,21 @@ final class ContentPipelineService: ObservableObject {
                 continuation.resume()
             }
             process(itemID, using: ctx)
-            // Safety timeout: if notification never fires, resume after 120s
+            // Safety timeout: if notification never fires, resume after 600s.
+            // This is longer than the worst-case pipeline duration (2 retries × 300s
+            // agent timeout + backoff) so it only fires if the pipeline truly hangs.
+            // When it does fire, we cancel the pipeline Task to stop resource use.
             Task { @MainActor in
-                try? await Task.sleep(for: .seconds(120))
+                try? await Task.sleep(for: .seconds(600))
                 guard !resumed else { return }
+                AppLog.provider.error("ContentPipeline: safety timeout for item \(itemID) — cancelling pipeline task")
                 resumed = true
                 if let t = token { NotificationCenter.default.removeObserver(t) }
+                // Cancel the pipeline's Task so it stops consuming resources.
+                // The item will be left in its current status (e.g. .pendingReview
+                // or .analyzing) and can be retried manually.
+                activeJobs[itemID]?.cancel()
+                activeJobs[itemID] = nil
                 continuation.resume()
             }
         }
