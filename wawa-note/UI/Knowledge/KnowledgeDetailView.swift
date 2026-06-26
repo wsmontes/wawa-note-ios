@@ -353,6 +353,16 @@ struct KnowledgeDetailView: View {
                                     ShareLink("JSON Export", item: jsonString)
                                 }
                             }
+                            // Subtitle exports (when transcript is available)
+                            if let t = transcript,
+                               let srt = SRTExporter.export(segments: t.segments, totalDuration: item.durationSeconds) {
+                                ShareLink("Subtitles (.srt)", item: srt)
+                            }
+                            if let t = transcript,
+                               let vtt = VTTExporter.export(segments: t.segments, totalDuration: item.durationSeconds,
+                                                            note: "Exported from Wawa Note") {
+                                ShareLink("Subtitles (.vtt)", item: vtt)
+                            }
                             if let anarlogMD = try? AnarlogExporter().exportMarkdown(item: item) {
                                 ShareLink("Anarlog .md", item: anarlogMD)
                             }
