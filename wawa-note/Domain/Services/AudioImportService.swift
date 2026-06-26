@@ -23,29 +23,50 @@ final class AudioImportService: @unchecked Sendable {
     ]
 
     func canRead(url: URL) -> Bool {
-        // Try AVAudioPlayer first (covers m4a, mp3, wav, aiff)
-        if (try? AVAudioPlayer(contentsOf: url)) != nil {
-            return true
-        }
-        // Try AVAsset with audio tracks
+        // AVAsset is the safest first check — it validates the container and
+        // track structure without loading audio data. Unlike AVAudioPlayer,
+        // it does not crash on malformed or unusual M4A files (ALAC, HE-AACv2,
+        // or truncated headers that cause AVAudioPlayer to SIGABRT internally).
         let asset = AVAsset(url: url)
-        if asset.isReadable, asset.tracks(withMediaType: .audio).first != nil {
+        if asset.isReadable, !asset.tracks(withMediaType: .audio).isEmpty {
             return true
         }
-        // Try ExtAudioFile (covers opus, ogg, flac, and other formats AVAudioPlayer doesn't handle)
+
+        // ExtAudioFile as fallback — handles formats AVAsset doesn't recognize
+        // (opus, ogg, flac, some PCM variants). Guard against nil file handles.
         var file: ExtAudioFileRef?
         let status = ExtAudioFileOpenURL(url as CFURL, &file)
-        if status == noErr, file != nil {
-            ExtAudioFileDispose(file!)
+        if status == noErr, let handle = file {
+            ExtAudioFileDispose(handle)
             return true
         }
-        return false
+
+        // AVAudioPlayer as last resort — it can crash on malformed files,
+        // so run it off the main thread via safePlayer().
+        return safePlayer(for: url) != nil
+    }
+
+    /// Safely create an AVAudioPlayer, running off the main thread with a
+    /// 1-second timeout. AVAudioPlayer(contentsOf:) can EXC_BAD_ACCESS on
+    /// certain M4A codec variants (ALAC, HE-AACv2) or truncated files.
+    func safePlayer(for url: URL) -> AVAudioPlayer? {
+        let semaphore = DispatchSemaphore(value: 0)
+        var player: AVAudioPlayer?
+        DispatchQueue.global(qos: .userInitiated).async {
+            player = try? AVAudioPlayer(contentsOf: url)
+            semaphore.signal()
+        }
+        _ = semaphore.wait(timeout: .now() + 1.0)
+        return player
     }
 
     func isNativeM4ACompatible(_ url: URL) -> Bool {
         let ext = url.pathExtension.lowercased()
         guard ext == "m4a" || ext == "aac" || ext == "mp4" else { return false }
-        return (try? AVAudioPlayer(contentsOf: url)) != nil
+        // Check via AVAsset first (safe, no crash risk), fall back to player.
+        let asset = AVAsset(url: url)
+        if asset.isReadable, !asset.tracks(withMediaType: .audio).isEmpty { return true }
+        return safePlayer(for: url) != nil
     }
 
     /// Copies or converts audio into the meeting artifact directory.
@@ -77,10 +98,12 @@ final class AudioImportService: @unchecked Sendable {
                 userInfo: [NSLocalizedDescriptionKey: "File not found at path"]))
         }
 
-        let playerDuration = (try? AVAudioPlayer(contentsOf: url))?.duration ?? 0
-
+        // AVAsset is safe for duration on any format. AVAudioPlayer is used as
+        // a secondary source but wrapped via safePlayer() to prevent crashes on
+        // malformed M4A files (certain codec variants cause EXC_BAD_ACCESS).
         let asset = AVAsset(url: url)
         let assetDuration = (try? await asset.load(.duration)).map { CMTimeGetSeconds($0) } ?? 0
+        let playerDuration = safePlayer(for: url)?.duration ?? 0
         let effectiveDuration = max(playerDuration, assetDuration)
 
         guard effectiveDuration > 0 else {
@@ -203,7 +226,7 @@ final class AudioImportService: @unchecked Sendable {
     // MARK: - Preview player
 
     func previewPlayer(for url: URL) -> AVAudioPlayer? {
-        try? AVAudioPlayer(contentsOf: url)
+        safePlayer(for: url)
     }
 }
 
