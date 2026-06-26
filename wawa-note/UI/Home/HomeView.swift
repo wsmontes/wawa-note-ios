@@ -503,7 +503,12 @@ struct HomeView: View {
                             }.foregroundStyle(.primary).frame(width: 60, height: 52)
                             .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
                         }.accessibilityLabel("Take Photo").accessibilityHint("Take a photo or choose from gallery")
-                        Button(action: { importVM.showFilePicker = true }) {
+                        Button(action: {
+                            // Dismiss any stale import sheet before opening the file picker.
+                            // Presenting both simultaneously causes SIGABRT (iOS 18).
+                            importVM.pendingImport = nil
+                            importVM.showFilePicker = true
+                        }) {
                             VStack(spacing: 4) {
                                 Image(systemName: "square.and.arrow.down").font(.subheadline)
                                 Text("Import").font(.caption2)
