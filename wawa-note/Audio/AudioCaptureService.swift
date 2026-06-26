@@ -62,7 +62,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     // MARK: Internal
 
     private var engine: AVAudioEngine?
-    private let sessionManager = AudioSessionManager()
+    let sessionManager = AudioSessionManager()
     private var timerTask: Task<Void, Never>?
     private var recordingStartTime: Date?
     private var interruptionBeganAt: Date?   // Tracks when the current interruption started

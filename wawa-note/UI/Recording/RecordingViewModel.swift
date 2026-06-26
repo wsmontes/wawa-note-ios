@@ -6,6 +6,7 @@ import SwiftData
 
 enum RecordingUIState: Equatable {
     case idle
+    case preparing
     case recording
     case paused
     case stopped
