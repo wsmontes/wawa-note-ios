@@ -355,11 +355,11 @@ struct KnowledgeDetailView: View {
                             }
                             // Subtitle exports (when transcript is available)
                             if let t = transcript,
-                               let srt = SRTExporter.export(segments: t.segments, totalDuration: item.durationSeconds) {
+                               let srt = SRTExporter.export(transcript: t, totalDuration: item.durationSeconds) {
                                 ShareLink("Subtitles (.srt)", item: srt)
                             }
                             if let t = transcript,
-                               let vtt = VTTExporter.export(segments: t.segments, totalDuration: item.durationSeconds,
+                               let vtt = VTTExporter.export(transcript: t, totalDuration: item.durationSeconds,
                                                             note: "Exported from Wawa Note") {
                                 ShareLink("Subtitles (.vtt)", item: vtt)
                             }

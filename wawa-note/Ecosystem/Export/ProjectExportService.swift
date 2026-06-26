@@ -803,7 +803,7 @@ final class InstanceExportService {
     func exportSRT(for itemId: UUID, totalDuration: Double? = nil) -> String? {
         let store = FileArtifactStore()
         guard let transcript = try? store.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: itemId) else { return nil }
-        return SRTExporter.export(segments: transcript.segments, totalDuration: totalDuration)
+        return SRTExporter.export(transcript: transcript, totalDuration: totalDuration)
     }
 
     // MARK: - VTT / WebVTT Export
@@ -812,7 +812,7 @@ final class InstanceExportService {
         let store = FileArtifactStore()
         guard let transcript = try? store.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: itemId) else { return nil }
         let note = "Exported from Wawa Note — \(DateFormatter.localizedString(from: Date(), dateStyle: .medium, timeStyle: .none))"
-        return VTTExporter.export(segments: transcript.segments, totalDuration: totalDuration, note: note)
+        return VTTExporter.export(transcript: transcript, totalDuration: totalDuration, note: note)
     }
 }
 
@@ -827,35 +827,29 @@ final class InstanceExportService {
 /// - Blank line between blocks
 struct SRTExporter: Sendable {
 
-    /// Export transcript segments to SRT format.
+    /// Export a transcript to SRT format using grouped segments for readable subtitles.
+    /// Raw Apple Speech segments are word-level (~120ms each); grouping merges them
+    /// into readable blocks split by natural pauses (0.4s+) or max 250 chars.
     /// - Parameters:
-    ///   - segments: The transcript segments. Each must have `startTime` and `text`.
-    ///   - totalDuration: Fallback when a segment's `endTime` is nil and there's
-    ///     no next segment to borrow from.
-    /// - Returns: Complete SRT string, or nil if no valid segments.
-    static func export(segments: [TranscriptSegment], totalDuration: Double? = nil) -> String? {
-        let valid = segments.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        guard !valid.isEmpty else { return nil }
+    ///   - transcript: The transcript to export.
+    ///   - totalDuration: Fallback for the last segment's endTime.
+    /// - Returns: Complete SRT string, or nil if no content.
+    static func export(transcript: Transcript, totalDuration: Double? = nil) -> String? {
+        let groups = transcript.groupedSegments(pauseThreshold: 0.4, maxChars: 64)
+        guard !groups.isEmpty else { return nil }
 
         var srt = ""
-        for (index, segment) in valid.enumerated() {
-            let seq = index + 1
-            let start = formatTimestamp(segment.startTime)
+        for (index, group) in groups.enumerated() {
+            let text = group.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
 
-            // Resolve endTime: use segment's endTime, or next segment's startTime,
-            // or totalDuration, or +5s as last resort.
-            let end: Double
-            if let et = segment.endTime {
-                end = et
-            } else if index + 1 < valid.count {
-                end = valid[index + 1].startTime
-            } else if let total = totalDuration, total > segment.startTime {
-                end = total
-            } else {
-                end = segment.startTime + 5
-            }
+            let end = group.endTime > group.startTime
+                ? group.endTime
+                : (totalDuration ?? group.startTime + 5)
 
-            srt += "\(seq)\n\(start) --> \(formatTimestamp(end))\n\(segment.text.trimmingCharacters(in: .whitespacesAndNewlines))\n\n"
+            srt += "\(index + 1)\n"
+            srt += "\(formatTimestamp(group.startTime)) --> \(formatTimestamp(end))\n"
+            srt += "\(text)\n\n"
         }
         return srt.isEmpty ? nil : srt
     }
@@ -882,47 +876,36 @@ struct SRTExporter: Sendable {
 /// - Optional speaker labels via `<v Name>` tags
 struct VTTExporter: Sendable {
 
-    /// Export transcript segments to WebVTT format.
+    /// Export a transcript to WebVTT format using grouped segments.
+    /// Raw segments are grouped by natural pauses (0.4s+) or max 64 chars
+    /// for readable subtitle blocks. Speaker labels are preserved per group.
     /// - Parameters:
-    ///   - segments: The transcript segments.
-    ///   - totalDuration: Fallback when `endTime` is nil.
-    ///   - speakers: Optional speaker ID to name mapping for `<v>` tags.
+    ///   - transcript: The transcript to export.
+    ///   - totalDuration: Fallback for the last group's endTime.
     ///   - note: Optional NOTE block text after the WEBVTT header.
-    /// - Returns: Complete VTT string, or nil if no valid segments.
+    /// - Returns: Complete VTT string, or nil if no content.
     static func export(
-        segments: [TranscriptSegment],
+        transcript: Transcript,
         totalDuration: Double? = nil,
-        speakers: [UUID: String]? = nil,
         note: String? = nil
     ) -> String? {
-        let valid = segments.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        guard !valid.isEmpty else { return nil }
+        let groups = transcript.groupedSegments(pauseThreshold: 0.4, maxChars: 64)
+        guard !groups.isEmpty else { return nil }
 
         var vtt = "WEBVTT\n\n"
         if let note { vtt += "NOTE\n\(note)\n\n" }
 
-        for (index, segment) in valid.enumerated() {
-            let start = formatTimestamp(segment.startTime)
+        for (index, group) in groups.enumerated() {
+            let text = group.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
 
-            let end: Double
-            if let et = segment.endTime {
-                end = et
-            } else if index + 1 < valid.count {
-                end = valid[index + 1].startTime
-            } else if let total = totalDuration, total > segment.startTime {
-                end = total
-            } else {
-                end = segment.startTime + 5
-            }
+            let end = group.endTime > group.startTime
+                ? group.endTime
+                : (totalDuration ?? group.startTime + 5)
 
-            vtt += "\(index + 1)\n\(start) --> \(formatTimestamp(end))\n"
-
-            let text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let speakers, let speakerId = segment.speakerId, let name = speakers[speakerId] {
-                vtt += "<v \(name)>\(text)\n\n"
-            } else {
-                vtt += "\(text)\n\n"
-            }
+            vtt += "\(index + 1)\n"
+            vtt += "\(formatTimestamp(group.startTime)) --> \(formatTimestamp(end))\n"
+            vtt += "\(text)\n\n"
         }
         return vtt.isEmpty ? nil : vtt
     }
