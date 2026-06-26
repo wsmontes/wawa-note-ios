@@ -347,24 +347,31 @@ struct KnowledgeDetailView: View {
                         Menu {
                             // Textual exports (when transcript/analysis available)
                             if transcript != nil || analysis != nil {
-                                ShareLink("Markdown", item: MarkdownExporter().export(item: item, transcript: transcript, analysis: analysis))
+                                let md = MarkdownExporter().export(item: item, transcript: transcript, analysis: analysis)
+                                if let url = tempExportURL(ext: "md", content: md) {
+                                    ShareLink("Markdown", item: url)
+                                }
                                 if let jsonData = try? JSONExporter().export(item: item, transcript: transcript, analysis: analysis),
-                                   let jsonString = String(data: jsonData, encoding: .utf8) {
-                                    ShareLink("JSON Export", item: jsonString)
+                                   let jsonString = String(data: jsonData, encoding: .utf8),
+                                   let url = tempExportURL(ext: "json", content: jsonString) {
+                                    ShareLink("JSON Export", item: url)
                                 }
                             }
                             // Subtitle exports (when transcript is available)
                             if let t = transcript,
-                               let srt = SRTExporter.export(transcript: t, totalDuration: item.durationSeconds) {
-                                ShareLink("Subtitles (.srt)", item: srt)
+                               let srt = SRTExporter.export(transcript: t, totalDuration: item.durationSeconds),
+                               let url = tempExportURL(ext: "srt", content: srt) {
+                                ShareLink("Subtitles (.srt)", item: url)
                             }
                             if let t = transcript,
                                let vtt = VTTExporter.export(transcript: t, totalDuration: item.durationSeconds,
-                                                            note: "Exported from Wawa Note") {
-                                ShareLink("Subtitles (.vtt)", item: vtt)
+                                                            note: "Exported from Wawa Note"),
+                               let url = tempExportURL(ext: "vtt", content: vtt) {
+                                ShareLink("Subtitles (.vtt)", item: url)
                             }
-                            if let anarlogMD = try? AnarlogExporter().exportMarkdown(item: item) {
-                                ShareLink("Anarlog .md", item: anarlogMD)
+                            if let anarlogMD = try? AnarlogExporter().exportMarkdown(item: item),
+                               let url = tempExportURL(ext: "md", content: anarlogMD) {
+                                ShareLink("Anarlog .md", item: url)
                             }
                             // Meetily export removed (KAN-258)
                             // Audio export — available even without transcript
@@ -1819,6 +1826,26 @@ struct KnowledgeDetailView: View {
     }
 
     // MARK: - Helpers
+
+    /// Write export content to a temp file named after the item's title.
+    /// Returns the file URL for use with ShareLink, or nil on failure.
+    private func tempExportURL(ext: String, content: String) -> URL? {
+        let sanitized = item.title
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+            .trimmingCharacters(in: .whitespaces)
+        let name = sanitized.isEmpty ? "export" : sanitized
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(name)
+            .appendingPathExtension(ext)
+        do {
+            try content.write(to: url, atomically: true, encoding: .utf8)
+            return url
+        } catch {
+            AppLog.error("export", "Failed to write temp export file: \(error.localizedDescription)")
+            return nil
+        }
+    }
 
     /// Load raw JSON from analysis files — no key expectations, renders anything.
     private func loadRawAnalysisJSON() {
