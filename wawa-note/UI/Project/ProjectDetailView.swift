@@ -90,14 +90,14 @@ struct ProjectHomeView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var chatState: ChatOverlayState
     @EnvironmentObject private var coordinator: RecordingCoordinator
-    @State private var selectedTab: ProjectTab = .synthesis
+    @State private var selectedTab: ProjectTab = .chat
     @State private var showCaptureSheet = false
     @State private var showNoteEditor = false
     @State private var showFileImporter = false
 
     enum ProjectTab: String, CaseIterable {
-        case synthesis = "Síntese"
-        case files = "Arquivos"
+        case chat = "Chat"
+        case files = "Files"
     }
 
     var body: some View {
@@ -114,8 +114,8 @@ struct ProjectHomeView: View {
 
             // Content
             switch selectedTab {
-            case .synthesis:
-                ProjectSynthesisView(project: project)
+            case .chat:
+                ProjectChatView(project: project)
             case .files:
                 ItemsView(projectID: project.id)
             }
@@ -1442,5 +1442,25 @@ struct EmptySynthesisView: View {
             }
             Spacer()
         }
+    }
+}
+
+// MARK: - Project Chat View
+
+struct ProjectChatView: View {
+    let project: Project
+    @StateObject private var chatVM = ChatViewModel()
+    @Environment(\.modelContext) private var modelContext
+
+    var body: some View {
+        ChatView(viewModel: chatVM, compact: false)
+            .onAppear {
+                chatVM.setup(modelContext: modelContext)
+                chatVM.activeProjectID = project.id
+                chatVM.activeProjectName = project.name
+                if let hex = project.colorHex {
+                    chatVM.activeProjectColorHex = hex
+                }
+            }
     }
 }
