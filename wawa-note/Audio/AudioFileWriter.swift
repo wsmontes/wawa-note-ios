@@ -187,15 +187,14 @@ final class AudioFileWriter: @unchecked Sendable {
     /// Uses rotation: writes to .NEW, validates, then renames — the previous
     /// checkpoint is preserved as .BAK.
     func writeCheckpoint(meetingId: UUID, segmentIndex: Int, format: AVAudioFormat) {
-        queue.async { [weak self] in
-            guard let self else { return }
+        queue.sync {
             let checkpoint: [String: Any] = [
                 "meetingId": meetingId.uuidString,
                 "segmentIndex": segmentIndex,
                 "sampleRate": format.sampleRate,
                 "channels": format.channelCount,
                 "timestamp": Date().timeIntervalSince1970,
-                "fileName": self._currentFileURL?.lastPathComponent ?? "unknown"
+                "fileName": self._currentFileURL?.lastPathComponent ?? "unknown",
             ]
             guard let data = try? JSONSerialization.data(withJSONObject: checkpoint) else {
                 AppLog.error("audio", "Checkpoint: failed to serialize checkpoint JSON")
@@ -231,13 +230,14 @@ final class AudioFileWriter: @unchecked Sendable {
         // Try primary first, then backup
         for candidateURL in [url, bakURL] {
             guard FileManager.default.fileExists(atPath: candidateURL.path),
-                  let data = try? Data(contentsOf: candidateURL),
-                  let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let meetingIdStr = dict["meetingId"] as? String,
-                  let meetingId = UUID(uuidString: meetingIdStr),
-                  let segmentIndex = dict["segmentIndex"] as? Int,
-                  let sampleRate = dict["sampleRate"] as? Double,
-                  let timestamp = dict["timestamp"] as? TimeInterval else { continue }
+                let data = try? Data(contentsOf: candidateURL),
+                let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let meetingIdStr = dict["meetingId"] as? String,
+                let meetingId = UUID(uuidString: meetingIdStr),
+                let segmentIndex = dict["segmentIndex"] as? Int,
+                let sampleRate = dict["sampleRate"] as? Double,
+                let timestamp = dict["timestamp"] as? TimeInterval
+            else { continue }
 
             // Recover checkpoints up to 24h old — covers overnight and
             // morning-after scenarios where the user records, the app crashes,
@@ -361,7 +361,7 @@ final class AudioFileWriter: @unchecked Sendable {
             AVNumberOfChannelsKey: 1,
             AVLinearPCMBitDepthKey: 16,
             AVLinearPCMIsFloatKey: false,
-            AVLinearPCMIsBigEndianKey: false
+            AVLinearPCMIsBigEndianKey: false,
         ]
 
         let fileName = String(format: "segment-%03d.\(ext)", self._segmentIndex)
@@ -404,7 +404,8 @@ final class AudioFileWriter: @unchecked Sendable {
                 self._segmentIndex = nextIdx
                 let finalName = String(format: "segment-%03d.\(ext)", self._segmentIndex)
                 let finalURL = segmentsDir.appendingPathComponent(finalName)
-                self._audioFile = try AVAudioFile(forWriting: finalURL, settings: settings, commonFormat: format.commonFormat, interleaved: format.isInterleaved)
+                self._audioFile = try AVAudioFile(
+                    forWriting: finalURL, settings: settings, commonFormat: format.commonFormat, interleaved: format.isInterleaved)
                 self._currentFileURL = finalURL
                 AppLog.audio.info("Segment \(self._segmentIndex): \(finalName) \(sampleRate)Hz PCM (index adjusted)")
                 return
