@@ -80,7 +80,8 @@ protocol TranscriptionEngine: Sendable {
     /// Transcribe a live audio stream (buffer-based).
     /// Returns an async stream of volatile + final results.
     /// Volatile results update in real-time; final results are immutable.
-    func transcribeLive(from audioFileURL: URL) -> LiveTranscriptionStream
+    /// - Parameter meetingId: The KnowledgeItem ID these segments belong to.
+    func transcribeLive(from audioFileURL: URL, meetingId: UUID) -> LiveTranscriptionStream
 
     /// Cancel an in-progress transcription.
     func cancel()
@@ -98,7 +99,7 @@ protocol TranscriptionEngine: Sendable {
 
 extension TranscriptionEngine {
     /// Default: not all engines support live transcription.
-    func transcribeLive(from audioFileURL: URL) -> LiveTranscriptionStream {
+    func transcribeLive(from audioFileURL: URL, meetingId: UUID) -> LiveTranscriptionStream {
         LiveTranscriptionStream { continuation in
             continuation.finish()
         }

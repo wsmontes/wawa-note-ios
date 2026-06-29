@@ -1,26 +1,35 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 import UniformTypeIdentifiers
-// Related JIRA: KAN-8, KAN-10, KAN-525
 
+// Related JIRA: KAN-8, KAN-10, KAN-525
 
 // MARK: - Shared Signal Helpers
 
 private func signalColor(_ type: String) -> Color {
     switch type {
-    case "risk": .red; case "alert": .orange; case "opportunity": .green
-    case "contradiction": .purple; case "pattern": .blue; case "doubt": .yellow
-    case "new_project": .mint; case "emerging_problem": .pink
+    case "risk": .red
+    case "alert": .orange
+    case "opportunity": .green
+    case "contradiction": .purple
+    case "pattern": .blue
+    case "doubt": .yellow
+    case "new_project": .mint
+    case "emerging_problem": .pink
     default: .secondary
     }
 }
 
 private func signalIcon(_ type: String) -> String {
     switch type {
-    case "risk": "exclamationmark.triangle.fill"; case "alert": "bell.fill"
-    case "opportunity": "lightbulb.fill"; case "contradiction": "arrow.triangle.swap"
-    case "pattern": "rectangle.3.group.fill"; case "doubt": "questionmark.circle.fill"
-    case "new_project": "sparkles"; case "emerging_problem": "ant.fill"
+    case "risk": "exclamationmark.triangle.fill"
+    case "alert": "bell.fill"
+    case "opportunity": "lightbulb.fill"
+    case "contradiction": "arrow.triangle.swap"
+    case "pattern": "rectangle.3.group.fill"
+    case "doubt": "questionmark.circle.fill"
+    case "new_project": "sparkles"
+    case "emerging_problem": "ant.fill"
     default: "dot.radiowaves.left.and.right"
     }
 }
@@ -43,7 +52,10 @@ struct ProjectDetailView: View {
             ProjectHomeView(project: project)
                 .onAppear {
                     chatState.context = .project(project.id)
-                    AppLog.debug("project", "ProjectDetailView appeared — project=\(project.name) id=\(project.id.uuidString.prefix(8)) status=\(project.status.rawValue) health=\(project.healthStatus ?? "nil")")
+                    AppLog.debug(
+                        "project",
+                        "ProjectDetailView appeared — project=\(project.name) id=\(project.id.uuidString.prefix(8)) status=\(project.status.rawValue) health=\(project.healthStatus ?? "nil")"
+                    )
                 }
         }
     }
@@ -100,6 +112,7 @@ struct ProjectHomeView: View {
     @EnvironmentObject private var chatState: ChatOverlayState
     @EnvironmentObject private var coordinator: RecordingCoordinator
     @EnvironmentObject private var services: ServiceContainer
+    @EnvironmentObject private var processingQueue: ProcessingQueueService
     @State private var selectedTab: ProjectTab = .chat
     @State private var showCaptureSheet = false
     @State private var showNoteEditor = false
@@ -146,19 +159,29 @@ struct ProjectHomeView: View {
                     }
                     .accessibilityLabel("Kanban Board")
                     Menu {
-                        Button { showCaptureSheet = true } label: {
+                        Button {
+                            showCaptureSheet = true
+                        } label: {
                             Label("Add Item", systemImage: "plus")
                         }
-                        Button { exportMarkdown() } label: {
+                        Button {
+                            exportMarkdown()
+                        } label: {
                             Label("Export Markdown", systemImage: "doc.richtext")
                         }
-                        Button { exportJSON() } label: {
+                        Button {
+                            exportJSON()
+                        } label: {
                             Label("Export JSON", systemImage: "doc.text")
                         }
-                        Button { exportSRT() } label: {
+                        Button {
+                            exportSRT()
+                        } label: {
                             Label("Export SRT", systemImage: "captions.bubble")
                         }
-                        Button { exportVTT() } label: {
+                        Button {
+                            exportVTT()
+                        } label: {
                             Label("Export VTT", systemImage: "captions.bubble.fill")
                         }
                     } label: {
@@ -171,7 +194,7 @@ struct ProjectHomeView: View {
             Button("Record Audio") { coordinator.startRecording(projectID: project.id) }
             Button("Add Note") { showNoteEditor = true }
             Button("Import File") { showFileImporter = true }
-            Button("Cancel", role: .cancel) { }
+            Button("Cancel", role: .cancel) {}
         }
         .sheet(isPresented: $showNoteEditor) {
             NoteEditorView(mode: .create(type: .note, folderID: nil, initialTag: nil))
@@ -192,9 +215,12 @@ struct ProjectHomeView: View {
         let router = ImportRouter(importers: [
             JSONImporter(), MarkdownImporter(), PlainTextImporter(),
             SRTImporter(), ICSImporter(), PDFImporter(), HTMLImporter(), RTFImporter(),
-            AnarlogImporter()
+            AnarlogImporter(), AudioImportService(),
         ])
-        guard let importer = router.importer(for: url) else { return }
+        guard let importer = router.importer(for: url) else {
+            AppLog.general.warning("ProjectHomeView: no importer for \(url.lastPathComponent)")
+            return
+        }
         do {
             let result = try await importer.importFromURL(url)
             let item = result.knowledgeItem
@@ -202,6 +228,9 @@ struct ProjectHomeView: View {
             modelContext.insert(item)
             try? modelContext.save()
             try? services.projects.addItem(item.id, to: project.id)
+            // Drive the content pipeline so audio gets transcribed and all items
+            // get analyzed/ingested into the project. (KAN-518)
+            processingQueue.enqueue(itemID: item.id, projectID: project.id, trigger: .newCapture)
         } catch {
             AppLog.general.error("Import failed: \(error.localizedDescription)")
         }
@@ -226,17 +255,24 @@ struct ProjectHomeView: View {
         let md = exporter.exportMarkdown(project: project, items: items, tasks: taskRows, edges: edges)
         let vc = UIActivityViewController(activityItems: [md], applicationActivities: nil)
         if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let root = scene.windows.first?.rootViewController { root.present(vc, animated: true) }
+            let root = scene.windows.first?.rootViewController
+        {
+            root.present(vc, animated: true)
+        }
     }
 
     private func exportJSON() {
         let svc = InstanceExportService()
         let export = svc.exportSingleProject(project, context: modelContext)
         guard let data = try? JSONEncoder().encode(export),
-              let json = String(data: data, encoding: .utf8) else { return }
+            let json = String(data: data, encoding: .utf8)
+        else { return }
         let vc = UIActivityViewController(activityItems: [json], applicationActivities: nil)
         if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let root = scene.windows.first?.rootViewController { root.present(vc, animated: true) }
+            let root = scene.windows.first?.rootViewController
+        {
+            root.present(vc, animated: true)
+        }
     }
 
     private func exportSRT() {
@@ -249,7 +285,10 @@ struct ProjectHomeView: View {
         guard !allSRT.isEmpty else { return }
         let vc = UIActivityViewController(activityItems: [allSRT], applicationActivities: nil)
         if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let root = scene.windows.first?.rootViewController { root.present(vc, animated: true) }
+            let root = scene.windows.first?.rootViewController
+        {
+            root.present(vc, animated: true)
+        }
     }
 
     private func exportVTT() {
@@ -264,7 +303,10 @@ struct ProjectHomeView: View {
         guard allVTT.count > 10 else { return }
         let vc = UIActivityViewController(activityItems: [allVTT], applicationActivities: nil)
         if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let root = scene.windows.first?.rootViewController { root.present(vc, animated: true) }
+            let root = scene.windows.first?.rootViewController
+        {
+            root.present(vc, animated: true)
+        }
     }
 }
 
@@ -514,13 +556,17 @@ struct ItemsView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 8) {
-                    Button { exportAllFiles() } label: {
+                    Button {
+                        exportAllFiles()
+                    } label: {
                         Label("Export All", systemImage: "square.and.arrow.up")
                     }
                     .font(.caption)
                     Menu {
                         ForEach(ItemSortOrder.allCases, id: \.self) { order in
-                            Button { sortOrder = order } label: {
+                            Button {
+                                sortOrder = order
+                            } label: {
                                 Label(order.label, systemImage: sortOrder == order ? "checkmark" : "")
                             }
                         }
@@ -626,7 +672,9 @@ struct ItemsView: View {
 
     @ViewBuilder
     private func contextMenuItems(for item: UnifiedItem) -> some View {
-        Button { shareItem(item) } label: {
+        Button {
+            shareItem(item)
+        } label: {
             Label("Share", systemImage: "square.and.arrow.up")
         }
         if case .knowledge(let ki) = item {
@@ -642,7 +690,10 @@ struct ItemsView: View {
         let text = "\(item.title)\n\(item.subtitle)\n\(item.createdAt.formatted())"
         let vc = UIActivityViewController(activityItems: [text], applicationActivities: nil)
         if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let root = scene.windows.first?.rootViewController { root.present(vc, animated: true) }
+            let root = scene.windows.first?.rootViewController
+        {
+            root.present(vc, animated: true)
+        }
     }
 
     private func exportAllFiles() {
@@ -668,7 +719,8 @@ struct ItemsView: View {
         while let fileURL = enumerator.nextObject() as? URL {
             guard fileURL.isFileURL else { continue }
             if let attrs = try? fileURL.resourceValues(forKeys: [.fileSizeKey]),
-               let size = attrs.fileSize {
+                let size = attrs.fileSize
+            {
                 totalBytes += Int64(size)
             }
         }
@@ -761,9 +813,10 @@ struct BoardView: View {
                         .containerRelativeFrame(.horizontal, count: 1, span: 1, spacing: 16)
                         .dropDestination(for: String.self) { dropped, _ in
                             guard let idStr = dropped.first,
-                                  let uuid = UUID(uuidString: idStr),
-                                  let task = tasks.first(where: { $0.id == uuid }),
-                                  task.statusRaw != status.rawValue else { return false }
+                                let uuid = UUID(uuidString: idStr),
+                                let task = tasks.first(where: { $0.id == uuid }),
+                                task.statusRaw != status.rawValue
+                            else { return false }
                             moveTask(task, to: status)
                             return true
                         } isTargeted: { targeted in
@@ -779,7 +832,9 @@ struct BoardView: View {
         }
         .navigationTitle("Board")
         .overlay(alignment: .bottomTrailing) {
-            Button { showNewTask = true } label: {
+            Button {
+                showNewTask = true
+            } label: {
                 Image(systemName: "plus")
                     .font(.title3).fontWeight(.semibold).foregroundStyle(.white)
                     .frame(width: 52, height: 52)
@@ -800,7 +855,9 @@ struct BoardView: View {
         let priority = TaskPriority(rawValue: task.priorityRaw ?? "medium") ?? .medium
         let barColor = priorityBarColor(priority)
 
-        return Button { editingTask = task } label: {
+        return Button {
+            editingTask = task
+        } label: {
             HStack(spacing: 0) {
                 // 4pt left color bar for priority — zero text cost, instant scan
                 RoundedRectangle(cornerRadius: 2)
@@ -841,21 +898,35 @@ struct BoardView: View {
         .buttonStyle(.plain)
         .draggable(task.id.uuidString)
         .contextMenu {
-            Button { editingTask = task } label: { Label("Edit", systemImage: "pencil") }
+            Button {
+                editingTask = task
+            } label: {
+                Label("Edit", systemImage: "pencil")
+            }
             ForEach(columns, id: \.rawValue) { col in
                 if col.rawValue != task.statusRaw {
-                    Button { moveTask(task, to: col) } label: {
+                    Button {
+                        moveTask(task, to: col)
+                    } label: {
                         Label("Move to \(statusLabel(col))", systemImage: "arrow.right")
                     }
                 }
             }
             Divider()
-            Button(role: .destructive) { deleteTask(task) } label: { Label("Delete", systemImage: "trash") }
+            Button(role: .destructive) {
+                deleteTask(task)
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
         }
         .swipeActions(edge: .leading) {
             ForEach(columns.prefix(2), id: \.rawValue) { col in
                 if col.rawValue != task.statusRaw {
-                    Button { moveTask(task, to: col) } label: { Text(statusLabel(col)) }.tint(statusColor(col))
+                    Button {
+                        moveTask(task, to: col)
+                    } label: {
+                        Text(statusLabel(col))
+                    }.tint(statusColor(col))
                 }
             }
         }
@@ -864,7 +935,9 @@ struct BoardView: View {
     // MARK: Knowledge Item Card
 
     private func knowledgeItemCard(_ item: KnowledgeItem) -> some View {
-        NavigationLink { KnowledgeDetailView(itemID: item.id) } label: {
+        NavigationLink {
+            KnowledgeDetailView(itemID: item.id)
+        } label: {
             HStack(spacing: 10) {
                 Image(systemName: item.type.icon).foregroundStyle(item.type.color).frame(width: 24)
                 VStack(alignment: .leading, spacing: 2) {
@@ -918,11 +991,21 @@ struct BoardView: View {
 private func statusLabel(_ s: TaskStatus) -> String { s.rawValue.capitalized }
 
 private func statusColor(_ s: TaskStatus) -> Color {
-    switch s { case .todo: .blue; case .inProgress: .orange; case .done: .green; case .cancelled: .gray }
+    switch s {
+    case .todo: .blue
+    case .inProgress: .orange
+    case .done: .green
+    case .cancelled: .gray
+    }
 }
 
 private func priorityBarColor(_ p: TaskPriority) -> Color {
-    switch p { case .critical: .red; case .high: .orange; case .medium: .blue; case .low: .clear }
+    switch p {
+    case .critical: .red
+    case .high: .orange
+    case .medium: .blue
+    case .low: .clear
+    }
 }
 
 private func relativeDueDate(_ date: Date) -> String {
@@ -958,7 +1041,8 @@ struct SignalsView: View {
                 VStack(spacing: 16) {
                     Image(systemName: "waveform.path.ecg").font(.largeTitle).foregroundStyle(.secondary)
                     Text("No signals").font(.headline)
-                    Text("Signals will appear here when the system detects patterns, risks, or opportunities.").font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    Text("Signals will appear here when the system detects patterns, risks, or opportunities.").font(.subheadline).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity).padding(.vertical, 48)
                 .listRowBackground(Color.clear)
@@ -966,10 +1050,22 @@ struct SignalsView: View {
                 ForEach(filteredSignals) { signal in
                     signalCard(signal)
                         .swipeActions {
-                            Button { acknowledgeSignal(signal) } label: { Label("Acknowledge", systemImage: "eye") }.tint(.blue)
-                            Button { archiveSignal(signal) } label: { Label("Archive", systemImage: "archivebox") }.tint(.gray)
+                            Button {
+                                acknowledgeSignal(signal)
+                            } label: {
+                                Label("Acknowledge", systemImage: "eye")
+                            }.tint(.blue)
+                            Button {
+                                archiveSignal(signal)
+                            } label: {
+                                Label("Archive", systemImage: "archivebox")
+                            }.tint(.gray)
                             if ["risk", "alert", "opportunity", "doubt"].contains(signal.type) {
-                                Button { transformToTask(signal) } label: { Label("Task", systemImage: "checklist") }.tint(.green)
+                                Button {
+                                    transformToTask(signal)
+                                } label: {
+                                    Label("Task", systemImage: "checklist")
+                                }.tint(.green)
                             }
                         }
                 }
@@ -1038,7 +1134,6 @@ struct SignalsView: View {
         AppLog.debug("project", "SignalsView.loadSignals done — total=\(all.count) filtered=\(signals.count)")
     }
 }
-
 
 // MARK: - Item Sort Order
 
@@ -1229,7 +1324,8 @@ struct ConfigProjectBrowserView: View {
     private func buildSettingsJSON() -> String {
         let snapshot = ConfigProjectService.buildSettingsSnapshot()
         guard let data = try? JSONSerialization.data(withJSONObject: snapshot, options: .prettyPrinted),
-              let json = String(data: data, encoding: .utf8) else { return "{}" }
+            let json = String(data: data, encoding: .utf8)
+        else { return "{}" }
         return json
     }
 
@@ -1315,7 +1411,8 @@ struct JSONTreeView: View {
     var body: some View {
         Group {
             if let data = json.data(using: .utf8),
-               let parsed = try? JSONSerialization.jsonObject(with: data) {
+                let parsed = try? JSONSerialization.jsonObject(with: data)
+            {
                 List {
                     JSONNodeView(key: nil, value: parsed)
                 }
@@ -1525,8 +1622,9 @@ struct ConfigSchemaViewer: View {
             // Output Schema — interactive tree
             Section {
                 if !schemaJSON.isEmpty,
-                   let data = schemaJSON.data(using: .utf8),
-                   let parsed = try? JSONSerialization.jsonObject(with: data) {
+                    let data = schemaJSON.data(using: .utf8),
+                    let parsed = try? JSONSerialization.jsonObject(with: data)
+                {
                     JSONNodeView(key: nil, value: parsed)
                 }
             } header: {
@@ -1556,9 +1654,11 @@ struct ConfigSchemaViewer: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             if let data = try? JSONEncoder().encode(framework.itemAnalysis.outputSchema),
-               let json = String(data: data, encoding: .utf8) {
+                let json = String(data: data, encoding: .utf8)
+            {
                 if let obj = try? JSONSerialization.jsonObject(with: data),
-                   let pretty = try? JSONSerialization.data(withJSONObject: obj, options: .prettyPrinted) {
+                    let pretty = try? JSONSerialization.data(withJSONObject: obj, options: .prettyPrinted)
+                {
                     schemaJSON = String(data: pretty, encoding: .utf8) ?? json
                 } else {
                     schemaJSON = json
@@ -1569,5 +1669,3 @@ struct ConfigSchemaViewer: View {
 }
 
 // MARK: - Document Scanner (VisionKit wrapper)
-
-

@@ -254,7 +254,20 @@ extension AudioImportService: FormatImporter {
         var warnings: [String] = []
         if metadata.duration <= 0 { warnings.append("Could not determine audio duration") }
 
-        return ImportResult(knowledgeItem: item, artifacts: ["source": url], warnings: warnings)
+        // Store the audio into the item's meeting directory so the transcription
+        // pipeline can find it. Without this, generic callers that invoke
+        // importFromURL (e.g. project drag-drop) would create an item with no
+        // audio file and transcription would fail. (KAN-518)
+        let artifactStore = FileArtifactStore()
+        do {
+            try await storeAudio(sourceURL: url, itemID: item.id, using: artifactStore)
+            item.audioFileRelativePath = AppFileConstants.audioFileName
+        } catch {
+            throw ImportError.conversionFailed(error)
+        }
+
+        let audioURL = artifactStore.audioFileURL(for: item.id)
+        return ImportResult(knowledgeItem: item, artifacts: ["audio": audioURL], warnings: warnings)
     }
 
     // canRead(url:) already exists

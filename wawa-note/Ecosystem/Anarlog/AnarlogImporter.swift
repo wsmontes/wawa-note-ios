@@ -111,17 +111,32 @@ struct AnarlogImporter: FormatImporter {
             )
         ).base64EncodedString()
 
-        // Persist transcript data if present
+        // Persist transcript data if present.
+        // Must use the canonical `Transcript` schema so search, export, embeddings,
+        // and the VFS can read it via readArtifact(Transcript.self, ...). (KAN-518)
         var warnings: [String] = []
         if let transcript = fm.transcript, !transcript.segments.isEmpty {
-            let anarlogTranscript = AnarlogTranscriptData(
-                segments: transcript.segments.map { seg in
-                    TranscriptSegmentData(speaker: seg.speaker, text: seg.text,
-                                          startMs: nil, endMs: nil)
-                }
+            let canonicalSegments: [TranscriptSegment] = transcript.segments.enumerated().map { idx, seg in
+                let speaker = seg.speaker.trimmingCharacters(in: .whitespaces)
+                let text = speaker.isEmpty ? seg.text : "\(speaker): \(seg.text)"
+                return TranscriptSegment(
+                    meetingId: item.id,
+                    startTime: Double(idx),
+                    endTime: nil,
+                    text: text,
+                    languageCode: nil,
+                    sourceEngineId: "anarlog_import"
+                )
+            }
+            let canonicalTranscript = Transcript(
+                meetingId: item.id,
+                languageCode: nil,
+                segments: canonicalSegments,
+                sourceEngineId: "anarlog_import"
             )
             do {
-                try fileStore.writeArtifact(anarlogTranscript, fileName: "transcript.json", meetingId: item.id)
+                try fileStore.writeArtifact(canonicalTranscript, fileName: "transcript.json", meetingId: item.id)
+                item.transcriptionEngineId = "anarlog_import"
             } catch {
                 warnings.append("Failed to persist transcript: \(error.localizedDescription)")
                 logger.warning("Failed to persist transcript for \(item.id): \(error)")
@@ -168,15 +183,3 @@ private struct AnarlogImportProvenance: Codable {
     let importedAt: Date
 }
 
-// MARK: - Transcript data for FileArtifactStore
-
-private struct AnarlogTranscriptData: Codable {
-    let segments: [TranscriptSegmentData]
-}
-
-private struct TranscriptSegmentData: Codable {
-    let speaker: String
-    let text: String
-    let startMs: Double?
-    let endMs: Double?
-}
