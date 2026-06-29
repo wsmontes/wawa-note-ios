@@ -1,7 +1,7 @@
-import SwiftData
-import OSLog
 import AVFoundation
 import Combine
+import OSLog
+import SwiftData
 import UIKit
 // Related JIRA: KAN-5, KAN-14, KAN-17, KAN-77
 
@@ -42,7 +42,7 @@ final class RecordingCoordinator: ObservableObject {
 
     private var recordingStartDate: Date?
     private var pausedDuration: TimeInterval = 0
-    private var wasUserPaused = false   // true when pauseRecording() was called by the user
+    private var wasUserPaused = false  // true when pauseRecording() was called by the user
     private var pauseStartDate: Date?
     private var recordingTitle: String = ""
     private var observationTimer: Timer?
@@ -70,13 +70,16 @@ final class RecordingCoordinator: ObservableObject {
 
     private func updateSampleRateBadge() {
         let rate = captureService.captureSampleRate
-        guard rate > 0 else { sampleRateBadge = ""; return }
+        guard rate > 0 else {
+            sampleRateBadge = ""
+            return
+        }
         let khz = rate / 1000
         let quality: String
         switch rate {
-        case ..<12000:  quality = "LQ"       // Bluetooth HFP 8kHz
-        case ..<24000:  quality = "MQ"       // 16-22kHz
-        default:        quality = "HQ"       // 44.1-48kHz built-in/USB
+        case ..<12000: quality = "LQ"  // Bluetooth HFP 8kHz
+        case ..<24000: quality = "MQ"  // 16-22kHz
+        default: quality = "HQ"  // 44.1-48kHz built-in/USB
         }
         sampleRateBadge = "\(String(format: "%.1f", khz)) kHz · \(quality)"
     }
@@ -215,7 +218,10 @@ final class RecordingCoordinator: ObservableObject {
         let item = KnowledgeItem(type: .audio, title: recordingTitle, status: .recording)
         item.scheduledDate = scheduledDate
         item.calendarEventIdentifier = calendarEventIdentifier
-        if let projectID { item.projectID = projectID; item.inboxDate = nil }
+        if let projectID {
+            item.projectID = projectID
+            item.inboxDate = nil
+        }
         context.insert(item)
 
         do {
@@ -313,15 +319,7 @@ final class RecordingCoordinator: ObservableObject {
             do {
                 if forceBuiltIn {
                     AppLog.audio.info("Pre-flight attempt \(attempt + 1): forcing built-in mic")
-                    // Deactivate and reconfigure directly with built-in mic
-                    try? captureService.sessionManager.deactivate()
-                    try? await Task.sleep(nanoseconds: 150_000_000)
-                    try captureService.sessionManager.configureForRecording()
-                    if let builtIn = (captureService.sessionManager.session.availableInputs ?? [])
-                        .first(where: { $0.portType == .builtInMic }) {
-                        try? captureService.sessionManager.session.setPreferredInput(builtIn)
-                        AppLog.audio.info("Pre-flight: forced built-in mic — \(builtIn.portName)")
-                    }
+                    try? await captureService.resetAudioSessionToBuiltInMic()
                 }
 
                 try await captureService.startRecording(meetingId: meetingId)
@@ -391,13 +389,18 @@ final class RecordingCoordinator: ObservableObject {
         title: String,
         date: Date,
         duration: TimeInterval,
-        projectID: UUID? = nil
+        projectID: UUID? = nil,
+        languageCode: String? = nil
     ) -> KnowledgeItem? {
         let context = modelContext
         let item = KnowledgeItem(type: .audio, title: title, createdAt: date, updatedAt: date, status: .recorded, durationSeconds: duration)
         item.audioFileRelativePath = AppFileConstants.audioFileName
         item.isImported = true
-        if let pid = projectID { item.projectID = pid; item.inboxDate = nil }
+        item.languageCode = languageCode
+        if let pid = projectID {
+            item.projectID = pid
+            item.inboxDate = nil
+        }
         context.insert(item)
         try? context.save()
         return item
@@ -446,7 +449,8 @@ final class RecordingCoordinator: ObservableObject {
         wasUserPaused = false
         guard state != .idle, state != .stopped else { return }
         let itemId = savedItemId
-        AppLog.event("audio", "Stopping recording — elapsed=\(elapsedTimeFormatted) pausedDur=\(Int(pausedDuration))s itemID=\(itemId?.uuidString.prefix(8) ?? "nil")")
+        AppLog.event(
+            "audio", "Stopping recording — elapsed=\(elapsedTimeFormatted) pausedDur=\(Int(pausedDuration))s itemID=\(itemId?.uuidString.prefix(8) ?? "nil")")
         // Capture audio metadata BEFORE stopRecording() deactivates the session.
         let capturedSampleRate = captureService.captureSampleRate
         let capturedInputPortType = captureService.captureInputPortType
@@ -653,7 +657,8 @@ final class RecordingCoordinator: ObservableObject {
             }
 
             self.state = .paused
-            self.errorMessage = self.captureService.audioInterruptionReason
+            self.errorMessage =
+                self.captureService.audioInterruptionReason
                 ?? "Could not resume recording. Try disconnecting Bluetooth or use iPhone mic."
             self.notifyStatusChange()
         }
@@ -754,7 +759,7 @@ final class RecordingCoordinator: ObservableObject {
     private func isM4ABroken(at url: URL) -> Bool {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
         defer { try? handle.close() }
-        let data = handle.readData(ofLength: 4096) // Read enough to see atom structure
+        let data = handle.readData(ofLength: 4096)  // Read enough to see atom structure
         // Check for moov atom presence
         let moovRange = data.range(of: Data("moov".utf8))
         return moovRange == nil
@@ -788,9 +793,10 @@ final class RecordingCoordinator: ObservableObject {
             // Also recover recorded items with broken M4A (concatenation was interrupted).
             // These items have status .recorded and WAV segments exist, but audio.m4a is
             // invalid (missing moov atom). Re-concatenating from WAV segments fixes them.
-            let recordedDescriptor = FetchDescriptor<KnowledgeItem>(predicate: #Predicate {
-                $0.statusRaw == "recorded" && $0.audioFileRelativePath != nil
-            })
+            let recordedDescriptor = FetchDescriptor<KnowledgeItem>(
+                predicate: #Predicate {
+                    $0.statusRaw == "recorded" && $0.audioFileRelativePath != nil
+                })
             let recordedItems = (try? bgContext.fetch(recordedDescriptor)) ?? []
             var repairedIds: [UUID] = []
             for item in recordedItems {
@@ -803,13 +809,16 @@ final class RecordingCoordinator: ObservableObject {
                     // Use Task because concatenate() is async but cleanupOrphanedRecordings is sync.
                     if let manifest = try? store.readRecordingManifest(for: item.id) {
                         let itemId = item.id
-                        let capturedQueue = processingQueue
-                        Task { @MainActor in
+                        Task { @MainActor [weak self] in
                             let ok = await AudioSegmentConcatenator.concatenate(manifest: manifest, meetingId: itemId)
                             if ok {
                                 AppLog.audio.info("Repaired broken M4A for item \(itemId.uuidString.prefix(8))")
-                                // Re-enqueue for pipeline processing
-                                capturedQueue?.enqueue(itemID: itemId, trigger: .backgroundBackfill)
+                                // Access processingQueue at execution time, not capture time (it's nil during init)
+                                if let queue = self?.processingQueue {
+                                    queue.enqueue(itemID: itemId, trigger: .backgroundBackfill)
+                                } else {
+                                    AppLog.audio.warning("Cannot re-enqueue repaired item — processingQueue is nil")
+                                }
                             } else {
                                 AppLog.audio.error("Failed to repair broken M4A for item \(itemId.uuidString.prefix(8))")
                             }
@@ -1026,15 +1035,17 @@ final class RecordingCoordinator: ObservableObject {
     private func hasValidAudioData(meetingId: UUID) -> Bool {
         let store = FileArtifactStore()
         guard store.recordingManifestExists(for: meetingId),
-              let manifest = try? store.readRecordingManifest(for: meetingId) else {
+            let manifest = try? store.readRecordingManifest(for: meetingId)
+        else {
             // Legacy: check audio.m4a directly
             return store.audioFileExists(for: meetingId)
         }
         for seg in manifest.segments {
             let url = store.segmentURL(for: meetingId, fileName: seg.fileName)
             if FileManager.default.fileExists(atPath: url.path),
-               let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64,
-               size > 0 {
+                let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64,
+                size > 0
+            {
                 return true
             }
         }
@@ -1068,7 +1079,7 @@ final class RecordingCoordinator: ObservableObject {
             item.audioFileRelativePath = AppFileConstants.audioFileName
             // Persist audio capture metadata for UI display and diagnostics
             item.audioSampleRate = sampleRate > 0 ? sampleRate : nil
-            item.audioChannelCount = 1 // Always mono in current implementation
+            item.audioChannelCount = 1  // Always mono in current implementation
             item.audioInputPortType = inputPortType
             item.audioInputPortName = inputPortName.isEmpty ? nil : inputPortName
             AppLog.audio.info("Item finalized: \(item.id) hasAudio=true duration=\(effectiveDuration)s sampleRate=\(Int(sampleRate))Hz input=\(inputPortType)")
