@@ -1,8 +1,8 @@
+import AVFoundation
 import Foundation
-import Speech
 import NaturalLanguage
 import OSLog
-import AVFoundation
+import Speech
 
 // MARK: - Transcription States
 
@@ -70,17 +70,19 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
     let id = "apple-speech"
     let displayName = "Apple Speech"
     /// Set to true when the cloud fallback path succeeded (on-device was rejected).
-    var usedCloudFallback = false
+    private(set) var usedCloudFallback = false
 
     static let maxLocalDuration: TimeInterval = 50
-    static let maxFileDuration: TimeInterval = 3600 // 1 hour max
+    static let maxFileDuration: TimeInterval = 3600  // 1 hour max
 
     private let candidateLocales: [Locale]
-    private let chunker: AudioChunker
+    private let chunker: VADChunker
     private var activeRecognitionTask: SFSpeechRecognitionTask?
     private let fileStore = FileArtifactStore()
-
-    private static let chunkOverlap: TimeInterval = 1.5
+    /// Cached cloud-allowed flag — read once at init to avoid
+    /// inconsistent UserDefaults reads across checkAvailability,
+    /// transcribeDirect, and transcribeLive.
+    private let allowCloud: Bool
 
     var onProgress: ((TranscriptionProgress) -> Void)?
     var onCheckpoint: ((Transcript, Int) -> Void)?
@@ -122,7 +124,8 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         let deviceLang = Locale.current.language.languageCode?.identifier ?? "en"
         let deviceLocale = Locale(identifier: deviceLang)
         if !locales.contains(where: { $0.identifier == deviceLocale.identifier }),
-           let _ = SFSpeechRecognizer(locale: deviceLocale) {
+            SFSpeechRecognizer(locale: deviceLocale) != nil
+        {
             locales.insert(deviceLocale, at: max(0, locales.count - 1))
         }
 
@@ -143,7 +146,8 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
         self.candidateLocales = locales
         let bestLabel = locales.first?.identifier ?? "unknown"
-        self.chunker = AudioChunker(chunkDuration: Self.maxLocalDuration, overlap: Self.chunkOverlap)
+        self.chunker = VADChunker(maxChunkDuration: Self.maxLocalDuration)
+        self.allowCloud = TranscriptionSettings.shared.allowCloud
         AppLog.transcription.info("AppleSpeech ready — best=\(bestLabel) locales=\(locales.map(\.identifier).prefix(5).joined(separator: ", "))")
     }
 
@@ -163,7 +167,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
             let isAvailable = recognizer.isAvailable
             let supportsOnDevice = recognizer.supportsOnDeviceRecognition
-            let cloudAllowed = UserDefaults.standard.bool(forKey: "transcription_allow_cloud")
+            let cloudAllowed = TranscriptionSettings.shared.allowCloud
 
             if isAvailable {
                 if !cloudAllowed && !supportsOnDevice {
@@ -252,15 +256,13 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             return try await transcribeDirect(url: audioFileURL, recognizer: recognizer, meetingId: meetingId)
         }
 
-        // Chunking for long files (>50s)
-        let total = Int(ceil(duration / chunker.chunkDuration))
-        chunker.onProgress = { [weak self] completed, total in
-            self?.onProgress?(.chunking(completed: completed, total: total))
-        }
-        onProgress?(.chunking(completed: 0, total: total))
+        // Chunking for long files (>50s).
+        // VADChunker detects speech boundaries dynamically — total chunk count
+        // is determined by actual speech segments, not a fixed duration window.
+        onProgress?(.chunking(completed: 0, total: 1))
 
-        let chunks = try await chunker.splitAudio(url: audioFileURL)
-        defer { chunker.cleanup() }
+        let chunks = try await chunker.chunkAudio(url: audioFileURL)
+        defer { chunker.cleanup(chunks: chunks) }
 
         var previousText = ""
         var allSegments: [TranscriptSegment] = []
@@ -284,17 +286,18 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                 var text = segment.text
                 if i > 0 { text = deduplicateStart(text, against: previousText) }
 
-                allSegments.append(TranscriptSegment(
-                    meetingId: segment.meetingId,
-                    startTime: adjustedStart,
-                    endTime: adjustedEnd,
-                    speakerId: segment.speakerId,
-                    text: text,
-                    originalText: segment.originalText,
-                    confidence: segment.confidence,
-                    languageCode: segment.languageCode,
-                    sourceEngineId: segment.sourceEngineId
-                ))
+                allSegments.append(
+                    TranscriptSegment(
+                        meetingId: segment.meetingId,
+                        startTime: adjustedStart,
+                        endTime: adjustedEnd,
+                        speakerId: segment.speakerId,
+                        text: text,
+                        originalText: segment.originalText,
+                        confidence: segment.confidence,
+                        languageCode: segment.languageCode,
+                        sourceEngineId: segment.sourceEngineId
+                    ))
             }
             previousText = chunkText
 
@@ -331,7 +334,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         request.addsPunctuation = true
 
         // On-device recognition: requires model download. Disable for testing.
-        let forceOnDevice = !UserDefaults.standard.bool(forKey: "transcription_allow_cloud")
+        let forceOnDevice = !TranscriptionSettings.shared.allowCloud
         if forceOnDevice {
             guard recognizer.supportsOnDeviceRecognition else {
                 AppLog.transcription.error("On-device model not available for \(recognizer.locale.identifier)")
@@ -339,6 +342,10 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             }
         }
         request.requiresOnDeviceRecognition = forceOnDevice
+        // Track cloud usage for accurate engine ID reporting.
+        // When cloud is allowed (forceOnDevice=false), audio goes to Apple Cloud servers
+        // even though the SFSpeechRecognizer is the same API.
+        usedCloudFallback = !forceOnDevice
 
         // Domain-specific vocabulary for better accuracy
         if let contextTerms = buildContextualTerms() {
@@ -354,9 +361,12 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             // iOS 17/18 on-device bug: SFSpeechRecognizer discards previous
             // transcription after pauses (~1.5-2s), treating pause boundaries as
             // utterance resets. The final result only contains the LAST utterance.
-            // Workaround: enable partial results, detect resets by watching for
-            // the formattedString to shrink, and accumulate segments across resets.
+            // Workaround: hybrid approach — shrink detection catches resets
+            // (committing accumulated segments), index-based tracking handles
+            // normal growth within an utterance.
             var accumulatedSegments: [SFTranscriptionSegment] = []
+            var committedSegments: [SFTranscriptionSegment] = []  // saved across resets
+            var lastSeenSegmentCount = 0
             var previousResult: SFSpeechRecognitionResult?
 
             // Timeout: SFSpeechRecognizer may never call the completion handler
@@ -378,9 +388,18 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                     let nsError = error as NSError
                     AppLog.transcription.error("On-device recognition failed: \(nsError.domain)/\(nsError.code) — \(error.localizedDescription)")
 
-                    // kAFAssistantErrorDomain Code=1101 = local recognizer rejected audio format.
-                    // Retry once with cloud recognition if it was forced on-device.
-                    if nsError.domain.contains("AssistantError") && forceOnDevice {
+                    // When user said NO cloud: throw immediately for ANY error.
+                    // Never silently fall back — that would violate the user's privacy choice.
+                    if forceOnDevice {
+                        hasResumed = true
+                        continuation.resume(throwing: TranscriptionError.onDeviceUnavailable)
+                        return
+                    }
+
+                    // When user ALLOWED cloud: fall back for AssistantErrors (1101/1107)
+                    // kAFAssistantErrorDomain 1101 = audio format rejected
+                    // kAFAssistantErrorDomain 1107 = model not downloaded for locale
+                    if nsError.domain.contains("AssistantError") {
                         hasResumed = true
                         AppLog.transcription.warning("Local recognizer rejected audio, falling back to cloud recognition")
                         let cloudRequest = SFSpeechURLRecognitionRequest(url: recognitionURL)
@@ -390,19 +409,37 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                         if let ctx = self.buildContextualTerms() {
                             cloudRequest.contextualStrings = ctx
                         }
+
                         var cloudHasResumed = false
-                        let cloudTask = recognizer.recognitionTask(with: cloudRequest) { cloudResult, cloudError in
+                        var cloudTask: SFSpeechRecognitionTask?
+                        let cloudTimeout = DispatchWorkItem {
+                            guard !cloudHasResumed else { return }
+                            cloudHasResumed = true
+                            cloudTask?.cancel()
+                            continuation.resume(throwing: TranscriptionError.recognitionFailed("Cloud recognition timed out after 120s"))
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 120, execute: cloudTimeout)
+
+                        cloudTask = recognizer.recognitionTask(with: cloudRequest) { cloudResult, cloudError in
                             guard !cloudHasResumed else { return }
                             if let cloudError {
                                 cloudHasResumed = true
+                                cloudTimeout.cancel()
                                 let cloudNSError = cloudError as NSError
                                 AppLog.transcription.error("Cloud fallback also failed: \(cloudNSError.domain)/\(cloudNSError.code)")
-                                continuation.resume(throwing: TranscriptionError.recognitionFailed("\(cloudNSError.domain)/\(cloudNSError.code): \(cloudError.localizedDescription)"))
+                                continuation.resume(
+                                    throwing: TranscriptionError.recognitionFailed(
+                                        "\(cloudNSError.domain)/\(cloudNSError.code): \(cloudError.localizedDescription)"))
                                 return
                             }
                             guard let cloudResult = cloudResult, cloudResult.isFinal else { return }
                             cloudHasResumed = true
+                            cloudTimeout.cancel()
                             self.usedCloudFallback = true
+                            NotificationCenter.default.post(
+                                name: .transcriptEngineDidChange,
+                                object: nil,
+                                userInfo: ["engineId": "apple-cloud", "label": "Apple Cloud"])
                             let transcript = self.buildTranscript(from: cloudResult, recognizer: recognizer, meetingId: meetingId)
                             AppLog.transcription.info("Cloud fallback succeeded: \(transcript.segments.count) segments")
                             continuation.resume(returning: transcript)
@@ -411,36 +448,54 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                         return
                     }
 
+                    // Other errors: surface to user
                     hasResumed = true
-                    timeoutWorkItem.cancel()
                     continuation.resume(throwing: TranscriptionError.recognitionFailed("\(nsError.domain)/\(nsError.code): \(error.localizedDescription)"))
                     return
                 }
 
                 guard let result = result else { return }
 
-                // ── Accumulation workaround for iOS 17/18 reset bug ──────
-                // When SFSpeechRecognizer resets at an utterance boundary,
-                // bestTranscription.formattedString shrinks (previous text
-                // discarded). Save the previous utterance before it's lost.
-                if let prev = previousResult {
-                    let prevLen = prev.bestTranscription.formattedString.count
-                    let currLen = result.bestTranscription.formattedString.count
-                    if currLen < prevLen {
-                        accumulatedSegments.append(contentsOf: prev.bestTranscription.segments)
-                    }
+                let currentSegments = result.bestTranscription.segments
+
+                // ── Hybrid reset detection for iOS 17/18 bug ──────
+                // SFSpeechRecognizer discards prior utterances at pause boundaries.
+                //
+                // Reset detection: when formattedString shrinks vs the previous
+                // result, the recognizer has reset. Commit accumulated segments
+                // before they're lost, then restart tracking for the new utterance.
+                //
+                // Index-based accumulation: within a single utterance, append
+                // genuinely new segments by tracking the highest seen index.
+                if let prev = previousResult,
+                    result.bestTranscription.formattedString.count < prev.bestTranscription.formattedString.count
+                {
+                    committedSegments.append(contentsOf: accumulatedSegments)
+                    accumulatedSegments = []
+                    lastSeenSegmentCount = 0
                 }
+
+                if currentSegments.count > lastSeenSegmentCount {
+                    let newSegments = currentSegments[lastSeenSegmentCount...]
+                    accumulatedSegments.append(contentsOf: newSegments)
+                    lastSeenSegmentCount = currentSegments.count
+                }
+
                 previousResult = result
 
                 guard result.isFinal else { return }
 
-                // Save the final utterance
-                accumulatedSegments.append(contentsOf: result.bestTranscription.segments)
+                var allSegments = committedSegments + accumulatedSegments
+                if allSegments.isEmpty {
+                    allSegments = currentSegments
+                }
 
                 hasResumed = true
                 timeoutWorkItem.cancel()
-                let transcript = self.buildTranscript(from: accumulatedSegments, recognizer: recognizer, meetingId: meetingId)
-                AppLog.transcription.info("On-device complete: \(transcript.segments.count) segments, lang=\(transcript.languageCode ?? recognizer.locale.identifier), locale=\(recognizer.locale.identifier)")
+                let transcript = self.buildTranscript(from: allSegments, recognizer: recognizer, meetingId: meetingId)
+                AppLog.transcription.info(
+                    "On-device complete: \(transcript.segments.count) segments, lang=\(transcript.languageCode ?? recognizer.locale.identifier), locale=\(recognizer.locale.identifier)"
+                )
                 continuation.resume(returning: transcript)
             }
             self.activeRecognitionTask = recognitionTask
@@ -512,19 +567,23 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         let inputFormat = inputFile.processingFormat
 
         // Target: 16kHz 16-bit mono PCM
-        guard let outputFormat = AVAudioFormat(commonFormat: .pcmFormatInt16,
-                                                sampleRate: 16_000,
-                                                channels: 1,
-                                                interleaved: false) else {
+        guard
+            let outputFormat = AVAudioFormat(
+                commonFormat: .pcmFormatInt16,
+                sampleRate: 16_000,
+                channels: 1,
+                interleaved: false)
+        else {
             throw TranscriptionError.recognitionFailed("Cannot create output format")
         }
 
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("pcm_\(UUID().uuidString).wav")
-        let outputFile = try AVAudioFile(forWriting: tempURL,
-                                           settings: outputFormat.settings,
-                                           commonFormat: .pcmFormatInt16,
-                                           interleaved: false)
+        let outputFile = try AVAudioFile(
+            forWriting: tempURL,
+            settings: outputFormat.settings,
+            commonFormat: .pcmFormatInt16,
+            interleaved: false)
 
         guard let converter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
             throw TranscriptionError.recognitionFailed("Cannot create converter")
@@ -594,7 +653,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                     let request = SFSpeechURLRecognitionRequest(url: audioFileURL)
                     request.shouldReportPartialResults = true
                     request.addsPunctuation = true
-                    request.requiresOnDeviceRecognition = !UserDefaults.standard.bool(forKey: "transcription_allow_cloud")
+                    request.requiresOnDeviceRecognition = !TranscriptionSettings.shared.allowCloud
                     if let terms = contextualTerms, !terms.isEmpty {
                         request.contextualStrings = terms
                     }
@@ -702,8 +761,9 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         let recognizer = NLLanguageRecognizer()
         recognizer.processString(text)
         guard let language = recognizer.dominantLanguage,
-              let confidence = recognizer.languageHypotheses(withMaximum: 1)[language],
-              confidence > Self.languageConfidenceThreshold else {
+            let confidence = recognizer.languageHypotheses(withMaximum: 1)[language],
+            confidence > Self.languageConfidenceThreshold
+        else {
             return nil
         }
         return language.rawValue
