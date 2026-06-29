@@ -1,9 +1,9 @@
 import Foundation
+import JavaScriptCore
+import Network
+import PDFKit
 import SwiftData
 import UIKit
-import Network
-import JavaScriptCore
-import PDFKit
 
 // MARK: - Pipeline Agent Templates
 
@@ -16,65 +16,65 @@ enum PipelineTemplate {
     /// The standard content processing pipeline: Extract → Analyze → Ingest.
     /// Uses the virtual filesystem shell (run_command) for all operations.
     static let standard: String = """
-    You are a content analysis agent in Wawa Note. Process the item described in the first message.
+        You are a content analysis agent in Wawa Note. Process the item described in the first message.
 
-    ## TOOLS
+        ## TOOLS
 
-    You have three tools:
-    - run_command: shell commands for exploration (extract, ls, cat, grep, echo)
-    - set_title: rename the item after reading content (call BEFORE analysis)
-    - write_analysis: save your structured analysis
+        You have three tools:
+        - run_command: shell commands for exploration (extract, ls, cat, grep, echo)
+        - set_title: rename the item after reading content (call BEFORE analysis)
+        - write_analysis: save your structured analysis
 
-    ## MANDATORY STEPS
+        ## MANDATORY STEPS
 
-    ### Step 1: EXTRACT (always first)
-    Use run_command: `extract <item-id>`
-    If empty or fails, report and stop.
+        ### Step 1: EXTRACT (always first)
+        Use run_command: `extract <item-id>`
+        If empty or fails, report and stop.
 
-    ### Step 2: TITLE (after reading)
-    Read the extracted content. Generate a concise, descriptive title
-    (5-10 words) that captures the essence. Call set_title with the title.
-    Better than generic names like "Recording 2026-06-15".
+        ### Step 2: TITLE (after reading)
+        Read the extracted content. Generate a concise, descriptive title
+        (5-10 words) that captures the essence. Call set_title with the title.
+        Better than generic names like "Recording 2026-06-15".
 
-    ### Step 3: ANALYZE (adaptive)
-    Review the content and decide which sections are relevant. Not all content needs the same sections — a casual note and a formal meeting have different needs.
+        ### Step 3: ANALYZE (adaptive)
+        Review the content and decide which sections are relevant. Not all content needs the same sections — a casual note and a formal meeting have different needs.
 
-    Produce a JSON object with sections YOU choose. Use write_analysis:
-    - itemId: the item's UUID
-    - analysisJson: a JSON object where each key is a section name and each value is the section content
+        Produce a JSON object with sections YOU choose. Use write_analysis:
+        - itemId: the item's UUID
+        - analysisJson: a JSON object where each key is a section name and each value is the section content
 
-    ## SECTION GUIDELINES
+        ## SECTION GUIDELINES
 
-    Choose sections that MATCH the content. Common examples:
-    - "summary": always include — one paragraph capturing the essence
-    - "key_points": main takeaways as a list of strings
-    - "decisions": [{"decision": "...", "context": "..."}] — only if decisions were made
-    - "action_items": [{"task": "...", "owner": "...", "deadline": "..."}] — only if tasks assigned
-    - "risks": [{"risk": "...", "mitigation": "..."}] — only if risks discussed
-    - "open_questions": ["..."] — only if questions raised
-    - "people_mentioned": ["name"] — only if people named
-    - "topics_discussed": ["topic"] — list of subjects
-    - "sentiment": "positive/neutral/negative" — overall tone
-    - "custom_sections": {} — any other relevant groupings you identify
+        Choose sections that MATCH the content. Common examples:
+        - "summary": always include — one paragraph capturing the essence
+        - "key_points": main takeaways as a list of strings
+        - "decisions": [{"decision": "...", "context": "..."}] — only if decisions were made
+        - "action_items": [{"task": "...", "owner": "...", "deadline": "..."}] — only if tasks assigned
+        - "risks": [{"risk": "...", "mitigation": "..."}] — only if risks discussed
+        - "open_questions": ["..."] — only if questions raised
+        - "people_mentioned": ["name"] — only if people named
+        - "topics_discussed": ["topic"] — list of subjects
+        - "sentiment": "positive/neutral/negative" — overall tone
+        - "custom_sections": {} — any other relevant groupings you identify
 
-    ### Step 4: SPEAKER RESOLUTION (when transcript has speakers)
-    After write_analysis, identify speakers mentioned in the transcript.
-    Use `person "Name"` to cross-reference each speaker across contacts,
-    calendar, transcripts, and memory. Compare results carefully — homonyms
-    are common, disambiguate by context (company, recent meetings, other speakers).
-    When uncertain, add to pending_confirmations with evidence for each candidate.
-    Output via write_speakers — the schema is strictly validated. Retry until it passes.
+        ### Step 4: SPEAKER RESOLUTION (when transcript has speakers)
+        After write_analysis, identify speakers mentioned in the transcript.
+        Use `person "Name"` to cross-reference each speaker across contacts,
+        calendar, transcripts, and memory. Compare results carefully — homonyms
+        are common, disambiguate by context (company, recent meetings, other speakers).
+        When uncertain, add to pending_confirmations with evidence for each candidate.
+        Output via write_speakers — the schema is strictly validated. Retry until it passes.
 
-    ## RULES
-    - ALWAYS start with extract
-    - ALWAYS use write_analysis — never just describe results
-    - "summary" is the only REQUIRED section. All others are OPTIONAL.
-    - ONLY include sections that have meaningful content. Skip empty ones entirely (don't use null).
-    - If content quality is too low to analyze (blurry scan, inaudible audio, garbled OCR), produce a minimal analysis with "summary" explaining why and stop. Do NOT loop retrying on unanalyzable content.
-    - You may add custom sections beyond the examples above if the content warrants it.
-    - Be specific — reference what was actually said
-    - Use snake_case for section keys
-    """
+        ## RULES
+        - ALWAYS start with extract
+        - ALWAYS use write_analysis — never just describe results
+        - "summary" is the only REQUIRED section. All others are OPTIONAL.
+        - ONLY include sections that have meaningful content. Skip empty ones entirely (don't use null).
+        - If content quality is too low to analyze (blurry scan, inaudible audio, garbled OCR), produce a minimal analysis with "summary" explaining why and stop. Do NOT loop retrying on unanalyzable content.
+        - You may add custom sections beyond the examples above if the content warrants it.
+        - Be specific — reference what was actually said
+        - Use snake_case for section keys
+        """
 
     /// Build a framework-aware prompt that includes the project's schema sections.
     static func forFramework(_ framework: ProjectFramework) -> String {
@@ -83,39 +83,39 @@ enum PipelineTemplate {
         let desc = framework.description
 
         return """
-        You are a content analysis agent in Wawa Note. Process the item described in the first message.
+            You are a content analysis agent in Wawa Note. Process the item described in the first message.
 
-        ## FRAMEWORK: \(framework.name)
-        \(desc)
+            ## FRAMEWORK: \(framework.name)
+            \(desc)
 
-        ## TOOLS
-        - run_command: extract, ls, cat, grep, echo
-        - write_analysis: save your structured analysis
+            ## TOOLS
+            - run_command: extract, ls, cat, grep, echo
+            - write_analysis: save your structured analysis
 
-        ## STEPS
-        1. EXTRACT: use `extract <item-id>`
-        2. ANALYZE: decide which sections apply, produce JSON, call write_analysis
+            ## STEPS
+            1. EXTRACT: use `extract <item-id>`
+            2. ANALYZE: decide which sections apply, produce JSON, call write_analysis
 
-        ## AVAILABLE SECTIONS (choose which apply):
-        \(sectionList)
+            ## AVAILABLE SECTIONS (choose which apply):
+            \(sectionList)
 
-        ## RULES
-        - ALWAYS start with extract
-        - Include a "summary" section with a one-paragraph synthesis
-        - ONLY include sections that have meaningful content from the source
-        - Skip sections where nothing relevant was found — omit them entirely
-        - You may add up to 3 custom sections beyond the available list if the content warrants it
-        - Be specific and reference what was actually said
-        - Use the exact section key names from the available list
-        """
+            ## RULES
+            - ALWAYS start with extract
+            - Include a "summary" section with a one-paragraph synthesis
+            - ONLY include sections that have meaningful content from the source
+            - Skip sections where nothing relevant was found — omit them entirely
+            - You may add up to 3 custom sections beyond the available list if the content warrants it
+            - Be specific and reference what was actually said
+            - Use the exact section key names from the available list
+            """
     }
 
     /// Lightweight pipeline: extract and analyze only. No project ingestion.
     static let extractAndAnalyze: String = """
-    You are a content processing agent. Extract text from the given item and analyze it. \
-    Do NOT perform project ingestion (no tasks, edges, or annotations). \
-    Output only the analysis summary. Follow the same cost and error rules as the standard pipeline.
-    """
+        You are a content processing agent. Extract text from the given item and analyze it. \
+        Do NOT perform project ingestion (no tasks, edges, or annotations). \
+        Output only the analysis summary. Follow the same cost and error rules as the standard pipeline.
+        """
 }
 
 // MARK: - Content Pipeline Service
@@ -153,20 +153,20 @@ final class ContentPipelineService: ObservableObject {
             .map { "\($0.name) — \($0.displayName): \($0.description)" }
             .joined(separator: "\n")
         return """
-        ## ANALYSIS SETUP
+            ## ANALYSIS SETUP
 
-        Read the content, then decide your approach:
+            Read the content, then decide your approach:
 
-        1. If a schema below clearly matches the content, call `select_schema <name>`:
-        \(schemaList)
+            1. If a schema below clearly matches the content, call `select_schema <name>`:
+            \(schemaList)
 
-        2. If a skill below provides useful guidance, call `select_skill <name>`:
-        \(skillList)
+            2. If a skill below provides useful guidance, call `select_skill <name>`:
+            \(skillList)
 
-        If nothing fits well, skip both and proceed directly to write_analysis.
-        You can define your own structure based on what the content actually needs.
-        The UI will adapt to whatever fields you produce.
-        """
+            If nothing fits well, skip both and proceed directly to write_analysis.
+            You can define your own structure based on what the content actually needs.
+            The UI will adapt to whatever fields you produce.
+            """
     }
 
     /// Process an item through the pipeline using an autonomous agent.
@@ -219,55 +219,68 @@ final class ContentPipelineService: ObservableObject {
             let extractionSvc = ContentExtractionService(modelContext: modelContext, fileStore: fileStore)
 
             if AutomationSettings.shared.autoTranscribe {
-                if item.type == .audio, item.transcriptionEngineId == nil {
-                    pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
+                if item.type == .audio, extractionSvc.needsTranscription(for: item) {
+                    pipelineStatus = PipelineProgress(
+                        itemId: itemID, itemTitle: item.title,
                         itemType: item.type.rawValue, phase: "transcribing",
                         currentTool: nil, toolSummary: nil, toolLog: [], events: [], thinkingActive: false)
                     // Update item status so KnowledgeDetailView can show the right indicator
                     // without guessing. This is the authoritative state transition.
                     item.status = .transcribing
-                    do { try modelContext.save() }
-                    catch { AppLog.provider.error("ContentPipeline: save failed (→transcribing): \(error.localizedDescription)") }
-                    NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
+                    do { try modelContext.save() } catch {
+                        AppLog.provider.error("ContentPipeline: save failed (→transcribing): \(error.localizedDescription)")
+                    }
+                    NotificationCenter.default.post(
+                        name: .contentPipelineStageChanged, object: itemID.uuidString,
                         userInfo: ["stage": "transcribing"])
                     if let transcribedText = await extractionSvc.extractTextFromAudio(item) {
                         AppLog.provider.info("ContentPipeline: pre-transcription complete for item \(itemID) — \(transcribedText.count) chars")
                         // Set pendingReview so user can verify transcription before analysis
                         if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
                             fresh.status = .pendingReview
-                            do { try modelContext.save() }
-                            catch { AppLog.provider.error("ContentPipeline: save failed (transcribe→pendingReview): \(error.localizedDescription)") }
+                            do { try modelContext.save() } catch {
+                                AppLog.provider.error("ContentPipeline: save failed (transcribe→pendingReview): \(error.localizedDescription)")
+                            }
                         }
                     } else {
-                        AppLog.provider.warning("ContentPipeline: pre-transcription failed for item \(itemID)")
+                        AppLog.provider.warning("ContentPipeline: pre-transcription failed for item \(itemID) — marking as failed")
+                        if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+                            fresh.status = .failed
+                            try? modelContext.save()
+                        }
                     }
                 }
                 if item.type == .image, item.bodyText == nil {
                     let pageCount = item.imagePageCount ?? 1
                     item.status = .transcribing
                     try? modelContext.save()
-                    pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
+                    pipelineStatus = PipelineProgress(
+                        itemId: itemID, itemTitle: item.title,
                         itemType: item.type.rawValue, phase: "recognizing",
                         currentTool: nil, toolSummary: nil, toolLog: [], events: [], thinkingActive: false)
-                    NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
+                    NotificationCenter.default.post(
+                        name: .contentPipelineStageChanged, object: itemID.uuidString,
                         userInfo: ["stage": "Extracting text" + (pageCount > 1 ? " (\(pageCount) pages)" : "")])
                     if let ocrText = await extractionSvc.extractTextFromImage(item) {
                         let hasVision = ocrText.contains("VISUAL ANALYSIS")
                         AppLog.provider.info("ContentPipeline: extraction complete for item \(itemID) — \(ocrText.count) chars, vision=\(hasVision)")
-                        NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
+                        NotificationCenter.default.post(
+                            name: .contentPipelineStageChanged, object: itemID.uuidString,
                             userInfo: ["stage": "OCR done (\(ocrText.count) chars" + (hasVision ? " + vision)" : ")")])
                         // Set pendingReview so user can verify extraction before analysis
                         if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
                             fresh.status = .pendingReview
-                            do { try modelContext.save() }
-                            catch { AppLog.provider.error("ContentPipeline: save failed (OCR→pendingReview): \(error.localizedDescription)") }
+                            do { try modelContext.save() } catch {
+                                AppLog.provider.error("ContentPipeline: save failed (OCR→pendingReview): \(error.localizedDescription)")
+                            }
                         }
                     } else {
                         AppLog.provider.warning("ContentPipeline: OCR failed for item \(itemID)")
                     }
                 }
                 if item.type == .webBookmark, item.bodyText == nil {
-                    pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
+                    pipelineStatus = PipelineProgress(
+                        itemId: itemID, itemTitle: item.title,
                         itemType: item.type.rawValue, phase: "fetching",
                         currentTool: nil, toolSummary: nil, toolLog: [], events: [], thinkingActive: false)
                     // bestAvailableText handles the fetch; call it to cache the result
@@ -308,7 +321,7 @@ final class ContentPipelineService: ObservableObject {
                 SelectSchemaTool(),
                 SelectSkillTool(),
                 WriteAnalysisTool(),
-                WriteSpeakersTool()
+                WriteSpeakersTool(),
             ]
 
             let catalogPrompt = Self.buildCatalogPrompt()
@@ -347,10 +360,11 @@ final class ContentPipelineService: ObservableObject {
             // Report progress to UI
             var toolLog: [String] = []
             var agentEvents: [PipelineAgentEvent] = []
-            pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
-                                              itemType: item.type.rawValue, phase: "starting",
-                                              currentTool: nil, toolSummary: nil, toolLog: toolLog,
-                                              events: agentEvents, thinkingActive: false)
+            pipelineStatus = PipelineProgress(
+                itemId: itemID, itemTitle: item.title,
+                itemType: item.type.rawValue, phase: "starting",
+                currentTool: nil, toolSummary: nil, toolLog: toolLog,
+                events: agentEvents, thinkingActive: false)
 
             // Verify we have content to analyze before launching the agent.
             // Uses the extractionSvc already created in Phase 0 above.
@@ -364,15 +378,15 @@ final class ContentPipelineService: ObservableObject {
             }
 
             let taskDescription = """
-            Process knowledge item with ID: \(itemID.uuidString)
+                Process knowledge item with ID: \(itemID.uuidString)
 
-            Item details:
-            - Title: \(item.title)
-            - Type: \(item.type.rawValue)
-            - Status: \(item.status.rawValue)
-            \(item.projectID.map { "- Project ID: \($0.uuidString)" } ?? "")
-            \(item.durationSeconds.map { "- Duration: \(Int($0))s" } ?? "")
-            """
+                Item details:
+                - Title: \(item.title)
+                - Type: \(item.type.rawValue)
+                - Status: \(item.status.rawValue)
+                \(item.projectID.map { "- Project ID: \($0.uuidString)" } ?? "")
+                \(item.durationSeconds.map { "- Duration: \(Int($0))s" } ?? "")
+                """
 
             var lastError: String?
             var attemptCount = 0
@@ -380,8 +394,26 @@ final class ContentPipelineService: ObservableObject {
 
             while attemptCount < maxAttempts {
                 attemptCount += 1
+                let retryTaskDescription: String
+                if attemptCount == 1 {
+                    retryTaskDescription = taskDescription
+                } else {
+                    retryTaskDescription = """
+                        PREVIOUS ATTEMPT FAILED.
+                        Error: \(lastError ?? "unknown")
+
+                        ADJUST YOUR STRATEGY:
+                        - If the error mentions schema validation, check write_analysis required fields.
+                        - If a tool returned an error, try a different tool for the same goal.
+                        - If the content is large, process it in smaller parts via run_command.
+                        - If stuck, start with extract and describe what you see before analyzing.
+
+                        Original task:
+                        \(taskDescription)
+                        """
+                }
                 let stream = loop.runAutonomous(
-                    task: attemptCount == 1 ? taskDescription : "Previous attempt failed. Error: \(lastError ?? "unknown"). Try a different strategy — use different tools, chunk differently, or simplify.",
+                    task: retryTaskDescription,
                     systemPrompt: systemPrompt,
                     tools: tools,
                     provider: provider,
@@ -394,58 +426,72 @@ final class ContentPipelineService: ObservableObject {
                         switch event {
                         case .toolCallStarted(let name, let id, let args):
                             AppLog.provider.info("Pipeline agent tool [attempt \(attemptCount)]: \(name)")
-                            agentEvents.append(PipelineAgentEvent(
-                                id: UUID(), kind: .toolCall, timestamp: Date(),
-                                detail: name, metadata: args))
+                            agentEvents.append(
+                                PipelineAgentEvent(
+                                    id: UUID(), kind: .toolCall, timestamp: Date(),
+                                    detail: name, metadata: args))
                             toolLog.append("\(name): \(args.prefix(80))")
-                            pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
+                            pipelineStatus = PipelineProgress(
+                                itemId: itemID, itemTitle: item.title,
                                 itemType: item.type.rawValue, phase: "analyzing",
                                 currentTool: name, toolSummary: nil, toolLog: toolLog,
                                 events: agentEvents, thinkingActive: false)
-                            NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
+                            NotificationCenter.default.post(
+                                name: .contentPipelineStageChanged, object: itemID.uuidString,
                                 userInfo: ["tool": name, "args": args, "events": agentEvents, "itemTitle": item.title])
                         case .toolCallCompleted(let name, let id, let summary):
                             AppLog.provider.info("Pipeline agent result [attempt \(attemptCount)]: \(name) — \(summary)")
-                            agentEvents.append(PipelineAgentEvent(
-                                id: UUID(), kind: .toolResult, timestamp: Date(),
-                                detail: name, metadata: summary))
+                            agentEvents.append(
+                                PipelineAgentEvent(
+                                    id: UUID(), kind: .toolResult, timestamp: Date(),
+                                    detail: name, metadata: summary))
                             toolLog.append("\(name): \(summary)")
-                            pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
+                            pipelineStatus = PipelineProgress(
+                                itemId: itemID, itemTitle: item.title,
                                 itemType: item.type.rawValue, phase: "analyzing",
                                 currentTool: name, toolSummary: summary, toolLog: toolLog,
                                 events: agentEvents, thinkingActive: false)
-                            NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
+                            NotificationCenter.default.post(
+                                name: .contentPipelineStageChanged, object: itemID.uuidString,
                                 userInfo: ["tool": name, "summary": summary, "events": agentEvents, "itemTitle": item.title])
                         case .textDelta(let delta):
-                            agentEvents.append(PipelineAgentEvent(
-                                id: UUID(), kind: .textDelta, timestamp: Date(),
-                                detail: String(delta.prefix(100)), metadata: nil))
+                            agentEvents.append(
+                                PipelineAgentEvent(
+                                    id: UUID(), kind: .textDelta, timestamp: Date(),
+                                    detail: String(delta.prefix(100)), metadata: nil))
                         case .thinking:
-                            pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
+                            pipelineStatus = PipelineProgress(
+                                itemId: itemID, itemTitle: item.title,
                                 itemType: item.type.rawValue, phase: "analyzing",
                                 currentTool: nil, toolSummary: nil, toolLog: toolLog,
                                 events: agentEvents, thinkingActive: true)
-                            NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
+                            NotificationCenter.default.post(
+                                name: .contentPipelineStageChanged, object: itemID.uuidString,
                                 userInfo: ["thinking": true, "events": agentEvents, "itemTitle": item.title])
                         case .finished:
                             AppLog.provider.info("Pipeline agent completed for item \(itemID) on attempt \(attemptCount)")
-                            agentEvents.append(PipelineAgentEvent(
-                                id: UUID(), kind: .done, timestamp: Date(),
-                                detail: "Agent finished", metadata: nil))
-                            pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
+                            agentEvents.append(
+                                PipelineAgentEvent(
+                                    id: UUID(), kind: .done, timestamp: Date(),
+                                    detail: "Agent finished", metadata: nil))
+                            pipelineStatus = PipelineProgress(
+                                itemId: itemID, itemTitle: item.title,
                                 itemType: item.type.rawValue, phase: "completed",
                                 currentTool: nil, toolSummary: nil, toolLog: toolLog,
                                 events: agentEvents, thinkingActive: false)
-                            NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
+                            NotificationCenter.default.post(
+                                name: .contentPipelineStageChanged, object: itemID.uuidString,
                                 userInfo: ["phase": "completed", "events": agentEvents, "itemTitle": item.title])
                             failed = false
                         case .truncated(let reason, let progress):
                             AppLog.provider.warning("Pipeline agent truncated for item \(itemID): \(reason) (\(progress))")
                             lastError = "Agent truncated: \(reason)"
-                            agentEvents.append(PipelineAgentEvent(
-                                id: UUID(), kind: .failed, timestamp: Date(),
-                                detail: "Truncated: \(reason) (\(progress))", metadata: nil))
-                            pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
+                            agentEvents.append(
+                                PipelineAgentEvent(
+                                    id: UUID(), kind: .failed, timestamp: Date(),
+                                    detail: "Truncated: \(reason) (\(progress))", metadata: nil))
+                            pipelineStatus = PipelineProgress(
+                                itemId: itemID, itemTitle: item.title,
                                 itemType: item.type.rawValue, phase: "error",
                                 currentTool: nil, toolSummary: "Truncated: \(reason)", toolLog: toolLog,
                                 events: agentEvents, thinkingActive: false)
@@ -453,10 +499,12 @@ final class ContentPipelineService: ObservableObject {
                         case .error(let error):
                             AppLog.provider.error("Pipeline agent error [attempt \(attemptCount)]: \(error.localizedDescription)")
                             lastError = error.localizedDescription
-                            agentEvents.append(PipelineAgentEvent(
-                                id: UUID(), kind: .failed, timestamp: Date(),
-                                detail: error.localizedDescription, metadata: nil))
-                            pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
+                            agentEvents.append(
+                                PipelineAgentEvent(
+                                    id: UUID(), kind: .failed, timestamp: Date(),
+                                    detail: error.localizedDescription, metadata: nil))
+                            pipelineStatus = PipelineProgress(
+                                itemId: itemID, itemTitle: item.title,
                                 itemType: item.type.rawValue, phase: "error",
                                 currentTool: nil, toolSummary: error.localizedDescription, toolLog: toolLog,
                                 events: agentEvents, thinkingActive: false)
@@ -475,11 +523,13 @@ final class ContentPipelineService: ObservableObject {
                     if store.artifactExists(fileName: "analysis.json", meetingId: itemID) {
                         // Schema validation: ensure output matches the project's framework
                         if let projectID = item.projectID,
-                           let project = try? ProjectService(context: modelContext).fetch(id: projectID) {
+                            let project = try? ProjectService(context: modelContext).fetch(id: projectID)
+                        {
                             let framework = FrameworkService.shared.resolve(for: project)
                             let fileURL = store.itemDirectoryURL(for: itemID).appendingPathComponent("analysis.json")
                             if let data = try? Data(contentsOf: fileURL),
-                               let validationError = FrameworkService.validateAnalysis(data: data, against: framework) {
+                                let validationError = FrameworkService.validateAnalysis(data: data, against: framework)
+                            {
                                 // WriteAnalysisTool already gave the agent feedback during the loop.
                                 // If we still have validation errors here, the agent couldn't fix them.
                                 // Accept the output anyway — partial analysis is better than none.
@@ -488,14 +538,16 @@ final class ContentPipelineService: ObservableObject {
                         }
                         // Create DynamicAnalysis from the raw JSON (any keys work)
                         if !failed, let data = try? Data(contentsOf: store.itemDirectoryURL(for: itemID).appendingPathComponent("analysis.json")),
-                           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                            let dynamicData = try? JSONEncoder().encode(DynamicAnalysis(
-                                itemId: itemID,
-                                providerId: provider.id,
-                                model: executorModel,
-                                schemaId: "write_analysis",
-                                results: AnalysisResults(storage: json.mapValues { AnyCodable($0) })
-                            ))
+                            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                        {
+                            let dynamicData = try? JSONEncoder().encode(
+                                DynamicAnalysis(
+                                    itemId: itemID,
+                                    providerId: provider.id,
+                                    model: executorModel,
+                                    schemaId: "write_analysis",
+                                    results: AnalysisResults(storage: json.mapValues { AnyCodable($0) })
+                                ))
                             if let dd = dynamicData {
                                 try? dd.write(to: store.itemDirectoryURL(for: itemID).appendingPathComponent(AppFileConstants.dynamicAnalysisFileName))
                             }
@@ -507,12 +559,13 @@ final class ContentPipelineService: ObservableObject {
                                 fresh.analysisProviderId = executorModel
                                 try? modelContext.save()
                             }
-                            break // Success — analysis exists and DynamicAnalysis created
+                            break  // Success — analysis exists and DynamicAnalysis created
                         }
                     } else {
                         // Agent finished but didn't create analysis
                         AppLog.provider.warning("Pipeline attempt \(attemptCount): agent finished but no analysis.json found")
-                        lastError = "Agent completed without producing analysis. The model may have failed to call analyze_content or the tool returned an error."
+                        lastError =
+                            "Agent completed without producing analysis. The model may have failed to call analyze_content or the tool returned an error."
                         failed = true
                     }
                 }
@@ -528,7 +581,8 @@ final class ContentPipelineService: ObservableObject {
             }
 
             if let error = lastError {
-                pipelineStatus = PipelineProgress(itemId: itemID, itemTitle: item.title,
+                pipelineStatus = PipelineProgress(
+                    itemId: itemID, itemTitle: item.title,
                     itemType: item.type.rawValue, phase: "error",
                     currentTool: nil, toolSummary: error, toolLog: toolLog,
                     events: agentEvents, thinkingActive: false)
@@ -575,8 +629,9 @@ final class ContentPipelineService: ObservableObject {
             }
             beginBackgroundTask()
 
-            NotificationCenter.default.post(name: .contentPipelineStageChanged, object: itemID.uuidString,
-                                            userInfo: ["stage": PipelineStage.ingesting.rawValue])
+            NotificationCenter.default.post(
+                name: .contentPipelineStageChanged, object: itemID.uuidString,
+                userInfo: ["stage": PipelineStage.ingesting.rawValue])
             await ingestionPipeline.ingest(itemID: itemID, projectID: projectID, using: modelContext)
         }
     }
@@ -642,14 +697,30 @@ final class LensCatalogService {
     /// The agent chooses which sections to fill based on content.
     private var frameworkLenses: [Lens] {
         [
-            Lens(id: "builtin/meeting", name: "Meeting Analysis", description: "Decisions, actions, risks, dates, entities", icon: "mic.fill", category: .domain, framework: FrameworkService.meetingFramework),
-            Lens(id: "builtin/research", name: "Research", description: "Hypotheses, findings, themes, sources", icon: "magnifyingglass", category: .domain, framework: FrameworkService.researchFramework),
-            Lens(id: "builtin/brainstorm", name: "Brainstorm", description: "Ideas, themes, questions, creative exploration", icon: "lightbulb.fill", category: .domain, framework: FrameworkService.brainstormFramework),
-            Lens(id: "builtin/journal", name: "Journal", description: "Themes, mood, people, places, reflections", icon: "book.fill", category: .personal, framework: FrameworkService.journalFramework),
-            Lens(id: "builtin/coaching", name: "Coaching", description: "Competencies, commitments, breakthroughs", icon: "figure.mind.and.body", category: .domain, framework: FrameworkService.coachingFramework),
-            Lens(id: "builtin/legal", name: "Legal Brief", description: "Citations, statutes, depositions, privilege", icon: "building.columns.fill", category: .domain, framework: FrameworkService.legalFramework),
-            Lens(id: "builtin/product", name: "Product Spec", description: "User stories, requirements, bugs, constraints", icon: "hammer.fill", category: .domain, framework: FrameworkService.productFramework),
-            Lens(id: "builtin/blank", name: "Adaptive", description: "AI chooses sections based on content — no fixed template", icon: "doc.fill", category: .custom, framework: FrameworkService.blankFramework)
+            Lens(
+                id: "builtin/meeting", name: "Meeting Analysis", description: "Decisions, actions, risks, dates, entities", icon: "mic.fill", category: .domain,
+                framework: FrameworkService.meetingFramework),
+            Lens(
+                id: "builtin/research", name: "Research", description: "Hypotheses, findings, themes, sources", icon: "magnifyingglass", category: .domain,
+                framework: FrameworkService.researchFramework),
+            Lens(
+                id: "builtin/brainstorm", name: "Brainstorm", description: "Ideas, themes, questions, creative exploration", icon: "lightbulb.fill",
+                category: .domain, framework: FrameworkService.brainstormFramework),
+            Lens(
+                id: "builtin/journal", name: "Journal", description: "Themes, mood, people, places, reflections", icon: "book.fill", category: .personal,
+                framework: FrameworkService.journalFramework),
+            Lens(
+                id: "builtin/coaching", name: "Coaching", description: "Competencies, commitments, breakthroughs", icon: "figure.mind.and.body",
+                category: .domain, framework: FrameworkService.coachingFramework),
+            Lens(
+                id: "builtin/legal", name: "Legal Brief", description: "Citations, statutes, depositions, privilege", icon: "building.columns.fill",
+                category: .domain, framework: FrameworkService.legalFramework),
+            Lens(
+                id: "builtin/product", name: "Product Spec", description: "User stories, requirements, bugs, constraints", icon: "hammer.fill",
+                category: .domain, framework: FrameworkService.productFramework),
+            Lens(
+                id: "builtin/blank", name: "Adaptive", description: "AI chooses sections based on content — no fixed template", icon: "doc.fill",
+                category: .custom, framework: FrameworkService.blankFramework),
         ]
     }
 
@@ -657,7 +728,8 @@ final class LensCatalogService {
         let lenses = AIConfigService.shared.config.lenses ?? [:]
         return lenses.compactMap { key, lensJSON in
             guard let name = lensJSON.name else { return nil }
-            return Lens(id: "lens/\(key)", name: name, description: lensJSON.description ?? "",
+            return Lens(
+                id: "lens/\(key)", name: name, description: lensJSON.description ?? "",
                 icon: lensJSON.icon ?? "sparkles", category: .analytical, framework: nil,
                 systemPromptOverride: lensJSON.systemPrompt, userPromptTemplate: lensJSON.userPrompt)
         }
@@ -698,7 +770,7 @@ final class FrameworkService {
             "coaching": coachingFramework,
             "legal": legalFramework,
             "product": productFramework,
-            "blank": blankFramework
+            "blank": blankFramework,
         ]
     }
 
@@ -709,8 +781,9 @@ final class FrameworkService {
 
     func resolve(for project: Project) -> ProjectFramework {
         if let json = project.frameworkJSON,
-           let data = json.data(using: .utf8),
-           let framework = try? JSONDecoder().decode(ProjectFramework.self, from: data) {
+            let data = json.data(using: .utf8),
+            let framework = try? JSONDecoder().decode(ProjectFramework.self, from: data)
+        {
             return framework
         }
         return Self.meetingFramework
@@ -731,7 +804,8 @@ final class FrameworkService {
     func apply(to project: Project, framework: ProjectFramework) {
         project.frameworkId = framework.id
         if let data = try? JSONEncoder().encode(framework),
-           let json = String(data: data, encoding: .utf8) {
+            let json = String(data: data, encoding: .utf8)
+        {
             project.frameworkJSON = json
         }
     }
@@ -760,7 +834,7 @@ final class FrameworkService {
         for (field, prop) in schema.properties {
             guard let value = json[field] else {
                 if required.contains(field) { return "Missing required field '\(field)'" }
-                continue // optional field not present, OK
+                continue  // optional field not present, OK
             }
 
             switch prop.type {
@@ -775,10 +849,13 @@ final class FrameworkService {
                             return "Field '\(field)'[\(idx)] must be an object"
                         }
                         for (itemField, itemProp) in itemProps {
-                            if obj[itemField] == nil { continue } // optional
+                            if obj[itemField] == nil { continue }  // optional
                             switch itemProp.type {
                             case "string": if !(obj[itemField] is String) { return "Field '\(field)'[\(idx)].\(itemField) must be a string" }
-                            case "number", "integer": if !(obj[itemField] is NSNumber) && !(obj[itemField] is Int) && !(obj[itemField] is Double) { return "Field '\(field)'[\(idx)].\(itemField) must be a number" }
+                            case "number", "integer":
+                                if !(obj[itemField] is NSNumber) && !(obj[itemField] is Int) && !(obj[itemField] is Double) {
+                                    return "Field '\(field)'[\(idx)].\(itemField) must be a number"
+                                }
                             default: break
                             }
                         }
@@ -795,7 +872,7 @@ final class FrameworkService {
             }
         }
 
-        return nil // valid
+        return nil  // valid
     }
 
     /// Validate analysis JSON bytes against a framework. Convenience wrapper.
@@ -815,41 +892,68 @@ final class FrameworkService {
     // MARK: Built-in frameworks
 
     static var meetingFramework: ProjectFramework {
-        let schema = AnalysisOutputSchema(type: "object", properties: [
-            "short_summary": SchemaProperty(type: "string", items: nil, properties: nil, description: "One-line summary"),
-            "detailed_summary": SchemaProperty(type: "string", items: nil, properties: nil, description: "Detailed summary"),
-            "decisions": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
-                "title": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
-                "details": SchemaProperty(type: "string", items: nil, properties: nil, description: nil)
-            ]), properties: nil, description: "Decisions made"),
-            "action_items": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
-                "task": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
-                "owner": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
-                "due_date": SchemaProperty(type: "string", items: nil, properties: nil, description: nil)
-            ]), properties: nil, description: "Action items"),
-            "risks": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
-                "risk": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
-                "details": SchemaProperty(type: "string", items: nil, properties: nil, description: nil)
-            ]), properties: nil, description: "Risks identified"),
-            "open_questions": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
-                "question": SchemaProperty(type: "string", items: nil, properties: nil, description: nil)
-            ]), properties: nil, description: "Open questions"),
-            "important_dates": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
-                "date": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
-                "meaning": SchemaProperty(type: "string", items: nil, properties: nil, description: nil)
-            ]), properties: nil, description: "Important dates"),
-            "entities": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
-                "name": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
-                "type": SchemaProperty(type: "string", items: nil, properties: nil, description: nil)
-            ]), properties: nil, description: "Entities mentioned")
-        ], required: ["short_summary"])
+        let schema = AnalysisOutputSchema(
+            type: "object",
+            properties: [
+                "short_summary": SchemaProperty(type: "string", items: nil, properties: nil, description: "One-line summary"),
+                "detailed_summary": SchemaProperty(type: "string", items: nil, properties: nil, description: "Detailed summary"),
+                "decisions": SchemaProperty(
+                    type: "array",
+                    items: SchemaItems(
+                        type: "object",
+                        properties: [
+                            "title": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                            "details": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                        ]), properties: nil, description: "Decisions made"),
+                "action_items": SchemaProperty(
+                    type: "array",
+                    items: SchemaItems(
+                        type: "object",
+                        properties: [
+                            "task": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                            "owner": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                            "due_date": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                        ]), properties: nil, description: "Action items"),
+                "risks": SchemaProperty(
+                    type: "array",
+                    items: SchemaItems(
+                        type: "object",
+                        properties: [
+                            "risk": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                            "details": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                        ]), properties: nil, description: "Risks identified"),
+                "open_questions": SchemaProperty(
+                    type: "array",
+                    items: SchemaItems(
+                        type: "object",
+                        properties: [
+                            "question": SchemaProperty(type: "string", items: nil, properties: nil, description: nil)
+                        ]), properties: nil, description: "Open questions"),
+                "important_dates": SchemaProperty(
+                    type: "array",
+                    items: SchemaItems(
+                        type: "object",
+                        properties: [
+                            "date": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                            "meaning": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                        ]), properties: nil, description: "Important dates"),
+                "entities": SchemaProperty(
+                    type: "array",
+                    items: SchemaItems(
+                        type: "object",
+                        properties: [
+                            "name": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                            "type": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                        ]), properties: nil, description: "Entities mentioned"),
+            ], required: ["short_summary"])
 
         return ProjectFramework(
             id: "builtin/meeting",
             name: "Meeting Analysis",
             description: "Extracts decisions, action items, risks, open questions, dates, and entities from meeting content.",
             itemAnalysis: AnalysisConfig(
-                systemPrompt: "You are a meeting intelligence analyst. Extract decisions, action items with owners, risks, open questions, important dates, and mentioned people/systems/organizations. Return only valid JSON.",
+                systemPrompt:
+                    "You are a meeting intelligence analyst. Extract decisions, action items with owners, risks, open questions, important dates, and mentioned people/systems/organizations. Return only valid JSON.",
                 outputSchema: schema,
                 renderAs: [
                     FieldRenderer(field: "short_summary", type: .card, title: "Summary", icon: "text.alignleft"),
@@ -857,7 +961,7 @@ final class FrameworkService {
                     FieldRenderer(field: "action_items", type: .list, title: "Action Items", icon: "checklist"),
                     FieldRenderer(field: "risks", type: .list, title: "Risks", icon: "exclamationmark.triangle"),
                     FieldRenderer(field: "open_questions", type: .list, title: "Open Questions", icon: "questionmark.circle"),
-                    FieldRenderer(field: "entities", type: .chips, title: "Mentioned", icon: "tag")
+                    FieldRenderer(field: "entities", type: .chips, title: "Mentioned", icon: "tag"),
                 ]
             ),
             projectSynthesis: SynthesisConfig(
@@ -868,7 +972,7 @@ final class FrameworkService {
                 ViewDefinition(id: "tasks", title: "Tasks", type: .kanban, source: "tasks"),
                 ViewDefinition(id: "items", title: "Items", type: .list, source: "items"),
                 ViewDefinition(id: "graph", title: "Graph", type: .graph, source: "edges"),
-                ViewDefinition(id: "timeline", title: "Timeline", type: .timeline, source: "items")
+                ViewDefinition(id: "timeline", title: "Timeline", type: .timeline, source: "items"),
             ],
             entityKinds: ["person", "organization", "system", "repository", "location"],
             edgeTypes: ["supports", "contradicts", "references", "relates_to", "precedes", "mentions", "assigned_to"]
@@ -881,24 +985,35 @@ final class FrameworkService {
             name: "Research",
             description: "Tracks hypotheses, findings, sources, and methods across research items.",
             itemAnalysis: AnalysisConfig(
-                systemPrompt: "You are a research analyst. Extract hypotheses, findings, sources cited, methodology notes, open questions, and key themes from this content. Return only valid JSON.",
-                outputSchema: AnalysisOutputSchema(type: "object", properties: [
-                    "short_summary": SchemaProperty(type: "string", items: nil, properties: nil, description: "One-line summary"),
-                    "hypotheses": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
-                        "statement": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
-                        "confidence": SchemaProperty(type: "string", items: nil, properties: nil, description: nil)
-                    ]), properties: nil, description: "Hypotheses proposed or tested"),
-                    "findings": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
-                        "description": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
-                        "source": SchemaProperty(type: "string", items: nil, properties: nil, description: nil)
-                    ]), properties: nil, description: "Key findings"),
-                    "themes": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Key themes")
-                ], required: ["short_summary"]),
+                systemPrompt:
+                    "You are a research analyst. Extract hypotheses, findings, sources cited, methodology notes, open questions, and key themes from this content. Return only valid JSON.",
+                outputSchema: AnalysisOutputSchema(
+                    type: "object",
+                    properties: [
+                        "short_summary": SchemaProperty(type: "string", items: nil, properties: nil, description: "One-line summary"),
+                        "hypotheses": SchemaProperty(
+                            type: "array",
+                            items: SchemaItems(
+                                type: "object",
+                                properties: [
+                                    "statement": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                                    "confidence": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                                ]), properties: nil, description: "Hypotheses proposed or tested"),
+                        "findings": SchemaProperty(
+                            type: "array",
+                            items: SchemaItems(
+                                type: "object",
+                                properties: [
+                                    "description": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                                    "source": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                                ]), properties: nil, description: "Key findings"),
+                        "themes": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Key themes"),
+                    ], required: ["short_summary"]),
                 renderAs: [
                     FieldRenderer(field: "short_summary", type: .card, title: "Summary", icon: "text.alignleft"),
                     FieldRenderer(field: "hypotheses", type: .list, title: "Hypotheses", icon: "lightbulb"),
                     FieldRenderer(field: "findings", type: .list, title: "Findings", icon: "magnifyingglass"),
-                    FieldRenderer(field: "themes", type: .chips, title: "Themes", icon: "tag")
+                    FieldRenderer(field: "themes", type: .chips, title: "Themes", icon: "tag"),
                 ]
             ),
             projectSynthesis: SynthesisConfig(
@@ -909,7 +1024,7 @@ final class FrameworkService {
                 ViewDefinition(id: "items", title: "Items", type: .list, source: "items"),
                 ViewDefinition(id: "hypotheses", title: "Hypotheses", type: .cards, source: "analysis.hypotheses"),
                 ViewDefinition(id: "graph", title: "Graph", type: .graph, source: "edges"),
-                ViewDefinition(id: "timeline", title: "Timeline", type: .timeline, source: "items")
+                ViewDefinition(id: "timeline", title: "Timeline", type: .timeline, source: "items"),
             ],
             entityKinds: ["hypothesis", "finding", "source", "method", "theme"],
             edgeTypes: ["supports", "contradicts", "cites", "builds_on", "refutes"]
@@ -922,21 +1037,28 @@ final class FrameworkService {
             name: "Brainstorm",
             description: "Captures ideas, clusters themes, and surfaces questions from brainstorming sessions.",
             itemAnalysis: AnalysisConfig(
-                systemPrompt: "You analyze brainstorming content. Extract ideas, themes, questions raised, and connections between concepts. Do NOT extract decisions or action items. Return only valid JSON.",
-                outputSchema: AnalysisOutputSchema(type: "object", properties: [
-                    "short_summary": SchemaProperty(type: "string", items: nil, properties: nil, description: "One-line summary"),
-                    "ideas": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
-                        "idea": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
-                        "category": SchemaProperty(type: "string", items: nil, properties: nil, description: nil)
-                    ]), properties: nil, description: "Ideas generated"),
-                    "themes": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Emerging themes"),
-                    "questions": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Questions raised")
-                ], required: ["short_summary"]),
+                systemPrompt:
+                    "You analyze brainstorming content. Extract ideas, themes, questions raised, and connections between concepts. Do NOT extract decisions or action items. Return only valid JSON.",
+                outputSchema: AnalysisOutputSchema(
+                    type: "object",
+                    properties: [
+                        "short_summary": SchemaProperty(type: "string", items: nil, properties: nil, description: "One-line summary"),
+                        "ideas": SchemaProperty(
+                            type: "array",
+                            items: SchemaItems(
+                                type: "object",
+                                properties: [
+                                    "idea": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                                    "category": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                                ]), properties: nil, description: "Ideas generated"),
+                        "themes": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Emerging themes"),
+                        "questions": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Questions raised"),
+                    ], required: ["short_summary"]),
                 renderAs: [
                     FieldRenderer(field: "short_summary", type: .card, title: "Summary", icon: "text.alignleft"),
                     FieldRenderer(field: "ideas", type: .list, title: "Ideas", icon: "lightbulb"),
                     FieldRenderer(field: "themes", type: .chips, title: "Themes", icon: "tag"),
-                    FieldRenderer(field: "questions", type: .list, title: "Questions", icon: "questionmark.circle")
+                    FieldRenderer(field: "questions", type: .list, title: "Questions", icon: "questionmark.circle"),
                 ]
             ),
             projectSynthesis: SynthesisConfig(
@@ -947,7 +1069,7 @@ final class FrameworkService {
                 ViewDefinition(id: "ideas", title: "Ideas", type: .cards, source: "analysis.ideas"),
                 ViewDefinition(id: "items", title: "Items", type: .list, source: "items"),
                 ViewDefinition(id: "themes", title: "Themes", type: .chips, source: "analysis.themes"),
-                ViewDefinition(id: "graph", title: "Graph", type: .graph, source: "edges")
+                ViewDefinition(id: "graph", title: "Graph", type: .graph, source: "edges"),
             ],
             entityKinds: ["idea", "theme", "question", "category"],
             edgeTypes: ["clusters_with", "inspires", "extends", "contradicts"]
@@ -960,18 +1082,21 @@ final class FrameworkService {
             name: "Journal",
             description: "Personal journal with theme tracking, mood patterns, and cross-reference discovery.",
             itemAnalysis: AnalysisConfig(
-                systemPrompt: "You analyze personal journal entries. Extract themes, mood if evident, people mentioned, places, and cross-references to past entries. Do NOT extract decisions or risks. Return only valid JSON.",
-                outputSchema: AnalysisOutputSchema(type: "object", properties: [
-                    "short_summary": SchemaProperty(type: "string", items: nil, properties: nil, description: "One-line summary"),
-                    "themes": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Themes"),
-                    "people_mentioned": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "People mentioned"),
-                    "places": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Places mentioned")
-                ], required: ["short_summary"]),
+                systemPrompt:
+                    "You analyze personal journal entries. Extract themes, mood if evident, people mentioned, places, and cross-references to past entries. Do NOT extract decisions or risks. Return only valid JSON.",
+                outputSchema: AnalysisOutputSchema(
+                    type: "object",
+                    properties: [
+                        "short_summary": SchemaProperty(type: "string", items: nil, properties: nil, description: "One-line summary"),
+                        "themes": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Themes"),
+                        "people_mentioned": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "People mentioned"),
+                        "places": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Places mentioned"),
+                    ], required: ["short_summary"]),
                 renderAs: [
                     FieldRenderer(field: "short_summary", type: .card, title: "Summary", icon: "text.alignleft"),
                     FieldRenderer(field: "themes", type: .chips, title: "Themes", icon: "tag"),
                     FieldRenderer(field: "people_mentioned", type: .chips, title: "People", icon: "person"),
-                    FieldRenderer(field: "places", type: .chips, title: "Places", icon: "mappin")
+                    FieldRenderer(field: "places", type: .chips, title: "Places", icon: "mappin"),
                 ]
             ),
             projectSynthesis: SynthesisConfig(
@@ -982,7 +1107,7 @@ final class FrameworkService {
                 ViewDefinition(id: "entries", title: "Entries", type: .list, source: "items"),
                 ViewDefinition(id: "themes", title: "Themes", type: .cards, source: "analysis.themes"),
                 ViewDefinition(id: "timeline", title: "Timeline", type: .timeline, source: "items"),
-                ViewDefinition(id: "graph", title: "Connections", type: .graph, source: "edges")
+                ViewDefinition(id: "graph", title: "Connections", type: .graph, source: "edges"),
             ],
             entityKinds: ["theme", "person", "place", "event"],
             edgeTypes: ["relates_to", "follows_up", "references", "contradicts"]
@@ -994,31 +1119,49 @@ final class FrameworkService {
             id: "builtin/coaching", name: "Coaching",
             description: "Tracks competency demonstrations, behavioral shifts, and session outcomes across coaching engagements.",
             itemAnalysis: AnalysisConfig(
-                systemPrompt: "You are a leadership coach analyst. Extract competency demonstrations, behavioral shifts, commitment follow-through, and breakthrough insights. Return only valid JSON.",
-                outputSchema: AnalysisOutputSchema(type: "object", properties: [
-                    "short_summary": SchemaProperty(type: "string", items: nil, properties: nil, description: "One-line session summary"),
-                    "competency_demonstrations": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
-                        "competency": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
-                        "evidence": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
-                        "level": SchemaProperty(type: "string", items: nil, properties: nil, description: "demonstrated|developing|absent")
-                    ]), properties: nil, description: "Competencies observed"),
-                    "commitments": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
-                        "description": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
-                        "deadline": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
-                        "follow_through": SchemaProperty(type: "string", items: nil, properties: nil, description: "pending|in_progress|completed|abandoned")
-                    ]), properties: nil, description: "Commitments made"),
-                    "aha_moments": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Breakthrough insights"),
-                    "next_session": SchemaProperty(type: "string", items: nil, properties: nil, description: "What to prepare for next session")
-                ], required: ["short_summary"]),
-                renderAs: [FieldRenderer(field: "short_summary", type: .card, title: "Summary", icon: "text.alignleft"),
+                systemPrompt:
+                    "You are a leadership coach analyst. Extract competency demonstrations, behavioral shifts, commitment follow-through, and breakthrough insights. Return only valid JSON.",
+                outputSchema: AnalysisOutputSchema(
+                    type: "object",
+                    properties: [
+                        "short_summary": SchemaProperty(type: "string", items: nil, properties: nil, description: "One-line session summary"),
+                        "competency_demonstrations": SchemaProperty(
+                            type: "array",
+                            items: SchemaItems(
+                                type: "object",
+                                properties: [
+                                    "competency": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                                    "evidence": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                                    "level": SchemaProperty(type: "string", items: nil, properties: nil, description: "demonstrated|developing|absent"),
+                                ]), properties: nil, description: "Competencies observed"),
+                        "commitments": SchemaProperty(
+                            type: "array",
+                            items: SchemaItems(
+                                type: "object",
+                                properties: [
+                                    "description": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                                    "deadline": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                                    "follow_through": SchemaProperty(
+                                        type: "string", items: nil, properties: nil, description: "pending|in_progress|completed|abandoned"),
+                                ]), properties: nil, description: "Commitments made"),
+                        "aha_moments": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Breakthrough insights"),
+                        "next_session": SchemaProperty(type: "string", items: nil, properties: nil, description: "What to prepare for next session"),
+                    ], required: ["short_summary"]),
+                renderAs: [
+                    FieldRenderer(field: "short_summary", type: .card, title: "Summary", icon: "text.alignleft"),
                     FieldRenderer(field: "competency_demonstrations", type: .list, title: "Competencies", icon: "star"),
                     FieldRenderer(field: "commitments", type: .list, title: "Commitments", icon: "checklist"),
-                    FieldRenderer(field: "aha_moments", type: .chips, title: "Breakthroughs", icon: "lightbulb")]
+                    FieldRenderer(field: "aha_moments", type: .chips, title: "Breakthroughs", icon: "lightbulb"),
+                ]
             ),
-            projectSynthesis: SynthesisConfig(systemPrompt: "Track competency growth, commitment completion rates, and emerging themes across coaching sessions.", outputSchema: AnalysisOutputSchema(type: "object", properties: [:], required: nil)),
-            views: [ViewDefinition(id: "sessions", title: "Sessions", type: .list, source: "items"),
+            projectSynthesis: SynthesisConfig(
+                systemPrompt: "Track competency growth, commitment completion rates, and emerging themes across coaching sessions.",
+                outputSchema: AnalysisOutputSchema(type: "object", properties: [:], required: nil)),
+            views: [
+                ViewDefinition(id: "sessions", title: "Sessions", type: .list, source: "items"),
                 ViewDefinition(id: "competencies", title: "Competencies", type: .cards, source: "analysis.competency_demonstrations"),
-                ViewDefinition(id: "growth", title: "Growth", type: .timeline, source: "items")],
+                ViewDefinition(id: "growth", title: "Growth", type: .timeline, source: "items"),
+            ],
             entityKinds: ["competency", "commitment", "feedback_type", "behavioral_shift"],
             edgeTypes: ["supports", "contradicts", "references", "relates_to", "precedes", "mentions"]
         )
@@ -1029,33 +1172,51 @@ final class FrameworkService {
             id: "builtin/legal", name: "Legal Brief",
             description: "Connects case citations, statutes, depositions, and party positions with full provenance chains.",
             itemAnalysis: AnalysisConfig(
-                systemPrompt: "You are a legal analyst. Extract case citations, statute references, party positions, deposition quotes, and privilege indicators. Flag uncertain readings. Return only valid JSON.",
-                outputSchema: AnalysisOutputSchema(type: "object", properties: [
-                    "short_summary": SchemaProperty(type: "string", items: nil, properties: nil, description: "One-line summary"),
-                    "case_citations": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
-                        "case_name": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
-                        "citation": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
-                        "relevance": SchemaProperty(type: "string", items: nil, properties: nil, description: "supports|contradicts|distinguishes")
-                    ]), properties: nil, description: "Cases cited"),
-                    "deposition_quotes": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
-                        "quote": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
-                        "witness": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
-                        "significance": SchemaProperty(type: "string", items: nil, properties: nil, description: nil)
-                    ]), properties: nil, description: "Key deposition quotes"),
-                    "statutes": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Statutes referenced"),
-                    "privilege_concerns": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Potential privilege issues")
-                ], required: ["short_summary"]),
-                renderAs: [FieldRenderer(field: "short_summary", type: .card, title: "Summary", icon: "text.alignleft"),
+                systemPrompt:
+                    "You are a legal analyst. Extract case citations, statute references, party positions, deposition quotes, and privilege indicators. Flag uncertain readings. Return only valid JSON.",
+                outputSchema: AnalysisOutputSchema(
+                    type: "object",
+                    properties: [
+                        "short_summary": SchemaProperty(type: "string", items: nil, properties: nil, description: "One-line summary"),
+                        "case_citations": SchemaProperty(
+                            type: "array",
+                            items: SchemaItems(
+                                type: "object",
+                                properties: [
+                                    "case_name": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                                    "citation": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                                    "relevance": SchemaProperty(type: "string", items: nil, properties: nil, description: "supports|contradicts|distinguishes"),
+                                ]), properties: nil, description: "Cases cited"),
+                        "deposition_quotes": SchemaProperty(
+                            type: "array",
+                            items: SchemaItems(
+                                type: "object",
+                                properties: [
+                                    "quote": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                                    "witness": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                                    "significance": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                                ]), properties: nil, description: "Key deposition quotes"),
+                        "statutes": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Statutes referenced"),
+                        "privilege_concerns": SchemaProperty(
+                            type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Potential privilege issues"),
+                    ], required: ["short_summary"]),
+                renderAs: [
+                    FieldRenderer(field: "short_summary", type: .card, title: "Summary", icon: "text.alignleft"),
                     FieldRenderer(field: "case_citations", type: .list, title: "Cases", icon: "building.columns"),
                     FieldRenderer(field: "deposition_quotes", type: .list, title: "Depositions", icon: "quote.bubble"),
                     FieldRenderer(field: "statutes", type: .chips, title: "Statutes", icon: "book.pages"),
-                    FieldRenderer(field: "privilege_concerns", type: .list, title: "Privilege", icon: "lock.shield")]
+                    FieldRenderer(field: "privilege_concerns", type: .list, title: "Privilege", icon: "lock.shield"),
+                ]
             ),
-            projectSynthesis: SynthesisConfig(systemPrompt: "Synthesize legal strategy. Identify conflicting testimonies, supporting precedents, and gaps in evidence.", outputSchema: AnalysisOutputSchema(type: "object", properties: [:], required: nil)),
-            views: [ViewDefinition(id: "documents", title: "Documents", type: .list, source: "items"),
+            projectSynthesis: SynthesisConfig(
+                systemPrompt: "Synthesize legal strategy. Identify conflicting testimonies, supporting precedents, and gaps in evidence.",
+                outputSchema: AnalysisOutputSchema(type: "object", properties: [:], required: nil)),
+            views: [
+                ViewDefinition(id: "documents", title: "Documents", type: .list, source: "items"),
                 ViewDefinition(id: "cases", title: "Cases", type: .cards, source: "analysis.case_citations"),
                 ViewDefinition(id: "timeline", title: "Timeline", type: .timeline, source: "items"),
-                ViewDefinition(id: "graph", title: "Graph", type: .graph, source: "edges")],
+                ViewDefinition(id: "graph", title: "Graph", type: .graph, source: "edges"),
+            ],
             entityKinds: ["case", "statute", "party", "jurisdiction", "court", "witness"],
             edgeTypes: ["supports", "contradicts", "references", "relates_to", "precedes", "mentions", "distinguishes"]
         )
@@ -1066,37 +1227,58 @@ final class FrameworkService {
             id: "builtin/product", name: "Product Spec",
             description: "Connects user stories, requirements, constraints, and bugs with full traceability.",
             itemAnalysis: AnalysisConfig(
-                systemPrompt: "You are a product analyst. Extract user stories, requirements, technical constraints, bug references, and design decisions. Return only valid JSON.",
-                outputSchema: AnalysisOutputSchema(type: "object", properties: [
-                    "short_summary": SchemaProperty(type: "string", items: nil, properties: nil, description: "One-line summary"),
-                    "user_stories": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
-                        "story": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
-                        "role": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
-                        "criteria": SchemaProperty(type: "string", items: nil, properties: nil, description: "Acceptance criteria")
-                    ]), properties: nil, description: "User stories"),
-                    "requirements": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
-                        "description": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
-                        "priority": SchemaProperty(type: "string", items: nil, properties: nil, description: "P0/P1/P2/P3"),
-                        "source": SchemaProperty(type: "string", items: nil, properties: nil, description: nil)
-                    ]), properties: nil, description: "Requirements"),
-                    "constraints": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Technical constraints"),
-                    "bugs": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Bug IDs referenced"),
-                    "design_decisions": SchemaProperty(type: "array", items: SchemaItems(type: "object", properties: [
-                        "decision": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
-                        "rationale": SchemaProperty(type: "string", items: nil, properties: nil, description: nil)
-                    ]), properties: nil, description: "Design decisions")
-                ], required: ["short_summary"]),
-                renderAs: [FieldRenderer(field: "short_summary", type: .card, title: "Summary", icon: "text.alignleft"),
+                systemPrompt:
+                    "You are a product analyst. Extract user stories, requirements, technical constraints, bug references, and design decisions. Return only valid JSON.",
+                outputSchema: AnalysisOutputSchema(
+                    type: "object",
+                    properties: [
+                        "short_summary": SchemaProperty(type: "string", items: nil, properties: nil, description: "One-line summary"),
+                        "user_stories": SchemaProperty(
+                            type: "array",
+                            items: SchemaItems(
+                                type: "object",
+                                properties: [
+                                    "story": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                                    "role": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                                    "criteria": SchemaProperty(type: "string", items: nil, properties: nil, description: "Acceptance criteria"),
+                                ]), properties: nil, description: "User stories"),
+                        "requirements": SchemaProperty(
+                            type: "array",
+                            items: SchemaItems(
+                                type: "object",
+                                properties: [
+                                    "description": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                                    "priority": SchemaProperty(type: "string", items: nil, properties: nil, description: "P0/P1/P2/P3"),
+                                    "source": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                                ]), properties: nil, description: "Requirements"),
+                        "constraints": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Technical constraints"),
+                        "bugs": SchemaProperty(type: "array", items: SchemaItems(type: "string"), properties: nil, description: "Bug IDs referenced"),
+                        "design_decisions": SchemaProperty(
+                            type: "array",
+                            items: SchemaItems(
+                                type: "object",
+                                properties: [
+                                    "decision": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                                    "rationale": SchemaProperty(type: "string", items: nil, properties: nil, description: nil),
+                                ]), properties: nil, description: "Design decisions"),
+                    ], required: ["short_summary"]),
+                renderAs: [
+                    FieldRenderer(field: "short_summary", type: .card, title: "Summary", icon: "text.alignleft"),
                     FieldRenderer(field: "user_stories", type: .list, title: "Stories", icon: "person.text.rectangle"),
                     FieldRenderer(field: "requirements", type: .list, title: "Requirements", icon: "list.bullet.clipboard"),
                     FieldRenderer(field: "constraints", type: .chips, title: "Constraints", icon: "hammer"),
-                    FieldRenderer(field: "design_decisions", type: .list, title: "Decisions", icon: "paintpalette")]
+                    FieldRenderer(field: "design_decisions", type: .list, title: "Decisions", icon: "paintpalette"),
+                ]
             ),
-            projectSynthesis: SynthesisConfig(systemPrompt: "Synthesize product specs. Identify requirement conflicts, missing criteria, and cross-component dependencies.", outputSchema: AnalysisOutputSchema(type: "object", properties: [:], required: nil)),
-            views: [ViewDefinition(id: "specs", title: "Specs", type: .list, source: "items"),
+            projectSynthesis: SynthesisConfig(
+                systemPrompt: "Synthesize product specs. Identify requirement conflicts, missing criteria, and cross-component dependencies.",
+                outputSchema: AnalysisOutputSchema(type: "object", properties: [:], required: nil)),
+            views: [
+                ViewDefinition(id: "specs", title: "Specs", type: .list, source: "items"),
                 ViewDefinition(id: "stories", title: "Stories", type: .cards, source: "analysis.user_stories"),
                 ViewDefinition(id: "requirements", title: "Reqs", type: .table, source: "analysis.requirements"),
-                ViewDefinition(id: "graph", title: "Deps", type: .graph, source: "edges")],
+                ViewDefinition(id: "graph", title: "Deps", type: .graph, source: "edges"),
+            ],
             entityKinds: ["story", "requirement", "constraint", "component", "bug"],
             edgeTypes: ["supports", "contradicts", "references", "relates_to", "precedes", "blockedBy", "produces"]
         )
@@ -1108,10 +1290,13 @@ final class FrameworkService {
             name: "Blank",
             description: "Minimal schema. The AI will adapt analysis to whatever content you add.",
             itemAnalysis: AnalysisConfig(
-                systemPrompt: "Analyze this content and extract whatever is most relevant. Return a JSON object with fields that make sense for this specific content. Include at least a 'short_summary' string field.",
-                outputSchema: AnalysisOutputSchema(type: "object", properties: [
-                    "short_summary": SchemaProperty(type: "string", items: nil, properties: nil, description: "One-line summary")
-                ], required: ["short_summary"]),
+                systemPrompt:
+                    "Analyze this content and extract whatever is most relevant. Return a JSON object with fields that make sense for this specific content. Include at least a 'short_summary' string field.",
+                outputSchema: AnalysisOutputSchema(
+                    type: "object",
+                    properties: [
+                        "short_summary": SchemaProperty(type: "string", items: nil, properties: nil, description: "One-line summary")
+                    ], required: ["short_summary"]),
                 renderAs: [
                     FieldRenderer(field: "short_summary", type: .card, title: "Summary", icon: "text.alignleft")
                 ]
@@ -1122,7 +1307,7 @@ final class FrameworkService {
             ),
             views: [
                 ViewDefinition(id: "items", title: "Items", type: .list, source: "items"),
-                ViewDefinition(id: "graph", title: "Graph", type: .graph, source: "edges")
+                ViewDefinition(id: "graph", title: "Graph", type: .graph, source: "edges"),
             ],
             entityKinds: [],
             edgeTypes: ["relates_to", "references"]
@@ -1134,14 +1319,18 @@ final class FrameworkService {
 
 enum ProjectHealthEngine {
     struct HealthResult {
-        let score: Int; let status: String
-        let decisionVelocity: Double; let actionDebtRatio: Double
-        let evidenceFreshnessDays: Double; let graphDensity: Double
-        let riskExposure: Double; let anomalies: [String]
+        let score: Int
+        let status: String
+        let decisionVelocity: Double
+        let actionDebtRatio: Double
+        let evidenceFreshnessDays: Double
+        let graphDensity: Double
+        let riskExposure: Double
+        let anomalies: [String]
     }
     @MainActor
     static func compute(for projectID: UUID, context: ModelContext) -> HealthResult? {
-        guard let _ = try? ProjectService(context: context).fetch(id: projectID) else { return nil }
+        guard (try? ProjectService(context: context).fetch(id: projectID)) != nil else { return nil }
         let items = (try? ProjectService(context: context).items(in: projectID)) ?? []
         let tasks = (try? TaskService(context: context).tasks(for: projectID)) ?? []
         // Signal counts
@@ -1152,12 +1341,16 @@ enum ProjectHealthEngine {
         let edgeSvc = GraphEdgeService(context: context)
         let itemIDs = Set(items.map(\.id))
         let allEdges = (try? edgeSvc.recentEdges(limit: 500))?.filter { itemIDs.contains($0.fromID) || itemIDs.contains($0.toID) } ?? []
-        var decisionCount = 0; var riskCount = 0; var totalRiskSeverity = 0.0
-        let store = FileArtifactStore(); let fourWeeksAgo = Date().addingTimeInterval(-28*86400)
+        var decisionCount = 0
+        var riskCount = 0
+        var totalRiskSeverity = 0.0
+        let store = FileArtifactStore()
+        let fourWeeksAgo = Date().addingTimeInterval(-28 * 86400)
         var recentDecisionCount = 0
         for item in items {
             guard let a = try? store.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) else { continue }
-            decisionCount += a.decisions.count; riskCount += a.risks.count
+            decisionCount += a.decisions.count
+            riskCount += a.risks.count
             let isRecent = item.createdAt >= fourWeeksAgo
             if isRecent { recentDecisionCount += a.decisions.count }
             totalRiskSeverity += a.risks.map { ($0.confidence ?? 0.5) }.reduce(0, +)
@@ -1166,33 +1359,41 @@ enum ProjectHealthEngine {
         let decisionVelocity = Double(recentDecisionCount) / 4.0
         // Risk exposure: magnitude (count × avg severity), normalized 0-1
         let avgSeverity = riskCount > 0 ? totalRiskSeverity / Double(riskCount) : 0
-        let maxRisks = 20.0; let riskMagnitude = min(Double(riskCount) / maxRisks, 1.0)
+        let maxRisks = 20.0
+        let riskMagnitude = min(Double(riskCount) / maxRisks, 1.0)
         let riskExposure = riskMagnitude * avgSeverity
-        let totalTasks = tasks.count; let openTasks = tasks.filter { $0.status == .todo || $0.status == .inProgress }.count
+        let totalTasks = tasks.count
+        let openTasks = tasks.filter { $0.status == .todo || $0.status == .inProgress }.count
         let actionDebtRatio = totalTasks > 0 ? Double(openTasks) / Double(totalTasks) : 0
-        let now = Date(); let ages = items.map { now.timeIntervalSince($0.createdAt) / 86400 }.sorted()
-        let medianAge: Double = ages.isEmpty ? -1 : (ages.count % 2 == 0 ? (ages[ages.count/2-1]+ages[ages.count/2])/2 : ages[ages.count/2])
+        let now = Date()
+        let ages = items.map { now.timeIntervalSince($0.createdAt) / 86400 }.sorted()
+        let medianAge: Double = ages.isEmpty ? -1 : (ages.count % 2 == 0 ? (ages[ages.count / 2 - 1] + ages[ages.count / 2]) / 2 : ages[ages.count / 2])
         let entityCount = Set(allEdges.flatMap { [$0.fromID, $0.toID] }).count
         let graphDensity = entityCount > 1 ? Double(allEdges.count) / Double(entityCount * (entityCount - 1)) : 0
-        let dv = min(decisionVelocity / 2.0, 1.0) * 25; let ad = (1.0 - actionDebtRatio) * 25.0
+        let dv = min(decisionVelocity / 2.0, 1.0) * 25
+        let ad = (1.0 - actionDebtRatio) * 25.0
         let ef = medianAge < 7 ? 20.0 : medianAge < 14 ? 15.0 : medianAge < 30 ? 10.0 : 5.0
         let gd = graphDensity > 0.10 ? 15.0 : graphDensity > 0.05 ? 10.0 : 5.0
-        let re = (1.0 - riskExposure) * 15.0; let score = Int((dv + ad + ef + gd + re).rounded())
+        let re = (1.0 - riskExposure) * 15.0
+        let score = Int((dv + ad + ef + gd + re).rounded())
         let status = score >= 70 ? "healthy" : score >= 40 ? "stale" : score >= 30 ? "atRisk" : "dormant"
         var anomalies: [String] = []
-        if medianAge < 0 { anomalies.append("No items in project") }
-        else if medianAge > 7 { anomalies.append("Silence burst: \(Int(medianAge))d") }
+        if medianAge < 0 { anomalies.append("No items in project") } else if medianAge > 7 { anomalies.append("Silence burst: \(Int(medianAge))d") }
         if decisionVelocity < 0.5 && items.count >= 3 { anomalies.append("Decision drought") }
         if actionDebtRatio > 0.7 && totalTasks > 0 { anomalies.append("Action debt: \(Int(actionDebtRatio*100))%") }
         if riskExposure > 0.5 { anomalies.append("High risk exposure") }
         if unresolvedRisks.count > 0 { anomalies.append("Unresolved risks: \(unresolvedRisks.count)") }
         if pendingSignals.count >= 5 { anomalies.append("Signal backlog: \(pendingSignals.count) pending") }
-        return HealthResult(score: score, status: status, decisionVelocity: decisionVelocity, actionDebtRatio: actionDebtRatio, evidenceFreshnessDays: medianAge, graphDensity: graphDensity, riskExposure: riskExposure, anomalies: anomalies)
+        return HealthResult(
+            score: score, status: status, decisionVelocity: decisionVelocity, actionDebtRatio: actionDebtRatio, evidenceFreshnessDays: medianAge,
+            graphDensity: graphDensity, riskExposure: riskExposure, anomalies: anomalies)
     }
     @MainActor
     static func updateProject(_ pid: UUID, context: ModelContext) {
         guard let r = compute(for: pid, context: context), let p = try? ProjectService(context: context).fetch(id: pid) else { return }
-        p.healthScore = Double(r.score); p.healthStatus = r.status; p.lastActivityAt = Date()
+        p.healthScore = Double(r.score)
+        p.healthStatus = r.status
+        p.lastActivityAt = Date()
         try? context.save()
     }
 }
@@ -1220,17 +1421,17 @@ enum PipelineStage: String, Sendable {
 /// An individual event in the agent's processing trace, rendered in the UI.
 struct PipelineAgentEvent: Sendable, Identifiable {
     enum Kind: String, Sendable {
-        case thinking      // Agent is reasoning (LLM thinking)
-        case toolCall      // Agent called a tool
-        case toolResult    // Tool returned a result
-        case textDelta     // Agent sent a text chunk
-        case done          // Agent finished successfully
-        case failed        // Agent errored
+        case thinking  // Agent is reasoning (LLM thinking)
+        case toolCall  // Agent called a tool
+        case toolResult  // Tool returned a result
+        case textDelta  // Agent sent a text chunk
+        case done  // Agent finished successfully
+        case failed  // Agent errored
     }
     let id: UUID
     let kind: Kind
     let timestamp: Date
-    let detail: String     // tool name, summary, or thinking label
+    let detail: String  // tool name, summary, or thinking label
     let metadata: String?  // arguments, full result, or thinking text
 }
 
@@ -1238,10 +1439,10 @@ struct PipelineProgress: Sendable {
     let itemId: UUID
     let itemTitle: String
     let itemType: String
-    let phase: String       // "starting", "transcribing", "analyzing", "ingesting", "completed", "error"
+    let phase: String  // "starting", "transcribing", "analyzing", "ingesting", "completed", "error"
     let currentTool: String?
     let toolSummary: String?
-    var toolLog: [String]   // ordered list of "tool_name: summary"
+    var toolLog: [String]  // ordered list of "tool_name: summary"
     var events: [PipelineAgentEvent]  // full agent trace for UI rendering
     var thinkingActive: Bool  // true when agent is in thinking/reasoning state
 }
@@ -1281,9 +1482,10 @@ final class PromptStore: ObservableObject {
 
     private func loadBasePrompts() {
         guard let url = Bundle.main.url(forResource: "ai_config", withExtension: "json"),
-              let data = try? Data(contentsOf: url),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let features = json["features"] as? [String: [String: Any]] else { return }
+            let data = try? Data(contentsOf: url),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let features = json["features"] as? [String: [String: Any]]
+        else { return }
 
         let now = Date()
         for (featureKey, featureDict) in features {
@@ -1324,8 +1526,9 @@ final class PromptStore: ObservableObject {
 
     private func applyUserOverrides() {
         guard fileManager.fileExists(atPath: overridesURL.path),
-              let data = try? Data(contentsOf: overridesURL),
-              let overrides = try? JSONDecoder().decode([String: EditablePrompt].self, from: data) else { return }
+            let data = try? Data(contentsOf: overridesURL),
+            let overrides = try? JSONDecoder().decode([String: EditablePrompt].self, from: data)
+        else { return }
         for (key, prompt) in overrides where prompt.isUserEdited {
             prompts[key] = prompt
         }
@@ -1417,18 +1620,18 @@ final class PromptStore: ObservableObject {
 /// A learned pattern or strategy that the agent can recall.
 struct AgentMemory: Codable, Identifiable, Sendable {
     var id: UUID
-    let pattern: String           // e.g. "audio > 60min in Portuguese"
-    let strategy: String           // e.g. "chunk 5k chars with nano, reduce with gpt-5.5"
-    let itemType: String?          // "audio", "image", "note"
-    let contentType: String?       // "meeting", "interview", "document", "photo"
-    let language: String?          // "pt", "en", etc.
-    let minDuration: Double?       // seconds
-    let minChars: Int?             // character count threshold
+    let pattern: String  // e.g. "audio > 60min in Portuguese"
+    let strategy: String  // e.g. "chunk 5k chars with nano, reduce with gpt-5.5"
+    let itemType: String?  // "audio", "image", "note"
+    let contentType: String?  // "meeting", "interview", "document", "photo"
+    let language: String?  // "pt", "en", etc.
+    let minDuration: Double?  // seconds
+    let minChars: Int?  // character count threshold
     var successCount: Int
     var failCount: Int
     var lastUsed: Date
     let createdAt: Date
-    var isStale: Bool              // >3 consecutive failures
+    var isStale: Bool  // >3 consecutive failures
 
     var relevance: Double {
         let total = Double(successCount + failCount)
@@ -1459,8 +1662,9 @@ final class AgentMemoryStore: ObservableObject {
 
     private func load() {
         guard fileManager.fileExists(atPath: storeURL.path),
-              let data = try? Data(contentsOf: storeURL),
-              let loaded = try? JSONDecoder().decode([AgentMemory].self, from: data) else { return }
+            let data = try? Data(contentsOf: storeURL),
+            let loaded = try? JSONDecoder().decode([AgentMemory].self, from: data)
+        else { return }
         memories = loaded
     }
 
@@ -1476,9 +1680,11 @@ final class AgentMemoryStore: ObservableObject {
 
     // MARK: - CRUD
 
-    func write(pattern: String, strategy: String, itemType: String? = nil,
-               contentType: String? = nil, language: String? = nil,
-               minDuration: Double? = nil, minChars: Int? = nil) -> AgentMemory {
+    func write(
+        pattern: String, strategy: String, itemType: String? = nil,
+        contentType: String? = nil, language: String? = nil,
+        minDuration: Double? = nil, minChars: Int? = nil
+    ) -> AgentMemory {
         let mem = AgentMemory(
             id: UUID(), pattern: pattern, strategy: strategy,
             itemType: itemType, contentType: contentType, language: language,
@@ -1508,9 +1714,11 @@ final class AgentMemoryStore: ObservableObject {
     }
 
     /// Search for relevant memories matching content characteristics.
-    func search(itemType: String? = nil, language: String? = nil,
-                minDuration: Double? = nil, minChars: Int? = nil,
-                contentType: String? = nil, maxResults: Int = 5) -> [AgentMemory] {
+    func search(
+        itemType: String? = nil, language: String? = nil,
+        minDuration: Double? = nil, minChars: Int? = nil,
+        contentType: String? = nil, maxResults: Int = 5
+    ) -> [AgentMemory] {
         memories
             .filter { !$0.isStale }
             .filter { mem in
@@ -1534,11 +1742,12 @@ final class AgentMemoryStore: ObservableObject {
     func linkToItem(memoryId: UUID, itemId: UUID, context: ModelContext) {
         guard let mem = memories.first(where: { $0.id == memoryId }) else { return }
         let annotationService = AnnotationService(context: context)
-        try? annotationService.upsert([
-            CapturedAnnotation(source: "agent_memory", key: "memory_id", value: memoryId.uuidString, confidence: 1.0),
-            CapturedAnnotation(source: "agent_memory", key: "pattern", value: mem.pattern, confidence: nil),
-            CapturedAnnotation(source: "agent_memory", key: "strategy", value: mem.strategy, confidence: nil)
-        ], itemID: itemId, source: "agent_memory")
+        try? annotationService.upsert(
+            [
+                CapturedAnnotation(source: "agent_memory", key: "memory_id", value: memoryId.uuidString, confidence: 1.0),
+                CapturedAnnotation(source: "agent_memory", key: "pattern", value: mem.pattern, confidence: nil),
+                CapturedAnnotation(source: "agent_memory", key: "strategy", value: mem.strategy, confidence: nil),
+            ], itemID: itemId, source: "agent_memory")
     }
 }
 
@@ -1553,14 +1762,14 @@ enum ToolPermission {
     static func classify(toolName: String) -> ToolPermission {
         switch toolName {
         case "search_knowledge", "get_item", "list_items", "get_project",
-             "get_connections", "get_tasks", "get_analysis", "summarize_day",
-             "read_prompt", "list_prompts", "search_memory", "list_memories",
-             "extract_content", "describe_image":
+            "get_connections", "get_tasks", "get_analysis", "summarize_day",
+            "read_prompt", "list_prompts", "search_memory", "list_memories",
+            "extract_content", "describe_image":
             return .readOnly
         case "create_note", "create_task", "update_task", "create_edge",
-             "set_annotation", "analyze_content", "edit_prompt",
-             "write_memory", "create_project_framework", "update_project_framework",
-             "raise_signal", "list_lenses", "apply_lens":
+            "set_annotation", "analyze_content", "edit_prompt",
+            "write_memory", "create_project_framework", "update_project_framework",
+            "raise_signal", "list_lenses", "apply_lens":
             return .write
         case "trash_item":
             return .destructive
@@ -1572,7 +1781,7 @@ enum ToolPermission {
     var requiresConfirmation: Bool {
         switch self {
         case .readOnly: return false
-        case .write: return false   // Pipeline auto-approves; interactive chat may override
+        case .write: return false  // Pipeline auto-approves; interactive chat may override
         case .destructive: return true
         }
     }
@@ -1650,7 +1859,10 @@ enum ContentParser {
             let line = lines[i].trimmingCharacters(in: .whitespaces)
 
             // Skip empty
-            if line.isEmpty { i += 1; continue }
+            if line.isEmpty {
+                i += 1
+                continue
+            }
 
             // Table detection: lines with | separators
             if line.contains("|") && line.hasPrefix("|") {
@@ -1697,9 +1909,9 @@ enum ContentParser {
             var textLines: [String] = []
             while i < lines.count {
                 let l = lines[i].trimmingCharacters(in: .whitespaces)
-                if l.isEmpty || l.hasPrefix("```") || l.hasPrefix("|") || l.hasPrefix("- [ ]") ||
-                   l.hasPrefix("* [ ]") || l.hasPrefix("- ") || l.hasPrefix("* ") ||
-                   l.range(of: #"^\d+\."#, options: .regularExpression) != nil {
+                if l.isEmpty || l.hasPrefix("```") || l.hasPrefix("|") || l.hasPrefix("- [ ]") || l.hasPrefix("* [ ]") || l.hasPrefix("- ") || l.hasPrefix("* ")
+                    || l.range(of: #"^\d+\."#, options: .regularExpression) != nil
+                {
                     break
                 }
                 textLines.append(lines[i])
@@ -1729,16 +1941,20 @@ enum ContentParser {
         }
 
         guard tableLines.count >= 2 else {
-            errors.append(ParseError(line: startIndex + 1, snippet: tableLines.first ?? "",
-                reason: "Table needs at least 2 rows (header + separator)", suggestion: "Add a separator row: |---|---|"))
+            errors.append(
+                ParseError(
+                    line: startIndex + 1, snippet: tableLines.first ?? "",
+                    reason: "Table needs at least 2 rows (header + separator)", suggestion: "Add a separator row: |---|---|"))
             return (nil, tableLines.count, errors)
         }
 
         // Parse header
         let headerCells = parseTableRow(tableLines[0])
         guard !headerCells.isEmpty else {
-            errors.append(ParseError(line: startIndex + 1, snippet: tableLines[0],
-                reason: "Could not parse table header", suggestion: "Format: | Col1 | Col2 |"))
+            errors.append(
+                ParseError(
+                    line: startIndex + 1, snippet: tableLines[0],
+                    reason: "Could not parse table header", suggestion: "Format: | Col1 | Col2 |"))
             return (nil, tableLines.count, errors)
         }
 
@@ -1753,9 +1969,11 @@ enum ContentParser {
         for rowIdx in dataStart..<tableLines.count {
             let cells = parseTableRow(tableLines[rowIdx])
             if cells.count != headerCells.count {
-                errors.append(ParseError(line: startIndex + rowIdx + 1, snippet: tableLines[rowIdx],
-                    reason: "Row has \(cells.count) columns, expected \(headerCells.count)",
-                    suggestion: "Each row must have exactly \(headerCells.count) cells matching: \(headerCells.joined(separator: " | "))"))
+                errors.append(
+                    ParseError(
+                        line: startIndex + rowIdx + 1, snippet: tableLines[rowIdx],
+                        reason: "Row has \(cells.count) columns, expected \(headerCells.count)",
+                        suggestion: "Each row must have exactly \(headerCells.count) cells matching: \(headerCells.joined(separator: " | "))"))
             }
             rows.append(cells)
         }
@@ -1799,9 +2017,13 @@ enum ContentParser {
             if parts.count >= 2 {
                 task = parts[0]
                 for part in parts.dropFirst() {
-                    if part.hasPrefix("owner:") { owner = part.replacingOccurrences(of: "owner:", with: "").trimmingCharacters(in: .whitespaces) }
-                    else if part.hasPrefix("due:") { dueDate = part.replacingOccurrences(of: "due:", with: "").trimmingCharacters(in: .whitespaces) }
-                    else if part.hasPrefix("priority:") { priority = part.replacingOccurrences(of: "priority:", with: "").trimmingCharacters(in: .whitespaces) }
+                    if part.hasPrefix("owner:") {
+                        owner = part.replacingOccurrences(of: "owner:", with: "").trimmingCharacters(in: .whitespaces)
+                    } else if part.hasPrefix("due:") {
+                        dueDate = part.replacingOccurrences(of: "due:", with: "").trimmingCharacters(in: .whitespaces)
+                    } else if part.hasPrefix("priority:") {
+                        priority = part.replacingOccurrences(of: "priority:", with: "").trimmingCharacters(in: .whitespaces)
+                    }
                 }
             }
 
@@ -1816,13 +2038,14 @@ enum ContentParser {
     // MARK: Code block parser
 
     private static func parseCodeBlock(from lines: [String], startIndex: Int) -> (CodeBlock?, Int) {
-        var i = startIndex + 1 // skip opening ```
+        var i = startIndex + 1  // skip opening ```
         var codeLines: [String] = []
         let lang = lines[startIndex].replacingOccurrences(of: "```", with: "").trimmingCharacters(in: .whitespaces)
 
         while i < lines.count {
             if lines[i].trimmingCharacters(in: .whitespaces).hasPrefix("```") {
-                i += 1; break
+                i += 1
+                break
             }
             codeLines.append(lines[i])
             i += 1
@@ -1884,7 +2107,8 @@ struct SkillTemplate: Codable, Identifiable, Sendable {
         SkillTemplate(
             id: UUID(), name: "deep_research",
             description: "Multi-item search and synthesis across the entire knowledge base",
-            systemPrompt: "You are a research agent. Search the knowledge base thoroughly, read relevant items, and synthesize findings. Be thorough — explore connections between items. Output a structured research report.",
+            systemPrompt:
+                "You are a research agent. Search the knowledge base thoroughly, read relevant items, and synthesize findings. Be thorough — explore connections between items. Output a structured research report.",
             allowedTools: ["search_knowledge", "get_item", "list_items", "get_project", "get_connections", "get_analysis"],
             defaultModel: "gpt-5.5", maxIterations: 15
         ),
@@ -1898,10 +2122,11 @@ struct SkillTemplate: Codable, Identifiable, Sendable {
         SkillTemplate(
             id: UUID(), name: "meeting_summarizer",
             description: "Focus on decisions, action items, and key outcomes from meetings",
-            systemPrompt: "You are a meeting analyst. Focus on: who attended, what was decided, action items with owners, and follow-ups. Be concise and actionable.",
+            systemPrompt:
+                "You are a meeting analyst. Focus on: who attended, what was decided, action items with owners, and follow-ups. Be concise and actionable.",
             allowedTools: ["extract_content", "analyze_content", "create_task"],
             defaultModel: "gpt-5.5", maxIterations: 8
-        )
+        ),
     ]
 }
 
@@ -1951,33 +2176,37 @@ final class WawaJSBridge: NSObject, WawaJSExports {
         return results.compactMap { r in
             guard let item = items.first(where: { $0.id == r.itemID }) else { return nil }
             var d = itemToDict(item)
-            d["snippet"] = r.snippet; d["matchedField"] = r.matchedField.rawValue
+            d["snippet"] = r.snippet
+            d["matchedField"] = r.matchedField.rawValue
             return d
         }
     }
 
     func getItem(_ id: String) -> [String: Any]? {
         guard let uuid = UUID(uuidString: id),
-              let item = try? KnowledgeItemService(context: modelContext).fetchItem(id: uuid) else { return nil }
+            let item = try? KnowledgeItemService(context: modelContext).fetchItem(id: uuid)
+        else { return nil }
         return itemToDict(item)
     }
 
     func getItemAnalysis(_ id: String) -> [String: Any]? {
         guard let uuid = UUID(uuidString: id),
-              let analysis = try? fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: uuid) else { return nil }
+            let analysis = try? fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: uuid)
+        else { return nil }
         return [
             "shortSummary": analysis.shortSummary,
             "detailedSummary": analysis.detailedSummary,
             "decisions": analysis.decisions.map { ["title": $0.title, "details": $0.details] },
             "actionItems": analysis.actionItems.map { ["task": $0.task, "owner": $0.owner ?? ""] },
             "risks": analysis.risks.map { ["risk": $0.risk, "confidence": $0.confidence ?? 0] },
-            "openQuestions": analysis.openQuestions.map { ["question": $0.question] }
+            "openQuestions": analysis.openQuestions.map { ["question": $0.question] },
         ]
     }
 
     func getProject(_ id: String) -> [String: Any]? {
         guard let uuid = UUID(uuidString: id),
-              let project = try? ProjectService(context: modelContext).fetch(id: uuid) else { return nil }
+            let project = try? ProjectService(context: modelContext).fetch(id: uuid)
+        else { return nil }
         return ["id": project.id.uuidString, "name": project.name]
     }
 
@@ -2008,19 +2237,22 @@ final class WawaJSBridge: NSObject, WawaJSExports {
     func readPDF(_ itemId: String) -> String? {
         guard let uuid = UUID(uuidString: itemId) else { return nil }
         let dir = fileStore.itemDirectoryURL(for: uuid)
-        let pdfs = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil))?.filter {
-            $0.pathExtension.lowercased() == "pdf"
-        } ?? []
+        let pdfs =
+            (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil))?.filter {
+                $0.pathExtension.lowercased() == "pdf"
+            } ?? []
         guard let pdfURL = pdfs.first,
-              let pdf = PDFDocument(url: pdfURL) else { return nil }
+            let pdf = PDFDocument(url: pdfURL)
+        else { return nil }
         return pdf.string
     }
 
     func readExcel(_ itemId: String) -> [[String: Any]]? {
         // Try CSV first (pure Swift), then xlsx via base64 bridge
         guard let uuid = UUID(uuidString: itemId),
-              let item = try? KnowledgeItemService(context: modelContext).fetchItem(id: uuid),
-              let text = item.bodyText ?? loadFileText(itemId: itemId, ext: "csv") else { return nil }
+            let item = try? KnowledgeItemService(context: modelContext).fetchItem(id: uuid),
+            let text = item.bodyText ?? loadFileText(itemId: itemId, ext: "csv")
+        else { return nil }
         let lines = text.components(separatedBy: "\n").filter { !$0.isEmpty }
         guard lines.count >= 2 else { return nil }
         let headers = lines[0].components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
@@ -2037,10 +2269,11 @@ final class WawaJSBridge: NSObject, WawaJSExports {
     func readWord(_ itemId: String) -> String? {
         guard let uuid = UUID(uuidString: itemId) else { return nil }
         let dir = fileStore.itemDirectoryURL(for: uuid)
-        let docs = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil))?.filter {
-            let ext = $0.pathExtension.lowercased()
-            return ext == "docx" || ext == "rtf" || ext == "txt"
-        } ?? []
+        let docs =
+            (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil))?.filter {
+                let ext = $0.pathExtension.lowercased()
+                return ext == "docx" || ext == "rtf" || ext == "txt"
+            } ?? []
         guard let docURL = docs.first else { return nil }
         if docURL.pathExtension.lowercased() == "txt" {
             return try? String(contentsOf: docURL, encoding: .utf8)
@@ -2060,9 +2293,10 @@ final class WawaJSBridge: NSObject, WawaJSExports {
     private func loadFileText(itemId: String, ext: String) -> String? {
         guard let uuid = UUID(uuidString: itemId) else { return nil }
         let dir = fileStore.itemDirectoryURL(for: uuid)
-        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil))?.filter {
-            $0.pathExtension.lowercased() == ext
-        } ?? []
+        let files =
+            (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil))?.filter {
+                $0.pathExtension.lowercased() == ext
+            } ?? []
         guard let url = files.first else { return nil }
         return try? String(contentsOf: url, encoding: .utf8)
     }
@@ -2077,10 +2311,12 @@ final class WawaJSBridge: NSObject, WawaJSExports {
     // MARK: Helpers
 
     private func itemToDict(_ item: KnowledgeItem) -> [String: Any] {
-        ["id": item.id.uuidString, "title": item.title, "type": item.type.rawValue,
-         "status": item.status.rawValue, "createdAt": item.createdAt.description,
-         "durationSeconds": item.durationSeconds ?? 0, "tags": item.tags,
-         "projectID": item.projectID?.uuidString ?? ""]
+        [
+            "id": item.id.uuidString, "title": item.title, "type": item.type.rawValue,
+            "status": item.status.rawValue, "createdAt": item.createdAt.description,
+            "durationSeconds": item.durationSeconds ?? 0, "tags": item.tags,
+            "projectID": item.projectID?.uuidString ?? "",
+        ]
     }
 }
 
@@ -2088,7 +2324,9 @@ enum JSSandbox {
     static let timeout: TimeInterval = 5.0
 
     struct Result {
-        let output: String; let logs: [String]; let error: String?
+        let output: String
+        let logs: [String]
+        let error: String?
     }
 
     static func execute(_ code: String, bridge: WawaJSBridge) -> Result {
@@ -2098,13 +2336,14 @@ enum JSSandbox {
         context.setObject(bridge, forKeyedSubscript: "native" as NSString)
 
         // Inject console shim
-        context.evaluateScript("""
-        var console = {
-            log: function(m) { native.jsLog(String(m)); },
-            error: function(m) { native.jsLog('[ERROR] ' + String(m)); },
-            warn: function(m) { native.jsLog('[WARN] ' + String(m)); }
-        };
-        """)
+        context.evaluateScript(
+            """
+            var console = {
+                log: function(m) { native.jsLog(String(m)); },
+                error: function(m) { native.jsLog('[ERROR] ' + String(m)); },
+                warn: function(m) { native.jsLog('[WARN] ' + String(m)); }
+            };
+            """)
 
         // Inject dayjs (date library, 7KB minified core)
         context.evaluateScript(Self.dayjsCore)
@@ -2137,180 +2376,180 @@ enum JSSandbox {
 
     /// Minimal dayjs-like date helpers. ~1.2KB
     private static let dayjsCore = """
-    var dayjs = function(d) {
-        var dt = d ? new Date(d) : new Date();
-        return {
-            format: function(f) {
-                var y = dt.getFullYear(), M = String(dt.getMonth()+1).padStart(2,'0'),
-                    D = String(dt.getDate()).padStart(2,'0'),
-                    h = String(dt.getHours()).padStart(2,'0'),
-                    m = String(dt.getMinutes()).padStart(2,'0'),
-                    s = String(dt.getSeconds()).padStart(2,'0');
-                return f.replace('YYYY',y).replace('MM',M).replace('DD',D)
-                        .replace('HH',h).replace('mm',m).replace('ss',s);
-            },
-            add: function(n, unit) {
-                var nd = new Date(dt);
-                if (unit==='day') nd.setDate(nd.getDate()+n);
-                if (unit==='month') nd.setMonth(nd.getMonth()+n);
-                if (unit==='year') nd.setFullYear(nd.getFullYear()+n);
-                if (unit==='hour') nd.setHours(nd.getHours()+n);
-                return dayjs(nd);
-            },
-            diff: function(other, unit) {
-                var diff = dt - new Date(other);
-                if (unit==='day') return Math.round(diff/86400000);
-                if (unit==='hour') return Math.round(diff/3600000);
-                return diff;
-            },
-            isBefore: function(other) { return dt < new Date(other); },
-            isAfter: function(other) { return dt > new Date(other); },
-            toDate: function() { return dt; },
-            valueOf: function() { return dt.getTime(); }
+        var dayjs = function(d) {
+            var dt = d ? new Date(d) : new Date();
+            return {
+                format: function(f) {
+                    var y = dt.getFullYear(), M = String(dt.getMonth()+1).padStart(2,'0'),
+                        D = String(dt.getDate()).padStart(2,'0'),
+                        h = String(dt.getHours()).padStart(2,'0'),
+                        m = String(dt.getMinutes()).padStart(2,'0'),
+                        s = String(dt.getSeconds()).padStart(2,'0');
+                    return f.replace('YYYY',y).replace('MM',M).replace('DD',D)
+                            .replace('HH',h).replace('mm',m).replace('ss',s);
+                },
+                add: function(n, unit) {
+                    var nd = new Date(dt);
+                    if (unit==='day') nd.setDate(nd.getDate()+n);
+                    if (unit==='month') nd.setMonth(nd.getMonth()+n);
+                    if (unit==='year') nd.setFullYear(nd.getFullYear()+n);
+                    if (unit==='hour') nd.setHours(nd.getHours()+n);
+                    return dayjs(nd);
+                },
+                diff: function(other, unit) {
+                    var diff = dt - new Date(other);
+                    if (unit==='day') return Math.round(diff/86400000);
+                    if (unit==='hour') return Math.round(diff/3600000);
+                    return diff;
+                },
+                isBefore: function(other) { return dt < new Date(other); },
+                isAfter: function(other) { return dt > new Date(other); },
+                toDate: function() { return dt; },
+                valueOf: function() { return dt.getTime(); }
+            };
         };
-    };
-    """
+        """
 
     /// Simple statistics: mean, median, stddev, percentile, correlation, linearRegression. ~1.8KB
     private static let simpleStats = """
-    var stats = {
-        sum: function(arr) { return arr.reduce(function(a,b){return a+b;},0); },
-        mean: function(arr) { return stats.sum(arr)/arr.length; },
-        median: function(arr) {
-            var s = arr.slice().sort(function(a,b){return a-b;});
-            var m = Math.floor(s.length/2);
-            return s.length%2 ? s[m] : (s[m-1]+s[m])/2;
-        },
-        min: function(arr) { return Math.min.apply(null, arr); },
-        max: function(arr) { return Math.max.apply(null, arr); },
-        stddev: function(arr) {
-            var m = stats.mean(arr);
-            return Math.sqrt(arr.reduce(function(a,b){return a+Math.pow(b-m,2);},0)/arr.length);
-        },
-        percentile: function(arr, p) {
-            var s = arr.slice().sort(function(a,b){return a-b;});
-            return s[Math.ceil(p/100*s.length)-1];
-        },
-        correlation: function(x, y) {
-            var mx=stats.mean(x), my=stats.mean(y);
-            var num=0, dx=0, dy=0;
-            for (var i=0;i<x.length;i++){ num+=(x[i]-mx)*(y[i]-my); dx+=Math.pow(x[i]-mx,2); dy+=Math.pow(y[i]-my,2); }
-            return num/Math.sqrt(dx*dy);
-        },
-        linearRegression: function(x, y) {
-            var mx=stats.mean(x), my=stats.mean(y);
-            var num=0, den=0;
-            for (var i=0;i<x.length;i++){ num+=(x[i]-mx)*(y[i]-my); den+=Math.pow(x[i]-mx,2); }
-            var slope = num/den;
-            return { slope: slope, intercept: my-slope*mx, predict: function(v){ return slope*v+(my-slope*mx); } };
-        },
-        histogram: function(arr, bins) {
-            var mn=stats.min(arr), mx=stats.max(arr), width=(mx-mn)/bins, buckets=[];
-            for (var i=0;i<bins;i++){ var lo=mn+i*width, hi=lo+width;
-                buckets.push({min:lo, max:hi, count:arr.filter(function(v){return v>=lo&&(i===bins-1?v<=hi:v<hi);}).length}); }
-            return buckets;
-        }
-    };
-    """
+        var stats = {
+            sum: function(arr) { return arr.reduce(function(a,b){return a+b;},0); },
+            mean: function(arr) { return stats.sum(arr)/arr.length; },
+            median: function(arr) {
+                var s = arr.slice().sort(function(a,b){return a-b;});
+                var m = Math.floor(s.length/2);
+                return s.length%2 ? s[m] : (s[m-1]+s[m])/2;
+            },
+            min: function(arr) { return Math.min.apply(null, arr); },
+            max: function(arr) { return Math.max.apply(null, arr); },
+            stddev: function(arr) {
+                var m = stats.mean(arr);
+                return Math.sqrt(arr.reduce(function(a,b){return a+Math.pow(b-m,2);},0)/arr.length);
+            },
+            percentile: function(arr, p) {
+                var s = arr.slice().sort(function(a,b){return a-b;});
+                return s[Math.ceil(p/100*s.length)-1];
+            },
+            correlation: function(x, y) {
+                var mx=stats.mean(x), my=stats.mean(y);
+                var num=0, dx=0, dy=0;
+                for (var i=0;i<x.length;i++){ num+=(x[i]-mx)*(y[i]-my); dx+=Math.pow(x[i]-mx,2); dy+=Math.pow(y[i]-my,2); }
+                return num/Math.sqrt(dx*dy);
+            },
+            linearRegression: function(x, y) {
+                var mx=stats.mean(x), my=stats.mean(y);
+                var num=0, den=0;
+                for (var i=0;i<x.length;i++){ num+=(x[i]-mx)*(y[i]-my); den+=Math.pow(x[i]-mx,2); }
+                var slope = num/den;
+                return { slope: slope, intercept: my-slope*mx, predict: function(v){ return slope*v+(my-slope*mx); } };
+            },
+            histogram: function(arr, bins) {
+                var mn=stats.min(arr), mx=stats.max(arr), width=(mx-mn)/bins, buckets=[];
+                for (var i=0;i<bins;i++){ var lo=mn+i*width, hi=lo+width;
+                    buckets.push({min:lo, max:hi, count:arr.filter(function(v){return v>=lo&&(i===bins-1?v<=hi:v<hi);}).length}); }
+                return buckets;
+            }
+        };
+        """
 
     /// Wawa helpers: DataFrame-like operations + convenience functions. ~2.8KB
     private static let wawaHelpers = """
-    var wawa = {
-        // DataFrame-like: array of objects → query, transform, aggregate
-        df: function(rows) {
-            var r = rows || [];
-            return {
-                rows: function() { return r; },
-                count: function() { return r.length; },
-                columns: function() { return r.length>0?Object.keys(r[0]):[]; },
-                filter: function(fn) { return wawa.df(r.filter(fn)); },
-                sort: function(col, desc) {
-                    return wawa.df(r.slice().sort(function(a,b){
-                        var va=a[col], vb=b[col];
-                        return (va<vb?-1:va>vb?1:0)*(desc?-1:1);
-                    }));
-                },
-                select: function(cols) {
-                    return wawa.df(r.map(function(row){
-                        var o={}; cols.forEach(function(c){o[c]=row[c];}); return o;
-                    }));
-                },
-                head: function(n) { return wawa.df(r.slice(0,n||5)); },
-                tail: function(n) { return wawa.df(r.slice(-(n||5))); },
-                groupBy: function(col) {
-                    var groups={};
-                    r.forEach(function(row){ var k=row[col]; if(!groups[k])groups[k]=[]; groups[k].push(row); });
-                    var result=[]; Object.keys(groups).forEach(function(k){ result.push({_key:k,_count:groups[k].length,_rows:groups[k]}); });
-                    return wawa.df(result);
-                },
-                agg: function(col, fn) {
-                    var groups={};
-                    r.forEach(function(row){ var k=row._key||'all'; if(!groups[k])groups[k]=[]; groups[k].push(row); });
-                    var result=[];
-                    Object.keys(groups).forEach(function(k){
-                        var vals=groups[k].map(function(rr){ return rr[col]; });
-                        result.push({_key:k, _value:fn(vals)});
-                    });
-                    return wawa.df(result);
-                },
-                toJSON: function() { return JSON.stringify(r); },
-                toArray: function(col) { return r.map(function(row){return row[col];}); }
-            };
-        },
+        var wawa = {
+            // DataFrame-like: array of objects → query, transform, aggregate
+            df: function(rows) {
+                var r = rows || [];
+                return {
+                    rows: function() { return r; },
+                    count: function() { return r.length; },
+                    columns: function() { return r.length>0?Object.keys(r[0]):[]; },
+                    filter: function(fn) { return wawa.df(r.filter(fn)); },
+                    sort: function(col, desc) {
+                        return wawa.df(r.slice().sort(function(a,b){
+                            var va=a[col], vb=b[col];
+                            return (va<vb?-1:va>vb?1:0)*(desc?-1:1);
+                        }));
+                    },
+                    select: function(cols) {
+                        return wawa.df(r.map(function(row){
+                            var o={}; cols.forEach(function(c){o[c]=row[c];}); return o;
+                        }));
+                    },
+                    head: function(n) { return wawa.df(r.slice(0,n||5)); },
+                    tail: function(n) { return wawa.df(r.slice(-(n||5))); },
+                    groupBy: function(col) {
+                        var groups={};
+                        r.forEach(function(row){ var k=row[col]; if(!groups[k])groups[k]=[]; groups[k].push(row); });
+                        var result=[]; Object.keys(groups).forEach(function(k){ result.push({_key:k,_count:groups[k].length,_rows:groups[k]}); });
+                        return wawa.df(result);
+                    },
+                    agg: function(col, fn) {
+                        var groups={};
+                        r.forEach(function(row){ var k=row._key||'all'; if(!groups[k])groups[k]=[]; groups[k].push(row); });
+                        var result=[];
+                        Object.keys(groups).forEach(function(k){
+                            var vals=groups[k].map(function(rr){ return rr[col]; });
+                            result.push({_key:k, _value:fn(vals)});
+                        });
+                        return wawa.df(result);
+                    },
+                    toJSON: function() { return JSON.stringify(r); },
+                    toArray: function(col) { return r.map(function(row){return row[col];}); }
+                };
+            },
 
-        // Convenience functions over native.*
-        topRisky: function(limit) {
-            var items = native.getAllItems();
-            var scored = [];
-            for (var i=0;i<items.length;i++) {
-                var a = native.getItemAnalysis(items[i].id);
-                if (!a || !a.risks || a.risks.length===0) continue;
-                scored.push({ title: items[i].title, id: items[i].id, riskCount: a.risks.length, risks: a.risks });
-            }
-            scored.sort(function(a,b){ return b.riskCount-a.riskCount; });
-            return scored.slice(0, limit||10);
-        },
-
-        recentItems: function(days) {
-            var cutoff = dayjs().add(-(days||7), 'day').toDate();
-            return native.getAllItems().filter(function(i){ return new Date(i.createdAt) > cutoff; });
-        },
-
-        groupByType: function() {
-            var items = native.getAllItems();
-            var types = {};
-            items.forEach(function(i){ var t=i.type; if(!types[t])types[t]=[]; types[t].push(i); });
-            return Object.keys(types).map(function(k){ return { type: k, count: types[k].length }; });
-        },
-
-        pendingActions: function() {
-            var all = native.getAllItems();
-            var pending = [];
-            for (var i=0;i<all.length;i++) {
-                var a = native.getItemAnalysis(all[i].id);
-                if (!a || !a.actionItems) continue;
-                for (var j=0;j<a.actionItems.length;j++) {
-                    pending.push({ item: all[i].title, itemId: all[i].id, task: a.actionItems[j].task, owner: a.actionItems[j].owner });
+            // Convenience functions over native.*
+            topRisky: function(limit) {
+                var items = native.getAllItems();
+                var scored = [];
+                for (var i=0;i<items.length;i++) {
+                    var a = native.getItemAnalysis(items[i].id);
+                    if (!a || !a.risks || a.risks.length===0) continue;
+                    scored.push({ title: items[i].title, id: items[i].id, riskCount: a.risks.length, risks: a.risks });
                 }
-            }
-            return pending;
-        },
+                scored.sort(function(a,b){ return b.riskCount-a.riskCount; });
+                return scored.slice(0, limit||10);
+            },
 
-        describe: function(arr) {
-            if (arr.length===0) return {count:0};
-            var nums = arr.filter(function(v){ return typeof v === 'number'; });
-            return {
-                count: arr.length,
-                numericCount: nums.length,
-                min: nums.length>0?stats.min(nums):null,
-                max: nums.length>0?stats.max(nums):null,
-                mean: nums.length>0?stats.mean(nums):null,
-                median: nums.length>0?stats.median(nums):null,
-                stddev: nums.length>0?stats.stddev(nums):null
-            };
-        }
-    };
-    """
+            recentItems: function(days) {
+                var cutoff = dayjs().add(-(days||7), 'day').toDate();
+                return native.getAllItems().filter(function(i){ return new Date(i.createdAt) > cutoff; });
+            },
+
+            groupByType: function() {
+                var items = native.getAllItems();
+                var types = {};
+                items.forEach(function(i){ var t=i.type; if(!types[t])types[t]=[]; types[t].push(i); });
+                return Object.keys(types).map(function(k){ return { type: k, count: types[k].length }; });
+            },
+
+            pendingActions: function() {
+                var all = native.getAllItems();
+                var pending = [];
+                for (var i=0;i<all.length;i++) {
+                    var a = native.getItemAnalysis(all[i].id);
+                    if (!a || !a.actionItems) continue;
+                    for (var j=0;j<a.actionItems.length;j++) {
+                        pending.push({ item: all[i].title, itemId: all[i].id, task: a.actionItems[j].task, owner: a.actionItems[j].owner });
+                    }
+                }
+                return pending;
+            },
+
+            describe: function(arr) {
+                if (arr.length===0) return {count:0};
+                var nums = arr.filter(function(v){ return typeof v === 'number'; });
+                return {
+                    count: arr.length,
+                    numericCount: nums.length,
+                    min: nums.length>0?stats.min(nums):null,
+                    max: nums.length>0?stats.max(nums):null,
+                    mean: nums.length>0?stats.mean(nums):null,
+                    median: nums.length>0?stats.median(nums):null,
+                    stddev: nums.length>0?stats.stddev(nums):null
+                };
+            }
+        };
+        """
 }
 
 // MARK: - FieldAuthorityService
@@ -2478,7 +2717,8 @@ final class SignalResolutionService {
         signal.resolvedByRaw = "user"
         signal.resolutionReason = reason
         try? context.save()
-        AgentMemoryStore.shared.write(pattern: "rejected_\(signal.type)",
+        AgentMemoryStore.shared.write(
+            pattern: "rejected_\(signal.type)",
             strategy: "User rejected: \(signal.title.prefix(60))",
             itemType: signal.type, contentType: nil, language: nil)
     }
@@ -2501,13 +2741,15 @@ final class SignalResolutionService {
 
     func transformToTask(_ signal: AgentSuggestion, projectID: UUID? = nil) -> TaskItem? {
         let taskSvc = TaskService(context: context)
-        guard let task = try? taskSvc.create(
-            title: signal.title,
-            projectID: projectID ?? signal.projectID,
-            priority: .medium,
-            sourceItemID: signal.sourceItemID,
-            createdBy: .user
-        ) else { return nil }
+        guard
+            let task = try? taskSvc.create(
+                title: signal.title,
+                projectID: projectID ?? signal.projectID,
+                priority: .medium,
+                sourceItemID: signal.sourceItemID,
+                createdBy: .user
+            )
+        else { return nil }
         signal.status = "transformed"
         signal.resolvedAt = Date()
         signal.resolvedByRaw = "user"
@@ -2544,16 +2786,17 @@ final class SignalResolutionService {
         let all = (try? context.fetch(FetchDescriptor<AgentSuggestion>())) ?? []
         let contradictions = all.filter {
             $0.projectID == projectID
-            && $0.type == "contradiction"
-            && $0.isActive
+                && $0.type == "contradiction"
+                && $0.isActive
         }
         for sig in contradictions {
             // If the new item is referenced in the signal's payload, auto-resolve
             if let json = sig.payloadJSON,
-               let data = json.data(using: .utf8),
-               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let relatedIds = dict["related_item_ids"] as? [String],
-               relatedIds.contains(itemID.uuidString) {
+                let data = json.data(using: .utf8),
+                let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let relatedIds = dict["related_item_ids"] as? [String],
+                relatedIds.contains(itemID.uuidString)
+            {
                 autoArchive(sig, reason: "Resolved by new item: \(itemID.uuidString)")
             }
         }
@@ -2569,10 +2812,13 @@ final class VersioningService {
     private let autoMilestoneThreshold = 50
     private init() {}
 
-    func recordChange(entityType: String, entityID: UUID, projectID: UUID? = nil,
-                      field: String, previousValue: String?, newValue: String?,
-                      origin: FieldOrigin, context: ModelContext) {
-        let record = ChangeRecord(entityType: entityType, entityID: entityID, projectID: projectID,
+    func recordChange(
+        entityType: String, entityID: UUID, projectID: UUID? = nil,
+        field: String, previousValue: String?, newValue: String?,
+        origin: FieldOrigin, context: ModelContext
+    ) {
+        let record = ChangeRecord(
+            entityType: entityType, entityID: entityID, projectID: projectID,
             field: field, previousValue: previousValue, newValue: newValue, origin: origin)
         context.insert(record)
         if let pid = projectID {
@@ -2585,11 +2831,14 @@ final class VersioningService {
         try? context.save()
     }
 
-    func createSnapshot(projectID: UUID, label: String? = nil,
-                        trigger: SnapshotTrigger = .manual, context: ModelContext) {
+    func createSnapshot(
+        projectID: UUID, label: String? = nil,
+        trigger: SnapshotTrigger = .manual, context: ModelContext
+    ) {
         let allRecords = changes(for: projectID, context: context)
         let unassigned = allRecords.filter { $0.snapshotID == nil }
-        let snapshot = ProjectSnapshot(projectID: projectID, label: label, trigger: trigger,
+        let snapshot = ProjectSnapshot(
+            projectID: projectID, label: label, trigger: trigger,
             changeCount: unassigned.count)
         context.insert(snapshot)
         for record in unassigned { record.snapshotID = snapshot.id }
@@ -2597,8 +2846,10 @@ final class VersioningService {
         try? context.save()
     }
 
-    func changes(for projectID: UUID, since: Date? = nil, limit: Int = 100,
-                 context: ModelContext) -> [ChangeRecord] {
+    func changes(
+        for projectID: UUID, since: Date? = nil, limit: Int = 100,
+        context: ModelContext
+    ) -> [ChangeRecord] {
         let all = (try? context.fetch(FetchDescriptor<ChangeRecord>())) ?? []
         return all.filter { r in
             r.projectID == projectID && (since == nil || r.timestamp >= since!)
@@ -2625,13 +2876,16 @@ final class VersioningService {
         for (key, value) in lastValues {
             let parts = key.split(separator: ":")
             guard parts.count == 3, let eid = UUID(uuidString: String(parts[1])), let val = value else { continue }
-            applyRestore(entityType: String(parts[0]), entityID: eid, field: String(parts[2]),
+            applyRestore(
+                entityType: String(parts[0]), entityID: eid, field: String(parts[2]),
                 value: val, projectID: snapshot.projectID, context: context)
         }
     }
 
-    private func applyRestore(entityType: String, entityID: UUID, field: String,
-                               value: String, projectID: UUID, context: ModelContext) {
+    private func applyRestore(
+        entityType: String, entityID: UUID, field: String,
+        value: String, projectID: UUID, context: ModelContext
+    ) {
         switch entityType {
         case "TaskItem":
             guard let task = try? context.fetch(FetchDescriptor<TaskItem>(predicate: #Predicate { $0.id == entityID })).first else { return }
@@ -2660,7 +2914,8 @@ final class VersioningService {
         default: break
         }
         try? context.save()
-        recordChange(entityType: entityType, entityID: entityID, projectID: projectID,
+        recordChange(
+            entityType: entityType, entityID: entityID, projectID: projectID,
             field: field, previousValue: nil, newValue: value, origin: .system, context: context)
     }
 }
@@ -2685,19 +2940,27 @@ final class QueuePriorityService {
 
         // Trigger base (40 pts) — user action > system
         switch trigger {
-        case .directUserAction: score += 40   // "Transcribe", "Re-analyze"
-        case .newCapture: score += 30          // Recording just finished
-        case .projectAssignment: score += 25   // Swipe to project
-        case .batchReprocess: score += 10      // "Re-process All"
-        case .backgroundBackfill: score += 5   // Embedding backfill
+        case .directUserAction: score += 40  // "Transcribe", "Re-analyze"
+        case .newCapture: score += 30  // Recording just finished
+        case .projectAssignment: score += 25  // Swipe to project
+        case .batchReprocess: score += 10  // "Re-process All"
+        case .backgroundBackfill: score += 5  // Embedding backfill
         }
 
         // Recency (25 pts) — newer items first
         if let age = itemAge {
-            if age < 300 { score += 25 }           // < 5 min
-            else if age < 3600 { score += 20 }     // < 1 hour
-            else if age < 86400 { score += 12 }    // < 1 day
-            else { score += 5 }
+            if age < 300 {
+                score += 25
+            }  // < 5 min
+            else if age < 3600 {
+                score += 20
+            }  // < 1 hour
+            else if age < 86400 {
+                score += 12
+            }  // < 1 day
+            else {
+                score += 5
+            }
         } else {
             score += 15  // Unknown age = middle
         }
@@ -2712,16 +2975,16 @@ final class QueuePriorityService {
         // Retry boost (5 pts) — retries aren't penalized but don't jump the queue
         // Applied by caller when retryCount > 0
 
-        return min(score + 10, 100) // +10 floor so nothing is zero-priority
+        return min(score + 10, 100)  // +10 floor so nothing is zero-priority
     }
 }
 
 /// What triggered this queue entry.
 enum QueueTrigger: String, Sendable {
-    case directUserAction    // User tapped a specific button
-    case newCapture          // Recording/scan/photo just completed
-    case projectAssignment   // Item assigned to project via swipe
-    case batchReprocess      // Batch "Re-process All"
+    case directUserAction  // User tapped a specific button
+    case newCapture  // Recording/scan/photo just completed
+    case projectAssignment  // Item assigned to project via swipe
+    case batchReprocess  // Batch "Re-process All"
     case backgroundBackfill  // Embedding or other background work
 }
 
@@ -2753,15 +3016,18 @@ final class ProcessingQueueService: ObservableObject {
         trigger: QueueTrigger = .newCapture,
         priority: Int? = nil
     ) -> QueueEntry {
-        AppLog.event("pipeline", "Enqueue item — itemID=\(itemID.uuidString.prefix(8)) trigger=\(trigger) projectID=\(projectID?.uuidString.prefix(8) ?? "nil")")
+        AppLog.event(
+            "pipeline", "Enqueue item — itemID=\(itemID.uuidString.prefix(8)) trigger=\(trigger) projectID=\(projectID?.uuidString.prefix(8) ?? "nil")")
         // Deduplicate: if item already queued/processing, skip
         if let existing = entries.first(where: { $0.itemID == itemID && ($0.status == .queued || $0.status == .processing) }) {
             AppLog.debug("pipeline", "Item already queued — skipping duplicate")
             return existing
         }
 
-        let computedPriority = priority ?? QueuePriorityService.shared.computePriority(
-            itemID: itemID, projectID: projectID, trigger: trigger)
+        let computedPriority =
+            priority
+            ?? QueuePriorityService.shared.computePriority(
+                itemID: itemID, projectID: projectID, trigger: trigger)
         let entry = QueueEntry(
             itemID: itemID, projectID: projectID, status: .queued,
             priority: computedPriority)
@@ -2814,7 +3080,8 @@ final class ProcessingQueueService: ObservableObject {
     private func processNext() {
         guard !isPaused, activeJobCount < maxConcurrentJobs else { return }
 
-        let pending = entries
+        let pending =
+            entries
             .filter { $0.status == .queued }
             .sorted { $0.priority > $1.priority || ($0.priority == $1.priority && $0.queuedAt < $1.queuedAt) }
 
@@ -2832,7 +3099,9 @@ final class ProcessingQueueService: ObservableObject {
             return
         }
 
-        AppLog.event("pipeline", "Processing item — itemID=\(next.itemID.uuidString.prefix(8)) priority=\(next.priority) projectID=\(next.projectID?.uuidString.prefix(8) ?? "nil")")
+        AppLog.event(
+            "pipeline",
+            "Processing item — itemID=\(next.itemID.uuidString.prefix(8)) priority=\(next.priority) projectID=\(next.projectID?.uuidString.prefix(8) ?? "nil")")
 
         next.status = .processing
         next.startedAt = Date()
@@ -2872,8 +3141,11 @@ final class ProcessingQueueService: ObservableObject {
                 // 5s, 15s, 45s between attempts.
                 entry.status = .queued
                 entry.lastError = error
-                let backoffSeconds = Int(pow(3.0, Double(entry.retryCount))) * 5 // 5, 15, 45
-                AppLog.warn("pipeline", "Processing failed (attempt \(entry.retryCount)/\(entry.maxRetries)) — itemID=\(entry.itemID.uuidString.prefix(8)) retry in \(backoffSeconds)s error=\(error ?? "unknown")")
+                let backoffSeconds = Int(pow(3.0, Double(entry.retryCount))) * 5  // 5, 15, 45
+                AppLog.warn(
+                    "pipeline",
+                    "Processing failed (attempt \(entry.retryCount)/\(entry.maxRetries)) — itemID=\(entry.itemID.uuidString.prefix(8)) retry in \(backoffSeconds)s error=\(error ?? "unknown")"
+                )
                 activeTasks[entryID] = nil
                 activeJobCount = max(0, activeJobCount - 1)
                 endBackgroundTask()
@@ -3001,7 +3273,8 @@ final class PresetExportService {
     func exportPreset(from project: Project) -> Preset {
         var rules: [String] = []
         if project.customInstructions?.isEmpty == false { rules.append("custom_instructions_present") }
-        return Preset(id: "preset/\(project.slug)", name: project.name,
+        return Preset(
+            id: "preset/\(project.slug)", name: project.name,
             description: "Preset exported from project \"\(project.name)\"",
             lensID: project.frameworkId, frameworkJSON: project.frameworkJSON,
             customInstructions: project.customInstructions, analysisRules: rules,
@@ -3020,7 +3293,8 @@ final class PresetExportService {
         LensCatalogService.shared.allLenses.map { lens in
             var fwJSON: String?
             if let fw = lens.framework { fwJSON = (try? JSONEncoder().encode(fw)).flatMap { String(data: $0, encoding: .utf8) } }
-            return Preset(id: "preset/\(lens.id)", name: lens.name, description: lens.description,
+            return Preset(
+                id: "preset/\(lens.id)", name: lens.name, description: lens.description,
                 lensID: lens.id, frameworkJSON: fwJSON, version: 1)
         }
     }
@@ -3040,7 +3314,8 @@ enum ConfigResolver {
         if let slug = projectSlug {
             let projectURL = store.projectConfigDirectoryURL(for: slug).appendingPathComponent(filename)
             if FileManager.default.fileExists(atPath: projectURL.path),
-               let data = try? Data(contentsOf: projectURL) {
+                let data = try? Data(contentsOf: projectURL)
+            {
                 AppLog.provider.info("ConfigResolver: using project-level \(filename) for \(slug)")
                 return data
             }
@@ -3049,7 +3324,8 @@ enum ConfigResolver {
         // 2. Global user override
         let globalURL = store.configsDirectoryURL().appendingPathComponent(filename)
         if FileManager.default.fileExists(atPath: globalURL.path),
-           let data = try? Data(contentsOf: globalURL) {
+            let data = try? Data(contentsOf: globalURL)
+        {
             AppLog.provider.info("ConfigResolver: using global override \(filename)")
             return data
         }
@@ -3058,7 +3334,8 @@ enum ConfigResolver {
         let bundlePaths = [filename, "Pipelines/\(filename)", "Skills/\(filename)", "Schemas/\(filename)"]
         for path in bundlePaths {
             if let url = Bundle.main.url(forResource: path, withExtension: nil),
-               let data = try? Data(contentsOf: url) {
+                let data = try? Data(contentsOf: url)
+            {
                 return data
             }
         }
@@ -3094,12 +3371,17 @@ struct PipeStage: Codable, Sendable {
 }
 
 struct PipeStep: Codable, Sendable {
-    let action: String; let value: String?; let prompt: String?
+    let action: String
+    let value: String?
+    let prompt: String?
 }
 
 struct PipeDefinition: Codable, Sendable {
-    let name: String; let version: String; let description: String?
-    let params: PipeParams?; let stages: [PipeStage]
+    let name: String
+    let version: String
+    let description: String?
+    let params: PipeParams?
+    let stages: [PipeStage]
 }
 
 // MARK: - Pipeline Store
@@ -3114,8 +3396,9 @@ final class PipelineStore: ObservableObject {
         loadBuiltIn()
         let url = FileArtifactStore().configsDirectoryURL().appendingPathComponent("pipeline.json")
         if FileManager.default.fileExists(atPath: url.path),
-           let data = try? Data(contentsOf: url),
-           let overrides = try? JSONDecoder().decode([String: PipeDefinition].self, from: data) {
+            let data = try? Data(contentsOf: url),
+            let overrides = try? JSONDecoder().decode([String: PipeDefinition].self, from: data)
+        {
             for (name, def) in overrides { self.definitions[name] = def }
         }
         AppLog.provider.info("PipelineStore: \(self.definitions.count) pipeline(s) loaded")
@@ -3126,7 +3409,8 @@ final class PipelineStore: ObservableObject {
         guard let files = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) else { return }
         for fileURL in files where fileURL.pathExtension == "json" {
             guard let data = try? Data(contentsOf: fileURL),
-                  let def = try? JSONDecoder().decode(PipeDefinition.self, from: data) else { continue }
+                let def = try? JSONDecoder().decode(PipeDefinition.self, from: data)
+            else { continue }
             definitions[def.name] = def
         }
     }
@@ -3137,7 +3421,8 @@ final class PipelineStore: ObservableObject {
     /// Resolves through cascade: project/config → configs/ → bundle.
     func active(for projectSlug: String? = nil) -> PipeDefinition? {
         if let slug = projectSlug,
-           let def = ConfigResolver.resolve("pipeline.json", projectSlug: slug, as: PipeDefinition.self) {
+            let def = ConfigResolver.resolve("pipeline.json", projectSlug: slug, as: PipeDefinition.self)
+        {
             return def
         }
         if let def = ConfigResolver.resolve("pipeline.json", as: PipeDefinition.self) {
@@ -3155,8 +3440,9 @@ final class PipelineStore: ObservableObject {
         }
         var overrides: [String: PipeDefinition] = [:]
         if FileManager.default.fileExists(atPath: url.path),
-           let data = try? Data(contentsOf: url),
-           let existing = try? JSONDecoder().decode([String: PipeDefinition].self, from: data) {
+            let data = try? Data(contentsOf: url),
+            let existing = try? JSONDecoder().decode([String: PipeDefinition].self, from: data)
+        {
             overrides = existing
         }
         overrides[def.name] = def
