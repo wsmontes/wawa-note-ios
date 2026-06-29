@@ -1,6 +1,6 @@
+import OSLog
 import UIKit
 import UniformTypeIdentifiers
-import OSLog
 
 private let logger = Logger(subsystem: "com.wawa-note.share", category: "share-extension")
 private let appGroupIdentifier = "group.com.wawa-note"
@@ -32,8 +32,10 @@ final class ShareViewController: UIViewController {
     // MARK: - Attachment processing
 
     private func processAttachments() {
-        guard let containerURL = FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) else {
+        guard
+            let containerURL = FileManager.default
+                .containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)
+        else {
             logger.info(" App Group container not available — cannot import")
             processingDone = true
             hasErrors = true
@@ -65,7 +67,7 @@ final class ShareViewController: UIViewController {
                 UTType.audio.identifier,
                 UTType.movie.identifier,
                 UTType.fileURL.identifier,
-                UTType.data.identifier
+                UTType.data.identifier,
             ]
 
             var matched = false
@@ -94,7 +96,10 @@ final class ShareViewController: UIViewController {
         group.notify(queue: .main) { [weak self] in
             guard let self else { return }
             self.completionLock.lock()
-            guard !self.processingDone else { self.completionLock.unlock(); return }
+            guard !self.processingDone else {
+                self.completionLock.unlock()
+                return
+            }
             self.savedFiles = saved
             if saved.isEmpty {
                 logger.info(" No files saved (errors: \(errorCount))")
@@ -119,7 +124,10 @@ final class ShareViewController: UIViewController {
         DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
             guard let self else { return }
             self.completionLock.lock()
-            guard !self.processingDone else { self.completionLock.unlock(); return }
+            guard !self.processingDone else {
+                self.completionLock.unlock()
+                return
+            }
             logger.info(" Timed out waiting for attachments — completing with \(saved.count) files saved")
             self.savedFiles = saved
             if !saved.isEmpty {
@@ -178,7 +186,8 @@ final class ShareViewController: UIViewController {
     }
 
     private static func safeImportFilename(original: String) -> String {
-        let sanitized = original
+        let sanitized =
+            original
             .replacingOccurrences(of: "[^a-zA-Z0-9._-]", with: "_", options: .regularExpression)
         return "\(UUID().uuidString)-\(sanitized)"
     }
@@ -186,6 +195,8 @@ final class ShareViewController: UIViewController {
     // MARK: - Complete
 
     private func complete() {
+        guard !hasCompleted else { return }
+        hasCompleted = true
         extensionContext?.completeRequest(returningItems: nil)
     }
 }
