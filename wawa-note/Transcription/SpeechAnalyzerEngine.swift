@@ -139,7 +139,7 @@ final class SpeechAnalyzerEngine: TranscriptionEngine, @unchecked Sendable {
 
             for segment in result.transcription {
                 allSegments.append(TranscriptSegment(
-                    meetingId: UUID(),
+                    meetingId: meetingId,
                     startTime: segment.timestamp,
                     endTime: segment.timestamp + segment.duration,
                     text: segment.formattedString,
@@ -162,7 +162,7 @@ final class SpeechAnalyzerEngine: TranscriptionEngine, @unchecked Sendable {
 
     // MARK: - Live Transcription
 
-    func transcribeLive(from audioFileURL: URL) -> LiveTranscriptionStream {
+    func transcribeLive(from audioFileURL: URL, meetingId: UUID) -> LiveTranscriptionStream {
         LiveTranscriptionStream { continuation in
             let task = Task {
                 do {
@@ -190,7 +190,7 @@ final class SpeechAnalyzerEngine: TranscriptionEngine, @unchecked Sendable {
 
                         let segments = result.transcription.map { seg in
                             TranscriptSegment(
-                                meetingId: UUID(),
+                                meetingId: meetingId,
                                 startTime: seg.timestamp,
                                 endTime: seg.timestamp + seg.duration,
                                 text: seg.formattedString,

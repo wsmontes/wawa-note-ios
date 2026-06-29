@@ -90,6 +90,11 @@ final class ContentExtractionService {
         // Reuse existing transcript when available
         if let existing = loadExistingTranscriptText(for: item.id) {
             AppLog.provider.info("ContentExtraction: reusing existing transcript for item \(id)")
+            // Ensure status reflects that transcription is complete (KAN-518)
+            if item.status == .recorded || item.status == .queuedForTranscription || item.status == .transcribing {
+                item.status = .transcribed
+                try? modelContext.save()
+            }
             return existing
         }
 

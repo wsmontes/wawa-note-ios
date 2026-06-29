@@ -123,7 +123,7 @@ struct ProjectExportService {
                 ItemSummary(
                     id: item.id.uuidString,
                     type: item.type.rawValue,
-                    title: item.title,
+                    title: item.title.precomposedStringWithCanonicalMapping,
                     createdAt: ISO8601DateFormatter().string(from: item.createdAt),
                     status: item.status.rawValue
                 )
@@ -476,7 +476,7 @@ final class InstanceExportService {
                 sourceEngineId: t.sourceEngineId, createdAt: iso.string(from: t.createdAt), segmentCount: t.segments.count,
                 segments: t.segments.map { seg in TranscriptSegmentExport(id: seg.id.uuidString, meetingId: seg.meetingId.uuidString, speakerId: seg.speakerId.map({ $0.uuidString }), text: seg.text, startTime: seg.startTime, endTime: seg.endTime, confidence: seg.confidence) })
         }
-        return ItemExportFull(id: item.id.uuidString, type: item.type.rawValue, title: item.title,
+        return ItemExportFull(id: item.id.uuidString, type: item.type.rawValue, title: item.title.precomposedStringWithCanonicalMapping,
             createdAt: iso.string(from: item.createdAt), updatedAt: iso.string(from: item.updatedAt), status: item.status.rawValue,
             tags: item.tags, bodyText: item.bodyText, projectID: item.projectID.map({ $0.uuidString }),
             folderID: item.folderID.map({ $0.uuidString }), isFlagged: item.isFlagged, inboxDate: item.inboxDate.map({ iso.string(from: $0) }),
@@ -668,7 +668,7 @@ final class InstanceExportService {
                     sourceEngineId: t.sourceEngineId, createdAt: s(t.createdAt), segmentCount: t.segments.count,
                     segments: t.segments.map { seg in TranscriptSegmentExport(id: sid(seg.id), meetingId: sid(seg.meetingId), speakerId: seg.speakerId.map(sid), text: seg.text, startTime: seg.startTime, endTime: seg.endTime, confidence: seg.confidence) })
             }
-            return ItemExportFull(id: sid(item.id), type: item.type.rawValue, title: item.title,
+            return ItemExportFull(id: sid(item.id), type: item.type.rawValue, title: item.title.precomposedStringWithCanonicalMapping,
                 createdAt: s(item.createdAt), updatedAt: s(item.updatedAt), status: item.status.rawValue,
                 tags: item.tags, bodyText: item.bodyText, projectID: opt(item.projectID),
                 folderID: opt(item.folderID), isFlagged: item.isFlagged, inboxDate: item.inboxDate.map(s),

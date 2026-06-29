@@ -206,12 +206,15 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
                 if let jsonSegments = json["segments"] as? [[String: Any]], !jsonSegments.isEmpty {
                     segments = jsonSegments.compactMap { seg in
                         guard let text = seg["text"] as? String else { return nil }
+                        // Whisper's avg_logprob is a log-probability (≤ 0), not a [0,1] confidence.
+                        // Convert to a probability via exp() so it matches the Apple engine's scale. (KAN-518)
+                        let confidence: Double? = (seg["avg_logprob"] as? Double).map { min(1.0, max(0.0, exp($0))) }
                         return TranscriptSegment(
                             meetingId: meetingId,
                             startTime: seg["start"] as? Double ?? 0,
                             endTime: seg["end"] as? Double,
                             text: text.trimmingCharacters(in: .whitespacesAndNewlines),
-                            confidence: seg["avg_logprob"] as? Double,
+                            confidence: confidence,
                             languageCode: json["language"] as? String,
                             sourceEngineId: id
                         )

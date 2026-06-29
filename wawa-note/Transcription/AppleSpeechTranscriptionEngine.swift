@@ -482,11 +482,21 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
     /// Build a Transcript from accumulated SFTranscriptionSegments (iOS 17/18
     /// on-device workaround). Computes the full text from all segments and
     /// detects language once.
+    ///
+    /// Filters out intermediate/partial segments that have fake compressed timestamps
+    /// (duration ≈ 0) which are artifacts of the streaming recognition hypothesis updates.
+    /// Only segments with realistic timing (duration > 50ms) are kept.
+    /// Related JIRA: KAN-518
     private func buildTranscript(from segments: [SFTranscriptionSegment], recognizer: SFSpeechRecognizer, meetingId: UUID) -> Transcript {
-        let fullText = segments.map(\.substring).joined(separator: " ")
+        // Filter out intermediate hypothesis segments: these have near-zero duration
+        // because Apple packs all partial tokens into fake timestamps (e.g. 0.011s apart).
+        // Real final segments have duration > 50ms typically.
+        let validSegments = segments.filter { $0.duration > 0.05 || $0.confidence > 0 }
+
+        let fullText = validSegments.map(\.substring).joined(separator: " ")
         let detectedLang = detectLanguage(fullText)
 
-        let transcriptSegments = segments.map { segment in
+        let transcriptSegments = validSegments.map { segment in
             TranscriptSegment(
                 meetingId: meetingId,
                 startTime: segment.timestamp,
@@ -497,6 +507,8 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                 sourceEngineId: "apple-speech"
             )
         }
+
+        AppLog.transcription.info("buildTranscript: \(segments.count) raw → \(validSegments.count) valid segments (filtered \(segments.count - validSegments.count) intermediate hypotheses)")
 
         return Transcript(
             meetingId: meetingId,
@@ -580,7 +592,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
     /// Transcribe an audio file with live partial results.
     /// Guideline: "Diferencie resultado volátil de resultado finalizado."
-    func transcribeLive(from audioFileURL: URL) -> LiveTranscriptionStream {
+    func transcribeLive(from audioFileURL: URL, meetingId: UUID) -> LiveTranscriptionStream {
         LiveTranscriptionStream { continuation in
             let task = Task {
                 do {
@@ -636,7 +648,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
                             let transcriptSegments = newSegments.map { seg in
                                 TranscriptSegment(
-                                    meetingId: UUID(),
+                                    meetingId: meetingId,
                                     startTime: seg.timestamp,
                                     endTime: seg.timestamp + seg.duration,
                                     text: seg.substring,

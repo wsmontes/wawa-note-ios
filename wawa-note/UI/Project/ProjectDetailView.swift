@@ -100,6 +100,7 @@ struct ProjectHomeView: View {
     @EnvironmentObject private var chatState: ChatOverlayState
     @EnvironmentObject private var coordinator: RecordingCoordinator
     @EnvironmentObject private var services: ServiceContainer
+    @EnvironmentObject private var processingQueue: ProcessingQueueService
     @State private var selectedTab: ProjectTab = .synthesis
     @State private var showCaptureSheet = false
     @State private var showNoteEditor = false
@@ -192,9 +193,12 @@ struct ProjectHomeView: View {
         let router = ImportRouter(importers: [
             JSONImporter(), MarkdownImporter(), PlainTextImporter(),
             SRTImporter(), ICSImporter(), PDFImporter(), HTMLImporter(), RTFImporter(),
-            AnarlogImporter()
+            AnarlogImporter(), AudioImportService()
         ])
-        guard let importer = router.importer(for: url) else { return }
+        guard let importer = router.importer(for: url) else {
+            AppLog.general.warning("ProjectHomeView: no importer for \(url.lastPathComponent)")
+            return
+        }
         do {
             let result = try await importer.importFromURL(url)
             let item = result.knowledgeItem
@@ -202,6 +206,9 @@ struct ProjectHomeView: View {
             modelContext.insert(item)
             try? modelContext.save()
             try? services.projects.addItem(item.id, to: project.id)
+            // Drive the content pipeline so audio gets transcribed and all items
+            // get analyzed/ingested into the project. (KAN-518)
+            processingQueue.enqueue(itemID: item.id, projectID: project.id, trigger: .newCapture)
         } catch {
             AppLog.general.error("Import failed: \(error.localizedDescription)")
         }
