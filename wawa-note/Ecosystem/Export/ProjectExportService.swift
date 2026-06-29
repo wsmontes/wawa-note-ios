@@ -797,93 +797,123 @@ final class InstanceExportService {
 
     // MARK: - SRT Export
 
-    /// Export transcript segments as SubRip (.srt) subtitle format.
-    /// Each segment becomes a numbered subtitle block with HH:MM:SS,mmm timestamps.
-    func exportSRT(for itemId: UUID) -> String? {
+    func exportSRT(for itemId: UUID, totalDuration: Double? = nil) -> String? {
         let store = FileArtifactStore()
-        guard let transcript = try? store.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: itemId),
-              !transcript.segments.isEmpty else { return nil }
-
-        var srt = ""
-        for (index, segment) in transcript.segments.enumerated() {
-            let seq = index + 1
-            let start = formatSRTTimestamp(segment.startTime)
-            let end = formatSRTTimestamp(segment.endTime ?? segment.startTime + 5)
-            let text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else { continue }
-            srt += "\(seq)\n\(start) --> \(end)\n\(text)\n\n"
-        }
-        return srt.isEmpty ? nil : srt
-    }
-
-    private func formatSRTTimestamp(_ seconds: Double) -> String {
-        let h = Int(seconds) / 3600
-        let m = (Int(seconds) % 3600) / 60
-        let s = Int(seconds) % 60
-        let ms = Int((seconds - Double(Int(seconds))) * 1000)
-        return String(format: "%02d:%02d:%02d,%03d", h, m, s, ms)
+        guard let transcript = try? store.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: itemId) else { return nil }
+        return SRTExporter.export(transcript: transcript, totalDuration: totalDuration)
     }
 
     // MARK: - VTT / WebVTT Export
 
-    /// Export transcript segments as WebVTT (.vtt) subtitle format.
-    /// Supports speaker labels via `<v Speaker>` tags when speaker info is available.
-    func exportVTT(for itemId: UUID) -> String? {
+    func exportVTT(for itemId: UUID, totalDuration: Double? = nil) -> String? {
         let store = FileArtifactStore()
-        guard let transcript = try? store.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: itemId),
-              !transcript.segments.isEmpty else { return nil }
+        guard let transcript = try? store.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: itemId) else { return nil }
+        let note = "Exported from Wawa Note — \(DateFormatter.localizedString(from: Date(), dateStyle: .medium, timeStyle: .none))"
+        return VTTExporter.export(transcript: transcript, totalDuration: totalDuration, note: note)
+    }
+}
 
-        var vtt = "WEBVTT\n\n"
-        // Add a note header
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        vtt += "NOTE\nExported from Wawa Note — \(formatter.string(from: Date()))\n\n"
+// MARK: - SRT Exporter
 
-        for (index, segment) in transcript.segments.enumerated() {
-            let text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
+/// Exports transcript segments as SubRip (.srt) subtitle format.
+///
+/// Follows the SRT specification:
+/// - Sequence number starting at 1
+/// - Timestamps in HH:MM:SS,mmm --> HH:MM:SS,mmm format
+/// - Segment text (one or more lines)
+/// - Blank line between blocks
+struct SRTExporter: Sendable {
+
+    /// Export a transcript to SRT format using grouped segments for readable subtitles.
+    /// Raw Apple Speech segments are word-level (~120ms each); grouping merges them
+    /// into readable blocks split by natural pauses (0.4s+) or max 250 chars.
+    /// - Parameters:
+    ///   - transcript: The transcript to export.
+    ///   - totalDuration: Fallback for the last segment's endTime.
+    /// - Returns: Complete SRT string, or nil if no content.
+    static func export(transcript: Transcript, totalDuration: Double? = nil) -> String? {
+        let groups = transcript.groupedSegments(pauseThreshold: 0.4, maxChars: 64)
+        guard !groups.isEmpty else { return nil }
+
+        var srt = ""
+        for (index, group) in groups.enumerated() {
+            let text = group.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { continue }
 
-            let start = formatVTTTimestamp(segment.startTime)
-            let end = formatVTTTimestamp(segment.endTime ?? segment.startTime + 5)
+            let end = group.endTime > group.startTime
+                ? group.endTime
+                : (totalDuration ?? group.startTime + 5)
 
-            // Optional cue identifier
-            let cueId = "\(index + 1)"
-            vtt += "\(cueId)\n\(start) --> \(end)"
+            srt += "\(index + 1)\n"
+            srt += "\(formatTimestamp(group.startTime)) --> \(formatTimestamp(end))\n"
+            srt += "\(text)\n\n"
+        }
+        return srt.isEmpty ? nil : srt
+    }
 
-            // Add speaker if available
-            if let speakerId = segment.speakerId {
-                let shortId = speakerId.uuidString.prefix(6)
-                vtt += "\n<v Speaker-\(shortId)>\(text)</v>"
-            } else {
-                vtt += "\n\(text)"
-            }
-            vtt += "\n\n"
+    /// Format seconds to SRT timestamp: HH:MM:SS,mmm (comma separator per SRT spec)
+    static func formatTimestamp(_ seconds: Double) -> String {
+        let clamped = max(0, seconds)
+        let h = Int(clamped) / 3600
+        let m = (Int(clamped) % 3600) / 60
+        let s = Int(clamped) % 60
+        let ms = Int((clamped - Double(Int(clamped))) * 1000)
+        return String(format: "%02d:%02d:%02d,%03d", h, m, s, ms)
+    }
+}
+
+// MARK: - VTT Exporter
+
+/// Exports transcript segments as WebVTT (.vtt) subtitle format.
+///
+/// Follows the W3C WebVTT specification:
+/// - "WEBVTT" header
+/// - Optional NOTE block
+/// - Timestamps with period separator (HH:MM:SS.mmm)
+/// - Optional speaker labels via `<v Name>` tags
+struct VTTExporter: Sendable {
+
+    /// Export a transcript to WebVTT format using grouped segments.
+    /// Raw segments are grouped by natural pauses (0.4s+) or max 64 chars
+    /// for readable subtitle blocks. Speaker labels are preserved per group.
+    /// - Parameters:
+    ///   - transcript: The transcript to export.
+    ///   - totalDuration: Fallback for the last group's endTime.
+    ///   - note: Optional NOTE block text after the WEBVTT header.
+    /// - Returns: Complete VTT string, or nil if no content.
+    static func export(
+        transcript: Transcript,
+        totalDuration: Double? = nil,
+        note: String? = nil
+    ) -> String? {
+        let groups = transcript.groupedSegments(pauseThreshold: 0.4, maxChars: 64)
+        guard !groups.isEmpty else { return nil }
+
+        var vtt = "WEBVTT\n\n"
+        if let note { vtt += "NOTE\n\(note)\n\n" }
+
+        for (index, group) in groups.enumerated() {
+            let text = group.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+
+            let end = group.endTime > group.startTime
+                ? group.endTime
+                : (totalDuration ?? group.startTime + 5)
+
+            vtt += "\(index + 1)\n"
+            vtt += "\(formatTimestamp(group.startTime)) --> \(formatTimestamp(end))\n"
+            vtt += "\(text)\n\n"
         }
         return vtt.isEmpty ? nil : vtt
     }
 
-    /// Export as plain WebVTT without cue identifiers or speaker tags.
-    func exportVTTSimple(for itemId: UUID) -> String? {
-        let store = FileArtifactStore()
-        guard let transcript = try? store.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: itemId),
-              !transcript.segments.isEmpty else { return nil }
-
-        var vtt = "WEBVTT\n\n"
-        for segment in transcript.segments {
-            let text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else { continue }
-            let start = formatVTTTimestamp(segment.startTime)
-            let end = formatVTTTimestamp(segment.endTime ?? segment.startTime + 5)
-            vtt += "\(start) --> \(end)\n\(text)\n\n"
-        }
-        return vtt.isEmpty ? nil : vtt
-    }
-
-    private func formatVTTTimestamp(_ seconds: Double) -> String {
-        let h = Int(seconds) / 3600
-        let m = (Int(seconds) % 3600) / 60
-        let s = Int(seconds) % 60
-        let ms = Int((seconds - Double(Int(seconds))) * 1000)
+    /// Format seconds to VTT timestamp: HH:MM:SS.mmm (period separator per VTT spec)
+    static func formatTimestamp(_ seconds: Double) -> String {
+        let clamped = max(0, seconds)
+        let h = Int(clamped) / 3600
+        let m = (Int(clamped) % 3600) / 60
+        let s = Int(clamped) % 60
+        let ms = Int((clamped - Double(Int(clamped))) * 1000)
         return String(format: "%02d:%02d:%02d.%03d", h, m, s, ms)
     }
 }

@@ -246,35 +246,98 @@ final class RecordingCoordinator: ObservableObject {
         )
         saveManifest(manifest!, meetingId: itemId)
 
-        state = .recording
-        UIApplication.shared.isIdleTimerDisabled = true
-        startObservation()
-        activateLockScreenControls()
+        // Pre-flight: configure audio session and start engine BEFORE showing
+        // the recording UI. If the mic is unavailable (in use by another app,
+        // Bluetooth in bad state), retry with backoff and fall back to built-in
+        // mic before giving up. Only transition to .recording on success.
+        state = .preparing
         notifyStatusChange()
 
         Task { @MainActor [weak self] in
             guard let self else { return }
-            do {
-                try await self.captureService.startRecording(meetingId: itemId)
+
+            let result = await self.startAudioCaptureWithRetry(meetingId: itemId)
+
+            switch result {
+            case .success:
+                self.state = .recording
+                UIApplication.shared.isIdleTimerDisabled = true
+                self.startObservation()
+                self.activateLockScreenControls()
                 self.recordingStartDate = Date()
                 self.captureContextSafely(for: itemId)
-
+                self.notifyStatusChange()
                 AppLog.event("audio", "Recording started — itemID=\(itemId.uuidString.prefix(8)) input=\(self.captureService.currentInputPortName)")
-            } catch AudioCaptureError.permissionDenied {
+
+            case .permissionDenied:
                 AppLog.warn("audio", "Recording blocked: microphone permission denied")
                 self.errorMessage = "Microphone access is off. Turn it on in Settings to record audio."
                 self.rollbackRecordingStart(item: item)
-            } catch AudioCaptureError.diskFull {
+
+            case .diskFull:
                 AppLog.error("audio", "Recording failed: disk full")
                 self.errorMessage = "Not enough storage. Free up space and try again."
                 self.rollbackRecordingStart(item: item)
-            } catch {
-                let detail = error.localizedDescription
-                AppLog.error("audio", "Recording start failed: \(detail)")
-                self.errorMessage = "Could not start recording. Reason: \(detail)"
+
+            case .failed(let detail):
+                AppLog.error("audio", "Recording start failed after 3 attempts: \(detail)")
+                self.errorMessage = "Could not start recording. \(detail)"
                 self.rollbackRecordingStart(item: item)
             }
         }
+    }
+
+    /// Pre-flight result for the recording start flow.
+    private enum PreflightResult {
+        case success
+        case permissionDenied
+        case diskFull
+        case failed(String)
+    }
+
+    /// Attempt to start audio capture with retry and fallback.
+    /// Tries up to 3 times: first two with the preferred input, third with
+    /// built-in mic forced. Backoff: 300ms, 600ms between attempts.
+    private func startAudioCaptureWithRetry(meetingId: UUID) async -> PreflightResult {
+        let backoffNs: [UInt64] = [0, 300_000_000, 600_000_000]
+
+        for attempt in 0..<3 {
+            if attempt > 0 {
+                try? await Task.sleep(nanoseconds: backoffNs[attempt])
+            }
+
+            let forceBuiltIn = attempt == 2
+
+            do {
+                if forceBuiltIn {
+                    AppLog.audio.info("Pre-flight attempt \(attempt + 1): forcing built-in mic")
+                    // Deactivate and reconfigure directly with built-in mic
+                    try? captureService.sessionManager.deactivate()
+                    try? await Task.sleep(nanoseconds: 150_000_000)
+                    try captureService.sessionManager.configureForRecording()
+                    if let builtIn = (captureService.sessionManager.session.availableInputs ?? [])
+                        .first(where: { $0.portType == .builtInMic }) {
+                        try? captureService.sessionManager.session.setPreferredInput(builtIn)
+                        AppLog.audio.info("Pre-flight: forced built-in mic — \(builtIn.portName)")
+                    }
+                }
+
+                try await captureService.startRecording(meetingId: meetingId)
+                return .success
+            } catch AudioCaptureError.permissionDenied {
+                return .permissionDenied
+            } catch AudioCaptureError.diskFull {
+                return .diskFull
+            } catch {
+                AppLog.audio.warning("Pre-flight attempt \(attempt + 1) failed: \(error.localizedDescription)")
+                if attempt == 2 {
+                    AudioServicesPlayAlertSound(kSystemSoundID_Vibrate)
+                    return .failed(error.localizedDescription)
+                }
+            }
+        }
+
+        return .failed("Unknown error")
     }
 
     private func rollbackRecordingStart(item: KnowledgeItem) {
@@ -799,6 +862,7 @@ final class RecordingCoordinator: ObservableObject {
     private var stateString: String {
         switch state {
         case .idle: return "idle"
+        case .preparing: return "preparing"
         case .recording: return "recording"
         case .paused: return "paused"
         case .stopped: return "stopped"

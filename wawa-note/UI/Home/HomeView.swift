@@ -287,7 +287,7 @@ struct HomeView: View {
     var body: some View {
         ZStack {
             switch captureVM.recordingState {
-            case .recording, .paused:
+            case .preparing, .recording, .paused:
                 recordingPanel
             case .stopped:
                 defaultSurface
@@ -648,10 +648,10 @@ struct HomeView: View {
     private var recordingPanel: some View {
         let isActive = captureVM.recordingState == .recording
         let isPaused = captureVM.recordingState == .paused
-        let isWaiting = false  // simplified — no longer a separate state
+        let isPreparing = captureVM.recordingState == .preparing
         let isSwitching = false
         let isSystemInterrupted = false
-        let isTroubled = isWaiting || isSwitching || isSystemInterrupted
+        let isTroubled = isPreparing || isSwitching || isSystemInterrupted
         return VStack(spacing: 0) {
             Spacer()
             ScrollingWaveformView(level: captureVM.audioLevel, isRunning: isActive)
@@ -693,9 +693,12 @@ struct HomeView: View {
                     Text("Your recording is safe — this may take a moment")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
-            } else if isWaiting {
-                Text("Waiting for microphone…")
-                    .font(.subheadline).foregroundStyle(.orange)
+            } else if isPreparing {
+                VStack(spacing: 4) {
+                    ProgressView()
+                    Text("Preparing microphone…")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
             } else if isSystemInterrupted {
                 Text("Recording interrupted")
                     .font(.subheadline).foregroundStyle(.red)
@@ -747,7 +750,7 @@ struct HomeView: View {
                                 .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 22))
                         }
                     }
-                } else if isWaiting {
+                } else if isPreparing {
                     VStack(spacing: 12) {
                         Button(action: { captureVM.resumeRecording() }) {
                             Label("Try Again", systemImage: "arrow.clockwise")
