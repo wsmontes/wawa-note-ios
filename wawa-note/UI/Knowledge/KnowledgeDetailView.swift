@@ -1,7 +1,5 @@
 import SwiftUI
 import SwiftData
-// Related JIRA: KAN-10, KAN-51, KAN-93
-
 
 private enum ReprocessMode: CustomStringConvertible {
     case transcribeOnly
@@ -18,24 +16,11 @@ private enum ReprocessMode: CustomStringConvertible {
 }
 
 struct KnowledgeDetailView: View {
-    let itemID: UUID
-    @Query private var items: [KnowledgeItem]
+    let item: KnowledgeItem
     @Environment(\.modelContext) private var modelContext
-
-    init(itemID: UUID) {
-        self.itemID = itemID
-        _items = Query(
-            filter: #Predicate<KnowledgeItem> { $0.id == itemID },
-            sort: \KnowledgeItem.createdAt
-        )
-    }
-
-    /// Always non-nil when items is non-empty (which we guard in body).
-    private var item: KnowledgeItem { items.first! }
     @EnvironmentObject private var contentPipeline: ContentPipelineService
     @EnvironmentObject private var processingQueue: ProcessingQueueService
     @EnvironmentObject private var chatState: ChatOverlayState
-    @EnvironmentObject private var services: ServiceContainer
     @State private var transcript: Transcript?
     @State private var analysis: MeetingAnalysis?
     @State private var annotations: [Annotation] = []
@@ -49,7 +34,7 @@ struct KnowledgeDetailView: View {
     @State private var isAnalyzing = false
     @State private var analysisError: String?
     @State private var selectedModel: String = ""
-    @State private var selectedLocale = "en-US"
+    @State private var selectedLocale = "pt-BR"
     @State private var showLocalePicker = false
     @State private var isEditing = false
     @State private var editedTitle = ""
@@ -97,13 +82,8 @@ struct KnowledgeDetailView: View {
     }
 
     var body: some View {
-        if items.isEmpty {
-            ContentUnavailableView(
-                "Item not found", systemImage: "doc.text.magnifyingglass",
-                description: Text("This item may have been deleted."))
-        } else {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
                 header
                     .padding(.horizontal, 16)
 
@@ -162,7 +142,7 @@ struct KnowledgeDetailView: View {
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.ultraThinMaterial)
+                    .background(Color.red.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .padding(.horizontal, 16)
                     .padding(.top, 12)
@@ -183,7 +163,7 @@ struct KnowledgeDetailView: View {
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.ultraThinMaterial)
+                    .background(Color.red.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .padding(.horizontal, 16)
                     .padding(.top, 12)
@@ -373,7 +353,10 @@ struct KnowledgeDetailView: View {
                                let url = tempExportURL(ext: "md", content: anarlogMD) {
                                 ShareLink("Anarlog .md", item: url)
                             }
-                            // Meetily export removed (KAN-258)
+                            if let meetilyData = try? MeetilyExporter().exportJSON(item: item),
+                               let meetilyString = String(data: meetilyData, encoding: .utf8) {
+                                ShareLink("Meetily .json", item: meetilyString)
+                            }
                             // Audio export — available even without transcript
                             if hasPlayableAudio, let url = audioPlaybackURL {
                                 ShareLink("Audio", item: url)
@@ -425,22 +408,12 @@ struct KnowledgeDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: .pipelineCompleted)) { n in
             if n.object as? String == item.id.uuidString {
                 pipelineStage = ""
+                // Force SwiftUI to re-render with fresh data — the managed object
+                // may have been updated in another context.
                 refreshID = UUID()
                 Task { @MainActor in
-                    // Re-resolve audio now that concatenation has completed.
-                    // The RecordingCoordinator concat Task runs before the pipeline;
-                    // when .pipelineCompleted fires, audio.m4a should exist.
-                    // Without this the view may show stale .segmentsAvailable state.
-                    await resolveAudioAsset()
                     loadRawAnalysisJSON()
                     loadData()
-                    // If analysis ran but produced no visible results, surface a message
-                    if item.status == .analyzed || item.status == .failed,
-                       analysis == nil, rawAnalysisJSON.isEmpty {
-                        analysisError = "Analysis completed but no results were generated. The AI may have encountered an issue processing this item. Check Files for raw output."
-                    } else {
-                        analysisError = nil
-                    }
                 }
             }
         }
@@ -481,7 +454,6 @@ struct KnowledgeDetailView: View {
                 loadData()
             }
         }
-        } // else block
     }
 
     // MARK: - Header
@@ -561,7 +533,7 @@ struct KnowledgeDetailView: View {
                         .textFieldStyle(.roundedBorder)
                         .padding()
                         .onChange(of: connectSearchText) { _, _ in
-                            let all = (try? services.items.allItems()) ?? []
+                            let all = (try? KnowledgeItemService(context: modelContext).allItems()) ?? []
                             connectableItems = all
                                 .filter { $0.id != item.id && (connectSearchText.isEmpty || $0.title.localizedCaseInsensitiveContains(connectSearchText)) }
                                 .prefix(20).map { $0 }
@@ -570,7 +542,7 @@ struct KnowledgeDetailView: View {
                 List {
                     ForEach(connectableItems.prefix(20)) { other in
                         Button {
-                            let gsvc = services.edges
+                            let gsvc = GraphEdgeService(context: modelContext)
                             try? gsvc.create(
                                 fromID: item.id, toID: other.id,
                                 edgeType: .relatesTo, weight: 1.0,
@@ -596,7 +568,7 @@ struct KnowledgeDetailView: View {
                     }
                 }
                 .onAppear {
-                    let all = (try? services.items.allItems()) ?? []
+                    let all = (try? KnowledgeItemService(context: modelContext).allItems()) ?? []
                     connectableItems = all.filter { $0.id != item.id }
                 }
             }
@@ -1019,7 +991,7 @@ struct KnowledgeDetailView: View {
 
     private var resolvedFramework: ProjectFramework? {
         guard let projectID = item.projectID else { return nil }
-        let projSvc = services.projects
+        let projSvc = ProjectService(context: modelContext)
         guard let project = try? projSvc.fetch(id: projectID) else { return nil }
         return FrameworkService.shared.resolve(for: project)
     }
@@ -1416,7 +1388,7 @@ struct KnowledgeDetailView: View {
 
             ForEach(backlinks, id: \.edge.id) { link in
                     NavigationLink {
-                        KnowledgeDetailView(itemID: link.sourceItem.id)
+                        KnowledgeDetailView(item: link.sourceItem)
                     } label: {
                         HStack(spacing: 10) {
                             Image(systemName: edgeIcon(for: link.edge.edgeType))
@@ -1655,7 +1627,7 @@ struct KnowledgeDetailView: View {
                         .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 8))
                 }
             }
-            .padding(12).background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(12).background(Color.orange.opacity(0.06)).clipShape(RoundedRectangle(cornerRadius: 12))
             .padding(.horizontal, 16)
         }
     }
@@ -1743,12 +1715,12 @@ struct KnowledgeDetailView: View {
     // MARK: - Locale picker
 
     private let availableLocales: [(id: String, name: String)] = [
+        ("pt-BR", "Português (Brasil)"),
+        ("pt-PT", "Português (Portugal)"),
         ("en-US", "English (US)"),
-        ("pt-BR", "Portuguese (Brazil)"),
-        ("pt-PT", "Portuguese (Portugal)"),
-        ("es-ES", "Spanish"),
-        ("fr-FR", "French"),
-        ("de-DE", "German"),
+        ("es-ES", "Español"),
+        ("fr-FR", "Français"),
+        ("de-DE", "Deutsch"),
         ("it-IT", "Italiano"),
         ("ja-JP", "日本語"),
         ("zh-CN", "中文"),
@@ -1897,7 +1869,7 @@ struct KnowledgeDetailView: View {
     }
 
     private func saveEdits() {
-        let service = services.items
+        let service = KnowledgeItemService(context: modelContext)
         try? service.updateItem(
             item,
             title: editedTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? item.title : editedTitle.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -1996,7 +1968,7 @@ struct KnowledgeDetailView: View {
                 _ = await extractionSvc.extractTextFromImage(item)
             }
             isTranscribing = false
-            let fetchedItem = try? services.items.fetchItem(id: item.id)
+            let fetchedItem = try? KnowledgeItemService(context: modelContext).fetchItem(id: item.id)
             AppLog.provider.info("🔍 reprocessItem: extraction done — bodyText=\(fetchedItem?.bodyText?.count ?? 0) chars, hasVision=\(fetchedItem?.bodyText?.contains("VISUAL ANALYSIS") ?? false)")
             refreshID = UUID()
             loadData()
@@ -2012,7 +1984,7 @@ struct KnowledgeDetailView: View {
     // MARK: - Backlinks
 
     private func loadBacklinks() {
-        let edgeService = services.edges
+        let edgeService = GraphEdgeService(context: modelContext)
         let incomingEdges = (try? edgeService.edges(to: item.id)) ?? []
 
         var results: [(edge: GraphEdge, sourceItem: KnowledgeItem)] = []

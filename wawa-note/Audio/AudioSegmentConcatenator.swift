@@ -72,7 +72,8 @@ enum AudioSegmentConcatenator {
                 AppLog.event("audio", "Single segment exported → audio.m4a")
                 return true
             } else {
-                AppLog.audio.error("SegmentConcatenator: single-segment export failed — status=\(export.status.rawValue) error=\(export.error?.localizedDescription ?? "nil")")
+                AppLog.audio.error(
+                    "SegmentConcatenator: single-segment export failed — status=\(export.status.rawValue) error=\(export.error?.localizedDescription ?? "nil")")
                 return false
             }
         }
@@ -106,6 +107,11 @@ enum AudioSegmentConcatenator {
             }
         }
 
+        guard skippedCount < urls.count else {
+            AppLog.audio.error("SegmentConcatenator: all \(urls.count) segments skipped — no valid audio tracks")
+            return false
+        }
+
         guard let export = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetAppleM4A) else {
             AppLog.audio.error("SegmentConcatenator: multi-segment export session creation failed")
             return false
@@ -122,7 +128,8 @@ enum AudioSegmentConcatenator {
             }
             return true
         } else {
-            AppLog.audio.error("SegmentConcatenator: multi-segment export failed — status=\(export.status.rawValue) error=\(export.error?.localizedDescription ?? "nil")")
+            AppLog.audio.error(
+                "SegmentConcatenator: multi-segment export failed — status=\(export.status.rawValue) error=\(export.error?.localizedDescription ?? "nil")")
             return false
         }
     }
