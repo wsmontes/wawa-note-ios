@@ -1,10 +1,10 @@
+import AVFoundation
+import CoreLocation
 import Foundation
+import ImageIO
 import SwiftData
 import UIKit
-import AVFoundation
 import Vision
-import CoreLocation
-import ImageIO
 
 // MARK: - Text extraction from any content type
 
@@ -44,7 +44,8 @@ final class ContentExtractionService {
     func extractTextFromAudio(_ item: KnowledgeItem) async -> String? {
         let startTime = Date()
         let id = item.id
-        AppLog.provider.info("ContentExtraction: transcribing item \(id.uuidString.prefix(8)) — type=audio duration=\(item.durationSeconds.map { "\(Int($0))s" } ?? "nil")")
+        AppLog.provider.info(
+            "ContentExtraction: transcribing item \(id.uuidString.prefix(8)) — type=audio duration=\(item.durationSeconds.map { "\(Int($0))s" } ?? "nil")")
 
         // ── Diagnostic logging: final audio state ──────────────────
         let audioURL = fileStore.audioFileURL(for: item.id)
@@ -54,15 +55,18 @@ final class ContentExtractionService {
         let hasManifest = fileStore.recordingManifestExists(for: item.id)
         let manifest: RecordingManifest? = hasManifest ? try? fileStore.readRecordingManifest(for: item.id) : nil
         let segmentCount = manifest?.segments.count ?? 0
-        let segmentDetails: [String] = manifest?.segments.sorted(by: { $0.index < $1.index }).map { seg in
-            let segURL = fileStore.segmentURL(for: item.id, fileName: seg.fileName)
-            let segExists = FileManager.default.fileExists(atPath: segURL.path)
-            let segSize = segExists ? (try? FileManager.default.attributesOfItem(atPath: segURL.path)[.size] as? Int) ?? 0 : 0
-            let segDur = segExists ? Self.audioDuration(url: segURL) : 0
-            return "seg[\(seg.index)]=\(seg.fileName) exists=\(segExists) size=\(segSize) dur=\(String(format: "%.1f", segDur))s"
-        } ?? []
-        let sumSegmentDurations = segmentDetails.isEmpty ? 0.0 :
-            (manifest?.segments.compactMap { seg -> Double? in
+        let segmentDetails: [String] =
+            manifest?.segments.sorted(by: { $0.index < $1.index }).map { seg in
+                let segURL = fileStore.segmentURL(for: item.id, fileName: seg.fileName)
+                let segExists = FileManager.default.fileExists(atPath: segURL.path)
+                let segSize = segExists ? (try? FileManager.default.attributesOfItem(atPath: segURL.path)[.size] as? Int) ?? 0 : 0
+                let segDur = segExists ? Self.audioDuration(url: segURL) : 0
+                return "seg[\(seg.index)]=\(seg.fileName) exists=\(segExists) size=\(segSize) dur=\(String(format: "%.1f", segDur))s"
+            } ?? []
+        let sumSegmentDurations =
+            segmentDetails.isEmpty
+            ? 0.0
+            : (manifest?.segments.compactMap { seg -> Double? in
                 let url = fileStore.segmentURL(for: item.id, fileName: seg.fileName)
                 guard FileManager.default.fileExists(atPath: url.path) else { return nil }
                 let d = Self.audioDuration(url: url)
@@ -71,7 +75,8 @@ final class ContentExtractionService {
         let engineInfo = resolveTranscriptionEngine()
         let engineLabel = engineInfo.map { $0.id } ?? "none"
 
-        AppLog.audio.info("""
+        AppLog.audio.info(
+            """
             Transcription diagnostics for \(id.uuidString.prefix(8)):
             • finalAudioURL: \(audioURL.path)
             • audioExists: \(audioExists)
@@ -97,33 +102,23 @@ final class ContentExtractionService {
         // - Apple: prepareForRecognition decodes AAC→16kHz WAV for SFSpeechRecognizer
         // - Whisper: AAC bytes sent directly via HTTP multipart
         guard audioExists else {
-            AppLog.audio.error("Transcription validation FAILED: final audio missing — marking as failed")
-            if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: item.id) {
-                fresh.status = .failed
-                try? modelContext.save()
-            }
+            AppLog.audio.error("Transcription validation FAILED: final audio missing")
             return nil
         }
         guard audioSize > 4096 else {
-            AppLog.audio.error("Transcription validation FAILED: audio too small (\(audioSize) bytes) — marking as failed")
-            if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: item.id) {
-                fresh.status = .failed
-                try? modelContext.save()
-            }
+            AppLog.audio.error("Transcription validation FAILED: audio too small (\(audioSize) bytes)")
             return nil
         }
         guard audioDuration >= 1.0 else {
-            AppLog.audio.error("Transcription validation FAILED: audio too short (\(String(format: "%.1f", audioDuration))s) — marking as failed")
-            if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: item.id) {
-                fresh.status = .failed
-                try? modelContext.save()
-            }
+            AppLog.audio.error("Transcription validation FAILED: audio too short (\(String(format: "%.1f", audioDuration))s)")
             return nil
         }
         if hasManifest, let m = manifest, !m.segments.isEmpty, sumSegmentDurations > 0 {
             let ratio = audioDuration / sumSegmentDurations
             if ratio < 0.3 || ratio > 2.5 {
-                AppLog.audio.warning("Transcription validation: consolidated audio duration (\(String(format: "%.1f", audioDuration))s) deviates from segment sum (\(String(format: "%.1f", sumSegmentDurations))s) — ratio=\(String(format: "%.2f", ratio))")
+                AppLog.audio.warning(
+                    "Transcription validation: consolidated audio duration (\(String(format: "%.1f", audioDuration))s) deviates from segment sum (\(String(format: "%.1f", sumSegmentDurations))s) — ratio=\(String(format: "%.2f", ratio))"
+                )
             }
         }
         AppLog.audio.info("Transcription validation PASSED for \(id.uuidString.prefix(8))")
@@ -139,7 +134,8 @@ final class ContentExtractionService {
     }
 
     /// Resolve which transcription engine to use based on settings and provider config.
-    private func resolveTranscriptionEngine() -> (any TranscriptionEngine)? {
+    /// - Parameter preferredLocale: BCP-47 locale identifier for SFSpeechRecognizer, e.g. "en-US".
+    private func resolveTranscriptionEngine(preferredLocale: String? = nil) -> (any TranscriptionEngine)? {
         let settings = TranscriptionSettings.shared
         let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext)
 
@@ -150,15 +146,16 @@ final class ContentExtractionService {
             return settings.useRemoteWhisper && (supportsTranscription || typeSupports)
         }()
 
-        if canUseRemoteWhisper, let config {
-            let baseURL = config.baseURL!
+        if canUseRemoteWhisper, let config, let baseURL = config.baseURL {
             var apiKey = ""
             if let keyId = config.apiKeyKeychainIdentifier {
                 apiKey = (try? SecureKeyStore().loadAPIKey(for: keyId)) ?? ""
             }
             return RemoteTranscriptionEngine(baseURL: baseURL, apiKey: apiKey)
         }
-        return AppleSpeechTranscriptionEngine(preferredLocale: preferredLocale)
+        // Item's languageCode takes priority over the service-level preferredLocale
+        let locale = preferredLocale ?? self.preferredLocale
+        return AppleSpeechTranscriptionEngine(preferredLocale: locale)
     }
 
     /// Returns the effective engine ID, appending "-cloud" when the Apple engine
@@ -179,7 +176,7 @@ final class ContentExtractionService {
             return nil
         }
 
-        let engine = resolveTranscriptionEngine()
+        let engine = resolveTranscriptionEngine(preferredLocale: item.languageCode)
         guard let engine else { return nil }
 
         do {
@@ -188,7 +185,8 @@ final class ContentExtractionService {
             // ── Post-transcription diagnostics ────────────────────
             let transcriptChars = result.segments.map(\.text).joined(separator: " ").count
             let langCode = result.languageCode ?? "nil"
-            AppLog.audio.info("""
+            AppLog.audio.info(
+                """
                 Transcription result for \(item.id.uuidString.prefix(8)):
                 • engine: \(self.resolvedEngineId(engine))
                 • transcriptSegments: \(result.segments.count)
@@ -200,9 +198,8 @@ final class ContentExtractionService {
             try fileStore.createMeetingDirectory(for: item.id)
             try fileStore.writeArtifact(result, fileName: "transcript.json", meetingId: item.id)
 
-            item.status = .transcribed
             item.transcriptionEngineId = resolvedEngineId(engine)
-            try modelContext.save()
+            // Status transitions and save are owned by ContentPipelineService
 
             NotificationCenter.default.post(name: .transcriptReady, object: item.id.uuidString)
 
@@ -211,8 +208,10 @@ final class ContentExtractionService {
         } catch {
             let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             AppLog.provider.error("ContentExtraction: transcription failed for item \(item.id): \(msg)")
-            item.status = .failed
-            try? modelContext.save()
+            // Post error details so KnowledgeDetailView can show them
+            NotificationCenter.default.post(
+                name: .transcriptionFailed, object: item.id.uuidString,
+                userInfo: ["error": msg])
             if let fallback = loadExistingTranscriptText(for: item.id) {
                 return fallback
             }
@@ -223,8 +222,24 @@ final class ContentExtractionService {
     /// Reads transcript text from an already-saved transcript.json, if it exists.
     private func loadExistingTranscriptText(for itemID: UUID) -> String? {
         guard let transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: itemID),
-              !transcript.segments.isEmpty else { return nil }
+            !transcript.segments.isEmpty
+        else { return nil }
         return transcript.segments.map(\.text).joined(separator: "\n")
+    }
+
+    /// Returns true when the item needs transcription: either no transcript exists,
+    /// or the stored engine ID differs from the currently selected engine.
+    /// This enables re-transcription when the user switches Apple ↔ Whisper.
+    func needsTranscription(for item: KnowledgeItem) -> Bool {
+        // No transcript on disk — definitely needs transcription
+        guard let transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id),
+            !transcript.segments.isEmpty
+        else { return true }
+        // Engine mismatch — force re-transcription
+        guard let storedId = item.transcriptionEngineId else { return true }
+        let engine = resolveTranscriptionEngine(preferredLocale: item.languageCode)
+        let currentId = engine.map { resolvedEngineId($0) } ?? "none"
+        return storedId != currentId
     }
 
     // MARK: - Document → text
@@ -271,8 +286,9 @@ final class ContentExtractionService {
         guard let relativePath = item.imageFileRelativePath else { return nil }
         let imageURL = fileStore.itemDirectoryURL(for: item.id).appendingPathComponent(relativePath)
         guard let imageData = try? Data(contentsOf: imageURL),
-              let image = UIImage(data: imageData),
-              let cgImage = image.cgImage else { return nil }
+            let image = UIImage(data: imageData),
+            let cgImage = image.cgImage
+        else { return nil }
 
         // 1. OCR
         let ocrText: String? = await withCheckedContinuation { continuation in
@@ -292,7 +308,8 @@ final class ContentExtractionService {
             let msg = AIMessage(role: .user, content: [.text("Describe this image."), .imageFile(imageURL)])
             let model = AIConfigService.shared.modelFor(feature: "vision")
             let params = AIConfigService.shared.requestParams(for: "vision", model: model)
-            let req = AIRequest(model: model, messages: [msg],
+            let req = AIRequest(
+                model: model, messages: [msg],
                 temperature: params.temperature,
                 maxTokens: params.maxTokens)
             if let response = try? await provider.send(req), !response.content.isEmpty {
@@ -308,7 +325,8 @@ final class ContentExtractionService {
 
         // Save OCR text to body if not already there
         if let ocrText, !ocrText.isEmpty,
-           let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: item.id) {
+            let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: item.id)
+        {
             fresh.bodyText = ocrText
             try? modelContext.save()
         }
@@ -412,7 +430,8 @@ final class ContentExtractionService {
         AppLog.provider.info("ContentExtraction.analyze: source=\(sourceCtx.sourceType.rawValue), model=\(model)")
 
         do {
-            let result = try await AnalysisService().analyze(transcript: transcript, using: provider, model: model, meetingId: item.id, sourceContext: sourceCtx)
+            let result = try await AnalysisService().analyze(
+                transcript: transcript, using: provider, model: model, meetingId: item.id, sourceContext: sourceCtx)
 
             try fileStore.createMeetingDirectory(for: item.id)
             try fileStore.writeArtifact(result, fileName: "analysis.json", meetingId: item.id)
@@ -437,9 +456,11 @@ final class ContentExtractionService {
     }
 
     /// Parses agent output into structured MeetingAnalysis artifact.
-    private func analyzeStructured(transcript: Transcript, item: KnowledgeItem, sourceCtx: SourceContext, provider: any AIProvider, model: String) async -> Bool {
+    private func analyzeStructured(transcript: Transcript, item: KnowledgeItem, sourceCtx: SourceContext, provider: any AIProvider, model: String) async -> Bool
+    {
         do {
-            let result = try await AnalysisService().analyze(transcript: transcript, using: provider, model: model, meetingId: item.id, sourceContext: sourceCtx)
+            let result = try await AnalysisService().analyze(
+                transcript: transcript, using: provider, model: model, meetingId: item.id, sourceContext: sourceCtx)
             try fileStore.createMeetingDirectory(for: item.id)
             try fileStore.writeArtifact(result, fileName: "analysis.json", meetingId: item.id)
             item.status = .analyzed
@@ -510,10 +531,11 @@ final class ContentExtractionService {
             } else if (currentChunk + "\n\n" + para).count <= Self.maxChunkChars {
                 currentChunk += "\n\n" + para
             } else {
-                segments.append(TranscriptSegment(
-                    meetingId: itemID, startTime: Double(segmentIndex),
-                    text: currentChunk, sourceEngineId: "text-chunk"
-                ))
+                segments.append(
+                    TranscriptSegment(
+                        meetingId: itemID, startTime: Double(segmentIndex),
+                        text: currentChunk, sourceEngineId: "text-chunk"
+                    ))
                 segmentIndex += 1
                 currentChunk = para
 
@@ -527,16 +549,18 @@ final class ContentExtractionService {
         }
 
         if !currentChunk.isEmpty {
-            segments.append(TranscriptSegment(
-                meetingId: itemID, startTime: Double(segmentIndex),
-                text: currentChunk, sourceEngineId: "text-chunk"
-            ))
+            segments.append(
+                TranscriptSegment(
+                    meetingId: itemID, startTime: Double(segmentIndex),
+                    text: currentChunk, sourceEngineId: "text-chunk"
+                ))
         }
 
         if segments.isEmpty {
-            segments.append(TranscriptSegment(
-                meetingId: itemID, startTime: 0, text: text, sourceEngineId: "text-direct"
-            ))
+            segments.append(
+                TranscriptSegment(
+                    meetingId: itemID, startTime: 0, text: text, sourceEngineId: "text-direct"
+                ))
         }
 
         return segments
@@ -619,13 +643,17 @@ struct SourceContext: Sendable {
     func analysisSystemPrompt() -> String {
         switch sourceType {
         case .recording:
-            return "You are a audio content analyst. Extract decisions, action items with owners, risks, open questions, important dates, mentioned people/systems/organizations, and a topic timeline. Return only valid JSON."
+            return
+                "You are a audio content analyst. Extract decisions, action items with owners, risks, open questions, important dates, mentioned people/systems/organizations, and a topic timeline. Return only valid JSON."
         case .import_:
-            return "You are a document analyst. Analyze this imported file. Identify its structure, key points, decisions if any, action items, risks, mentioned entities, and dates. Consider the filename and metadata for context. Return only valid JSON."
+            return
+                "You are a document analyst. Analyze this imported file. Identify its structure, key points, decisions if any, action items, risks, mentioned entities, and dates. Consider the filename and metadata for context. Return only valid JSON."
         case .scan:
-            return "You are a visual content analyst. Analyze this image description (which may include OCR text and/or an AI-generated visual description). Identify what is depicted, key objects, text content, context, and any action items or insights. Note that this is NOT a meeting transcript — focus on visual content. Return only valid JSON."
+            return
+                "You are a visual content analyst. Analyze this image description (which may include OCR text and/or an AI-generated visual description). Identify what is depicted, key objects, text content, context, and any action items or insights. Note that this is NOT a meeting transcript — focus on visual content. Return only valid JSON."
         case .note:
-            return "You are a knowledge analyst. Analyze this note. Extract key themes, questions being explored, references to other topics, action items if any, and people/systems mentioned. Return only valid JSON."
+            return
+                "You are a knowledge analyst. Analyze this note. Extract key themes, questions being explored, references to other topics, action items if any, and people/systems mentioned. Return only valid JSON."
         }
     }
 
@@ -706,7 +734,8 @@ final class ImageAnalysisService {
     /// Analyze an image file: run OCR + LLM vision, return combined enriched text.
     func analyzeImage(_ imageURL: URL, llmProvider: any AIProvider, model: String) async throws -> String {
         guard let image = UIImage(contentsOfFile: imageURL.path),
-              let cgImage = image.cgImage else {
+            let cgImage = image.cgImage
+        else {
             throw ImageAnalysisError.invalidImage
         }
 
@@ -730,11 +759,19 @@ final class ImageAnalysisService {
             let request = AIRequest(
                 model: model,
                 messages: [
-                    AIMessage(role: .system, content: [.text("You are a document image analyst. Describe what you see in the image — document type, layout, visual elements, handwriting, diagrams. Be concise but thorough. Return only the description, no JSON.")]),
-                    AIMessage(role: .user, content: [
-                        .text("Analyze this document image. Describe its type, content, layout, and any notable visual elements."),
-                        .imageFile(imageURL)
-                    ])
+                    AIMessage(
+                        role: .system,
+                        content: [
+                            .text(
+                                "You are a document image analyst. Describe what you see in the image — document type, layout, visual elements, handwriting, diagrams. Be concise but thorough. Return only the description, no JSON."
+                            )
+                        ]),
+                    AIMessage(
+                        role: .user,
+                        content: [
+                            .text("Analyze this document image. Describe its type, content, layout, and any notable visual elements."),
+                            .imageFile(imageURL),
+                        ]),
                 ],
                 temperature: params.temperature,
                 maxTokens: min(params.maxTokens ?? 4096, 2048)
@@ -778,12 +815,12 @@ final class LocationIntelligenceService {
     /// Works with JPEG, HEIC, TIFF, and RAW formats that embed GPS tags.
     static func extractGPSFromImage(_ imageURL: URL) -> CLLocationCoordinate2D? {
         guard let source = CGImageSourceCreateWithURL(imageURL as CFURL, nil),
-              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let gps = props[kCGImagePropertyGPSDictionary] as? [CFString: Any],
-              let lat = gps[kCGImagePropertyGPSLatitude] as? Double,
-              let lon = gps[kCGImagePropertyGPSLongitude] as? Double,
-              let latRef = gps[kCGImagePropertyGPSLatitudeRef] as? String,
-              let lonRef = gps[kCGImagePropertyGPSLongitudeRef] as? String
+            let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+            let gps = props[kCGImagePropertyGPSDictionary] as? [CFString: Any],
+            let lat = gps[kCGImagePropertyGPSLatitude] as? Double,
+            let lon = gps[kCGImagePropertyGPSLongitude] as? Double,
+            let latRef = gps[kCGImagePropertyGPSLatitudeRef] as? String,
+            let lonRef = gps[kCGImagePropertyGPSLongitudeRef] as? String
         else { return nil }
 
         let latitude = latRef == "S" ? -lat : lat
@@ -805,7 +842,7 @@ final class LocationIntelligenceService {
                     place.thoroughfare,
                     place.locality,
                     place.administrativeArea,
-                    place.country
+                    place.country,
                 ].compactMap { $0 }.filter { !$0.isEmpty }
                 let address = parts.joined(separator: ", ")
                 continuation.resume(returning: address.isEmpty ? nil : address)
@@ -887,4 +924,3 @@ final class LocationIntelligenceService {
     }
 
 }
-
