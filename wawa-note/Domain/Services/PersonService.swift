@@ -1,6 +1,6 @@
+import Contacts
 import Foundation
 import SwiftData
-import Contacts
 
 @MainActor
 final class PersonService {
@@ -60,7 +60,7 @@ final class PersonService {
         let store = CNContactStore()
         let keys: [CNKeyDescriptor] = [
             CNContactEmailAddressesKey as CNKeyDescriptor,
-            CNContactOrganizationNameKey as CNKeyDescriptor
+            CNContactOrganizationNameKey as CNKeyDescriptor,
         ]
         let predicate = CNContact.predicateForContacts(matchingName: name)
         guard let contact = try? store.unifiedContacts(matching: predicate, keysToFetch: keys).first else {

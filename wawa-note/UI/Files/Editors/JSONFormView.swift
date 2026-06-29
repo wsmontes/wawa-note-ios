@@ -245,11 +245,26 @@ struct JSONPrimitiveRow: View {
         _value = value
         self.onUpdate = onUpdate
         switch value.wrappedValue {
-        case .string(let s): _textValue = State(initialValue: s); _boolValue = State(initialValue: false); _selectedType = State(initialValue: "string")
-        case .number(let s): _textValue = State(initialValue: s); _boolValue = State(initialValue: false); _selectedType = State(initialValue: "number")
-        case .bool(let b): _textValue = State(initialValue: ""); _boolValue = State(initialValue: b); _selectedType = State(initialValue: "bool")
-        case .null: _textValue = State(initialValue: ""); _boolValue = State(initialValue: false); _selectedType = State(initialValue: "null")
-        default: _textValue = State(initialValue: ""); _boolValue = State(initialValue: false); _selectedType = State(initialValue: "string")
+        case .string(let s):
+            _textValue = State(initialValue: s)
+            _boolValue = State(initialValue: false)
+            _selectedType = State(initialValue: "string")
+        case .number(let s):
+            _textValue = State(initialValue: s)
+            _boolValue = State(initialValue: false)
+            _selectedType = State(initialValue: "number")
+        case .bool(let b):
+            _textValue = State(initialValue: "")
+            _boolValue = State(initialValue: b)
+            _selectedType = State(initialValue: "bool")
+        case .null:
+            _textValue = State(initialValue: "")
+            _boolValue = State(initialValue: false)
+            _selectedType = State(initialValue: "null")
+        default:
+            _textValue = State(initialValue: "")
+            _boolValue = State(initialValue: false)
+            _selectedType = State(initialValue: "string")
         }
     }
 
@@ -274,8 +289,8 @@ struct JSONPrimitiveRow: View {
                     switch newType {
                     case "string": value = .string(textValue)
                     case "number": value = .number(textValue)
-                    case "bool":   value = .bool(boolValue)
-                    case "null":   value = .null
+                    case "bool": value = .bool(boolValue)
+                    case "null": value = .null
                     default: break
                     }
                     onUpdate()

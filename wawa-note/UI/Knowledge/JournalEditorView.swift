@@ -1,5 +1,5 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 struct JournalEditorView: View {
     @Environment(\.dismiss) private var dismiss
@@ -103,13 +103,19 @@ struct JournalEditorView: View {
                 }
                 ToolbarItem(placement: .keyboard) {
                     HStack(spacing: 16) {
-                        Button { surroundSelection(with: "**") } label: {
+                        Button {
+                            surroundSelection(with: "**")
+                        } label: {
                             Image(systemName: "bold")
                         }
-                        Button { surroundSelection(with: "*") } label: {
+                        Button {
+                            surroundSelection(with: "*")
+                        } label: {
                             Image(systemName: "italic")
                         }
-                        Button { insertPrefixForSelectedLine("- ") } label: {
+                        Button {
+                            insertPrefixForSelectedLine("- ")
+                        } label: {
                             Image(systemName: "list.bullet")
                         }
                         Spacer()
@@ -172,7 +178,8 @@ struct JournalEditorView: View {
     }
 
     private func save() {
-        let finalTitle = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let finalTitle =
+            title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? Date().formatted(date: .abbreviated, time: .omitted)
             : title.trimmingCharacters(in: .whitespacesAndNewlines)
 

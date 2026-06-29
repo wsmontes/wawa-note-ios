@@ -1,5 +1,5 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 @MainActor
 final class ProviderEditorViewModel: ObservableObject {
@@ -232,8 +232,8 @@ struct ProviderEditorView: View {
     }
 }
 
-private extension String {
-    var nilIfEmpty: String? {
+extension String {
+    fileprivate var nilIfEmpty: String? {
         isEmpty ? nil : self
     }
 }

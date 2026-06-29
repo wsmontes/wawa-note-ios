@@ -18,18 +18,26 @@ struct AIConfig: Codable, Sendable {
     let agentModes: [String: AgentModeConfig]?
 
     struct ProviderConfig: Codable, Sendable {
-        let id: String; let displayName: String; let type: String
-        let baseURL: String; let authType: String
-        let helpURL: String?; let iconName: String
-        let category: String; let description: String?
+        let id: String
+        let displayName: String
+        let type: String
+        let baseURL: String
+        let authType: String
+        let helpURL: String?
+        let iconName: String
+        let category: String
+        let description: String?
         let defaultModel: String?
         let availableModels: [String]?
-        let scanPort: Int?; let scanPath: String?
+        let scanPort: Int?
+        let scanPath: String?
         let endpoints: [String: String]?
     }
 
     struct DefaultModels: Codable, Sendable {
-        let analysis: String?; let chat: String?; let transcription: String?
+        let analysis: String?
+        let chat: String?
+        let transcription: String?
     }
 
     struct ModelPreset: Codable, Sendable {
@@ -49,12 +57,15 @@ struct AIConfig: Codable, Sendable {
     }
 
     struct FeatureConfig: Codable, Sendable {
-        let provider: String?; let model: String?
-        let engine: String?; let fallbackEngine: String?
+        let provider: String?
+        let model: String?
+        let engine: String?
+        let fallbackEngine: String?
         let temperature: Double?
         let maxCompletionTokens: Int?
         let maxTokens: Int?
-        let systemPrompt: String?; let userPrompt: String?
+        let systemPrompt: String?
+        let userPrompt: String?
         let supportedLocales: [String]?
     }
 
@@ -84,7 +95,8 @@ final class AIConfigService: @unchecked Sendable {
     /// project/config → configs/ → bundle.
     func config(for projectSlug: String? = nil) -> AIConfig {
         if let slug = projectSlug,
-           let projCfg = Self.loadConfig(projectSlug: slug) {
+            let projCfg = Self.loadConfig(projectSlug: slug)
+        {
             return projCfg
         }
         if let globalCfg = Self.loadConfig(fromGlobalOverride: true) {
@@ -105,7 +117,8 @@ final class AIConfigService: @unchecked Sendable {
             url = bundleURL
         }
         guard let data = try? Data(contentsOf: url),
-              let cfg = try? JSONDecoder().decode(AIConfig.self, from: data) else { return nil }
+            let cfg = try? JSONDecoder().decode(AIConfig.self, from: data)
+        else { return nil }
         AppLog.provider.info("Loaded AI config from \(url.lastPathComponent) — \(cfg.providers.count) providers")
         return cfg
     }
@@ -121,9 +134,10 @@ final class AIConfigService: @unchecked Sendable {
                 AppLog.provider.error("Failed to load ai_config.json: \(error) — using default config")
             }
         }
-        return AIConfig(version: "1.0", description: "Default config", providers: [:],
-                        defaultModels: nil, modelPresets: [:], features: [:], lenses: nil,
-                        providerTemplates: nil, apiTemplates: nil, modelPolicy: nil, agentModes: nil)
+        return AIConfig(
+            version: "1.0", description: "Default config", providers: [:],
+            defaultModels: nil, modelPresets: [:], features: [:], lenses: nil,
+            providerTemplates: nil, apiTemplates: nil, modelPolicy: nil, agentModes: nil)
     }
 
     /// Validate loaded config and warn about critical issues.
@@ -260,7 +274,8 @@ final class AIConfigService: @unchecked Sendable {
     /// Whether analysis can actually run right now (provider + API key).
     func isAnalysisAvailable(context: ModelContext) -> Bool {
         guard let active = ActiveProviderManager.shared.getActiveProvider(context: context),
-              active.isAPIKeyPresent() else { return false }
+            active.isAPIKeyPresent()
+        else { return false }
         return !active.defaultModel.isEmpty || !active.availableModels.isEmpty
             || !availableModels(for: active.typeRaw).isEmpty
     }
@@ -314,8 +329,10 @@ final class AIConfigService: @unchecked Sendable {
         // Model family prefixes: o1, o3, o4, ... match "o1-mini", "o3-pro", etc.
         // r1 matches "deepseek-r1", "r1-distill", etc.
         // qwq matches "qwq-32b", "qwq-v2", etc.
-        let reasoningPrefixes = ["o1", "o3", "o4", "o5", "o6", "o7", "o8", "o9",
-                                 "r1", "qwq"]
+        let reasoningPrefixes = [
+            "o1", "o3", "o4", "o5", "o6", "o7", "o8", "o9",
+            "r1", "qwq",
+        ]
         for prefix in reasoningPrefixes {
             // Match at word boundary: starts with prefix, or has "/<prefix>" or "-<prefix>"
             if lower.hasPrefix(prefix) { return true }
@@ -340,7 +357,8 @@ final class AIConfigService: @unchecked Sendable {
 
     func supportsAudioTranscription(for providerType: String) -> Bool {
         guard let pc = config.providers[providerType],
-              let endpoints = pc.endpoints else { return false }
+            let endpoints = pc.endpoints
+        else { return false }
         return endpoints["audioTranscription"] != nil
     }
 
@@ -437,7 +455,8 @@ final class AIConfigService: @unchecked Sendable {
             req.httpMethod = "HEAD"
             req.timeoutInterval = 5
             if let (_, resp) = try? await URLSession.shared.data(for: req),
-               let http = resp as? HTTPURLResponse, (200...499).contains(http.statusCode) {
+                let http = resp as? HTTPURLResponse, (200...499).contains(http.statusCode)
+            {
                 results.append((config.name, true))
             } else {
                 results.append((config.name, false))
@@ -478,12 +497,14 @@ final class JSONConfigProvider: @unchecked Sendable, AIConfigProvider {
         }
         var params = configService.requestParams(for: feature, model: model)
         if let temp = override?.temperature {
-            params = AIFeatureParams(temperature: temp, maxTokens: params.maxTokens,
-                                     contextWindow: params.contextWindow, isReasoning: params.isReasoning)
+            params = AIFeatureParams(
+                temperature: temp, maxTokens: params.maxTokens,
+                contextWindow: params.contextWindow, isReasoning: params.isReasoning)
         }
         if let maxT = override?.maxTokens {
-            params = AIFeatureParams(temperature: params.temperature, maxTokens: maxT,
-                                     contextWindow: params.contextWindow, isReasoning: params.isReasoning)
+            params = AIFeatureParams(
+                temperature: params.temperature, maxTokens: maxT,
+                contextWindow: params.contextWindow, isReasoning: params.isReasoning)
         }
         return params
     }
@@ -497,23 +518,24 @@ final class JSONConfigProvider: @unchecked Sendable, AIConfigProvider {
     }
 
     var providerTemplates: [ProviderTemplateConfig] {
-        configService.config.providerTemplates ?? configService.allProviders().map { config in
-            ProviderTemplateConfig(
-                id: config.id,
-                displayName: config.displayName,
-                icon: iconForProvider(config.id),
-                type: ProviderType(rawValue: config.type) ?? .openAICompatible,
-                baseURL: config.baseURL,
-                auth: authForConfig(config),
-                authHeader: authHeaderForConfig(config),
-                authPrefix: authPrefixForConfig(config),
-                defaultModels: config.availableModels ?? [],
-                autoDiscover: ProviderType(rawValue: config.type)?.isLocal ?? false,
-                discoveryPort: ProviderType(rawValue: config.type)?.isLocal == true ? 11434 : nil,
-                description: config.description ?? "",
-                requiresAuth: !(ProviderType(rawValue: config.type)?.isLocal ?? false)
-            )
-        }
+        configService.config.providerTemplates
+            ?? configService.allProviders().map { config in
+                ProviderTemplateConfig(
+                    id: config.id,
+                    displayName: config.displayName,
+                    icon: iconForProvider(config.id),
+                    type: ProviderType(rawValue: config.type) ?? .openAICompatible,
+                    baseURL: config.baseURL,
+                    auth: authForConfig(config),
+                    authHeader: authHeaderForConfig(config),
+                    authPrefix: authPrefixForConfig(config),
+                    defaultModels: config.availableModels ?? [],
+                    autoDiscover: ProviderType(rawValue: config.type)?.isLocal ?? false,
+                    discoveryPort: ProviderType(rawValue: config.type)?.isLocal == true ? 11434 : nil,
+                    description: config.description ?? "",
+                    requiresAuth: !(ProviderType(rawValue: config.type)?.isLocal ?? false)
+                )
+            }
     }
 
     var apiTemplates: [APITemplate] {
@@ -532,15 +554,17 @@ final class JSONConfigProvider: @unchecked Sendable, AIConfigProvider {
 
     private var defaultModelPolicyRules: ModelPolicyRules {
         ModelPolicyRules(
-            budget: ModelPolicyRules.BudgetRules(dailyUSD: 1.0, thresholds: [
-                ModelPolicyRules.BudgetThreshold(minPercent: 0.50, tier: "deep"),
-                ModelPolicyRules.BudgetThreshold(minPercent: 0.25, tier: "fast"),
-                ModelPolicyRules.BudgetThreshold(minPercent: 0.00, tier: "economy")
-            ]),
+            budget: ModelPolicyRules.BudgetRules(
+                dailyUSD: 1.0,
+                thresholds: [
+                    ModelPolicyRules.BudgetThreshold(minPercent: 0.50, tier: "deep"),
+                    ModelPolicyRules.BudgetThreshold(minPercent: 0.25, tier: "fast"),
+                    ModelPolicyRules.BudgetThreshold(minPercent: 0.00, tier: "economy"),
+                ]),
             tiers: [
                 "deep": ModelPolicyRules.TierConfig(label: "Deep", prefer: ["claude-sonnet-4-6"]),
                 "fast": ModelPolicyRules.TierConfig(label: "Fast", prefer: ["gpt-5.1-mini"]),
-                "economy": ModelPolicyRules.TierConfig(label: "Economy", prefer: ["claude-haiku-4-5"])
+                "economy": ModelPolicyRules.TierConfig(label: "Economy", prefer: ["claude-haiku-4-5"]),
             ],
             features: [:],
             offlineFallback: ModelPolicyRules.OfflineFallbackConfig(enabled: true),

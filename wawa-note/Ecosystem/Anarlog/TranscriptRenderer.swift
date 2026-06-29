@@ -57,13 +57,15 @@ enum TranscriptRenderer {
         speakerHumanID: String?,
         words: [TranscriptWord]
     ) -> String {
-        let firstAnchor = words.first.map { w in
-            w.id ?? "start:\(Int(w.startMs))"
-        } ?? "none"
+        let firstAnchor =
+            words.first.map { w in
+                w.id ?? "start:\(Int(w.startMs))"
+            } ?? "none"
 
-        let lastAnchor = words.last.map { w in
-            w.id ?? "end:\(Int(w.endMs))"
-        } ?? "none"
+        let lastAnchor =
+            words.last.map { w in
+                w.id ?? "end:\(Int(w.endMs))"
+            } ?? "none"
 
         let si = speakerIndex.map(String.init) ?? "none"
         let hid = speakerHumanID ?? "none"
@@ -83,7 +85,7 @@ enum TranscriptRenderer {
 
         return transcripts.map { transcript in
             guard let startedAt = transcript.startedAt else {
-                return transcript // No start time → anchor at 0
+                return transcript  // No start time → anchor at 0
             }
             let offset = startedAt - earliestStart
             let offsetWords = transcript.words.map { word in

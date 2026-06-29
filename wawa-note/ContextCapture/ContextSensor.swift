@@ -18,4 +18,3 @@ protocol ContextSensor: Sendable {
     var sensorName: String { get }
     func capture() async throws -> [CapturedAnnotation]
 }
-

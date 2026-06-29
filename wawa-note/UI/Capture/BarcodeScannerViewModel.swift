@@ -1,6 +1,6 @@
-import SwiftUI
 import AVFoundation
 import SwiftData
+import SwiftUI
 
 // MARK: - Barcode Scanner ViewModel
 
@@ -29,35 +29,44 @@ final class BarcodeScannerViewModel: ObservableObject {
         case .authorized: break
         case .notDetermined:
             guard await AVCaptureDevice.requestAccess(for: .video) else {
-                error = "Camera access denied"; return
+                error = "Camera access denied"
+                return
             }
         case .denied, .restricted:
-            error = "Camera access denied. Enable in Settings > Privacy > Camera."; return
+            error = "Camera access denied. Enable in Settings > Privacy > Camera."
+            return
         @unknown default:
-            error = "Camera not available"; return
+            error = "Camera not available"
+            return
         }
 
         guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
-            error = "Camera not available"; return
+            error = "Camera not available"
+            return
         }
         guard let input = try? AVCaptureDeviceInput(device: device) else {
-            error = "Cannot create camera input"; return
+            error = "Cannot create camera input"
+            return
         }
 
         session.beginConfiguration()
         guard session.canAddInput(input) else {
-            error = "Cannot add camera input"; session.commitConfiguration(); return
+            error = "Cannot add camera input"
+            session.commitConfiguration()
+            return
         }
         session.addInput(input)
 
         guard session.canAddOutput(output) else {
-            error = "Cannot add metadata output"; session.commitConfiguration(); return
+            error = "Cannot add metadata output"
+            session.commitConfiguration()
+            return
         }
         session.addOutput(output)
 
         output.metadataObjectTypes = [
             .qr, .aztec, .code128, .code39, .code39Mod43, .code93,
-            .dataMatrix, .ean8, .ean13, .itf14, .pdf417, .upce
+            .dataMatrix, .ean8, .ean13, .itf14, .pdf417, .upce,
         ]
 
         session.commitConfiguration()
@@ -96,7 +105,8 @@ final class BarcodeScannerViewModel: ObservableObject {
 
     func toggleFlash() {
         guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
-              device.hasTorch else { return }
+            device.hasTorch
+        else { return }
         try? device.lockForConfiguration()
         flashOn.toggle()
         device.torchMode = flashOn ? .on : .off
@@ -161,11 +171,14 @@ private final class CaptureSessionDelegate: NSObject, AVCaptureMetadataOutputObj
     let onDetection: (String, String) -> Void
     init(onDetection: @escaping (String, String) -> Void) { self.onDetection = onDetection }
 
-    func metadataOutput(_ output: AVCaptureMetadataOutput,
-                        didOutput objects: [AVMetadataObject],
-                        from connection: AVCaptureConnection) {
+    func metadataOutput(
+        _ output: AVCaptureMetadataOutput,
+        didOutput objects: [AVMetadataObject],
+        from connection: AVCaptureConnection
+    ) {
         guard let obj = objects.first as? AVMetadataMachineReadableCodeObject,
-              let value = obj.stringValue, !value.isEmpty else { return }
+            let value = obj.stringValue, !value.isEmpty
+        else { return }
         onDetection(value, obj.type.rawValue)
     }
 }

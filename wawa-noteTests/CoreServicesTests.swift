@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import Wawa_Note
 
 @MainActor
@@ -152,7 +153,7 @@ final class EntityExtractionTests: XCTestCase {
             (.repository, .repository),
             (.location, .location),
             (.project, .other),
-            (.other, .other)
+            (.other, .other),
         ]
 
         for (type, expectedKind) in kindMappings {
@@ -228,27 +229,27 @@ final class IngestionResponseTests: XCTestCase {
 
     func testDecodeFullResponse() throws {
         let json = """
-        {
-            "item_project_view": "Fits into the architecture",
-            "project_item_view": "Reveals new patterns",
-            "connections": [
-                {"from_title": "Item A", "to_title": "Item B", "type": "supports", "explanation": "Direct evidence"}
-            ],
-            "task_updates": [
-                {"task_title": "Old task", "new_status": "done", "reason": "Completed by this item"}
-            ],
-            "new_tasks": [
-                {"title": "Investigate pattern", "priority": "high", "reason": "Urgent finding"}
-            ],
-            "edge_reinforcements": [
-                {"from_title": "X", "to_title": "Y", "note": "Confirmed"}
-            ],
-            "insights": [
-                {"text": "Unexpected correlation found", "confidence": 0.92}
-            ],
-            "project_summary_contribution": "This item adds significant knowledge about architecture decisions."
-        }
-        """
+            {
+                "item_project_view": "Fits into the architecture",
+                "project_item_view": "Reveals new patterns",
+                "connections": [
+                    {"from_title": "Item A", "to_title": "Item B", "type": "supports", "explanation": "Direct evidence"}
+                ],
+                "task_updates": [
+                    {"task_title": "Old task", "new_status": "done", "reason": "Completed by this item"}
+                ],
+                "new_tasks": [
+                    {"title": "Investigate pattern", "priority": "high", "reason": "Urgent finding"}
+                ],
+                "edge_reinforcements": [
+                    {"from_title": "X", "to_title": "Y", "note": "Confirmed"}
+                ],
+                "insights": [
+                    {"text": "Unexpected correlation found", "confidence": 0.92}
+                ],
+                "project_summary_contribution": "This item adds significant knowledge about architecture decisions."
+            }
+            """
         let data = json.data(using: .utf8)!
         let response = try JSONDecoder().decode(IngestionResponse.self, from: data)
 
@@ -264,10 +265,10 @@ final class IngestionResponseTests: XCTestCase {
 
     func testDecodeMinimalResponse() throws {
         let json = """
-        {
-            "project_summary_contribution": "Minimal contribution."
-        }
-        """
+            {
+                "project_summary_contribution": "Minimal contribution."
+            }
+            """
         let data = json.data(using: .utf8)!
         let response = try JSONDecoder().decode(IngestionResponse.self, from: data)
 
@@ -279,10 +280,10 @@ final class IngestionResponseTests: XCTestCase {
 
     func testLegacyKeyStillParsed() throws {
         let json = """
-        {
-            "project_summary_update": "Legacy key value"
-        }
-        """
+            {
+                "project_summary_update": "Legacy key value"
+            }
+            """
         let data = json.data(using: .utf8)!
         let response = try JSONDecoder().decode(IngestionResponse.self, from: data)
 
@@ -465,7 +466,8 @@ final class FieldProvenanceTests: XCTestCase {
 final class SignalPriorityServiceTests: XCTestCase {
 
     func testComputedPriorityUsesStoredScores() {
-        let signal = AgentSuggestion(projectID: UUID(), type: "risk", title: "Test risk",
+        let signal = AgentSuggestion(
+            projectID: UUID(), type: "risk", title: "Test risk",
             impactScore: 0.9, urgencyScore: 0.8, relevanceScore: 0.7)
         let priority = SignalPriorityService.shared.computePriority(
             signal: signal, project: nil, activeItemCount: 5)
@@ -474,9 +476,11 @@ final class SignalPriorityServiceTests: XCTestCase {
     }
 
     func testRiskTypeGetsBoost() {
-        let riskSignal = AgentSuggestion(projectID: UUID(), type: "risk", title: "R",
+        let riskSignal = AgentSuggestion(
+            projectID: UUID(), type: "risk", title: "R",
             impactScore: 0.5, urgencyScore: 0.5, relevanceScore: 0.5)
-        let doubtSignal = AgentSuggestion(projectID: UUID(), type: "doubt", title: "D",
+        let doubtSignal = AgentSuggestion(
+            projectID: UUID(), type: "doubt", title: "D",
             impactScore: 0.5, urgencyScore: 0.5, relevanceScore: 0.5)
         let riskPriority = SignalPriorityService.shared.computePriority(
             signal: riskSignal, project: nil, activeItemCount: 0)
@@ -487,9 +491,11 @@ final class SignalPriorityServiceTests: XCTestCase {
     }
 
     func testOlderSignalDecays() {
-        let freshSignal = AgentSuggestion(projectID: UUID(), type: "pattern", title: "P",
+        let freshSignal = AgentSuggestion(
+            projectID: UUID(), type: "pattern", title: "P",
             createdAt: Date(), impactScore: 0.5, urgencyScore: 0.5, relevanceScore: 0.5)
-        let oldSignal = AgentSuggestion(projectID: UUID(), type: "pattern", title: "Old",
+        let oldSignal = AgentSuggestion(
+            projectID: UUID(), type: "pattern", title: "Old",
             createdAt: Date().addingTimeInterval(-14 * 86400),
             impactScore: 0.5, urgencyScore: 0.5, relevanceScore: 0.5)
         let freshPriority = SignalPriorityService.shared.computePriority(
@@ -500,7 +506,8 @@ final class SignalPriorityServiceTests: XCTestCase {
     }
 
     func testPriorityClampedTo100() {
-        let signal = AgentSuggestion(projectID: UUID(), type: "alert", title: "A",
+        let signal = AgentSuggestion(
+            projectID: UUID(), type: "alert", title: "A",
             impactScore: 1.0, urgencyScore: 1.0, relevanceScore: 1.0)
         let priority = SignalPriorityService.shared.computePriority(
             signal: signal, project: nil, activeItemCount: 0)
@@ -512,7 +519,8 @@ final class SignalPriorityServiceTests: XCTestCase {
 final class AgentSuggestionTests: XCTestCase {
 
     func testComputedPriority() {
-        let signal = AgentSuggestion(projectID: UUID(), type: "risk", title: "Test",
+        let signal = AgentSuggestion(
+            projectID: UUID(), type: "risk", title: "Test",
             impactScore: 0.8, urgencyScore: 0.6, relevanceScore: 0.5)
         let priority = signal.computedPriority
         XCTAssertGreaterThan(priority, 0)
@@ -541,7 +549,7 @@ final class AudioCaptureStateTests: XCTestCase {
 
     func testAllStatesAreDistinct() {
         let states: [AudioCaptureState] = [
-            .idle, .recording, .paused, .stopped
+            .idle, .recording, .paused, .stopped,
         ]
         for i in 0..<states.count {
             for j in (i + 1)..<states.count {
@@ -627,14 +635,15 @@ final class RecordingManifestIndexProviderTests: XCTestCase {
     func testMultipleSegmentsNextIndex() {
         var segments: [RecordingSegment] = []
         for i in 0..<3 {
-            segments.append(RecordingSegment(
-                id: UUID(), index: i,
-                fileName: "segment-\(String(format: "%03d", i)).m4a",
-                startedAt: Date(), inputPortName: "iPhone",
-                inputPortType: "builtInMic",
-                routeChangeReason: i == 0 ? "initial" : "route switch",
-                sampleRate: 44100
-            ))
+            segments.append(
+                RecordingSegment(
+                    id: UUID(), index: i,
+                    fileName: "segment-\(String(format: "%03d", i)).m4a",
+                    startedAt: Date(), inputPortName: "iPhone",
+                    inputPortType: "builtInMic",
+                    routeChangeReason: i == 0 ? "initial" : "route switch",
+                    sampleRate: 44100
+                ))
         }
         let manifest = RecordingManifest(
             recordingId: UUID(), title: "Test",
@@ -764,10 +773,11 @@ final class ItemStatusStateMachineTests: XCTestCase {
         // draft → recording → preparingAudio → queuedForTranscription → transcribing → transcribed → pendingReview → analyzing → analyzed
         let journey: [ItemStatus] = [
             .draft, .recording, .preparingAudio, .queuedForTranscription,
-            .transcribing, .transcribed, .pendingReview, .analyzing, .analyzed
+            .transcribing, .transcribed, .pendingReview, .analyzing, .analyzed,
         ]
         for i in 0..<(journey.count - 1) {
-            XCTAssertTrue(journey[i].canTransition(to: journey[i + 1]),
+            XCTAssertTrue(
+                journey[i].canTransition(to: journey[i + 1]),
                 "\(journey[i]) → \(journey[i + 1]) should be valid")
         }
     }
@@ -795,17 +805,18 @@ final class ItemStatusStateMachineTests: XCTestCase {
     /// Illegal transitions must be rejected.
     func testIllegalTransitions() {
         // draft can only go to recording
-        XCTAssertFalse(ItemStatus.draft.canTransition(to: .analyzed))       // skip all steps
+        XCTAssertFalse(ItemStatus.draft.canTransition(to: .analyzed))  // skip all steps
         // analyzed can only go to failed (re-analysis)
         XCTAssertTrue(ItemStatus.analyzed.canTransition(to: .failed))
-        XCTAssertFalse(ItemStatus.analyzed.canTransition(to: .draft))      // can't un-analyze
+        XCTAssertFalse(ItemStatus.analyzed.canTransition(to: .draft))  // can't un-analyze
     }
 
     /// All transitions defined in validNextStatuses must pass canTransition.
     func testAllValidTransitionsAreConsistent() {
         for status in ItemStatus.allCases {
             for next in status.validNextStatuses {
-                XCTAssertTrue(status.canTransition(to: next),
+                XCTAssertTrue(
+                    status.canTransition(to: next),
                     "\(status) → \(next) in validNextStatuses but canTransition returned false")
             }
         }
@@ -829,11 +840,12 @@ final class RecordingCoordinatorStateTests: XCTestCase {
     func testPausedDurationDoesNotAdvance() {
         let start = Date()
         let pauseDate = start.addingTimeInterval(10)
-        let resumeDate = pauseDate.addingTimeInterval(5) // 5s paused
-        let rawElapsed = resumeDate.timeIntervalSince(start) // 15s wall clock
-        let pausedDuration = resumeDate.timeIntervalSince(pauseDate) // 5s
+        let resumeDate = pauseDate.addingTimeInterval(5)  // 5s paused
+        let rawElapsed = resumeDate.timeIntervalSince(start)  // 15s wall clock
+        let pausedDuration = resumeDate.timeIntervalSince(pauseDate)  // 5s
         let effectiveElapsed = rawElapsed - pausedDuration
-        XCTAssertEqual(effectiveElapsed, 10.0, accuracy: 0.01,
+        XCTAssertEqual(
+            effectiveElapsed, 10.0, accuracy: 0.01,
             "Effective elapsed should exclude paused time")
     }
 
@@ -887,7 +899,7 @@ final class AgentLoopCompletionTests: XCTestCase {
             .toolCallCompleted(name: "ls", id: "1", summary: "ok"),
             .truncated(reason: "test", progress: "1/1"),
             .finished(citations: []),
-            .error(NSError(domain: "test", code: 1))
+            .error(NSError(domain: "test", code: 1)),
         ]
         XCTAssertEqual(events.count, 7)
     }
@@ -914,9 +926,11 @@ final class ContentExtractionValidationTests: XCTestCase {
         let store = FileArtifactStore()
         let itemID = UUID()
         let url = store.audioFileURL(for: itemID)
-        XCTAssertTrue(url.path.contains(itemID.uuidString),
+        XCTAssertTrue(
+            url.path.contains(itemID.uuidString),
             "Audio URL should contain the item ID")
-        XCTAssertTrue(url.path.hasSuffix("audio.m4a"),
+        XCTAssertTrue(
+            url.path.hasSuffix("audio.m4a"),
             "Audio URL should be audio.m4a")
     }
 
@@ -1026,21 +1040,23 @@ final class ModelPolicyRulesTests: XCTestCase {
 
     private func makeSampleRules() -> ModelPolicyRules {
         ModelPolicyRules(
-            budget: ModelPolicyRules.BudgetRules(dailyUSD: 1.0, thresholds: [
-                ModelPolicyRules.BudgetThreshold(minPercent: 0.50, tier: "deep"),
-                ModelPolicyRules.BudgetThreshold(minPercent: 0.25, tier: "fast"),
-                ModelPolicyRules.BudgetThreshold(minPercent: 0.05, tier: "economy"),
-                ModelPolicyRules.BudgetThreshold(minPercent: 0.00, tier: "local")
-            ]),
+            budget: ModelPolicyRules.BudgetRules(
+                dailyUSD: 1.0,
+                thresholds: [
+                    ModelPolicyRules.BudgetThreshold(minPercent: 0.50, tier: "deep"),
+                    ModelPolicyRules.BudgetThreshold(minPercent: 0.25, tier: "fast"),
+                    ModelPolicyRules.BudgetThreshold(minPercent: 0.05, tier: "economy"),
+                    ModelPolicyRules.BudgetThreshold(minPercent: 0.00, tier: "local"),
+                ]),
             tiers: [
                 "deep": ModelPolicyRules.TierConfig(label: "Deep", prefer: ["claude-opus-4-8"]),
                 "fast": ModelPolicyRules.TierConfig(label: "Fast", prefer: ["claude-sonnet-4-6"]),
                 "economy": ModelPolicyRules.TierConfig(label: "Economy", prefer: ["claude-haiku-4-5"]),
-                "local": ModelPolicyRules.TierConfig(label: "Local", prefer: ["phi-4-mini"])
+                "local": ModelPolicyRules.TierConfig(label: "Local", prefer: ["phi-4-mini"]),
             ],
             features: [
                 "chat": ["deep": "claude-sonnet-4-6", "fast": "gpt-5.1-mini", "economy": "claude-haiku-4-5", "local": "phi-4-mini"],
-                "analysis": ["deep": "claude-opus-4-8", "fast": "claude-sonnet-4-6", "economy": "gpt-5.1-mini", "local": "phi-4-mini"]
+                "analysis": ["deep": "claude-opus-4-8", "fast": "claude-sonnet-4-6", "economy": "gpt-5.1-mini", "local": "phi-4-mini"],
             ],
             offlineFallback: ModelPolicyRules.OfflineFallbackConfig(enabled: true),
             userOverride: ModelPolicyRules.UserOverrideConfig(enabled: true)

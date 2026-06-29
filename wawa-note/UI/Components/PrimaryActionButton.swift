@@ -40,7 +40,7 @@ struct PrimaryActionButton: View {
             }
             .foregroundStyle(foregroundColor)
             .frame(maxWidth: .infinity)
-            .frame(minHeight: 50) // minHeight for Dynamic Type
+            .frame(minHeight: 50)  // minHeight for Dynamic Type
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .background(backgroundColor, in: RoundedRectangle(cornerRadius: 14))
@@ -72,9 +72,12 @@ struct PrimaryActionButton: View {
 
     private var shadowColor: Color {
         switch variant {
-        case .record: .red; case .destructive: .red
-        case .primary: .accentColor; case .secondary: .gray
-        case .scan: .blue; case .note: .yellow
+        case .record: .red
+        case .destructive: .red
+        case .primary: .accentColor
+        case .secondary: .gray
+        case .scan: .blue
+        case .note: .yellow
         }
     }
 

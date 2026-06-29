@@ -1,5 +1,5 @@
-import SwiftUI
 import AVFoundation
+import SwiftUI
 
 // MARK: - Barcode Scanner View
 
@@ -49,8 +49,7 @@ struct BarcodeScannerView: View {
         HStack {
             Button {
                 viewModel.stopScanning()
-                if viewModel.scannedCodes.isEmpty { dismiss() }
-                else { showSaveSheet = true }
+                if viewModel.scannedCodes.isEmpty { dismiss() } else { showSaveSheet = true }
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "xmark")
@@ -169,7 +168,10 @@ struct BarcodeScannerView: View {
                     } else {
                         UIPasteboard.general.string = latest.value
                         copiedCodeID = latest.id
-                        Task { try? await Task.sleep(nanoseconds: 1_500_000_000); copiedCodeID = nil }
+                        Task {
+                            try? await Task.sleep(nanoseconds: 1_500_000_000)
+                            copiedCodeID = nil
+                        }
                     }
                 } label: {
                     VStack(spacing: 8) {
@@ -297,7 +299,10 @@ struct BarcodeScannerView: View {
                         Button {
                             UIPasteboard.general.string = code.value
                             copiedSheetCodeID = code.id
-                            Task { try? await Task.sleep(nanoseconds: 1_500_000_000); copiedSheetCodeID = nil }
+                            Task {
+                                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                                copiedSheetCodeID = nil
+                            }
                         } label: {
                             HStack(spacing: 8) {
                                 Image(systemName: code.type.icon)

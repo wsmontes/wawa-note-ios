@@ -47,7 +47,7 @@ final class SecureKeyStore: @unchecked Sendable {
             kSecAttrService as String: serviceName,
             kSecAttrAccount as String: identifier,
             kSecValueData as String: data,
-            kSecAttrAccessible as String: accessLevel.secAttr
+            kSecAttrAccessible as String: accessLevel.secAttr,
         ]
 
         let status = SecItemAdd(query as CFDictionary, nil)
@@ -62,7 +62,7 @@ final class SecureKeyStore: @unchecked Sendable {
             kSecAttrService as String: serviceName,
             kSecAttrAccount as String: identifier,
             kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
+            kSecMatchLimit as String: kSecMatchLimitOne,
         ]
 
         var item: CFTypeRef?
@@ -82,7 +82,7 @@ final class SecureKeyStore: @unchecked Sendable {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: serviceName,
-            kSecAttrAccount as String: identifier
+            kSecAttrAccount as String: identifier,
         ]
 
         let status = SecItemDelete(query as CFDictionary)

@@ -1,6 +1,6 @@
-import SwiftUI
 import Combine
 import SwiftData
+import SwiftUI
 
 @MainActor
 final class CaptureViewModel: ObservableObject {

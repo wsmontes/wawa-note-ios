@@ -25,7 +25,8 @@ struct RTFImporter: FormatImporter {
             guard let raw = String(data: data, encoding: .ascii) else {
                 throw NSError(domain: "RTFImporter", code: 1)
             }
-            text = raw
+            text =
+                raw
                 .replacingOccurrences(of: "\\{[^}]*\\}", with: "", options: .regularExpression)
                 .replacingOccurrences(of: "\\\\[a-z]+\\d*\\s?", with: "", options: .regularExpression)
                 .replacingOccurrences(of: "\\\n", with: "")

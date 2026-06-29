@@ -1,5 +1,5 @@
-import Foundation
 import AVFoundation
+import Foundation
 import OSLog
 
 // MARK: - Voice Activity Detector
@@ -79,7 +79,7 @@ final class VoiceActivityDetector: ObservableObject {
         }
 
         let frameLength = Int(buffer.frameLength)
-        let windowSize = Int(sampleRate * 0.1) // 100ms windows
+        let windowSize = Int(sampleRate * 0.1)  // 100ms windows
         let minSilenceFrames = Int(sampleRate * minSilenceDuration)
 
         var segments: [SpeechSegment] = []
@@ -116,12 +116,13 @@ final class VoiceActivityDetector: ObservableObject {
                     if silenceDuration >= minSilenceFrames {
                         let segmentDuration = Double(i - start) / sampleRate
                         if segmentDuration >= minSpeechDuration {
-                            segments.append(SpeechSegment(
-                                startTime: Double(start) / sampleRate,
-                                endTime: Double(i) / sampleRate,
-                                confidence: min(currentRMS / (energyThreshold * 5), 1.0),
-                                rms: currentRMS
-                            ))
+                            segments.append(
+                                SpeechSegment(
+                                    startTime: Double(start) / sampleRate,
+                                    endTime: Double(i) / sampleRate,
+                                    confidence: min(currentRMS / (energyThreshold * 5), 1.0),
+                                    rms: currentRMS
+                                ))
                         }
                         speechStart = nil
                         silenceStart = nil
@@ -135,12 +136,13 @@ final class VoiceActivityDetector: ObservableObject {
         if let start = speechStart {
             let segmentDuration = Double(frameLength - start) / sampleRate
             if segmentDuration >= minSpeechDuration {
-                segments.append(SpeechSegment(
-                    startTime: Double(start) / sampleRate,
-                    endTime: Double(frameLength) / sampleRate,
-                    confidence: min(currentRMS / (energyThreshold * 5), 1.0),
-                    rms: currentRMS
-                ))
+                segments.append(
+                    SpeechSegment(
+                        startTime: Double(start) / sampleRate,
+                        endTime: Double(frameLength) / sampleRate,
+                        confidence: min(currentRMS / (energyThreshold * 5), 1.0),
+                        rms: currentRMS
+                    ))
             }
         }
 

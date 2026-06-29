@@ -162,7 +162,8 @@ final class AudioChunker: @unchecked Sendable {
                             if writer.status == .completed {
                                 continuation.resume()
                             } else {
-                                continuation.resume(throwing: writer.error ?? NSError(domain: "chunk", code: -8, userInfo: [NSLocalizedDescriptionKey: "Writer failed"]))
+                                continuation.resume(
+                                    throwing: writer.error ?? NSError(domain: "chunk", code: -8, userInfo: [NSLocalizedDescriptionKey: "Writer failed"]))
                             }
                         }
                         return

@@ -174,7 +174,7 @@ struct AnarlogDocument: Equatable {
 
     private static func normalizeLineEndings(_ s: String) -> String {
         s.replacingOccurrences(of: "\r\n", with: "\n")
-         .replacingOccurrences(of: "\r", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
     }
 
     private static func findClosingDelimiter(in text: String) -> Range<String.Index>? {
@@ -185,7 +185,8 @@ struct AnarlogDocument: Equatable {
             let afterNewline = text.index(after: newlineIdx)
 
             if afterNewline < text.endIndex,
-               text[afterNewline...].hasPrefix("---") {
+                text[afterNewline...].hasPrefix("---")
+            {
                 let dashEnd = text.index(afterNewline, offsetBy: 3)
                 // Check: after --- must be \n or end of string
                 if dashEnd == text.endIndex || text[dashEnd] == "\n" {
@@ -413,8 +414,7 @@ private enum MinimalYAMLParser {
     private static func countLeadingSpaces(_ line: String) -> Int {
         var count = 0
         for c in line {
-            if c == " " { count += 1 }
-            else { break }
+            if c == " " { count += 1 } else { break }
         }
         return count
     }
@@ -540,13 +540,10 @@ private enum MinimalYAMLSerializer {
         switch value {
         case let s as String:
             // Quote if string contains special YAML characters
-            if s.isEmpty || s.contains(":") || s.contains("#") || s.contains("{") ||
-               s.contains("}") || s.contains("[") || s.contains("]") ||
-               s.contains("&") || s.contains("*") || s.contains("!") ||
-               s.contains("|") || s.contains(">") || s.contains("%") ||
-               s.contains("@") || s.contains("`") || s.contains(",") ||
-               s.hasPrefix(" ") || s.hasSuffix(" ") ||
-               s == "true" || s == "false" || s == "null" || s == "~" {
+            if s.isEmpty || s.contains(":") || s.contains("#") || s.contains("{") || s.contains("}") || s.contains("[") || s.contains("]") || s.contains("&")
+                || s.contains("*") || s.contains("!") || s.contains("|") || s.contains(">") || s.contains("%") || s.contains("@") || s.contains("`")
+                || s.contains(",") || s.hasPrefix(" ") || s.hasSuffix(" ") || s == "true" || s == "false" || s == "null" || s == "~"
+            {
                 return "\"\(s.replacingOccurrences(of: "\"", with: "\\\""))\""
             }
             return s

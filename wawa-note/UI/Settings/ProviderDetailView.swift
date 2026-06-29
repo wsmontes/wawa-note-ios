@@ -1,5 +1,5 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 struct ProviderDetailView: View {
     let provider: AIProviderConfigModel

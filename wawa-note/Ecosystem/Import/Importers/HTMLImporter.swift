@@ -20,7 +20,8 @@ struct HTMLImporter: FormatImporter {
         let html = try String(contentsOf: url, encoding: .utf8)
 
         // Strip HTML tags
-        let plainText = html
+        let plainText =
+            html
             .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
             .replacingOccurrences(of: "&amp;", with: "&")
             .replacingOccurrences(of: "&lt;", with: "<")

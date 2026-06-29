@@ -4,16 +4,16 @@ import SwiftData
 // MARK: - FieldOrigin
 
 enum FieldOrigin: String, Codable, Sendable, CaseIterable {
-    case user       // Manually edited by user via UI
-    case llm        // Written by an AI agent or pipeline
-    case `import`   // Created by file import (PDF, markdown, etc.)
-    case system     // System-generated (e.g., OCR, default values, migrations)
+    case user  // Manually edited by user via UI
+    case llm  // Written by an AI agent or pipeline
+    case `import`  // Created by file import (PDF, markdown, etc.)
+    case system  // System-generated (e.g., OCR, default values, migrations)
 }
 
 enum CorrectionScope: String, Codable, Sendable, CaseIterable {
-    case item       // Correction applies to this item only
-    case project    // Correction may impact the project
-    case global     // Correction applies globally (requires explicit confirmation)
+    case item  // Correction applies to this item only
+    case project  // Correction may impact the project
+    case global  // Correction applies globally (requires explicit confirmation)
 }
 
 // MARK: - FieldProvenance
@@ -56,7 +56,7 @@ struct FieldProvenance: Codable, Sendable {
 
     static func decode(from json: String?) -> FieldProvenance {
         guard let json, let data = json.data(using: .utf8),
-              let prov = try? JSONDecoder().decode(FieldProvenance.self, from: data)
+            let prov = try? JSONDecoder().decode(FieldProvenance.self, from: data)
         else { return FieldProvenance(fields: [:]) }
         return prov
     }
@@ -210,7 +210,8 @@ final class TaskItem {
 
     var sourceSegmentIDList: [String] {
         guard let json = sourceSegmentIDs, let data = json.data(using: .utf8),
-              let list = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+            let list = try? JSONDecoder().decode([String].self, from: data)
+        else { return [] }
         return list
     }
 
@@ -332,7 +333,8 @@ final class GraphEdge {
 
     var provenanceSegmentIDList: [String] {
         guard let json = provenanceSegmentIDs, let data = json.data(using: .utf8),
-              let list = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+            let list = try? JSONDecoder().decode([String].self, from: data)
+        else { return [] }
         return list
     }
 
@@ -352,7 +354,8 @@ final class GraphEdge {
         self.edgeTypeRaw = edgeType.rawValue
         self.weight = weight
         self.provenanceItemID = provenanceItemID
-        self.provenanceSegmentIDs = provenanceSegmentIDs.isEmpty ? nil : (try? JSONEncoder().encode(provenanceSegmentIDs)).flatMap { String(data: $0, encoding: .utf8) }
+        self.provenanceSegmentIDs =
+            provenanceSegmentIDs.isEmpty ? nil : (try? JSONEncoder().encode(provenanceSegmentIDs)).flatMap { String(data: $0, encoding: .utf8) }
         self.createdAt = createdAt
     }
 }
@@ -427,15 +430,15 @@ struct AnalysisConfig: Codable, Sendable {
 }
 
 struct AnalysisOutputSchema: Codable, Sendable {
-    let type: String          // "object"
+    let type: String  // "object"
     let properties: [String: SchemaProperty]
     let required: [String]?
 }
 
 struct SchemaProperty: Codable, Sendable {
-    let type: String          // "string", "array", "object"
-    let items: SchemaItems?   // for array types
-    let properties: [String: SchemaProperty]? // for object types
+    let type: String  // "string", "array", "object"
+    let items: SchemaItems?  // for array types
+    let properties: [String: SchemaProperty]?  // for object types
     let description: String?
 }
 
@@ -478,7 +481,10 @@ struct ViewDefinition: Codable, Sendable {
 
     /// Validates that the view definition has a supported type and non-empty source.
     var isValid: Bool {
-        let validSources: Set<String> = ["items", "tasks", "edges", "analysis.hypotheses", "analysis.findings", "analysis.ideas", "analysis.competencies", "analysis.cases", "analysis.stories", "tags", "entities"]
+        let validSources: Set<String> = [
+            "items", "tasks", "edges", "analysis.hypotheses", "analysis.findings", "analysis.ideas", "analysis.competencies", "analysis.cases",
+            "analysis.stories", "tags", "entities",
+        ]
         return !source.isEmpty && validSources.contains(source)
     }
 }
@@ -497,9 +503,9 @@ enum ViewType: String, Codable, Sendable {
 // MARK: - Lens (unified Framework + ai_config.json lenses)
 
 enum LensCategory: String, Codable, Sendable, CaseIterable {
-    case domain      // meeting, research, legal, product, coaching
+    case domain  // meeting, research, legal, product, coaching
     case analytical  // risk_analysis, executive_summary, design_critique
-    case personal    // journal, brainstorm
+    case personal  // journal, brainstorm
     case custom
 }
 
@@ -534,18 +540,26 @@ struct Preset: Codable, Sendable, Identifiable {
     var exportedAt: Date
     var version: Int
 
-    init(id: String, name: String, description: String = "", lensID: String? = nil,
-         frameworkJSON: String? = nil, customInstructions: String? = nil,
-         markdownTemplates: [String: String] = [:], analysisRules: [String] = [],
-         doubtRules: [String] = [], relevanceCriteria: [String] = [],
-         llmBehavior: String? = nil, exportedAt: Date = Date(), version: Int = 1) {
-        self.id = id; self.name = name; self.description = description
-        self.lensID = lensID; self.frameworkJSON = frameworkJSON
+    init(
+        id: String, name: String, description: String = "", lensID: String? = nil,
+        frameworkJSON: String? = nil, customInstructions: String? = nil,
+        markdownTemplates: [String: String] = [:], analysisRules: [String] = [],
+        doubtRules: [String] = [], relevanceCriteria: [String] = [],
+        llmBehavior: String? = nil, exportedAt: Date = Date(), version: Int = 1
+    ) {
+        self.id = id
+        self.name = name
+        self.description = description
+        self.lensID = lensID
+        self.frameworkJSON = frameworkJSON
         self.customInstructions = customInstructions
         self.markdownTemplates = markdownTemplates
-        self.analysisRules = analysisRules; self.doubtRules = doubtRules
-        self.relevanceCriteria = relevanceCriteria; self.llmBehavior = llmBehavior
-        self.exportedAt = exportedAt; self.version = version
+        self.analysisRules = analysisRules
+        self.doubtRules = doubtRules
+        self.relevanceCriteria = relevanceCriteria
+        self.llmBehavior = llmBehavior
+        self.exportedAt = exportedAt
+        self.version = version
     }
 }
 
@@ -582,7 +596,8 @@ final class ProjectFrame {
 
     private static func decodeJSONArray(_ json: String) -> [String] {
         guard let data = json.data(using: .utf8),
-              let result = try? JSONDecoder().decode([String].self, from: data) else {
+            let result = try? JSONDecoder().decode([String].self, from: data)
+        else {
             return []
         }
         return result
@@ -591,7 +606,8 @@ final class ProjectFrame {
     private static func encodeJSONArray(_ array: [String]) -> String {
         guard !array.isEmpty else { return "[]" }
         if let data = try? JSONEncoder().encode(array),
-           let json = String(data: data, encoding: .utf8) {
+            let json = String(data: data, encoding: .utf8)
+        {
             return json
         }
         return "[]"
@@ -611,13 +627,19 @@ final class ProjectFrame {
         return true
     }
 
-    init(id: UUID = UUID(), projectID: UUID, parentFrameID: UUID? = nil, name: String,
-         lensID: String? = nil, filterTags: [String] = [], filterDateStart: Date? = nil,
-         filterDateEnd: Date? = nil, filterItemTypes: [String] = []) {
-        self.id = id; self.projectID = projectID; self.parentFrameID = parentFrameID
-        self.name = name; self.lensID = lensID
+    init(
+        id: UUID = UUID(), projectID: UUID, parentFrameID: UUID? = nil, name: String,
+        lensID: String? = nil, filterTags: [String] = [], filterDateStart: Date? = nil,
+        filterDateEnd: Date? = nil, filterItemTypes: [String] = []
+    ) {
+        self.id = id
+        self.projectID = projectID
+        self.parentFrameID = parentFrameID
+        self.name = name
+        self.lensID = lensID
         self._filterTagsJSON = Self.encodeJSONArray(filterTags)
-        self.filterDateStart = filterDateStart; self.filterDateEnd = filterDateEnd
+        self.filterDateStart = filterDateStart
+        self.filterDateEnd = filterDateEnd
         self._filterItemTypesJSON = Self.encodeJSONArray(filterItemTypes)
         self.createdAt = Date()
     }
@@ -650,13 +672,21 @@ final class ChangeRecord {
         set { originRaw = newValue.rawValue }
     }
 
-    init(id: UUID = UUID(), entityType: String, entityID: UUID, projectID: UUID? = nil,
-         field: String, previousValue: String? = nil, newValue: String? = nil,
-         origin: FieldOrigin = .llm, timestamp: Date = Date(), snapshotID: UUID? = nil) {
-        self.id = id; self.entityType = entityType; self.entityID = entityID
-        self.projectID = projectID; self.field = field
-        self.previousValue = previousValue; self.newValue = newValue
-        self.originRaw = origin.rawValue; self.timestamp = timestamp; self.snapshotID = snapshotID
+    init(
+        id: UUID = UUID(), entityType: String, entityID: UUID, projectID: UUID? = nil,
+        field: String, previousValue: String? = nil, newValue: String? = nil,
+        origin: FieldOrigin = .llm, timestamp: Date = Date(), snapshotID: UUID? = nil
+    ) {
+        self.id = id
+        self.entityType = entityType
+        self.entityID = entityID
+        self.projectID = projectID
+        self.field = field
+        self.previousValue = previousValue
+        self.newValue = newValue
+        self.originRaw = origin.rawValue
+        self.timestamp = timestamp
+        self.snapshotID = snapshotID
     }
 }
 
@@ -676,12 +706,18 @@ final class ProjectSnapshot {
         set { triggerRaw = newValue.rawValue }
     }
 
-    init(id: UUID = UUID(), projectID: UUID, label: String? = nil,
-         trigger: SnapshotTrigger = .manual, createdAt: Date = Date(),
-         changeCount: Int = 0, summary: String? = nil) {
-        self.id = id; self.projectID = projectID; self.label = label
-        self.triggerRaw = trigger.rawValue; self.createdAt = createdAt
-        self.changeCount = changeCount; self.summary = summary
+    init(
+        id: UUID = UUID(), projectID: UUID, label: String? = nil,
+        trigger: SnapshotTrigger = .manual, createdAt: Date = Date(),
+        changeCount: Int = 0, summary: String? = nil
+    ) {
+        self.id = id
+        self.projectID = projectID
+        self.label = label
+        self.triggerRaw = trigger.rawValue
+        self.createdAt = createdAt
+        self.changeCount = changeCount
+        self.summary = summary
     }
 }
 
@@ -702,7 +738,7 @@ final class AgentSuggestion {
     var confidence: Double?
     var sourceItemID: UUID?
     var sourceSegmentIDs: String?  // JSON array
-    var payloadJSON: String?       // JSON for the actual action
+    var payloadJSON: String?  // JSON for the actual action
     var createdAt: Date
     var resolvedAt: Date?
 
@@ -716,19 +752,32 @@ final class AgentSuggestion {
     var resolvedByRaw: String?
     var isCritical: Bool
 
-    init(id: UUID = UUID(), projectID: UUID? = nil, type: String, title: String,
-         body: String? = nil, status: String = "visible", confidence: Double? = nil,
-         sourceItemID: UUID? = nil, sourceSegmentIDs: [String]? = nil,
-         payloadJSON: String? = nil, createdAt: Date = Date(), resolvedAt: Date? = nil,
-         impactScore: Double? = nil, urgencyScore: Double? = nil, relevanceScore: Double? = nil,
-         resolutionReason: String? = nil, resolvedByRaw: String? = nil, isCritical: Bool = false) {
-        self.id = id; self.projectID = projectID; self.type = type; self.title = title
-        self.body = body; self.status = status; self.confidence = confidence
+    init(
+        id: UUID = UUID(), projectID: UUID? = nil, type: String, title: String,
+        body: String? = nil, status: String = "visible", confidence: Double? = nil,
+        sourceItemID: UUID? = nil, sourceSegmentIDs: [String]? = nil,
+        payloadJSON: String? = nil, createdAt: Date = Date(), resolvedAt: Date? = nil,
+        impactScore: Double? = nil, urgencyScore: Double? = nil, relevanceScore: Double? = nil,
+        resolutionReason: String? = nil, resolvedByRaw: String? = nil, isCritical: Bool = false
+    ) {
+        self.id = id
+        self.projectID = projectID
+        self.type = type
+        self.title = title
+        self.body = body
+        self.status = status
+        self.confidence = confidence
         self.sourceItemID = sourceItemID
         self.sourceSegmentIDs = sourceSegmentIDs.flatMap { try? JSONEncoder().encode($0) }.flatMap { String(data: $0, encoding: .utf8) }
-        self.payloadJSON = payloadJSON; self.createdAt = createdAt; self.resolvedAt = resolvedAt
-        self.impactScore = impactScore; self.urgencyScore = urgencyScore; self.relevanceScore = relevanceScore
-        self.resolutionReason = resolutionReason; self.resolvedByRaw = resolvedByRaw; self.isCritical = isCritical
+        self.payloadJSON = payloadJSON
+        self.createdAt = createdAt
+        self.resolvedAt = resolvedAt
+        self.impactScore = impactScore
+        self.urgencyScore = urgencyScore
+        self.relevanceScore = relevanceScore
+        self.resolutionReason = resolutionReason
+        self.resolvedByRaw = resolvedByRaw
+        self.isCritical = isCritical
     }
 
     /// Computed contextual priority (0-100). Uses stored scores or falls back to confidence.
@@ -814,9 +863,9 @@ enum QueueStatus: String, Codable, CaseIterable, Sendable {
 // MARK: - ProjectDerivedItem
 
 enum ProjectDerivedType: String, Codable, Sendable, CaseIterable {
-    case synthesis   // Living synthesis document — one per project
-    case task        // Actionable item with status, priority, dueAt, owner
-    case signal      // Alert, risk, doubt, opportunity
+    case synthesis  // Living synthesis document — one per project
+    case task  // Actionable item with status, priority, dueAt, owner
+    case signal  // Alert, risk, doubt, opportunity
     case connection  // Proposed edge between items
 }
 
@@ -840,19 +889,19 @@ enum ProjectDerivedStatus: String, Codable, Sendable, CaseIterable {
 final class ProjectDerivedItem {
     @Attribute(.unique) var id: UUID
     var projectID: UUID
-    var sourceItemID: UUID?        // nil = synthesis (project-level, not tied to one item)
+    var sourceItemID: UUID?  // nil = synthesis (project-level, not tied to one item)
     var typeRaw: String
     var title: String
-    var bodyJSON: String?          // Structured content specific to type (taskJSON, signalJSON, synthesisJSON)
+    var bodyJSON: String?  // Structured content specific to type (taskJSON, signalJSON, synthesisJSON)
     var statusRaw: String?
-    var priorityRaw: String?       // For tasks: low, medium, high, critical
-    var ownerName: String?         // For tasks: assigned person
-    var dueAt: Date?               // For tasks: deadline
-    var confidence: Double?        // For signals: 0-1
-    var isCritical: Bool           // For signals: demands immediate attention
+    var priorityRaw: String?  // For tasks: low, medium, high, critical
+    var ownerName: String?  // For tasks: assigned person
+    var dueAt: Date?  // For tasks: deadline
+    var confidence: Double?  // For signals: 0-1
+    var isCritical: Bool  // For signals: demands immediate attention
     var createdAt: Date
     var updatedAt: Date
-    var resolvedAt: Date?          // For signals: when resolved
+    var resolvedAt: Date?  // For signals: when resolved
     var resolutionReason: String?  // For signals: why resolved
     var reprocessContext: String?  // If created via reprocess, the context used
 
@@ -938,7 +987,7 @@ extension ProjectDerivedItem {
 
     private var signalIcon: String {
         guard let body = bodyJSON, let data = body.data(using: .utf8),
-              let json = try? JSONDecoder().decode(SignalBody.self, from: data)
+            let json = try? JSONDecoder().decode(SignalBody.self, from: data)
         else { return "dot.radiowaves.left.and.right" }
         switch json.signalType {
         case "risk": return "exclamationmark.triangle.fill"
@@ -954,12 +1003,12 @@ extension ProjectDerivedItem {
 
 /// Structured body for signal-type derived items.
 struct SignalBody: Codable, Sendable {
-    var signalType: String       // risk, alert, opportunity, doubt, pattern, contradiction
+    var signalType: String  // risk, alert, opportunity, doubt, pattern, contradiction
     var description: String
-    var suggestedAction: String? // What the agent suggests doing about it
+    var suggestedAction: String?  // What the agent suggests doing about it
     var relatedItemIDs: [UUID]?  // Items this signal connects
-    var impactScore: Double?     // 0-1
-    var urgencyScore: Double?    // 0-1
+    var impactScore: Double?  // 0-1
+    var urgencyScore: Double?  // 0-1
 }
 
 /// Structured body for task-type derived items.
@@ -972,10 +1021,10 @@ struct TaskBody: Codable, Sendable {
 
 /// Structured body for synthesis-type derived items.
 struct SynthesisBody: Codable, Sendable {
-    var markdown: String              // Full synthesis in markdown
+    var markdown: String  // Full synthesis in markdown
     var sections: [SynthesisSection]  // Parsed sections for rendering
-    var metrics: [SynthesisMetric]    // Computed metrics
-    var updatedFromItemIDs: [UUID]    // Items that contributed to latest version
+    var metrics: [SynthesisMetric]  // Computed metrics
+    var updatedFromItemIDs: [UUID]  // Items that contributed to latest version
     var generatedAt: Date
 }
 
@@ -983,7 +1032,7 @@ struct SynthesisSection: Codable, Sendable {
     var id: String
     var title: String
     var renderType: String  // "markdown", "cards", "table", "metrics", "timeline"
-    var content: String     // Markdown or JSON depending on renderType
+    var content: String  // Markdown or JSON depending on renderType
     var order: Int
 }
 
@@ -991,8 +1040,7 @@ struct SynthesisMetric: Codable, Sendable {
     var id: String
     var label: String
     var value: Double
-    var format: String      // "number", "percentage", "days", "score"
-    var status: String      // "healthy", "warning", "critical", "neutral"
+    var format: String  // "number", "percentage", "days", "score"
+    var status: String  // "healthy", "warning", "critical", "neutral"
     var icon: String?
 }
-

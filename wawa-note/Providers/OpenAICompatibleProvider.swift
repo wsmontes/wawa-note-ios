@@ -137,8 +137,8 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
                             "type": "function",
                             "function": [
                                 "name": tc.name,
-                                "arguments": tc.arguments
-                            ]
+                                "arguments": tc.arguments,
+                            ],
                         ]
                     }
                 }
@@ -165,7 +165,7 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
 
         var body: [String: Any] = [
             "model": effectiveModel,
-            "messages": bodyMessages
+            "messages": bodyMessages,
         ]
 
         // Temperature: only send if the model supports it
@@ -193,14 +193,15 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
                     body["response_format"] = ["type": "json_object"]
                 case .jsonSchema(let name, let schemaJSON):
                     if let schemaData = schemaJSON.data(using: .utf8),
-                       let schemaObj = try? JSONSerialization.jsonObject(with: schemaData) {
+                        let schemaObj = try? JSONSerialization.jsonObject(with: schemaData)
+                    {
                         body["response_format"] = [
                             "type": "json_schema",
                             "json_schema": [
                                 "name": name,
                                 "strict": true,
-                                "schema": schemaObj
-                            ]
+                                "schema": schemaObj,
+                            ],
                         ]
                     } else {
                         body["response_format"] = ["type": "json_object"]
@@ -231,7 +232,7 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
                         var p: [String: Any] = ["type": prop.type, "description": prop.description]
                         if let en = prop.enum { p["enum"] = en }
                         return p
-                    }
+                    },
                 ]
                 if !tool.parameters.required.isEmpty {
                     parameters["required"] = tool.parameters.required
@@ -241,8 +242,8 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
                     "function": [
                         "name": tool.name,
                         "description": tool.description,
-                        "parameters": parameters
-                    ]
+                        "parameters": parameters,
+                    ],
                 ]
             }
             if let tc = request.toolChoice { body["tool_choice"] = tc }
@@ -314,7 +315,8 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
         }
 
         AppLog.provider.info("Response: \(text.prefix(100))...")
-        return AIResponse(id: decoded.id, model: decoded.model, content: text,
+        return AIResponse(
+            id: decoded.id, model: decoded.model, content: text,
             reasoningContent: reasoningContent, usage: usage, toolCalls: toolCalls, finishReason: finishReason)
     }
 
@@ -346,8 +348,9 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
             throw ProviderError.requestFailed(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0)
         }
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let dataArr = json["data"] as? [[String: Any]],
-              let embedding = dataArr.first?["embedding"] as? [Double] else {
+            let dataArr = json["data"] as? [[String: Any]],
+            let embedding = dataArr.first?["embedding"] as? [Double]
+        else {
             throw ProviderError.decodingFailed
         }
         return embedding.map { Float($0) }
@@ -376,14 +379,16 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
 
         // OpenAI-compatible shape (most providers)
         if let data = json["data"] as? [[String: Any]],
-           let first = data.first,
-           let embedding = first["embedding"] as? [Double] {
+            let first = data.first,
+            let embedding = first["embedding"] as? [Double]
+        {
             return embedding.map { Float($0) }
         }
 
         // Ollama shape: {"embeddings": [[0.1, ...]]}
         if let embeddings = json["embeddings"] as? [[Double]],
-           let embedding = embeddings.first {
+            let embedding = embeddings.first
+        {
             return embedding.map { Float($0) }
         }
 
@@ -405,9 +410,11 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
         AppLog.provider.info("Warming up local model \(self.model)...")
         let start = CFAbsoluteTimeGetCurrent()
         do {
-            let request = AIRequest(model: model, messages: [
-                AIMessage(role: .user, content: [.text("Hi")])
-            ], maxTokens: 1)
+            let request = AIRequest(
+                model: model,
+                messages: [
+                    AIMessage(role: .user, content: [.text("Hi")])
+                ], maxTokens: 1)
             _ = try await send(request)
             let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
             AppLog.provider.info("Warm-up complete in \(String(format: "%.0f", elapsed))ms")
@@ -420,10 +427,10 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
 
     /// Queries Ollama's `/api/show` to get model details (quantization, context window, etc.)
     struct OllamaModelDetail: Sendable {
-        let quantization: String?       // e.g. "Q4_K_M"
-        let contextWindow: Int?         // e.g. 8192
-        let parameterSize: String?      // e.g. "8B"
-        let family: String?            // e.g. "llama"
+        let quantization: String?  // e.g. "Q4_K_M"
+        let contextWindow: Int?  // e.g. 8192
+        let parameterSize: String?  // e.g. "8B"
+        let family: String?  // e.g. "llama"
         var description: String {
             var parts: [String] = []
             if let fam = family { parts.append(fam) }
@@ -479,7 +486,9 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
         let parameterSize = details?["parameter_size"] as? String
         let family = details?["family"] as? String
 
-        AppLog.provider.info("Ollama model \(model): \(OllamaModelDetail(quantization: quant, contextWindow: contextWindow, parameterSize: parameterSize, family: family).description)")
+        AppLog.provider.info(
+            "Ollama model \(model): \(OllamaModelDetail(quantization: quant, contextWindow: contextWindow, parameterSize: parameterSize, family: family).description)"
+        )
         return OllamaModelDetail(quantization: quant, contextWindow: contextWindow, parameterSize: parameterSize, family: family)
     }
 
@@ -487,7 +496,8 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
 
     func fetchModels() async throws -> [String] {
         // Ollama uses /api/tags, everyone else uses /models
-        let path = providerType == .localNetwork && baseURL.absoluteString.contains("11434")
+        let path =
+            providerType == .localNetwork && baseURL.absoluteString.contains("11434")
             ? "api/tags" : "models"
         let endpoint = baseURL.appendingPathComponent(path)
         var request = URLRequest(url: endpoint)
@@ -559,7 +569,7 @@ struct OpenRouterModelEntry: Codable, Sendable {
     let architecture: String?  // e.g. "llama", "claude", "gpt"
 
     struct OpenRouterPricing: Codable, Sendable {
-        let prompt: String?     // USD per 1M tokens
+        let prompt: String?  // USD per 1M tokens
         let completion: String?
     }
 }
@@ -575,8 +585,9 @@ final class OpenRouterModelCache: @unchecked Sendable {
 
     var models: [OpenRouterModelEntry] {
         guard let ttlDate = defaults.object(forKey: ttlKey) as? Date, Date() < ttlDate,
-              let data = defaults.data(forKey: cacheKey),
-              let entries = try? JSONDecoder().decode([OpenRouterModelEntry].self, from: data) else {
+            let data = defaults.data(forKey: cacheKey),
+            let entries = try? JSONDecoder().decode([OpenRouterModelEntry].self, from: data)
+        else {
             return []
         }
         return entries

@@ -12,7 +12,8 @@ struct JSONExporter: Sendable {
         analysis: MeetingAnalysis? = nil
     ) throws -> Data {
         let full = InstanceExportService().buildItemExport(item: item)
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return try encoder.encode(full)
     }
 }

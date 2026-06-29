@@ -1,6 +1,6 @@
 import Foundation
-import UniformTypeIdentifiers
 import OSLog
+import UniformTypeIdentifiers
 
 struct GitHubIssuesImporter: FormatImporter {
     let formatIdentifier = "github-issues"

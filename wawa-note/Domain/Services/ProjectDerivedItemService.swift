@@ -96,7 +96,7 @@ final class ProjectDerivedItemService {
 
         let item = ProjectDerivedItem(
             projectID: projectID,
-            sourceItemID: nil, // synthesis belongs to project, not any single item
+            sourceItemID: nil,  // synthesis belongs to project, not any single item
             type: .synthesis,
             title: "Project Synthesis",
             bodyJSON: bodyStr
@@ -166,8 +166,7 @@ final class ProjectDerivedItemService {
         let inProgressRaw = ProjectDerivedStatus.inProgress.rawValue
         var descriptor = FetchDescriptor<ProjectDerivedItem>(
             predicate: #Predicate {
-                $0.projectID == projectID && $0.typeRaw == typeRaw &&
-                ($0.statusRaw == todoRaw || $0.statusRaw == inProgressRaw)
+                $0.projectID == projectID && $0.typeRaw == typeRaw && ($0.statusRaw == todoRaw || $0.statusRaw == inProgressRaw)
             }
         )
         descriptor.sortBy = [SortDescriptor(\.dueAt, order: .forward)]
@@ -180,8 +179,7 @@ final class ProjectDerivedItemService {
         let ackRaw = ProjectDerivedStatus.acknowledged.rawValue
         var descriptor = FetchDescriptor<ProjectDerivedItem>(
             predicate: #Predicate {
-                $0.projectID == projectID && $0.typeRaw == typeRaw &&
-                ($0.statusRaw == visibleRaw || $0.statusRaw == ackRaw)
+                $0.projectID == projectID && $0.typeRaw == typeRaw && ($0.statusRaw == visibleRaw || $0.statusRaw == ackRaw)
             }
         )
         descriptor.sortBy = [SortDescriptor(\.createdAt, order: .reverse)]

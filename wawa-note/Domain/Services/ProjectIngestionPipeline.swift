@@ -1,6 +1,6 @@
 import Foundation
-import SwiftData
 import OSLog
+import SwiftData
 
 // MARK: - Ingestion models (Codable)
 
@@ -13,7 +13,7 @@ struct IngestionResponse: Codable {
     var edge_reinforcements: [IngestionReinforcement]?
     var insights: [IngestionInsight]?
     var project_summary_contribution: String?
-    var project_summary_update: String? // legacy key, also checked
+    var project_summary_update: String?  // legacy key, also checked
     var signals: [IngestionSignal]?
 }
 
@@ -49,11 +49,11 @@ struct IngestionInsight: Codable {
 }
 
 struct IngestionSignal: Codable {
-    var type: String        // risk, alert, opportunity, contradiction, pattern, doubt, new_project, emerging_problem
+    var type: String  // risk, alert, opportunity, contradiction, pattern, doubt, new_project, emerging_problem
     var title: String
     var body: String?
-    var impact: Double?     // 0-1
-    var urgency: Double?    // 0-1
+    var impact: Double?  // 0-1
+    var urgency: Double?  // 0-1
     var related_item_titles: [String]?
 }
 
@@ -120,7 +120,8 @@ final class ProjectIngestionPipeline: ObservableObject {
         let taskSvc = TaskService(context: context)
         let edgeSvc = GraphEdgeService(context: context)
         guard let project = try? projSvc.fetch(id: projectID),
-              let newItem = try? knowledgeSvc.fetchItem(id: itemID) else {
+            let newItem = try? knowledgeSvc.fetchItem(id: itemID)
+        else {
             AppLog.provider.error("ProjectIngestion: project \(projectID) or item \(itemID) NOT FOUND in SwiftData")
             postIngestionFailed(itemID: itemID, projectID: projectID, error: .projectNotFound)
             return
@@ -170,7 +171,7 @@ final class ProjectIngestionPipeline: ObservableObject {
             model: model,
             messages: [
                 AIMessage(role: .system, content: [.text(systemPrompt)]),
-                AIMessage(role: .user, content: [.text(prompt)])
+                AIMessage(role: .user, content: [.text(prompt)]),
             ],
             temperature: params.temperature,
             maxTokens: params.maxTokens,
@@ -183,10 +184,13 @@ final class ProjectIngestionPipeline: ObservableObject {
             AppLog.provider.info("ProjectIngestion: raw response (\(rawContent.count) chars): \(String(rawContent.prefix(500)))")
 
             if let json = parseIngestionJSON(rawContent) {
-                applyResults(response: json, newItem: newItem, project: project, allItems: allItems,
-                            existingTasks: existingTasks, edgeSvc: edgeSvc, taskSvc: taskSvc,
-                            context: context, previousSummary: previousSummary, framework: framework)
-                AppLog.provider.info("ProjectIngestion: SUCCESS — \(json.new_tasks?.count ?? 0) new tasks, \(json.connections?.count ?? 0) connections for project \(project.name)")
+                applyResults(
+                    response: json, newItem: newItem, project: project, allItems: allItems,
+                    existingTasks: existingTasks, edgeSvc: edgeSvc, taskSvc: taskSvc,
+                    context: context, previousSummary: previousSummary, framework: framework)
+                AppLog.provider.info(
+                    "ProjectIngestion: SUCCESS — \(json.new_tasks?.count ?? 0) new tasks, \(json.connections?.count ?? 0) connections for project \(project.name)"
+                )
                 postIngestionCompleted(itemID: itemID, projectID: projectID)
                 scheduleGraphAnalysis(projectID: projectID, context: context)
                 return
@@ -201,7 +205,7 @@ final class ProjectIngestionPipeline: ObservableObject {
                 model: model,
                 messages: [
                     AIMessage(role: .system, content: [.text("You are a JSON repair assistant. Output ONLY valid JSON matching the requested schema.")]),
-                    AIMessage(role: .user, content: [.text(fixPrompt)])
+                    AIMessage(role: .user, content: [.text(fixPrompt)]),
                 ],
                 responseFormat: AIConfigService.shared.supportsJSONFormat(for: model) ? .jsonObject : nil
             )
@@ -211,9 +215,10 @@ final class ProjectIngestionPipeline: ObservableObject {
                 saveRawIngestionResponse(fixResponse.content, itemID: itemID, label: "fix_attempt")
                 if let json = parseIngestionJSON(fixResponse.content) {
                     AppLog.provider.info("ProjectIngestion: JSON fix retry succeeded")
-                    applyResults(response: json, newItem: newItem, project: project, allItems: allItems,
-                                existingTasks: existingTasks, edgeSvc: edgeSvc, taskSvc: taskSvc,
-                                context: context, previousSummary: previousSummary, framework: framework)
+                    applyResults(
+                        response: json, newItem: newItem, project: project, allItems: allItems,
+                        existingTasks: existingTasks, edgeSvc: edgeSvc, taskSvc: taskSvc,
+                        context: context, previousSummary: previousSummary, framework: framework)
                     postIngestionCompleted(itemID: itemID, projectID: projectID)
                     scheduleGraphAnalysis(projectID: projectID, context: context)
                     return
@@ -269,64 +274,64 @@ final class ProjectIngestionPipeline: ObservableObject {
             basePrompt = framework.projectSynthesis.systemPrompt
         } else {
             basePrompt = """
-            You are a project knowledge analyst. You analyze how a new item relates to a project.
+                You are a project knowledge analyst. You analyze how a new item relates to a project.
 
-            KEY PRINCIPLES:
-            - A new item does NOT make you rethink the entire project. It ADDS to existing knowledge.
-            - Read the new item THROUGH the project's eyes: how does it fit, connect, extend?
-            - Read the project THROUGH the new item's eyes: what does it reveal, confirm, or change?
-            - NEVER suggest deleting tasks or connections. Tasks can change status (done/cancelled). Connections can be added.
-            - Be conservative. Only report what is clearly supported. Flag uncertainty.
-            """
+                KEY PRINCIPLES:
+                - A new item does NOT make you rethink the entire project. It ADDS to existing knowledge.
+                - Read the new item THROUGH the project's eyes: how does it fit, connect, extend?
+                - Read the project THROUGH the new item's eyes: what does it reveal, confirm, or change?
+                - NEVER suggest deleting tasks or connections. Tasks can change status (done/cancelled). Connections can be added.
+                - Be conservative. Only report what is clearly supported. Flag uncertainty.
+                """
         }
 
         var prompt = basePrompt + "\n\n"
 
         if let instructions = project.customInstructions, !instructions.trimmingCharacters(in: .whitespaces).isEmpty {
             prompt += """
-            PROJECT INSTRUCTIONS (from user):
-            \(instructions)
+                PROJECT INSTRUCTIONS (from user):
+                \(instructions)
 
-            Use these instructions to guide your analysis. Prioritize what the user cares about.
+                Use these instructions to guide your analysis. Prioritize what the user cares about.
 
-            """
+                """
         }
 
         let edgeTypeList = framework.edgeTypes.joined(separator: "|")
 
         prompt += """
-        Return JSON with these fields:
-        {
-          "item_project_view": "one sentence: how this item fits into the project's existing knowledge",
-          "project_item_view": "one sentence: what this item reveals about the project that was not clear before",
-          "connections": [{"from_title": "...", "to_title": "...", "type": "\(edgeTypeList)", "explanation": "..."}],
-          "task_updates": [{"task_title": "...", "new_status": "done|cancelled", "reason": "..."}],
-          "new_tasks": [{"title": "...", "priority": "low|medium|high", "reason": "..."}],
-          "edge_reinforcements": [{"from_title": "...", "to_title": "...", "note": "this connection is confirmed by the new item"}],
-          "insights": [{"text": "...", "confidence": 0.8}],
-          "signals": [{"type": "risk|alert|opportunity|contradiction|pattern|doubt|new_project|emerging_problem", "title": "Short signal name", "body": "Why this matters", "impact": 0.7, "urgency": 0.5, "related_item_titles": ["item A"]}],
-          "project_summary_contribution": "REQUIRED. One paragraph summarizing what new knowledge this item contributes to the project."
-        }
+            Return JSON with these fields:
+            {
+              "item_project_view": "one sentence: how this item fits into the project's existing knowledge",
+              "project_item_view": "one sentence: what this item reveals about the project that was not clear before",
+              "connections": [{"from_title": "...", "to_title": "...", "type": "\(edgeTypeList)", "explanation": "..."}],
+              "task_updates": [{"task_title": "...", "new_status": "done|cancelled", "reason": "..."}],
+              "new_tasks": [{"title": "...", "priority": "low|medium|high", "reason": "..."}],
+              "edge_reinforcements": [{"from_title": "...", "to_title": "...", "note": "this connection is confirmed by the new item"}],
+              "insights": [{"text": "...", "confidence": 0.8}],
+              "signals": [{"type": "risk|alert|opportunity|contradiction|pattern|doubt|new_project|emerging_problem", "title": "Short signal name", "body": "Why this matters", "impact": 0.7, "urgency": 0.5, "related_item_titles": ["item A"]}],
+              "project_summary_contribution": "REQUIRED. One paragraph summarizing what new knowledge this item contributes to the project."
+            }
 
-        SIGNAL DETECTION:
-        After analysis, detect any significant signals:
-        - risk: things that could go wrong (deadlines, missing info, blockers)
-        - alert: urgent issues needing immediate attention
-        - opportunity: things to explore, leverage, or act on
-        - contradiction: this item conflicts with an existing item or assumption
-        - pattern: a recurring theme across 3+ items
-        - doubt: something unclear that needs investigation
-        - new_project: this item hints at a separate project/initiative
-        - emerging_problem: a problem that is just starting to surface
-        Only raise signals that are clearly supported. Include impact (0-1) and urgency (0-1). Max 5 signals.
+            SIGNAL DETECTION:
+            After analysis, detect any significant signals:
+            - risk: things that could go wrong (deadlines, missing info, blockers)
+            - alert: urgent issues needing immediate attention
+            - opportunity: things to explore, leverage, or act on
+            - contradiction: this item conflicts with an existing item or assumption
+            - pattern: a recurring theme across 3+ items
+            - doubt: something unclear that needs investigation
+            - new_project: this item hints at a separate project/initiative
+            - emerging_problem: a problem that is just starting to surface
+            Only raise signals that are clearly supported. Include impact (0-1) and urgency (0-1). Max 5 signals.
 
-        RULES:
-        - project_summary_contribution is REQUIRED. Always return it, even if just one sentence.
-        - task_updates: ONLY update status if the new item CLEARLY indicates a task is done or no longer relevant. Never delete.
-        - connections: report genuine relationships. Use types: \(edgeTypeList). If a connection already exists, use edge_reinforcements.
-        - new_tasks: only tasks explicitly implied. Max 3.
-        - signals: only the most relevant signals. Max 5. Omit if nothing notable.
-        """
+            RULES:
+            - project_summary_contribution is REQUIRED. Always return it, even if just one sentence.
+            - task_updates: ONLY update status if the new item CLEARLY indicates a task is done or no longer relevant. Never delete.
+            - connections: report genuine relationships. Use types: \(edgeTypeList). If a connection already exists, use edge_reinforcements.
+            - new_tasks: only tasks explicitly implied. Max 3.
+            - signals: only the most relevant signals. Max 5. Omit if nothing notable.
+            """
 
         return prompt
     }
@@ -356,7 +361,10 @@ final class ProjectIngestionPipeline: ObservableObject {
             ctx += "ITEMS (\(otherItems.count) total):\n"
             for (i, item) in otherItems.enumerated() {
                 // Truncate only at extreme limits (500 items, not 10)
-                if ctx.count > 30000 { ctx += "... (+\(otherItems.count - i) more items, truncated for space)\n"; break }
+                if ctx.count > 30000 {
+                    ctx += "... (+\(otherItems.count - i) more items, truncated for space)\n"
+                    break
+                }
                 ctx += "\n\(i+1). " + ItemContextBuilder.buildItemSummary(item: item, fileStore: fileStore)
             }
             ctx += "\n"
@@ -366,7 +374,10 @@ final class ProjectIngestionPipeline: ObservableObject {
         if !tasks.isEmpty {
             ctx += "TASKS (\(tasks.count) total):\n"
             for t in tasks {
-                if ctx.count > 30000 { ctx += "... (+ remaining tasks, truncated)\n"; break }
+                if ctx.count > 30000 {
+                    ctx += "... (+ remaining tasks, truncated)\n"
+                    break
+                }
                 ctx += "- [\(t.statusRaw)] \(t.title)"
                 if let owner = t.ownerName { ctx += " | owner: \(owner)" }
                 if let due = t.dueAt { ctx += " | due: \(due.formatted(date: .abbreviated, time: .omitted))" }
@@ -380,7 +391,10 @@ final class ProjectIngestionPipeline: ObservableObject {
         if !allEdges.isEmpty {
             ctx += "EXISTING CONNECTIONS (\(allEdges.count) total):\n"
             for e in allEdges {
-                if ctx.count > 30000 { ctx += "... (+ more connections, truncated)\n"; break }
+                if ctx.count > 30000 {
+                    ctx += "... (+ more connections, truncated)\n"
+                    break
+                }
                 let fromTitle = otherItems.first(where: { $0.id == e.fromID })?.title ?? String(e.fromID.uuidString.prefix(8))
                 let toTitle = otherItems.first(where: { $0.id == e.toID })?.title ?? String(e.toID.uuidString.prefix(8))
                 ctx += "- \(fromTitle) → \(e.edgeType.rawValue) → \(toTitle)\n"
@@ -433,26 +447,26 @@ final class ProjectIngestionPipeline: ObservableObject {
     private func buildFixPrompt(originalPrompt: String, rawContent: String, framework: ProjectFramework) -> String {
         let edgeTypeList = framework.edgeTypes.joined(separator: "|")
         let schema = """
-        {
-          "connections": [{"from_title":"...","to_title":"...","type":"\(edgeTypeList)","explanation":"..."}],
-          "task_updates": [{"task_title":"...","new_status":"done|cancelled","reason":"..."}],
-          "new_tasks": [{"title":"...","priority":"low|medium|high","reason":"...","confidence":0.8}],
-          "edge_reinforcements": [{"from_title":"...","to_title":"...","note":"..."}],
-          "insights": [{"text":"...","confidence":0.8}],
-          "project_summary_contribution": "..."
-        }
-        """
+            {
+              "connections": [{"from_title":"...","to_title":"...","type":"\(edgeTypeList)","explanation":"..."}],
+              "task_updates": [{"task_title":"...","new_status":"done|cancelled","reason":"..."}],
+              "new_tasks": [{"title":"...","priority":"low|medium|high","reason":"...","confidence":0.8}],
+              "edge_reinforcements": [{"from_title":"...","to_title":"...","note":"..."}],
+              "insights": [{"text":"...","confidence":0.8}],
+              "project_summary_contribution": "..."
+            }
+            """
         return """
-        Original task: \(originalPrompt.prefix(1000))...
+            Original task: \(originalPrompt.prefix(1000))...
 
-        Your previous response was not valid JSON. Fix it to match this schema:
+            Your previous response was not valid JSON. Fix it to match this schema:
 
-        \(schema)
+            \(schema)
 
-        Your broken response: \(ProviderAdapter.normalizeJSON(rawContent).prefix(1500))
+            Your broken response: \(ProviderAdapter.normalizeJSON(rawContent).prefix(1500))
 
-        Return ONLY valid JSON matching the schema. No markdown, no code fences.
-        """
+            Return ONLY valid JSON matching the schema. No markdown, no code fences.
+            """
     }
 
     // MARK: - Apply results
@@ -475,7 +489,8 @@ final class ProjectIngestionPipeline: ObservableObject {
             let sugSvc = SuggestionGatingService(context: context)
             for update in updates {
                 if let task = findTask(byTitle: update.task_title, in: existingTasks),
-                   let newStatus = TaskStatus(rawValue: update.new_status) {
+                    let newStatus = TaskStatus(rawValue: update.new_status)
+                {
                     if auth.canModify(field: "status", of: task, by: .llm) {
                         try? taskSvc.updateStatus(task, to: newStatus)
                     } else {
@@ -524,9 +539,10 @@ final class ProjectIngestionPipeline: ObservableObject {
         if let reinforcements = response.edge_reinforcements {
             for r in reinforcements {
                 guard let fromTitle = r.from_title,
-                      let toTitle = r.to_title,
-                      let fromItem = findItem(byTitle: fromTitle, in: allItems),
-                      let toItem = findItem(byTitle: toTitle, in: allItems) else { continue }
+                    let toTitle = r.to_title,
+                    let fromItem = findItem(byTitle: fromTitle, in: allItems),
+                    let toItem = findItem(byTitle: toTitle, in: allItems)
+                else { continue }
                 try? edgeSvc.reinforce(fromID: fromItem.id, toID: toItem.id)
             }
         }
@@ -549,16 +565,22 @@ final class ProjectIngestionPipeline: ObservableObject {
         // Signals — create AgentSuggestions for detected signals
         if let signals = response.signals {
             for sig in signals.prefix(8) {
-                let validTypes = ["risk", "alert", "opportunity", "change", "contradiction",
-                                  "pattern", "doubt", "new_project", "emerging_problem"]
+                let validTypes = [
+                    "risk", "alert", "opportunity", "change", "contradiction",
+                    "pattern", "doubt", "new_project", "emerging_problem",
+                ]
                 guard validTypes.contains(sig.type) else { continue }
 
                 var payload: [String: Any] = ["type": sig.type]
                 if let related = sig.related_item_titles { payload["related_item_ids"] = related }
                 let payloadJSON: String?
                 if let data = try? JSONSerialization.data(withJSONObject: payload),
-                   let json = String(data: data, encoding: .utf8) { payloadJSON = json }
-                else { payloadJSON = nil }
+                    let json = String(data: data, encoding: .utf8)
+                {
+                    payloadJSON = json
+                } else {
+                    payloadJSON = nil
+                }
 
                 let suggestion = AgentSuggestion(
                     projectID: project.id,
@@ -584,8 +606,7 @@ final class ProjectIngestionPipeline: ObservableObject {
                 let datePrefix = Date().formatted(date: .abbreviated, time: .omitted)
                 let entry = "\n\n[\(datePrefix) — from \"\(newItem.title)\"]\n\(contribution)"
                 project.summary = previousSummary + entry
-                do { try context.save() }
-                catch { AppLog.provider.error("ProjectIngestion: failed to save summary: \(error.localizedDescription)") }
+                do { try context.save() } catch { AppLog.provider.error("ProjectIngestion: failed to save summary: \(error.localizedDescription)") }
             } else {
                 let sugSvc = SuggestionGatingService(context: context)
                 sugSvc.proposeChange(
@@ -602,7 +623,8 @@ final class ProjectIngestionPipeline: ObservableObject {
         }
 
         // Auto-snapshot after ingestion
-        VersioningService.shared.createSnapshot(projectID: project.id,
+        VersioningService.shared.createSnapshot(
+            projectID: project.id,
             label: "Ingestion: \"\(newItem.title)\"",
             trigger: .auto_ingestion, context: context)
     }
@@ -725,11 +747,12 @@ final class SuggestionGatingService {
         let payload: [String: String] = [
             "field": field,
             "proposedValue": truncated,
-            "reason": reason ?? "AI suggested this change"
+            "reason": reason ?? "AI suggested this change",
         ]
         let payloadJSON: String?
         if let data = try? JSONEncoder().encode(payload),
-           let json = String(data: data, encoding: .utf8) {
+            let json = String(data: data, encoding: .utf8)
+        {
             payloadJSON = json
         } else {
             payloadJSON = nil

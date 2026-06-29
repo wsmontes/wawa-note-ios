@@ -1,5 +1,5 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 /// A compact menu-style picker that shows all available models for the active provider.
 /// Merges static models from ai_config.json with dynamically fetched ones.
@@ -99,7 +99,8 @@ struct ActiveModelPicker: View {
         defer { isLoading = false }
 
         guard let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext),
-              let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
+            let provider = try? ProviderRouter.resolveActive(context: modelContext)
+        else {
             availableModels = [selectedModel]
             return
         }
@@ -140,7 +141,8 @@ extension ActiveModelPicker {
     /// Resolve the effective model for an operation, with a feature-level fallback.
     static func effectiveModel(context: ModelContext, feature: String) -> String {
         if let config = ActiveProviderManager.shared.getActiveProvider(context: context),
-           !config.defaultModel.isEmpty {
+            !config.defaultModel.isEmpty
+        {
             return config.defaultModel
         }
         return AIConfigService.shared.modelFor(feature: feature)

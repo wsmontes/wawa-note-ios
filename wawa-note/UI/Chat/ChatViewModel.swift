@@ -1,6 +1,6 @@
-import SwiftUI
-import SwiftData
 import Combine
+import SwiftData
+import SwiftUI
 
 @MainActor
 final class ChatViewModel: ObservableObject {
@@ -46,8 +46,9 @@ final class ChatViewModel: ObservableObject {
     func projectColorHex(for projectID: UUID) -> String? {
         if let cached = projectColorCache[projectID] { return cached }
         guard let ctx = modelContext,
-              let project = try? ProjectService(context: ctx).fetch(id: projectID),
-              let hex = project.colorHex else { return nil }
+            let project = try? ProjectService(context: ctx).fetch(id: projectID),
+            let hex = project.colorHex
+        else { return nil }
         projectColorCache[projectID] = hex
         return hex
     }
@@ -176,7 +177,8 @@ final class ChatViewModel: ObservableObject {
             activeProjectColorHex = nil
             // Store the item ID for the agent to know which item is in focus
             if let ctx = modelContext,
-               let item = try? KnowledgeItemService(context: ctx).fetchItem(id: itemID) {
+                let item = try? KnowledgeItemService(context: ctx).fetchItem(id: itemID)
+            {
                 // No project context injection for standalone items
                 // The agent will see the item context via activeItemID in ToolContext
                 _ = item
@@ -201,9 +203,10 @@ final class ChatViewModel: ObservableObject {
     /// to a project. Items without projects keep their own context.
     private func resolveContext(_ context: ChatContext) -> ChatContext {
         guard case .item(let itemID) = context,
-              let ctx = modelContext,
-              let item = try? KnowledgeItemService(context: ctx).fetchItem(id: itemID),
-              let pid = item.projectID else {
+            let ctx = modelContext,
+            let item = try? KnowledgeItemService(context: ctx).fetchItem(id: itemID),
+            let pid = item.projectID
+        else {
             return context
         }
         return .project(pid)
@@ -235,15 +238,15 @@ final class ChatViewModel: ObservableObject {
         }
 
         let lsOutput = """
-        /projects/\(slug)/  (\(project.name))
-        project.json   \(project.statusRaw.capitalized)  health=\(project.healthStatus ?? "N/A")  tasks=\(tasks.count)  items=\(items.count)
-        items/         \(items.count) item(s)
-        tasks/         \(tasks.count) task(s)
-        people/        People connected to this project
-        edges/         Graph relationships
-        signals/       Alerts and insights
-        analysis/      AI analyses + transcripts (use cat)
-        """
+            /projects/\(slug)/  (\(project.name))
+            project.json   \(project.statusRaw.capitalized)  health=\(project.healthStatus ?? "N/A")  tasks=\(tasks.count)  items=\(items.count)
+            items/         \(items.count) item(s)
+            tasks/         \(tasks.count) task(s)
+            people/        People connected to this project
+            edges/         Graph relationships
+            signals/       Alerts and insights
+            analysis/      AI analyses + transcripts (use cat)
+            """
 
         // Create synthetic tool call and result messages with proper blocks for UI rendering
         let cdArgs = "{\"command\":\"cd /projects/\(slug)\"}"
@@ -257,11 +260,14 @@ final class ChatViewModel: ObservableObject {
             conversationId: conversationId, role: .tool,
             content: "/projects/\(slug)/  (\(project.name))",
             toolCallId: cdMsg.toolCalls?.first?.id,
-            blocks: [.projectContext(ProjectContextData(
-                projectName: project.name, slug: slug, status: project.statusRaw,
-                taskCount: tasks.count, itemCount: items.count, signalCount: 0,
-                healthStatus: project.healthStatus, summary: "Current project context"
-            ))]
+            blocks: [
+                .projectContext(
+                    ProjectContextData(
+                        projectName: project.name, slug: slug, status: project.statusRaw,
+                        taskCount: tasks.count, itemCount: items.count, signalCount: 0,
+                        healthStatus: project.healthStatus, summary: "Current project context"
+                    ))
+            ]
         )
         let lsArgs = "{\"command\":\"ls\"}"
         let lsMsg = ChatMessage(
@@ -286,13 +292,15 @@ final class ChatViewModel: ObservableObject {
     func pregenerateGreeting(for context: ChatContext) {
         let key = context.key
         guard greetingCache[key] == nil, let ctx = modelContext,
-              let provider = try? ProviderRouter.resolveActive(context: ctx) else { return }
+            let provider = try? ProviderRouter.resolveActive(context: ctx)
+        else { return }
 
         let welcomePrompt = Self.welcomePrompt(for: context, projectName: activeProjectName)
         let systemPrompt = Self.systemPrompt
 
         // Resolve model respecting the active provider — never hardcode a model name
-        let model = selectedModel.isEmpty
+        let model =
+            selectedModel.isEmpty
             ? (try? ActiveProviderManager.shared.getActiveProvider(context: ctx))?.defaultModel ?? Self.defaultChatModel
             : selectedModel
         let params = AIConfigService.shared.requestParams(for: "chat", model: model)
@@ -303,7 +311,7 @@ final class ChatViewModel: ObservableObject {
                 model: model,
                 messages: [
                     AIMessage(role: .system, content: [.text(systemPrompt)]),
-                    AIMessage(role: .user, content: [.text(welcomePrompt)])
+                    AIMessage(role: .user, content: [.text(welcomePrompt)]),
                 ],
                 temperature: params.temperature,
                 maxTokens: params.maxTokens
@@ -340,17 +348,20 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
-    private static let systemPrompt = "You are a concise assistant. Respond with EXACTLY one short line. No tools, no follow-up, no questions. Just a warm, contextual welcome."
+    private static let systemPrompt =
+        "You are a concise assistant. Respond with EXACTLY one short line. No tools, no follow-up, no questions. Just a warm, contextual welcome."
 
     // MARK: - Greeting generation (on-demand, no prompt in chat)
 
     private func generateWelcome(for context: ChatContext) {
         guard let ctx = modelContext,
-              let provider = try? ProviderRouter.resolveActive(context: ctx),
-              let conv = currentConversation else { return }
+            let provider = try? ProviderRouter.resolveActive(context: ctx),
+            let conv = currentConversation
+        else { return }
 
         // Resolve model respecting the active provider — same pattern as sendMessage()
-        let model = selectedModel.isEmpty
+        let model =
+            selectedModel.isEmpty
             ? (try? ActiveProviderManager.shared.getActiveProvider(context: ctx))?.defaultModel ?? Self.defaultChatModel
             : selectedModel
         let params = AIConfigService.shared.requestParams(for: "chat", model: model)
@@ -368,7 +379,7 @@ final class ChatViewModel: ObservableObject {
                 model: model,
                 messages: [
                     AIMessage(role: .system, content: [.text(systemPrompt)]),
-                    AIMessage(role: .user, content: [.text(welcomePrompt)])
+                    AIMessage(role: .user, content: [.text(welcomePrompt)]),
                 ],
                 temperature: params.temperature,
                 maxTokens: params.maxTokens
@@ -432,7 +443,10 @@ final class ChatViewModel: ObservableObject {
         }
 
         guard let conv = currentConversation else { return }
-        guard let ctx = modelContext else { error = "Model context not available."; return }
+        guard let ctx = modelContext else {
+            error = "Model context not available."
+            return
+        }
 
         let userMsg = ChatMessage(conversationId: conv.id, role: .user, content: text, projectColorHex: activeProjectColorHex)
         messages.append(userMsg)
@@ -443,7 +457,8 @@ final class ChatViewModel: ObservableObject {
             error = "No AI provider configured. Go to Settings."
             return
         }
-        let model = selectedModel.isEmpty ? (try? ActiveProviderManager.shared.getActiveProvider(context: ctx))?.defaultModel ?? Self.defaultChatModel : selectedModel
+        let model =
+            selectedModel.isEmpty ? (try? ActiveProviderManager.shared.getActiveProvider(context: ctx))?.defaultModel ?? Self.defaultChatModel : selectedModel
 
         state = .thinking
         streamingText = ""
@@ -500,7 +515,10 @@ final class ChatViewModel: ObservableObject {
                 var wasCancelled = false
 
                 for try await event in stream {
-                    if Task.isCancelled { wasCancelled = true; break }
+                    if Task.isCancelled {
+                        wasCancelled = true
+                        break
+                    }
 
                     switch event {
                     case .thinking:
@@ -589,22 +607,32 @@ final class ChatViewModel: ObservableObject {
         switch cmd {
         case "help":
             response = """
-            **Commands:**
-            - `/analyze <itemID>` — Run content pipeline on an item
-            - `/prompt <name>` — Show a prompt template (use `list_prompts` for names)
-            - `/search <query>` — Search the knowledge base
-            - `/memories` — List agent memories
-            - `/prompts` — List all prompt templates
-            - `/help` — Show this help
-            """
+                **Commands:**
+                - `/analyze <itemID>` — Run content pipeline on an item
+                - `/prompt <name>` — Show a prompt template (use `list_prompts` for names)
+                - `/search <query>` — Search the knowledge base
+                - `/memories` — List agent memories
+                - `/prompts` — List all prompt templates
+                - `/help` — Show this help
+                """
         case "analyze":
-            guard !arg.isEmpty else { response = "Usage: /analyze <itemID>"; break }
-            guard let itemId = UUID(uuidString: arg) else { response = "Invalid UUID: `\(arg)`."; break }
-            NotificationCenter.default.post(name: .pipelineCompleted, object: itemId.uuidString,
+            guard !arg.isEmpty else {
+                response = "Usage: /analyze <itemID>"
+                break
+            }
+            guard let itemId = UUID(uuidString: arg) else {
+                response = "Invalid UUID: `\(arg)`."
+                break
+            }
+            NotificationCenter.default.post(
+                name: .pipelineCompleted, object: itemId.uuidString,
                 userInfo: ["action": "reprocess"])
             response = "Re-analysis triggered for item `\(arg)`. Check the Knowledge detail view for progress."
         case "prompt":
-            guard !arg.isEmpty else { response = "Usage: /prompt <name>. Use /prompts to list names."; break }
+            guard !arg.isEmpty else {
+                response = "Usage: /prompt <name>. Use /prompts to list names."
+                break
+            }
             if let p = PromptStore.shared.prompt(named: arg) {
                 response = "**\(p.name)** [\(p.category)]\(p.isUserEdited ? " (edited)" : "")\n\n\(p.content)"
             } else {
@@ -615,14 +643,26 @@ final class ChatViewModel: ObservableObject {
             response = all.map { "- `\($0.name)` [\($0.category)]\($0.isUserEdited ? " (edited)" : "")" }.joined(separator: "\n")
         case "memories":
             let all = AgentMemoryStore.shared.listAll()
-            guard !all.isEmpty else { response = "No memories recorded yet."; break }
+            guard !all.isEmpty else {
+                response = "No memories recorded yet."
+                break
+            }
             response = all.map { "- \($0.isStale ? "[STALE] " : "")\($0.pattern) (\($0.successCount)S/\($0.failCount)F)" }.joined(separator: "\n")
         case "search":
-            guard !arg.isEmpty else { response = "Usage: /search <query>"; break }
-            guard let ctx = modelContext else { response = "Model context not available."; break }
+            guard !arg.isEmpty else {
+                response = "Usage: /search <query>"
+                break
+            }
+            guard let ctx = modelContext else {
+                response = "Model context not available."
+                break
+            }
             let items = (try? KnowledgeItemService(context: ctx).allItems()) ?? []
             let results = SearchService(fileStore: FileArtifactStore()).searchNow(query: arg, in: items).prefix(5)
-            guard !results.isEmpty else { response = "No results for \"\(arg)\"."; break }
+            guard !results.isEmpty else {
+                response = "No results for \"\(arg)\"."
+                break
+            }
             response = results.map { r in
                 guard let item = items.first(where: { $0.id == r.itemID }) else { return "- Unknown item" }
                 return "- \(item.title) (\(item.type.label)) — \(r.snippet)"
@@ -677,8 +717,9 @@ final class ChatViewModel: ObservableObject {
 
         // Re-inject project context for the new conversation if applicable
         if let pid = activeProjectID, let ctx = modelContext,
-           let project = try? ProjectService(context: ctx).fetch(id: pid),
-           let conv = currentConversation {
+            let project = try? ProjectService(context: ctx).fetch(id: pid),
+            let conv = currentConversation
+        {
             injectProjectContext(project: project, conversationId: conv.id)
             messages = (try? chatService.messages(for: conv.id)) ?? []
             messages.removeAll { $0.role == .user && $0.content.hasPrefix("Greet the user") }
@@ -711,7 +752,8 @@ final class ChatViewModel: ObservableObject {
             case .project(let id):
                 activeProjectID = id
                 if let mctx = modelContext,
-                   let project = try? ProjectService(context: mctx).fetch(id: id) {
+                    let project = try? ProjectService(context: mctx).fetch(id: id)
+                {
                     activeProjectName = project.name
                     activeProjectColorHex = project.colorHex ?? projectColorHex(for: id)
                 }
@@ -757,7 +799,8 @@ final class ChatViewModel: ObservableObject {
         guard let conv = currentConversation, let ctx = modelContext else { return }
 
         lastUserMessage = text
-        let userMsg = ChatMessage(conversationId: conv.id, role: .user, content: text,
+        let userMsg = ChatMessage(
+            conversationId: conv.id, role: .user, content: text,
             projectColorHex: activeProjectColorHex, isInternal: true)
         // Internal messages go to agent history but NOT rendered as user bubbles
         messages.append(userMsg)
@@ -768,7 +811,8 @@ final class ChatViewModel: ObservableObject {
             error = "No AI provider configured. Go to Settings."
             return
         }
-        let model = selectedModel.isEmpty ? (try? ActiveProviderManager.shared.getActiveProvider(context: ctx))?.defaultModel ?? Self.defaultChatModel : selectedModel
+        let model =
+            selectedModel.isEmpty ? (try? ActiveProviderManager.shared.getActiveProvider(context: ctx))?.defaultModel ?? Self.defaultChatModel : selectedModel
 
         state = .thinking
         streamingText = ""
@@ -822,7 +866,10 @@ final class ChatViewModel: ObservableObject {
                 var fullContent = ""
                 var wasCancelled = false
                 for try await event in stream {
-                    if Task.isCancelled { wasCancelled = true; break }
+                    if Task.isCancelled {
+                        wasCancelled = true
+                        break
+                    }
 
                     switch event {
                     case .thinking:
@@ -906,9 +953,11 @@ final class ChatViewModel: ObservableObject {
 
         // Add assistant tool call + result to messages — internal (not shown as chat bubbles)
         let tc = PersistedToolCall(id: UUID().uuidString, name: "run_command", arguments: "{\"command\":\"\(command)\"}", status: .completed)
-        let assistantMsg = ChatMessage(conversationId: conv.id, role: .assistant, content: "",
+        let assistantMsg = ChatMessage(
+            conversationId: conv.id, role: .assistant, content: "",
             toolCalls: [tc], blocks: nil, isInternal: true)
-        let resultMsg = ChatMessage(conversationId: conv.id, role: .tool,
+        let resultMsg = ChatMessage(
+            conversationId: conv.id, role: .tool,
             content: result.isError ? "TOOL ERROR: \(result.content)" : result.content,
             toolCallId: tc.id, blocks: result.blocks, isInternal: true)
         messages.append(assistantMsg)

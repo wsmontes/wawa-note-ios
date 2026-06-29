@@ -5,7 +5,7 @@ import Foundation
 /// Recursive JSON value that preserves the full structure for form-based editing.
 indirect enum JSONValue: Equatable, Hashable {
     case string(String)
-    case number(String)     // stored as string to preserve formatting (int vs double)
+    case number(String)  // stored as string to preserve formatting (int vs double)
     case bool(Bool)
     case null
     case object([JSONField])
@@ -14,22 +14,23 @@ indirect enum JSONValue: Equatable, Hashable {
     /// Initialize by parsing a JSON string.
     static func parse(_ jsonString: String) -> JSONValue? {
         guard let data = jsonString.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) else { return nil }
+            let obj = try? JSONSerialization.jsonObject(with: data)
+        else { return nil }
         return convert(obj)
     }
 
     /// Convert Foundation JSON types to our JSONValue tree.
     private static func convert(_ value: Any) -> JSONValue {
         switch value {
-        case let s as String:  return .string(s)
+        case let s as String: return .string(s)
         case let n as NSNumber:
             // Distinguish bools from numbers
             if CFGetTypeID(n) == CFBooleanGetTypeID() {
                 return .bool(n.boolValue)
             }
             return .number(n.stringValue)
-        case let b as Bool:    return .bool(b)
-        case is NSNull:        return .null
+        case let b as Bool: return .bool(b)
+        case is NSNull: return .null
         case let d as [String: Any]:
             let fields = d.sorted(by: { $0.key < $1.key }).map { k, v in
                 JSONField(key: k, value: convert(v))
@@ -48,17 +49,18 @@ indirect enum JSONValue: Equatable, Hashable {
         guard JSONSerialization.isValidJSONObject(obj) else { return "{}" }
         let opts: JSONSerialization.WritingOptions = pretty ? [.prettyPrinted, .sortedKeys] : [.sortedKeys]
         guard let data = try? JSONSerialization.data(withJSONObject: obj, options: opts),
-              let str = String(data: data, encoding: .utf8) else { return "{}" }
+            let str = String(data: data, encoding: .utf8)
+        else { return "{}" }
         return str
     }
 
     /// Convert back to Foundation types for serialization.
     func toFoundation() -> Any {
         switch self {
-        case .string(let s):  return s
-        case .number(let s):  return Double(s) ?? Int(s) ?? s
-        case .bool(let b):    return b
-        case .null:           return NSNull()
+        case .string(let s): return s
+        case .number(let s): return Double(s) ?? Int(s) ?? s
+        case .bool(let b): return b
+        case .null: return NSNull()
         case .object(let fields):
             var dict = [String: Any]()
             for f in fields { dict[f.key] = f.value.toFoundation() }
@@ -72,12 +74,12 @@ indirect enum JSONValue: Equatable, Hashable {
 
     var typeName: String {
         switch self {
-        case .string:   "String"
-        case .number:   "Number"
-        case .bool:     "Bool"
-        case .null:     "Null"
-        case .object:   "Object"
-        case .array:    "Array"
+        case .string: "String"
+        case .number: "Number"
+        case .bool: "Bool"
+        case .null: "Null"
+        case .object: "Object"
+        case .array: "Array"
         }
     }
 
@@ -85,10 +87,10 @@ indirect enum JSONValue: Equatable, Hashable {
         switch self {
         case .string(let s): return "\"\(s.prefix(30))\(s.count > 30 ? "…" : "")\""
         case .number(let s): return s
-        case .bool(let b):   return b ? "true" : "false"
-        case .null:          return "null"
+        case .bool(let b): return b ? "true" : "false"
+        case .null: return "null"
         case .object(let f): return "{ \(f.count) field\(f.count == 1 ? "" : "s") }"
-        case .array(let a):  return "[ \(a.count) item\(a.count == 1 ? "" : "s") ]"
+        case .array(let a): return "[ \(a.count) item\(a.count == 1 ? "" : "s") ]"
         }
     }
 }

@@ -1,5 +1,5 @@
-import SwiftUI
 import Speech
+import SwiftUI
 
 /// Shows on-device speech model availability and guides the user through download.
 ///

@@ -1,7 +1,7 @@
-import SwiftUI
-import SwiftData
 import EventKit
 import LocalAuthentication
+import SwiftData
+import SwiftUI
 import UserNotifications
 
 @main
@@ -36,7 +36,7 @@ struct WawaNoteApp: App {
             ProjectFrame.self,
             ChangeRecord.self,
             ProjectSnapshot.self,
-            ProjectDerivedItem.self
+            ProjectDerivedItem.self,
         ])
         if isTesting {
             // In-memory store for tests — no disk I/O, fast setup
@@ -182,13 +182,15 @@ struct WawaNoteApp: App {
 
         // App container Application Support
         if let appSupport = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        {
             searchDirs.append(appSupport)
         }
 
         // App Group container
         if let groupURL = FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: "group.com.wawa-note") {
+            .containerURL(forSecurityApplicationGroupIdentifier: "group.com.wawa-note")
+        {
             searchDirs.append(groupURL.appendingPathComponent("Library/Application Support"))
         }
 
@@ -207,9 +209,9 @@ struct WawaNoteApp: App {
         let storeFileName = url.lastPathComponent  // "default.store"
 
         let companions = [
-            storeFileName,                   // default.store
-            storeFileName + "-shm",          // default.store-shm
-            storeFileName + "-wal",          // default.store-wal
+            storeFileName,  // default.store
+            storeFileName + "-shm",  // default.store-shm
+            storeFileName + "-wal",  // default.store-wal
         ]
 
         for fileName in companions {
@@ -237,7 +239,6 @@ struct WawaNoteApp: App {
             }
         }
     }
-
 
     // MARK: - Body
 

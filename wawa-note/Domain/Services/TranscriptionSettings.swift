@@ -20,7 +20,8 @@ final class TranscriptionSettings: @unchecked Sendable {
     var mode: TranscriptionMode {
         get {
             guard let raw = defaults.string(forKey: key),
-                  let mode = TranscriptionMode(rawValue: raw) else {
+                let mode = TranscriptionMode(rawValue: raw)
+            else {
                 return .apple
             }
             return mode
@@ -32,5 +33,11 @@ final class TranscriptionSettings: @unchecked Sendable {
 
     var useRemoteWhisper: Bool {
         mode == .whisper
+    }
+
+    /// Whether Apple Cloud processing is allowed (vs. strict on-device only).
+    var allowCloud: Bool {
+        get { defaults.object(forKey: UserDefaultsKey.transcriptionAllowCloud) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: UserDefaultsKey.transcriptionAllowCloud) }
     }
 }

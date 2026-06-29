@@ -1,6 +1,6 @@
 import Foundation
-import SwiftData
 import OSLog
+import SwiftData
 
 @MainActor
 final class EntityExtractionService {

@@ -1,5 +1,5 @@
-import Foundation
 import EventKit
+import Foundation
 import OSLog
 
 final class CalendarContextSensor: ContextSensor, @unchecked Sendable {
@@ -7,9 +7,9 @@ final class CalendarContextSensor: ContextSensor, @unchecked Sendable {
 
     private let eventStore: EKEventStore
 
-    private static let contextWindowBefore: TimeInterval = -900    // 15 minutes
-    private static let contextWindowAfter: TimeInterval = 10800    // 3 hours
-    private static let proximityThreshold: TimeInterval = 300      // 5 minutes
+    private static let contextWindowBefore: TimeInterval = -900  // 15 minutes
+    private static let contextWindowAfter: TimeInterval = 10800  // 3 hours
+    private static let proximityThreshold: TimeInterval = 300  // 5 minutes
 
     init(eventStore: EKEventStore = .shared) {
         self.eventStore = eventStore

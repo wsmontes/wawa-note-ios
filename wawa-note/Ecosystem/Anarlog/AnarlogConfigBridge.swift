@@ -214,9 +214,9 @@ struct AnarlogSTTSection: Codable {
 
 /// Result of importing anarlog config.
 struct ImportedConfig {
-    let apiKeys: [String: String]      // providerId → apiKey
-    let defaultProvider: String?       // providerId
-    let models: [String: String]       // providerId → modelName
+    let apiKeys: [String: String]  // providerId → apiKey
+    let defaultProvider: String?  // providerId
+    let models: [String: String]  // providerId → modelName
 }
 
 // MARK: - Dynamic coding keys for flexible provider dict

@@ -25,7 +25,10 @@ struct CalendarPermissionView: View {
                     isRequesting = false
                 }
             } label: {
-                HStack { if isRequesting { ProgressView() }; Text("Connect Calendar") }
+                HStack {
+                    if isRequesting { ProgressView() }
+                    Text("Connect Calendar")
+                }
             }
             .buttonStyle(.borderedProminent)
             .disabled(isRequesting)

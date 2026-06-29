@@ -38,7 +38,9 @@ final class SemanticSearchService: @unchecked Sendable {
 
     func cosineSimilarity(_ a: [Float], _ b: [Float]) -> Float {
         guard a.count == b.count, !a.isEmpty else { return 0 }
-        var dot: Float = 0, magA: Float = 0, magB: Float = 0
+        var dot: Float = 0
+        var magA: Float = 0
+        var magB: Float = 0
         for i in 0..<a.count {
             dot += a[i] * b[i]
             magA += a[i] * a[i]

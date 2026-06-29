@@ -1,4 +1,6 @@
 import Foundation
+import SwiftUI
+import UIKit
 
 /// Standard view state for all feature screens.
 ///
@@ -14,9 +16,9 @@ enum ViewState<T: Sendable>: Sendable {
     case offline
 
     enum LoadingKind: Sendable {
-        case initial        // First load — use skeleton or branded spinner
-        case refreshing      // Pull-to-refresh or background update
-        case processing(String) // "Generating summary...", "Transcribing..."
+        case initial  // First load — use skeleton or branded spinner
+        case refreshing  // Pull-to-refresh or background update
+        case processing(String)  // "Generating summary...", "Transcribing..."
     }
 
     struct EmptyReason: Sendable {
@@ -40,8 +42,6 @@ enum ViewState<T: Sendable>: Sendable {
 }
 
 // MARK: - Haptics Helper
-
-import UIKit
 
 /// Semantic haptics for key actions.
 ///
@@ -87,8 +87,6 @@ enum Haptics {
 
 // MARK: - Accessibility Modifiers
 
-import SwiftUI
-
 extension View {
     /// Standard hit target for interactive elements (44pt minimum per HIG).
     func standardHitTarget() -> some View {
@@ -122,4 +120,3 @@ extension View {
         self.animation(UIAccessibility.isReduceMotionEnabled ? .none : animation, value: true)
     }
 }
-

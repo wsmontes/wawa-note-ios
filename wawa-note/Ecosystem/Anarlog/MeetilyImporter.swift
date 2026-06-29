@@ -1,6 +1,6 @@
 import Foundation
-import UniformTypeIdentifiers
 import OSLog
+import UniformTypeIdentifiers
 
 /// Imports Meetily meeting data as KnowledgeItem records.
 ///
@@ -66,8 +66,7 @@ struct MeetilyImporter: FormatImporter {
             return false
         }
         // Meetily JSON has either "meeting" + "transcript" or "transcript" + "summary"
-        return (json["meeting"] != nil && json["transcript"] != nil) ||
-               (json["transcript"] != nil && json["summary"] != nil)
+        return (json["meeting"] != nil && json["transcript"] != nil) || (json["transcript"] != nil && json["summary"] != nil)
     }
 
     private func isMeetilyTranscript(_ content: String) -> Bool {
@@ -250,7 +249,8 @@ struct MeetilyImporter: FormatImporter {
         return matches.compactMap { match in
             guard match.numberOfRanges >= 4 else { return nil }
 
-            let timestamp = match.range(at: 1).location != NSNotFound
+            let timestamp =
+                match.range(at: 1).location != NSNotFound
                 ? (text as NSString).substring(with: match.range(at: 1))
                 : nil
             let speaker = (text as NSString).substring(with: match.range(at: 2))

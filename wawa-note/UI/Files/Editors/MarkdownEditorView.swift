@@ -43,8 +43,10 @@ struct MarkdownEditorView: View {
                     }
             case .preview:
                 ScrollView {
-                    let md = (try? AttributedString(markdown: content,
-                        options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+                    let md =
+                        (try? AttributedString(
+                            markdown: content,
+                            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
                         ?? AttributedString(content)
                     Text(md)
                         .padding(12)

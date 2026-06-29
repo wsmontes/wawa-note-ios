@@ -46,8 +46,9 @@ final class TaskService {
         try context.save()
 
         if let source = sourceItemID {
-            try edgeService.create(fromID: source, toID: task.id, edgeType: .produced,
-                                   provenanceItemID: source, provenanceSegmentIDs: sourceSegmentIDs)
+            try edgeService.create(
+                fromID: source, toID: task.id, edgeType: .produced,
+                provenanceItemID: source, provenanceSegmentIDs: sourceSegmentIDs)
         }
         if let projectID {
             try edgeService.create(fromID: task.id, toID: projectID, edgeType: .belongsTo)
@@ -86,7 +87,8 @@ final class TaskService {
         task.status = status
         task.updatedAt = Date()
         try context.save()
-        VersioningService.shared.recordChange(entityType: "TaskItem", entityID: task.id, projectID: task.projectID,
+        VersioningService.shared.recordChange(
+            entityType: "TaskItem", entityID: task.id, projectID: task.projectID,
             field: "status", previousValue: prev, newValue: status.rawValue, origin: .user, context: context)
     }
 
@@ -97,11 +99,37 @@ final class TaskService {
         priority: TaskPriority? = nil,
         dueAt: Date? = nil
     ) throws {
-        let vs = VersioningService.shared; let ctx = context; let pid = task.projectID; let tid = task.id
-        if let title { let prev = task.title; task.title = title; vs.recordChange(entityType: "TaskItem", entityID: tid, projectID: pid, field: "title", previousValue: prev, newValue: title, origin: .user, context: ctx) }
-        if let ownerName { let prev = task.ownerName; task.ownerName = ownerName; vs.recordChange(entityType: "TaskItem", entityID: tid, projectID: pid, field: "ownerName", previousValue: prev, newValue: ownerName, origin: .user, context: ctx) }
-        if let priority { let prev = task.priority.rawValue; task.priority = priority; vs.recordChange(entityType: "TaskItem", entityID: tid, projectID: pid, field: "priority", previousValue: prev, newValue: priority.rawValue, origin: .user, context: ctx) }
-        if let dueAt { let prev = task.dueAt?.ISO8601Format(); task.dueAt = dueAt; vs.recordChange(entityType: "TaskItem", entityID: tid, projectID: pid, field: "dueAt", previousValue: prev, newValue: dueAt.ISO8601Format(), origin: .user, context: ctx) }
+        let vs = VersioningService.shared
+        let ctx = context
+        let pid = task.projectID
+        let tid = task.id
+        if let title {
+            let prev = task.title
+            task.title = title
+            vs.recordChange(
+                entityType: "TaskItem", entityID: tid, projectID: pid, field: "title", previousValue: prev, newValue: title, origin: .user, context: ctx)
+        }
+        if let ownerName {
+            let prev = task.ownerName
+            task.ownerName = ownerName
+            vs.recordChange(
+                entityType: "TaskItem", entityID: tid, projectID: pid, field: "ownerName", previousValue: prev, newValue: ownerName, origin: .user, context: ctx
+            )
+        }
+        if let priority {
+            let prev = task.priority.rawValue
+            task.priority = priority
+            vs.recordChange(
+                entityType: "TaskItem", entityID: tid, projectID: pid, field: "priority", previousValue: prev, newValue: priority.rawValue, origin: .user,
+                context: ctx)
+        }
+        if let dueAt {
+            let prev = task.dueAt?.ISO8601Format()
+            task.dueAt = dueAt
+            vs.recordChange(
+                entityType: "TaskItem", entityID: tid, projectID: pid, field: "dueAt", previousValue: prev, newValue: dueAt.ISO8601Format(), origin: .user,
+                context: ctx)
+        }
         task.updatedAt = Date()
         try context.save()
     }

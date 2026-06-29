@@ -1,7 +1,7 @@
 import EventKit
-import SwiftData
-import OSLog
 import Foundation
+import OSLog
+import SwiftData
 
 extension EKEventStore {
     nonisolated(unsafe) static let shared = EKEventStore()
@@ -88,7 +88,8 @@ final class CalendarSyncService: ObservableObject {
     func eventDatesForMonth(containing date: Date, items: [KnowledgeItem]) -> Set<Date> {
         let cal = Calendar.current
         guard let firstOfMonth = cal.date(from: cal.dateComponents([.year, .month], from: date)),
-              let firstOfNext = cal.date(byAdding: DateComponents(month: 1), to: firstOfMonth) else {
+            let firstOfNext = cal.date(byAdding: DateComponents(month: 1), to: firstOfMonth)
+        else {
             return []
         }
 
@@ -146,7 +147,8 @@ final class CalendarSyncService: ObservableObject {
     private func isAlreadyRepresented(ekEvent: EKEvent, items: [KnowledgeItem]) -> Bool {
         // Match by calendarEventIdentifier
         if let calID = ekEvent.eventIdentifier,
-           items.contains(where: { $0.calendarEventIdentifier == calID }) {
+            items.contains(where: { $0.calendarEventIdentifier == calID })
+        {
             return true
         }
         // Fallback: match by scheduledDate + title
@@ -190,7 +192,8 @@ final class CalendarSyncService: ObservableObject {
     /// Annotate a KnowledgeItem with participants from its linked calendar event.
     func annotateAnarlogParticipants(item: KnowledgeItem, context: ModelContext) {
         guard let eventId = item.calendarEventIdentifier,
-              let event = eventStore.event(withIdentifier: eventId) else { return }
+            let event = eventStore.event(withIdentifier: eventId)
+        else { return }
         let participants = anarlogParticipants(from: event)
         guard !participants.isEmpty else { return }
         AnarlogParticipantBridge.annotateParticipants(participants, itemID: item.id, source: "calendar_event", context: context)

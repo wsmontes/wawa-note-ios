@@ -1,5 +1,5 @@
-import Foundation
 import CoreSpotlight
+import Foundation
 
 struct SearchResult: Identifiable {
     let id = UUID()
@@ -69,8 +69,12 @@ final class SearchService {
         let options: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
         guard let range = text.range(of: query, options: options) else { return nil }
 
-        let start = text.index(range.lowerBound, offsetBy: -min(20, text.distance(from: text.startIndex, to: range.lowerBound)), limitedBy: text.startIndex) ?? text.startIndex
-        let end = text.index(range.upperBound, offsetBy: min(maxLength - 20, text.distance(from: range.upperBound, to: text.endIndex)), limitedBy: text.endIndex) ?? text.endIndex
+        let start =
+            text.index(range.lowerBound, offsetBy: -min(20, text.distance(from: text.startIndex, to: range.lowerBound)), limitedBy: text.startIndex)
+            ?? text.startIndex
+        let end =
+            text.index(range.upperBound, offsetBy: min(maxLength - 20, text.distance(from: range.upperBound, to: text.endIndex)), limitedBy: text.endIndex)
+            ?? text.endIndex
 
         var snippet = String(text[start..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
         if start != text.startIndex { snippet = "..." + snippet }

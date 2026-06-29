@@ -160,7 +160,8 @@ final class FileLogService: @unchecked Sendable {
 
     private func rotateIfNeeded() {
         guard let attrs = try? fileManager.attributesOfItem(atPath: currentLogURL.path),
-              let size = attrs[.size] as? Int64, size >= maxLogSize else { return }
+            let size = attrs[.size] as? Int64, size >= maxLogSize
+        else { return }
         let oldest = cachesDir.appendingPathComponent("wawa-debug.\(maxRotatedLogs).log")
         try? fileManager.removeItem(at: oldest)
         for i in stride(from: maxRotatedLogs - 1, through: 0, by: -1) {
@@ -263,7 +264,8 @@ extension String {
         var result = self
         for (pattern, replacement) in patterns {
             if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
-                result = regex.stringByReplacingMatches(in: result, options: [], range: NSRange(location: 0, length: result.utf16.count), withTemplate: replacement)
+                result = regex.stringByReplacingMatches(
+                    in: result, options: [], range: NSRange(location: 0, length: result.utf16.count), withTemplate: replacement)
             }
         }
         return result

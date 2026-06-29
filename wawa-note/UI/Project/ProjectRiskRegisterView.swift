@@ -1,5 +1,5 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 // MARK: - DEPRECATED: Subsumed by file browser with type filter (2026-06-18)
 struct RiskItem: Identifiable {
@@ -102,14 +102,15 @@ struct ProjectRiskRegisterView: View {
         for item in items {
             guard let analysis = try? store.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) else { continue }
             for risk in analysis.risks {
-                result.append(RiskItem(
-                    title: risk.risk,
-                    details: risk.details,
-                    sourceItemID: item.id,
-                    sourceItemTitle: item.title,
-                    sourceItemDate: item.createdAt,
-                    confidence: risk.confidence ?? 0.5
-                ))
+                result.append(
+                    RiskItem(
+                        title: risk.risk,
+                        details: risk.details,
+                        sourceItemID: item.id,
+                        sourceItemTitle: item.title,
+                        sourceItemDate: item.createdAt,
+                        confidence: risk.confidence ?? 0.5
+                    ))
             }
         }
         result.sort { $0.confidence > $1.confidence }

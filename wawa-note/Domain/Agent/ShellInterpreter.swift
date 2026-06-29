@@ -1,7 +1,7 @@
-import Foundation
-import SwiftData
 import Contacts
 import EventKit
+import Foundation
+import SwiftData
 
 // MARK: - Shell Command
 
@@ -10,8 +10,8 @@ struct ShellCommand {
     let args: [String]
     var flags: [String: String]
     let redirectTarget: String?  // for echo '...' > path
-    let redirectBody: String?    // the JSON body before >
-    var appendMode: Bool = false // >> instead of >
+    let redirectBody: String?  // the JSON body before >
+    var appendMode: Bool = false  // >> instead of >
 }
 
 // MARK: - Shell Interpreter
@@ -103,8 +103,16 @@ enum ShellInterpreter {
             var inDouble = false
             var prevWasAmpersand = false
             for ch in line {
-                if ch == "'" && !inDouble { inSingle.toggle(); current.append(ch); continue }
-                if ch == "\"" && !inSingle { inDouble.toggle(); current.append(ch); continue }
+                if ch == "'" && !inDouble {
+                    inSingle.toggle()
+                    current.append(ch)
+                    continue
+                }
+                if ch == "\"" && !inSingle {
+                    inDouble.toggle()
+                    current.append(ch)
+                    continue
+                }
                 if !inSingle && !inDouble {
                     if ch == "&" && prevWasAmpersand {
                         current.removeLast()
@@ -121,7 +129,7 @@ enum ShellInterpreter {
                     }
                     if ch == "|" {
                         result.append(current.trimmingCharacters(in: .whitespaces))
-                        current = "| " // Mark next command as piped
+                        current = "| "  // Mark next command as piped
                         prevWasAmpersand = false
                         continue
                     }
@@ -158,10 +166,13 @@ enum ShellInterpreter {
     }
 
     private static let manPages: [String: String] = [
-        "ls": "ls [path] — List directory contents.\n  Flags: --long, --type audio|note|image, --status todo|done|analyzed, --tag 'x', --since 7d, --limit 20\n  Examples: ls /, ls tasks/, ls items/ --type audio --since 7d",
+        "ls":
+            "ls [path] — List directory contents.\n  Flags: --long, --type audio|note|image, --status todo|done|analyzed, --tag 'x', --since 7d, --limit 20\n  Examples: ls /, ls tasks/, ls items/ --type audio --since 7d",
         "cat": "cat <path> — Read file contents.\n  Examples: cat items/<uuid>/body.md, cat /agent/prompts/analysis_system.md",
-        "echo": "echo '{\"field\":\"value\"}' > <path> — Write/update file.\n  Flags: --append (>> instead of >)\n  Examples: echo '{\"status\":\"done\"}' > tasks/task-filename",
-        "touch": "touch <path> [flags] — Create files/tasks.\n  Flags: --title, --type audio|note|image, --body, --priority low|medium|high|critical, --owner, --due (ISO8601)",
+        "echo":
+            "echo '{\"field\":\"value\"}' > <path> — Write/update file.\n  Flags: --append (>> instead of >)\n  Examples: echo '{\"status\":\"done\"}' > tasks/task-filename",
+        "touch":
+            "touch <path> [flags] — Create files/tasks.\n  Flags: --title, --type audio|note|image, --body, --priority low|medium|high|critical, --owner, --due (ISO8601)",
         "rm": "rm <path> — Remove (trash) items/tasks.\n  Items go to Trash (recoverable). Tasks cannot be undone.",
         "mv": "mv <from> <to> — Move items.\n  Examples: mv /inbox/<uuid> /projects/<slug>/items/<uuid>",
         "find": "find [path] — Search with filters.\n  Flags: --tag X, --since 7d, --type audio|note, --status todo|analyzed, --project 'name', --limit 20",
@@ -184,38 +195,44 @@ enum ShellInterpreter {
             } else {
                 result = shellErr("man: no entry for '\(topic)'. Try 'man' without arguments to see available commands.")
             }
-        case "ls":     result = handleLs(cmd, ctx)
-        case "cd":     result = handleCd(cmd, ctx); if !result.isError { result = autoLsAfterCd(result, ctx) }
-        case "cat":    result = handleCat(cmd, ctx)
-        case "find":   result = handleFind(cmd, ctx)
-        case "grep":   result = handleGrep(cmd, ctx)
-        case "touch":  result = handleTouch(cmd, ctx)
-        case "echo":   result = handleEcho(cmd, ctx)
-        case "rm":     result = handleRm(cmd, ctx)
-        case "mv":     result = handleMv(cmd, ctx)
+        case "ls": result = handleLs(cmd, ctx)
+        case "cd":
+            result = handleCd(cmd, ctx)
+            if !result.isError { result = autoLsAfterCd(result, ctx) }
+        case "cat": result = handleCat(cmd, ctx)
+        case "find": result = handleFind(cmd, ctx)
+        case "grep": result = handleGrep(cmd, ctx)
+        case "touch": result = handleTouch(cmd, ctx)
+        case "echo": result = handleEcho(cmd, ctx)
+        case "rm": result = handleRm(cmd, ctx)
+        case "mv": result = handleMv(cmd, ctx)
         // Destructive commands: require --force flag to skip confirmation prompt
         // The agent should use ask_user first, then retry with --force after user confirms
-        case "head":   result = handleHead(cmd, ctx)
-        case "wc":     result = handleWc(cmd, ctx)
-        case "history":result = handleHistory(cmd, ctx)
-        case "extract":result = handleExtract(cmd, ctx)
-        case "semantic":result = handleSemantic(cmd, ctx)
+        case "head": result = handleHead(cmd, ctx)
+        case "wc": result = handleWc(cmd, ctx)
+        case "history": result = handleHistory(cmd, ctx)
+        case "extract": result = handleExtract(cmd, ctx)
+        case "semantic": result = handleSemantic(cmd, ctx)
         case "analyze": result = handleAnalyze(cmd, ctx)
-        case "cal":     result = handleCal(cmd, ctx)
-        case "export":  result = handleExport(cmd, ctx)
+        case "cal": result = handleCal(cmd, ctx)
+        case "export": result = handleExport(cmd, ctx)
         case "vision", "describe": result = handleVision(cmd, ctx)
         case "progress": result = handleProgress(cmd, ctx)
         case "cleanup": result = handleCleanup(cmd, ctx)
         case "recipe": result = handleRecipe(cmd, ctx)
         case "person": result = handlePerson(cmd, ctx)
-        case "help":  result = handleHelp(cmd, ctx)
+        case "help": result = handleHelp(cmd, ctx)
         case "ask_user": result = handleAskUser(cmd, ctx)
         default:
             // Try fuzzy matching
-            let suggestions = ["ls", "cd", "cat", "find", "grep", "touch", "echo", "rm", "mv", "head", "wc", "history", "extract", "semantic", "analyze", "cal", "person", "export", "vision", "describe", "progress", "help", "ask_user"]
+            let suggestions = [
+                "ls", "cd", "cat", "find", "grep", "touch", "echo", "rm", "mv", "head", "wc", "history", "extract", "semantic", "analyze", "cal", "person",
+                "export", "vision", "describe", "progress", "help", "ask_user",
+            ]
             let close = suggestions.filter { $0.hasPrefix(cmd.name) || levenshtein(cmd.name, $0) <= 2 }
             let hint = close.isEmpty ? "" : ". Did you mean: \(close.joined(separator: ", "))?"
-            let tip = cmd.name.count > 0 && cmd.name.first?.isLowercase != true
+            let tip =
+                cmd.name.count > 0 && cmd.name.first?.isLowercase != true
                 ? " Commands are lowercase. Use 'help' to see available commands."
                 : ""
             result = shellErr("\(cmd.name): command not found\(hint)\(tip)")
@@ -240,7 +257,7 @@ enum ShellInterpreter {
         for j in 0...b.count { dp[0][j] = j }
         for i in 1...a.count {
             for j in 1...b.count {
-                dp[i][j] = a[i-1] == b[j-1] ? dp[i-1][j-1] : min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]) + 1
+                dp[i][j] = a[i - 1] == b[j - 1] ? dp[i - 1][j - 1] : min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]) + 1
             }
         }
         return dp[a.count][b.count]
@@ -255,10 +272,19 @@ enum ShellInterpreter {
         var inDouble = false
 
         for ch in raw {
-            if ch == "'" && !inDouble { inSingle.toggle(); continue }
-            if ch == "\"" && !inSingle { inDouble.toggle(); continue }
+            if ch == "'" && !inDouble {
+                inSingle.toggle()
+                continue
+            }
+            if ch == "\"" && !inSingle {
+                inDouble.toggle()
+                continue
+            }
             if ch.isWhitespace && !inSingle && !inDouble {
-                if !current.isEmpty { tokens.append(current); current = "" }
+                if !current.isEmpty {
+                    tokens.append(current)
+                    current = ""
+                }
             } else {
                 current.append(ch)
             }
@@ -284,14 +310,16 @@ enum ShellInterpreter {
             }
             // Strip surrounding quotes from body
             if let b = redirectBody, b.count >= 2 {
-                let first = b.first!, last = b.last!
+                let first = b.first!
+                let last = b.last!
                 if (first == "'" && last == "'") || (first == "\"" && last == "\"") {
                     redirectBody = String(b.dropFirst().dropLast())
                 }
             }
         }
 
-        let rest = redirectTarget != nil
+        let rest =
+            redirectTarget != nil
             ? Array(tokens.dropFirst(1).prefix(while: { $0 != ">" && $0 != ">>" }))
             : Array(tokens.dropFirst())
 
@@ -307,17 +335,21 @@ enum ShellInterpreter {
             if t.hasPrefix("--") {
                 let key = String(t.dropFirst(2))
                 if boolFlags.contains(key) {
-                    flags[key] = "true"; i += 1
+                    flags[key] = "true"
+                    i += 1
                 } else if i + 1 < rest.count {
                     let next = rest[i + 1]
                     // Only consume next token as value if it looks like a value, not a path or flag
                     if !next.hasPrefix("-") && !next.hasSuffix("/") && !next.contains("/") {
-                        flags[key] = next; i += 2
+                        flags[key] = next
+                        i += 2
                     } else {
-                        flags[key] = "true"; i += 1
+                        flags[key] = "true"
+                        i += 1
                     }
                 } else {
-                    flags[key] = "true"; i += 1
+                    flags[key] = "true"
+                    i += 1
                 }
             } else if t.hasPrefix("-") && t.count > 2 && !t.hasPrefix("--") {
                 // Combined short flags: -la → -l -a
@@ -335,20 +367,25 @@ enum ShellInterpreter {
             } else if t.hasPrefix("-") && t.count == 2 {
                 let key = String(t.dropFirst(1))
                 if boolFlags.contains(key) {
-                    flags[key] = "true"; i += 1
+                    flags[key] = "true"
+                    i += 1
                 } else if i + 1 < rest.count {
                     let next = rest[i + 1]
                     // Never consume a path-looking token (contains /) as a flag value
                     if !next.hasPrefix("-") && !next.contains("/") {
-                        flags[key] = next; i += 2
+                        flags[key] = next
+                        i += 2
                     } else {
-                        flags[key] = "true"; i += 1
+                        flags[key] = "true"
+                        i += 1
                     }
                 } else {
-                    flags[key] = "true"; i += 1
+                    flags[key] = "true"
+                    i += 1
                 }
             } else {
-                args.append(t); i += 1
+                args.append(t)
+                i += 1
             }
         }
 
@@ -438,9 +475,15 @@ enum ShellInterpreter {
             var cards: [ChatBlock] = []
             for item in filtered {
                 lines.append(VFSService.formatItemLine(item, index: 0, long: long))
-                let hasTrans = FileManager.default.fileExists(atPath: ctx.fileStore.itemDirectoryURL(for: item.id).appendingPathComponent("transcript.json").path)
-                let hasAnalysis = FileManager.default.fileExists(atPath: ctx.fileStore.itemDirectoryURL(for: item.id).appendingPathComponent("analysis.json").path)
-                cards.append(.itemCard(ItemCardData(itemID: item.id.uuidString, title: item.title, type: item.typeRaw, status: item.statusRaw, durationSeconds: item.durationSeconds, projectSlug: slug, hasTranscript: hasTrans, hasAnalysis: hasAnalysis)))
+                let hasTrans = FileManager.default.fileExists(
+                    atPath: ctx.fileStore.itemDirectoryURL(for: item.id).appendingPathComponent("transcript.json").path)
+                let hasAnalysis = FileManager.default.fileExists(
+                    atPath: ctx.fileStore.itemDirectoryURL(for: item.id).appendingPathComponent("analysis.json").path)
+                cards.append(
+                    .itemCard(
+                        ItemCardData(
+                            itemID: item.id.uuidString, title: item.title, type: item.typeRaw, status: item.statusRaw, durationSeconds: item.durationSeconds,
+                            projectSlug: slug, hasTranscript: hasTrans, hasAnalysis: hasAnalysis)))
             }
             return ok(lines.joined(separator: "\n"), blocks: cards)
 
@@ -456,10 +499,12 @@ enum ShellInterpreter {
                 let prioEmoji = t.priorityRaw == "critical" ? "🔴" : t.priorityRaw == "high" ? "🟠" : t.priorityRaw == "medium" ? "🔵" : "⚪"
                 let owner = t.ownerName.map { " @\($0)" } ?? ""
                 lines.append("  \(check) \(prioEmoji) \(t.title)\(owner)")
-                cards.append(.taskCard(TaskCardData(
-                    taskID: t.id.uuidString, title: t.title, status: t.statusRaw, priority: t.priorityRaw,
-                    owner: t.ownerName, projectSlug: slug, needsConfirmation: t.statusRaw != "done"
-                )))
+                cards.append(
+                    .taskCard(
+                        TaskCardData(
+                            taskID: t.id.uuidString, title: t.title, status: t.statusRaw, priority: t.priorityRaw,
+                            owner: t.ownerName, projectSlug: slug, needsConfirmation: t.statusRaw != "done"
+                        )))
             }
             return ok(lines.joined(separator: "\n"), blocks: cards)
 
@@ -481,7 +526,9 @@ enum ShellInterpreter {
             if all.isEmpty { return ok("edges/: no edges") }
             var lines = ["/projects/\(slug)/edges/ (\(all.count) edge(s))", ""]
             for e in all.prefix(limit) {
-                lines.append("\(e.id.uuidString.prefix(8))  \(e.edgeTypeRaw)  from=\(e.fromID.uuidString.prefix(8))  to=\(e.toID.uuidString.prefix(8))  weight=\(e.weight)")
+                lines.append(
+                    "\(e.id.uuidString.prefix(8))  \(e.edgeTypeRaw)  from=\(e.fromID.uuidString.prefix(8))  to=\(e.toID.uuidString.prefix(8))  weight=\(e.weight)"
+                )
             }
             return ok(lines.joined(separator: "\n"))
 
@@ -507,7 +554,9 @@ enum ShellInterpreter {
             var fileEntries: [(prefix: String, hasAnalysis: Bool, hasTranscript: Bool)] = []
             for item in items {
                 let dir = ctx.fileStore.itemDirectoryURL(for: item.id)
-                let hasAnalysis = FileManager.default.fileExists(atPath: dir.appendingPathComponent("analysis.json").path) || FileManager.default.fileExists(atPath: dir.appendingPathComponent("analysis.dynamic.json").path)
+                let hasAnalysis =
+                    FileManager.default.fileExists(atPath: dir.appendingPathComponent("analysis.json").path)
+                    || FileManager.default.fileExists(atPath: dir.appendingPathComponent("analysis.dynamic.json").path)
                 let hasTranscript = FileManager.default.fileExists(atPath: dir.appendingPathComponent("transcript.json").path)
                 if hasAnalysis || hasTranscript {
                     fileEntries.append((prefix: String(item.id.uuidString.prefix(8)), hasAnalysis: hasAnalysis, hasTranscript: hasTranscript))
@@ -601,10 +650,11 @@ enum ShellInterpreter {
                     "summary": p.summary as Any, "intention": p.intention as Any,
                     "taskCount": tasks.count, "itemCount": items.count,
                     "createdAt": p.createdAt.ISO8601Format(),
-                    "updatedAt": p.updatedAt.ISO8601Format()
+                    "updatedAt": p.updatedAt.ISO8601Format(),
                 ]
                 if let data = try? JSONSerialization.data(withJSONObject: dict, options: .prettyPrinted),
-                   let json = String(data: data, encoding: .utf8) {
+                    let json = String(data: data, encoding: .utf8)
+                {
                     return ok(json)
                 }
                 return shellErr("cat: failed to serialize project.json")
@@ -625,7 +675,8 @@ enum ShellInterpreter {
             if jsonOutput {
                 let dict = VFSService.itemToDict(item, fileStore: ctx.fileStore, fields: fields)
                 if let data = try? JSONSerialization.data(withJSONObject: dict, options: .prettyPrinted),
-                   let json = String(data: data, encoding: .utf8) {
+                    let json = String(data: data, encoding: .utf8)
+                {
                     return ok(json)
                 }
                 return shellErr("cat: failed to serialize item")
@@ -640,10 +691,11 @@ enum ShellInterpreter {
                 let dict: [String: Any] = [
                     "id": task.id.uuidString, "title": task.title,
                     "status": task.statusRaw, "priority": task.priorityRaw,
-                    "owner": task.ownerName as Any, "dueAt": task.dueAt?.ISO8601Format() as Any
+                    "owner": task.ownerName as Any, "dueAt": task.dueAt?.ISO8601Format() as Any,
                 ]
                 if let data = try? JSONSerialization.data(withJSONObject: dict, options: .prettyPrinted),
-                   let json = String(data: data, encoding: .utf8) {
+                    let json = String(data: data, encoding: .utf8)
+                {
                     return ok(json)
                 }
                 return shellErr("cat: failed to serialize task")
@@ -792,18 +844,25 @@ enum ShellInterpreter {
             var cards: [ChatBlock] = []
             for t in tasks {
                 lines.append("  ☐ \(t.title)  [\(t.statusRaw)]")
-                cards.append(.taskCard(TaskCardData(taskID: t.id.uuidString, title: t.title, status: t.statusRaw, priority: t.priorityRaw, owner: t.ownerName, projectSlug: ctx.activeProjectSlug, needsConfirmation: t.statusRaw != "done")))
+                cards.append(
+                    .taskCard(
+                        TaskCardData(
+                            taskID: t.id.uuidString, title: t.title, status: t.statusRaw, priority: t.priorityRaw, owner: t.ownerName,
+                            projectSlug: ctx.activeProjectSlug, needsConfirmation: t.statusRaw != "done")))
             }
             return ok(lines.joined(separator: "\n"), blocks: cards)
         }
 
         // Default: items (sandboxed: restrict to current item)
         if let err = checkSandboxGlobal(ctx) { return err }
-        let tagFilter = cmd.flags["tag"]; let typeFilter = cmd.flags["type"]; let projectFilter = cmd.flags["project"]
+        let tagFilter = cmd.flags["tag"]
+        let typeFilter = cmd.flags["type"]
+        let projectFilter = cmd.flags["project"]
         let sinceDays = Int(cmd.flags["since"] ?? "0") ?? 0
         let allItems: [KnowledgeItem] = {
             if let sandboxed = ctx.sandboxedItemID,
-               let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: sandboxed) {
+                let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: sandboxed)
+            {
                 return [item]
             }
             return (try? KnowledgeItemService(context: ctx.modelContext).allItems()) ?? []
@@ -816,7 +875,7 @@ enum ShellInterpreter {
             let allProjects = (try? ProjectService(context: ctx.modelContext).allProjects()) ?? []
             if let proj = allProjects.first(where: { VFSService.projectMatches($0, dirName: pslug) }) { results = results.filter { $0.projectID == proj.id } }
         }
-        if sinceDays > 0 { results = results.filter { $0.createdAt >= Date().addingTimeInterval(-Double(sinceDays)*86400) } }
+        if sinceDays > 0 { results = results.filter { $0.createdAt >= Date().addingTimeInterval(-Double(sinceDays) * 86400) } }
         results = Array(results.prefix(limit))
         if results.isEmpty { return ok("No matching items") }
         // --exec: run a command for each result (batch operations)
@@ -825,7 +884,8 @@ enum ShellInterpreter {
             for item in results.prefix(limit) {
                 let expanded = execCmd.replacingOccurrences(of: "{id}", with: item.id.uuidString)
                     .replacingOccurrences(of: "{title}", with: item.title.replacingOccurrences(of: " ", with: "_"))
-                let batchCmd = ShellCommand(name: expanded.components(separatedBy: " ").first ?? "", args: [], flags: [:], redirectTarget: nil, redirectBody: nil)
+                let batchCmd = ShellCommand(
+                    name: expanded.components(separatedBy: " ").first ?? "", args: [], flags: [:], redirectTarget: nil, redirectBody: nil)
                 // Execute the expanded command by recursively dispatching
                 let subResult = execute(command: expanded, context: ctx)
                 outputs.append("[\(item.title)]: \(subResult.content)")
@@ -839,7 +899,11 @@ enum ShellInterpreter {
         for item in results {
             let pn = item.projectID.flatMap { pid in (try? ProjectService(context: ctx.modelContext).fetch(id: pid)).map { VFSService.safeDirName($0) } } ?? "-"
             lines.append("  \(VFSService.typeIcon(item.typeRaw)) \(item.title)  project=\(pn)")
-            cards.append(.itemCard(ItemCardData(itemID: item.id.uuidString, title: item.title, type: item.typeRaw, status: item.statusRaw, durationSeconds: item.durationSeconds, projectSlug: pn, hasTranscript: false, hasAnalysis: false)))
+            cards.append(
+                .itemCard(
+                    ItemCardData(
+                        itemID: item.id.uuidString, title: item.title, type: item.typeRaw, status: item.statusRaw, durationSeconds: item.durationSeconds,
+                        projectSlug: pn, hasTranscript: false, hasAnalysis: false)))
         }
         return ok(lines.joined(separator: "\n"), blocks: cards)
     }
@@ -860,7 +924,8 @@ enum ShellInterpreter {
             switch vpath {
             case .projectAnalysis(_, _, let itemID):
                 guard let iid = itemID else { break }
-                let text = VFSService.readAnalysis(itemID: iid, fileStore: ctx.fileStore)
+                let text =
+                    VFSService.readAnalysis(itemID: iid, fileStore: ctx.fileStore)
                     ?? VFSService.readTranscript(itemID: iid, fileStore: ctx.fileStore)
                     ?? ""
                 let lines = text.components(separatedBy: "\n")
@@ -885,7 +950,8 @@ enum ShellInterpreter {
         if let err = checkSandboxGlobal(ctx) { return err }
         let allItems: [KnowledgeItem] = {
             if let sandboxed = ctx.sandboxedItemID,
-               let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: sandboxed) {
+                let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: sandboxed)
+            {
                 return [item]
             }
             return (try? KnowledgeItemService(context: ctx.modelContext).allItems()) ?? []
@@ -937,7 +1003,8 @@ enum ShellInterpreter {
             }
             let urlFlag = cmd.flags["url"]
             if kt == .webBookmark && urlFlag == nil {
-                return shellErr("touch: --url is required for webBookmark items. Usage: touch /inbox/ --type webBookmark --title \"Name\" --url \"https://...\"")
+                return shellErr(
+                    "touch: --url is required for webBookmark items. Usage: touch /inbox/ --type webBookmark --title \"Name\" --url \"https://...\"")
             }
             // Create item
             let svc = KnowledgeItemService(context: ctx.modelContext)
@@ -967,12 +1034,14 @@ enum ShellInterpreter {
             var blocks: [ChatBlock] = [.itemCard(card)]
             if let docType = cmd.flags["document-type"], let bodyText = body {
                 let sectionCount = bodyText.components(separatedBy: "## ").count
-                blocks.insert(.documentHeader(DocumentHeaderData(
-                    title: t, documentType: docType,
-                    summary: String(bodyText.prefix(200)),
-                    sectionCount: max(1, sectionCount),
-                    itemID: item.id.uuidString
-                )), at: 0)
+                blocks.insert(
+                    .documentHeader(
+                        DocumentHeaderData(
+                            title: t, documentType: docType,
+                            summary: String(bodyText.prefix(200)),
+                            sectionCount: max(1, sectionCount),
+                            itemID: item.id.uuidString
+                        )), at: 0)
             }
             return ok("Created \(loc)\(item.id.uuidString.prefix(8)).json  (\(t))", blocks: blocks)
 
@@ -982,7 +1051,9 @@ enum ShellInterpreter {
             let summary = cmd.flags["summary"]
             let project = try? ProjectService(context: ctx.modelContext).create(name: name, summary: summary)
             guard let p = project else { return shellErr("touch: failed to create project") }
-            ctx.activeProjectID = p.id; ctx.activeProjectSlug = p.slug; ctx.activeProjectName = p.name
+            ctx.activeProjectID = p.id
+            ctx.activeProjectSlug = p.slug
+            ctx.activeProjectName = p.name
             return ok("✅ Created project: \(p.name) (\(p.slug))")
 
         case .projectTasks, .projectTask:
@@ -994,17 +1065,20 @@ enum ShellInterpreter {
                 AppLog.agent.warning("touch: invalid priority '\(priority)' — valid: \(valid). Using medium.")
             }
             let due = dueStr.flatMap { ISO8601DateFormatter().date(from: $0) }
-            guard let task = try? TaskService(context: ctx.modelContext).create(
-                title: t, projectID: pid, priority: prio,
-                ownerName: owner, dueAt: due, createdBy: .llm) else {
+            guard
+                let task = try? TaskService(context: ctx.modelContext).create(
+                    title: t, projectID: pid, priority: prio,
+                    ownerName: owner, dueAt: due, createdBy: .llm)
+            else {
                 return shellErr("touch: failed to create task — database error")
             }
             let card = TaskCardData(
                 taskID: task.id.uuidString, title: t, status: task.statusRaw, priority: priority,
                 owner: owner, projectSlug: ctx.activeProjectSlug, needsConfirmation: true
             )
-            return ok("✅ Created: \(t) [\(priority)]",
-                       blocks: [.taskCard(card)])
+            return ok(
+                "✅ Created: \(t) [\(priority)]",
+                blocks: [.taskCard(card)])
 
         case .projectPeople:
             // Create a person: touch people/ --name "Display Name" --email "..." --role "Developer"
@@ -1022,9 +1096,10 @@ enum ShellInterpreter {
         case .projectEdges:
             // Create a relationship: touch edges/ --from <uuid> --to <uuid> --type relatesTo
             guard let fromStr = cmd.flags["from"],
-                  let toStr = cmd.flags["to"],
-                  let fromID = UUID(uuidString: fromStr),
-                  let toID = UUID(uuidString: toStr) else {
+                let toStr = cmd.flags["to"],
+                let fromID = UUID(uuidString: fromStr),
+                let toID = UUID(uuidString: toStr)
+            else {
                 return shellErr("touch edges/: --from <uuid> --to <uuid> required. --type <edgeType> optional.")
             }
             let edgeType = EdgeType(rawValue: cmd.flags["type"] ?? "relatesTo") ?? .relatesTo
@@ -1040,15 +1115,19 @@ enum ShellInterpreter {
             // If path ends with a filename-like segment, try to create anyway in current context
             if let t = fallbackTitle, let pid = ctx.activeProjectID {
                 let prio = TaskPriority(rawValue: priority) ?? .medium
-                guard let task = try? TaskService(context: ctx.modelContext).create(
-                    title: t, projectID: pid, priority: prio,
-                    ownerName: owner, dueAt: nil, createdBy: .llm
-                ) else {
+                guard
+                    let task = try? TaskService(context: ctx.modelContext).create(
+                        title: t, projectID: pid, priority: prio,
+                        ownerName: owner, dueAt: nil, createdBy: .llm
+                    )
+                else {
                     return shellErr("touch: failed to create task — database error")
                 }
                 return ok("Created /projects/\(ctx.activeProjectSlug ?? "?")/tasks/\(task.id.uuidString.prefix(8)).json  (\(t) [\(priority)])")
             }
-            return shellErr("touch: cannot create here. Use tasks/ or items/ inside a project, or /inbox/ for notes. Examples:\n  touch tasks/ --title \"My Task\"\n  touch tasks/my-task.json\n  touch /inbox/ --title \"My Note\" --type note")
+            return shellErr(
+                "touch: cannot create here. Use tasks/ or items/ inside a project, or /inbox/ for notes. Examples:\n  touch tasks/ --title \"My Task\"\n  touch tasks/my-task.json\n  touch /inbox/ --title \"My Note\" --type note"
+            )
 
         default:
             return shellErr("touch: cannot create in this location. Use /inbox/ or /projects/{slug}/items/ or /projects/{slug}/tasks/")
@@ -1062,7 +1141,8 @@ enum ShellInterpreter {
             return shellErr("echo: usage: echo '{\"field\":\"value\"}' > <path>")
         }
         guard let data = body.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
             return shellErr("echo: body must be valid JSON. Example: echo '{\"status\":\"done\"}' > path")
         }
 
@@ -1108,7 +1188,8 @@ enum ShellInterpreter {
                 project.intention = newIntention
             }
             if let newStatus = json["status"] as? String,
-               let status = ProjectStatus(rawValue: newStatus) {
+                let status = ProjectStatus(rawValue: newStatus)
+            {
                 project.status = status
             }
             try? ctx.modelContext.save()
@@ -1144,7 +1225,8 @@ enum ShellInterpreter {
             // The target path includes the filename after the item ID
             let rawJSON = body
             if let data = rawJSON.data(using: .utf8),
-               let _ = try? JSONSerialization.jsonObject(with: data) {
+                (try? JSONSerialization.jsonObject(with: data)) != nil
+            {
                 do {
                     try VFSService.writeItemFile(target, content: rawJSON, context: ctx)
                     return ok("Written to \(target)")
@@ -1167,11 +1249,16 @@ enum ShellInterpreter {
                     // Emit fileLink so user can tap to open the document
                     if let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) {
                         let snippet = String(body.prefix(100))
-                        return ok("\(action) \(target)", blocks: [.fileLink(FileLinkData(
-                            itemID: item.id.uuidString, title: item.title,
-                            itemType: item.typeRaw, snippet: snippet,
-                            projectSlug: ctx.activeProjectSlug
-                        ))])
+                        return ok(
+                            "\(action) \(target)",
+                            blocks: [
+                                .fileLink(
+                                    FileLinkData(
+                                        itemID: item.id.uuidString, title: item.title,
+                                        itemType: item.typeRaw, snippet: snippet,
+                                        projectSlug: ctx.activeProjectSlug
+                                    ))
+                            ])
                     }
                     return ok("\(action) \(target)")
                 } catch {
@@ -1187,7 +1274,8 @@ enum ShellInterpreter {
             }
             let rawJSON = body
             if let data = rawJSON.data(using: .utf8),
-               let _ = try? JSONSerialization.jsonObject(with: data) {
+                (try? JSONSerialization.jsonObject(with: data)) != nil
+            {
                 let fileURL = ctx.fileStore.itemDirectoryURL(for: iid).appendingPathComponent("analysis.json")
                 do {
                     try rawJSON.write(to: fileURL, atomically: true, encoding: .utf8)
@@ -1256,7 +1344,8 @@ enum ShellInterpreter {
                 let gsvc = GraphEdgeService(context: ctx.modelContext)
                 let edges = (try? gsvc.edges(from: pid)) ?? []
                 if let id = UUID(uuidString: edgeIDStr ?? ""),
-                   let edge = edges.first(where: { $0.id == id }) {
+                    let edge = edges.first(where: { $0.id == id })
+                {
                     try? gsvc.deleteEdge(edge)
                     return ok("Deleted edge \(edgeIDStr?.prefix(8) ?? "?")")
                 }
@@ -1462,10 +1551,12 @@ enum ShellInterpreter {
         if isFreeText {
             let placeholder = cmd.flags["placeholder"] ?? "Type your answer..."
             let submit = cmd.flags["submit"] ?? "Send"
-            let block = ChatBlock.freeTextInput(FreeTextInputData(
-                question: question, placeholder: placeholder, submitLabel: submit
-            ))
-            return ToolResult(content: "[ASK_USER] \(question)", blocks: [block], citations: [], isError: false, displaySummary: "Asking (text): \(question.prefix(60))")
+            let block = ChatBlock.freeTextInput(
+                FreeTextInputData(
+                    question: question, placeholder: placeholder, submitLabel: submit
+                ))
+            return ToolResult(
+                content: "[ASK_USER] \(question)", blocks: [block], citations: [], isError: false, displaySummary: "Asking (text): \(question.prefix(60))")
         }
 
         // Options mode: multiple choice
@@ -1473,19 +1564,21 @@ enum ShellInterpreter {
             let choices = opts.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
             let options = choices.map { ChoiceOption(label: $0, value: $0) }
             let block = ChatBlock.choicePrompt(ChoicePromptData(question: question, options: options))
-            return ToolResult(content: "[ASK_USER] \(question)", blocks: [block], citations: [], isError: false, displaySummary: "Asking: \(question.prefix(60))")
+            return ToolResult(
+                content: "[ASK_USER] \(question)", blocks: [block], citations: [], isError: false, displaySummary: "Asking: \(question.prefix(60))")
         }
 
         // Yes/No mode (default)
         let options = [
             ChoiceOption(label: yesLabel, value: "yes"),
-            ChoiceOption(label: noLabel, value: "no")
+            ChoiceOption(label: noLabel, value: "no"),
         ]
-        let block = ChatBlock.confirmation(ConfirmationData(
-            title: "Confirmation", message: question,
-            confirmLabel: yesLabel, cancelLabel: noLabel,
-            confirmValue: "yes", cancelValue: "no"
-        ))
+        let block = ChatBlock.confirmation(
+            ConfirmationData(
+                title: "Confirmation", message: question,
+                confirmLabel: yesLabel, cancelLabel: noLabel,
+                confirmValue: "yes", cancelValue: "no"
+            ))
         return ToolResult(content: "[ASK_USER] \(question)", blocks: [block], citations: [], isError: false, displaySummary: "Asking: \(question.prefix(60))")
     }
 
@@ -1507,7 +1600,9 @@ enum ShellInterpreter {
             AppLog.general.info("Semantic search completed: \(count) results for '\(query)'")
         }
         let itemCount = allItems.filter({ $0.bodyText != nil || $0.analysisProviderId != nil }).count
-        return ok("Semantic search initiated for '\(query)' across \(itemCount) items with content. Results will be available when embeddings are processed. For immediate results, use grep.")
+        return ok(
+            "Semantic search initiated for '\(query)' across \(itemCount) items with content. Results will be available when embeddings are processed. For immediate results, use grep."
+        )
     }
 
     // MARK: - person (cross-reference contacts, calendar, transcripts, calls, memory)
@@ -1525,7 +1620,7 @@ enum ShellInterpreter {
         let q = query.lowercased()
         var lines: [String] = []
         var total = 0
-        let visited = NSMutableSet() // track seen names to deduplicate
+        let visited = NSMutableSet()  // track seen names to deduplicate
 
         // ── Source 1: Contacts ───────────────────────────────────
         var contactHits: [String] = []
@@ -1553,34 +1648,35 @@ enum ShellInterpreter {
             lines.append("⚠️ Calendar: \(calPermErr)\n")
         } else {
             let calSvc = CalendarSyncService()
-            let sixMonths = DateInterval(start: Date().addingTimeInterval(-180*86400), duration: 180*86400)
+            let sixMonths = DateInterval(start: Date().addingTimeInterval(-180 * 86400), duration: 180 * 86400)
             let events = calSvc.fetchEvents(for: sixMonths)
-        for event in events {
-            let title = event.title.lowercased()
-            let attendeeNames = (event.attendees ?? []).compactMap { $0.name?.lowercased() }
-            if title.contains(q) {
-                calHits.append("  [mencionada] \"\(event.title)\" — \(formattedDate(event.startDate))")
-                total += 1
-            } else if attendeeNames.contains(where: { $0.contains(q) }) {
-                let matched = attendeeNames.filter { $0.contains(q) }.joined(separator: ", ")
-                calHits.append("  [attendee] \"\(event.title)\" — \(formattedDate(event.startDate)) — \(matched)")
-                total += 1
+            for event in events {
+                let title = event.title.lowercased()
+                let attendeeNames = (event.attendees ?? []).compactMap { $0.name?.lowercased() }
+                if title.contains(q) {
+                    calHits.append("  [mencionada] \"\(event.title)\" — \(formattedDate(event.startDate))")
+                    total += 1
+                } else if attendeeNames.contains(where: { $0.contains(q) }) {
+                    let matched = attendeeNames.filter { $0.contains(q) }.joined(separator: ", ")
+                    calHits.append("  [attendee] \"\(event.title)\" — \(formattedDate(event.startDate)) — \(matched)")
+                    total += 1
+                }
+                if calHits.count >= 5 { break }
             }
-            if calHits.count >= 5 { break }
-        }
-        if !calHits.isEmpty {
-            lines.append("### CALENDAR (\(calHits.count))")
-            lines.append(contentsOf: calHits.prefix(5))
-            lines.append("")
-        }
-        } // end calendar permission check
+            if !calHits.isEmpty {
+                lines.append("### CALENDAR (\(calHits.count))")
+                lines.append(contentsOf: calHits.prefix(5))
+                lines.append("")
+            }
+        }  // end calendar permission check
 
         // ── Source 3: Transcript grep ─────────────────────────────
         var transcriptHits: [String] = []
         let allItems = (try? KnowledgeItemService(context: ctx.modelContext).allItems()) ?? []
         for item in allItems where item.type == .audio {
             guard let transcript = try? ctx.fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id),
-                  !transcript.segments.isEmpty else { continue }
+                !transcript.segments.isEmpty
+            else { continue }
             let fullText = transcript.segments.map(\.text).joined(separator: " ")
             if fullText.lowercased().contains(q) {
                 // Extract a snippet around the match
@@ -1663,14 +1759,15 @@ enum ShellInterpreter {
 
         // Calendar appearances
         let calSvc = CalendarSyncService()
-        let sixMonths = DateInterval(start: Date().addingTimeInterval(-180*86400), duration: 180*86400)
+        let sixMonths = DateInterval(start: Date().addingTimeInterval(-180 * 86400), duration: 180 * 86400)
         let events = calSvc.fetchEvents(for: sixMonths)
         let relevantEvents = events.filter { event in
             let attNames = (event.attendees ?? []).compactMap { $0.name?.lowercased() }
-            return attNames.contains(where: { $0.contains(name.lowercased()) }) ||
-            event.title.lowercased().contains(name.lowercased())
+            return attNames.contains(where: { $0.contains(name.lowercased()) }) || event.title.lowercased().contains(name.lowercased())
         }
-        let df = DateFormatter(); df.dateStyle = .short; df.timeStyle = .short
+        let df = DateFormatter()
+        df.dateStyle = .short
+        df.timeStyle = .short
         if !relevantEvents.isEmpty {
             lines.append("### CALENDAR (\(relevantEvents.count))")
             for e in relevantEvents.prefix(5) {
@@ -1703,7 +1800,8 @@ enum ShellInterpreter {
             var granted = false
             let sem = DispatchSemaphore(value: 0)
             CNContactStore().requestAccess(for: .contacts) { ok, _ in
-                granted = ok; sem.signal()
+                granted = ok
+                sem.signal()
             }
             sem.wait()
             if !granted { return ([], "Contacts access denied by user.") }
@@ -1714,11 +1812,13 @@ enum ShellInterpreter {
         }
 
         let store = CNContactStore()
-        let keys: [CNKeyDescriptor] = [CNContactGivenNameKey as CNKeyDescriptor,
-                                        CNContactFamilyNameKey as CNKeyDescriptor,
-                                        CNContactEmailAddressesKey as CNKeyDescriptor,
-                                        CNContactOrganizationNameKey as CNKeyDescriptor,
-                                        CNContactJobTitleKey as CNKeyDescriptor]
+        let keys: [CNKeyDescriptor] = [
+            CNContactGivenNameKey as CNKeyDescriptor,
+            CNContactFamilyNameKey as CNKeyDescriptor,
+            CNContactEmailAddressesKey as CNKeyDescriptor,
+            CNContactOrganizationNameKey as CNKeyDescriptor,
+            CNContactJobTitleKey as CNKeyDescriptor,
+        ]
         let predicate = CNContact.predicateForContacts(matchingName: query)
         guard let contacts = try? store.unifiedContacts(matching: predicate, keysToFetch: keys) else { return ([], nil) }
         let results = contacts.compactMap { c -> (String, String?, String?, String?, String)? in
@@ -1726,8 +1826,10 @@ enum ShellInterpreter {
             guard !fullName.isEmpty else { return nil }
             let email = c.emailAddresses.first?.value as? String
             let matchType = fullName.lowercased() == query.lowercased() ? "exact" : "fuzzy"
-            return (fullName, email, c.organizationName.isEmpty ? nil : c.organizationName,
-                    c.jobTitle.isEmpty ? nil : c.jobTitle, matchType)
+            return (
+                fullName, email, c.organizationName.isEmpty ? nil : c.organizationName,
+                c.jobTitle.isEmpty ? nil : c.jobTitle, matchType
+            )
         }
         return (results, nil)
     }
@@ -1740,7 +1842,8 @@ enum ShellInterpreter {
             var granted = false
             let sem = DispatchSemaphore(value: 0)
             EKEventStore.shared.requestFullAccessToEvents { ok, _ in
-                granted = ok; sem.signal()
+                granted = ok
+                sem.signal()
             }
             sem.wait()
             if !granted { return "Calendar access denied by user." }
@@ -1786,7 +1889,8 @@ enum ShellInterpreter {
             item.analysisProviderId = "pending"
             try? ctx.modelContext.save()
         }
-        return ok("Item '\(item.title)' flagged for analysis. The pipeline will process it in the background. To check status: cat items/\(idStr.prefix(8)).json")
+        return ok(
+            "Item '\(item.title)' flagged for analysis. The pipeline will process it in the background. To check status: cat items/\(idStr.prefix(8)).json")
     }
 
     // MARK: - cal (calendar events)
@@ -1807,7 +1911,8 @@ enum ShellInterpreter {
             guard let s = str else { return nil }
             // Try ISO8601 first, then simple date
             if let d = iso.date(from: s) { return d }
-            let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
+            let df = DateFormatter()
+            df.dateFormat = "yyyy-MM-dd"
             return df.date(from: s)
         }
         let fromDate = parseDate(cmd.flags["from"])
@@ -1922,7 +2027,8 @@ enum ShellInterpreter {
         let total = Int(cmd.args.count > 1 ? cmd.args[1] : "1") ?? 1
         let label = cmd.flags["label"] ?? "Processing..."
         let block = ChatBlock.progressUpdate(ProgressUpdateData(step: step, total: total, label: label))
-        return ToolResult(content: "[PROGRESS] Step \(step)/\(total): \(label)", blocks: [block], citations: [], isError: false, displaySummary: "Step \(step)/\(total)")
+        return ToolResult(
+            content: "[PROGRESS] Step \(step)/\(total): \(label)", blocks: [block], citations: [], isError: false, displaySummary: "Step \(step)/\(total)")
     }
 
     // MARK: - vision / describe (image analysis)
@@ -1942,19 +2048,22 @@ enum ShellInterpreter {
         guard let provider = try? ProviderRouter.resolveActive(context: ctx.modelContext) else {
             return shellErr("vision: no AI provider configured. Vision requires a provider with image support.")
         }
-        let question = cmd.args.count > 1
+        let question =
+            cmd.args.count > 1
             ? cmd.args.dropFirst().joined(separator: " ")
             : cmd.flags["question"] ?? "Describe this image in detail. Extract any text visible."
         let saveAsNote = cmd.flags["save-as-note"] != nil
 
         let userMsg = AIMessage(role: .user, content: [.text(question), .imageFile(scanURL)])
         let model = AIConfigService.shared.modelFor(feature: "vision")
-        let request = AIRequest(model: model, messages: [userMsg],
+        let request = AIRequest(
+            model: model, messages: [userMsg],
             temperature: AIConfigService.shared.requestParams(for: "vision", model: model).temperature,
             maxTokens: AIConfigService.shared.requestParams(for: "vision", model: model).maxTokens)
 
         let semaphore = DispatchSemaphore(value: 0)
-        var resultText = ""; var resultError: String?
+        var resultText = ""
+        var resultError: String?
         let visionTask = Task {
             do {
                 let response = try await provider.send(request)
@@ -1963,9 +2072,11 @@ enum ShellInterpreter {
                 try? analysisData?.write(to: dir.appendingPathComponent("vision_analysis.json"))
                 if saveAsNote, !resultText.isEmpty {
                     let svc = KnowledgeItemService(context: ctx.modelContext)
-                    if let note = try? svc.createItem(type: .note, title: "Vision: \(item.title)",
+                    if let note = try? svc.createItem(
+                        type: .note, title: "Vision: \(item.title)",
                         bodyText: "# Image Analysis\n\n**Question:** \(question)\n\n\(resultText)",
-                        tags: ["vision", "ai-analysis"], inboxDate: Date()) {
+                        tags: ["vision", "ai-analysis"], inboxDate: Date())
+                    {
                         if let pid = item.projectID { try? ProjectService(context: ctx.modelContext).addItem(note.id, to: pid) }
                         AppLog.general.info("Vision: saved result as note \(note.title)")
                     }
@@ -2000,14 +2111,14 @@ enum ShellInterpreter {
                 return shellErr("recipe: '\(name)' not found. Use 'recipe list' to see available recipes.")
             }
             let info = """
-            Recipe: \(skill.displayName)
-            Description: \(skill.description)
-            Category: \(skill.category)
-            Template: \(skill.templateID)
-            Model: \(skill.defaultModel)
-            Max Iterations: \(skill.maxIterations)
-            Steps: \(skill.procedure?.steps.map { "\($0.step). \($0.action) — \($0.description)" }.joined(separator: ", ") ?? "none")
-            """
+                Recipe: \(skill.displayName)
+                Description: \(skill.description)
+                Category: \(skill.category)
+                Template: \(skill.templateID)
+                Model: \(skill.defaultModel)
+                Max Iterations: \(skill.maxIterations)
+                Steps: \(skill.procedure?.steps.map { "\($0.step). \($0.action) — \($0.description)" }.joined(separator: ", ") ?? "none")
+                """
             return ok(info)
         default:
             return shellErr("recipe: unknown subcommand '\(sub)'. Use: recipe list, recipe show <name>")
@@ -2025,7 +2136,9 @@ enum ShellInterpreter {
                 let exporter = JSONExporter()
                 if let data = try? exporter.export(item: item, transcript: nil, analysis: nil) {
                     output = String(data: data, encoding: .utf8) ?? ""
-                } else { return shellErr("export: JSON export failed") }
+                } else {
+                    return shellErr("export: JSON export failed")
+                }
             } else {
                 output = MarkdownExporter().export(item: item, transcript: nil, analysis: nil)
             }
@@ -2056,42 +2169,54 @@ enum ShellInterpreter {
         let topic = cmd.args.first ?? "vfs"
         switch topic.lowercased() {
         case "vfs", "filesystem":
-            return ok("""
-            VIRTUAL FILESYSTEM:
-            /                          Root — workspace summary
-            /inbox/                    Items without a project
-            /projects/                 All projects
-            /projects/{name}/          Project directory (cd target)
-              project.json             Metadata, health score
-              items/                   KnowledgeItems (meetings, notes, images)
-              tasks/                   Tasks by status/priority
-              people/                  People in this project
-              edges/                   Graph relationships
-              signals/                 Active alerts and insights
-              analysis/                AI analysis per item (use cat)
-            /agent/prompts/            Editable prompt templates
-            /agent/memories/           Learned patterns
-            /agent/chat/               Conversation history
-            """)
+            return ok(
+                """
+                VIRTUAL FILESYSTEM:
+                /                          Root — workspace summary
+                /inbox/                    Items without a project
+                /projects/                 All projects
+                /projects/{name}/          Project directory (cd target)
+                  project.json             Metadata, health score
+                  items/                   KnowledgeItems (meetings, notes, images)
+                  tasks/                   Tasks by status/priority
+                  people/                  People in this project
+                  edges/                   Graph relationships
+                  signals/                 Active alerts and insights
+                  analysis/                AI analysis per item (use cat)
+                /agent/prompts/            Editable prompt templates
+                /agent/memories/           Learned patterns
+                /agent/chat/               Conversation history
+                """)
         case "ls":
-            return ok("""
-            ls [path] — List directory contents.
-            Flags: --long (details), --type audio|note|image, --status todo|done|analyzed
-                   --tag \"tagname\", --since 7d, --limit 20
-            Examples: ls /, ls tasks/, ls items/ --type audio --since 7
-            """)
+            return ok(
+                """
+                ls [path] — List directory contents.
+                Flags: --long (details), --type audio|note|image, --status todo|done|analyzed
+                       --tag \"tagname\", --since 7d, --limit 20
+                Examples: ls /, ls tasks/, ls items/ --type audio --since 7
+                """)
         case "cd":
             return ok("cd <path> — Change current directory. cd .. to go up, cd / for root.\nExamples: cd /projects/my-project, cd tasks/, cd /inbox")
         case "cat":
-            return ok("cat <path> — Read a file.\nFlags: --json (raw JSON), --fields \"title,body\" (select fields)\nExamples: cat project.json, cat items/\"Meeting Notes\", cat analysis/abc.json")
+            return ok(
+                "cat <path> — Read a file.\nFlags: --json (raw JSON), --fields \"title,body\" (select fields)\nExamples: cat project.json, cat items/\"Meeting Notes\", cat analysis/abc.json"
+            )
         case "find":
-            return ok("find [path] — Search with filters.\nFlags: --tag X, --since 7d, --type audio|note, --status todo|analyzed, --project \"name\", --limit 20\nIn tasks/ dir: finds tasks by status. In items/ dir: finds items.")
+            return ok(
+                "find [path] — Search with filters.\nFlags: --tag X, --since 7d, --type audio|note, --status todo|analyzed, --project \"name\", --limit 20\nIn tasks/ dir: finds tasks by status. In items/ dir: finds items."
+            )
         case "grep":
-            return ok("grep \"query\" [path] — Full-text search.\nSearches item titles, bodies, transcripts, and analysis files.\nExamples: grep \"decision\" items/, grep \"budget\" /projects/my-project/")
+            return ok(
+                "grep \"query\" [path] — Full-text search.\nSearches item titles, bodies, transcripts, and analysis files.\nExamples: grep \"decision\" items/, grep \"budget\" /projects/my-project/"
+            )
         case "touch":
-            return ok("touch <path> — Create item or task.\nFlags: --title \"Name\", --type note|audio|image, --body \"text\", --priority low|medium|high|critical, --owner \"Name\", --tag \"tag\", --due 2026-06-15\nExamples: touch tasks/ --title \"Call John\" --priority high, touch /inbox/ --title \"Quick note\" --type note")
+            return ok(
+                "touch <path> — Create item or task.\nFlags: --title \"Name\", --type note|audio|image, --body \"text\", --priority low|medium|high|critical, --owner \"Name\", --tag \"tag\", --due 2026-06-15\nExamples: touch tasks/ --title \"Call John\" --priority high, touch /inbox/ --title \"Quick note\" --type note"
+            )
         case "echo":
-            return ok("echo '{\"field\":\"value\"}' > <path> — Update fields.\nUpdate tasks: echo '{\"status\":\"done\"}' > tasks/TaskName\nUpdate items: echo '{\"title\":\"New name\"}' > items/ItemName\nUpdate project: echo '{\"summary\":\"...\"}' > project.json")
+            return ok(
+                "echo '{\"field\":\"value\"}' > <path> — Update fields.\nUpdate tasks: echo '{\"status\":\"done\"}' > tasks/TaskName\nUpdate items: echo '{\"title\":\"New name\"}' > items/ItemName\nUpdate project: echo '{\"summary\":\"...\"}' > project.json"
+            )
         case "rm", "mv", "head", "wc", "history", "extract", "status":
             return ok("\(topic) — Use 'help vfs' to see all commands and their descriptions.")
         default:
@@ -2131,13 +2256,18 @@ enum ShellInterpreter {
     /// Returns an error if the agent is sandboxed and tries to list/access other items.
     private static func checkSandboxGlobal(_ ctx: ToolContext) -> ToolResult? {
         guard ctx.sandboxedItemID != nil else { return nil }
-        return shellErr("Access denied: browsing other items is not allowed during item analysis. Use 'extract <item-id>' to get the content of the item being analyzed, or 'cat' to read files within it.")
+        return shellErr(
+            "Access denied: browsing other items is not allowed during item analysis. Use 'extract <item-id>' to get the content of the item being analyzed, or 'cat' to read files within it."
+        )
     }
 
     // MARK: - Helpers
 
     private static let dateFormatter: DateFormatter = {
-        let f = DateFormatter(); f.dateStyle = .short; f.timeStyle = .short; return f
+        let f = DateFormatter()
+        f.dateStyle = .short
+        f.timeStyle = .short
+        return f
     }()
 
     private static func formattedDate(_ date: Date) -> String {
@@ -2153,7 +2283,8 @@ enum ShellInterpreter {
     }
 
     /// Known command names for did-you-mean suggestions (used by dispatch default).
-    private static let knownCommands: Set<String> = ["ls", "cd", "cat", "echo", "touch", "rm", "mv", "find",
-        "grep", "wc", "man", "history", "help", "pwd", "mkdir", "ask_user", "plan", "assign", "progress", "cleanup", "person"]
+    private static let knownCommands: Set<String> = [
+        "ls", "cd", "cat", "echo", "touch", "rm", "mv", "find",
+        "grep", "wc", "man", "history", "help", "pwd", "mkdir", "ask_user", "plan", "assign", "progress", "cleanup", "person",
+    ]
 }
-

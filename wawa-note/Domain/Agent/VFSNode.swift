@@ -4,35 +4,35 @@ import Foundation
 
 enum VFSNodeType: String, Codable, Sendable, Hashable {
     case directory
-    case markdownFile     // .md
-    case jsonFile         // .json
-    case audioFile        // .m4a
-    case imageFile        // .jpg, .png
-    case projectFile      // project.json (special)
+    case markdownFile  // .md
+    case jsonFile  // .json
+    case audioFile  // .m4a
+    case imageFile  // .jpg, .png
+    case projectFile  // project.json (special)
     case unknown
 }
 
 // MARK: - VFS Node Metadata
 
 struct VFSNodeMetadata: Sendable, Codable, Hashable {
-    var itemType: String?           // KnowledgeItemType: audio, note, image, journalEntry, webBookmark
-    var itemStatus: String?         // ItemStatus: draft, recording, analyzed, etc.
-    var projectStatus: String?      // ProjectStatus: active, archived, completed
+    var itemType: String?  // KnowledgeItemType: audio, note, image, journalEntry, webBookmark
+    var itemStatus: String?  // ItemStatus: draft, recording, analyzed, etc.
+    var projectStatus: String?  // ProjectStatus: active, archived, completed
     var healthStatus: String?
     var healthScore: Double?
     var taskCount: Int?
     var itemCount: Int?
     var tags: [String]?
     var durationSeconds: Double?
-    var swiftDataID: UUID?          // Backing model UUID for write operations
+    var swiftDataID: UUID?  // Backing model UUID for write operations
     var isConfigProject: Bool = false
-    var priority: String?           // TaskPriority
-    var owner: String?              // Task owner
-    var dueAt: Date?                // Task due date
-    var edgeType: String?           // GraphEdge type
-    var signalType: String?         // AgentSuggestion type
+    var priority: String?  // TaskPriority
+    var owner: String?  // Task owner
+    var dueAt: Date?  // Task due date
+    var edgeType: String?  // GraphEdge type
+    var signalType: String?  // AgentSuggestion type
     var isFlagged: Bool = false
-    var confidence: Double?         // Annotation/Edge confidence
+    var confidence: Double?  // Annotation/Edge confidence
     var languageCode: String?
     var calendarEventIdentifier: String?
 
@@ -180,26 +180,26 @@ extension VFSNodeType {
     /// SF Symbol icon name for this file type.
     var iconName: String {
         switch self {
-        case .directory:     "folder.fill"
-        case .markdownFile:  "doc.richtext.fill"
-        case .jsonFile:      "curlybraces"
-        case .audioFile:     "waveform"
-        case .imageFile:     "photo.fill"
-        case .projectFile:   "doc.text.fill"
-        case .unknown:       "doc.fill"
+        case .directory: "folder.fill"
+        case .markdownFile: "doc.richtext.fill"
+        case .jsonFile: "curlybraces"
+        case .audioFile: "waveform"
+        case .imageFile: "photo.fill"
+        case .projectFile: "doc.text.fill"
+        case .unknown: "doc.fill"
         }
     }
 
     /// Color tint for this file type.
     var tintColor: String {
         switch self {
-        case .directory:    "#64748B"   // slate gray
-        case .markdownFile: "#2563EB"   // blue
-        case .jsonFile:     "#0D9488"   // teal
-        case .audioFile:    "#7C3AED"   // purple
-        case .imageFile:    "#DB2777"   // pink
-        case .projectFile:  "#B45309"   // amber
-        case .unknown:      "#6B7280"   // gray
+        case .directory: "#64748B"  // slate gray
+        case .markdownFile: "#2563EB"  // blue
+        case .jsonFile: "#0D9488"  // teal
+        case .audioFile: "#7C3AED"  // purple
+        case .imageFile: "#DB2777"  // pink
+        case .projectFile: "#B45309"  // amber
+        case .unknown: "#6B7280"  // gray
         }
     }
 }

@@ -121,9 +121,13 @@ struct AutomationSettings: @unchecked Sendable {
                 if models.isEmpty {
                     // If availableModels not fetched, check AIConfigService
                     let aiModels = AIConfigService.shared.availableModels(for: config.providerConfigId)
-                    if aiModels.contains(model) { found = true; break }
+                    if aiModels.contains(model) {
+                        found = true
+                        break
+                    }
                 } else if models.contains(model) {
-                    found = true; break
+                    found = true
+                    break
                 }
             }
             if !found {

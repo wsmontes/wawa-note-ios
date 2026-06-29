@@ -73,8 +73,13 @@ private struct GeminiRequest: Encodable {
 
     /// Recursive JSON value encoder for tool call arguments.
     enum GeminiAnyValue: Encodable {
-        case string(String), int(Int), double(Double), bool(Bool)
-        case object([String: GeminiAnyValue]), array([GeminiAnyValue]), null
+        case string(String)
+        case int(Int)
+        case double(Double)
+        case bool(Bool)
+        case object([String: GeminiAnyValue])
+        case array([GeminiAnyValue])
+        case null
 
         func encode(to encoder: any Encoder) throws {
             var c = encoder.singleValueContainer()
@@ -144,13 +149,21 @@ private struct GeminiResponse: Decodable {
 
                     init(from decoder: any Decoder) throws {
                         let container = try decoder.singleValueContainer()
-                        if let s = try? container.decode(String.self) { value = s }
-                        else if let i = try? container.decode(Int.self) { value = i }
-                        else if let d = try? container.decode(Double.self) { value = d }
-                        else if let b = try? container.decode(Bool.self) { value = b }
-                        else if let arr = try? container.decode([AnyDecodable].self) { value = arr.map(\.value) }
-                        else if let obj = try? container.decode([String: AnyDecodable].self) { value = obj.mapValues { $0.value } }
-                        else { value = "null" }
+                        if let s = try? container.decode(String.self) {
+                            value = s
+                        } else if let i = try? container.decode(Int.self) {
+                            value = i
+                        } else if let d = try? container.decode(Double.self) {
+                            value = d
+                        } else if let b = try? container.decode(Bool.self) {
+                            value = b
+                        } else if let arr = try? container.decode([AnyDecodable].self) {
+                            value = arr.map(\.value)
+                        } else if let obj = try? container.decode([String: AnyDecodable].self) {
+                            value = obj.mapValues { $0.value }
+                        } else {
+                            value = "null"
+                        }
                     }
                 }
             }
@@ -238,10 +251,12 @@ final class GeminiProvider: AIProvider, @unchecked Sendable {
         // Extract system instruction as top-level field
         let systemText = request.messages
             .filter { $0.role == .system }
-            .compactMap { msg in msg.content.compactMap { block -> String? in
-                if case .text(let t) = block { return t }
-                return nil
-            }.joined(separator: "\n") }
+            .compactMap { msg in
+                msg.content.compactMap { block -> String? in
+                    if case .text(let t) = block { return t }
+                    return nil
+                }.joined(separator: "\n")
+            }
             .joined(separator: "\n\n")
             .nilIfEmpty
 
@@ -275,15 +290,17 @@ final class GeminiProvider: AIProvider, @unchecked Sendable {
                 for tc in tcs {
                     let argsObj: [String: GeminiRequest.GeminiAnyValue]
                     if let data = tc.arguments.data(using: .utf8),
-                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                    {
                         argsObj = obj.mapValues { GeminiRequest.GeminiAnyValue.from($0) }
                     } else {
                         argsObj = [:]
                     }
-                    parts.append(GeminiRequest.Part(
-                        text: nil,
-                        functionCall: GeminiRequest.Part.FunctionCall(name: tc.name, args: argsObj),
-                        functionResponse: nil))
+                    parts.append(
+                        GeminiRequest.Part(
+                            text: nil,
+                            functionCall: GeminiRequest.Part.FunctionCall(name: tc.name, args: argsObj),
+                            functionResponse: nil))
                 }
                 return [GeminiRequest.Content(role: "model", parts: parts)]
             }
@@ -379,7 +396,8 @@ final class GeminiProvider: AIProvider, @unchecked Sendable {
                 if let args = fc.args {
                     let raw: [String: Any] = args.mapValues { $0.value }
                     if let data = try? JSONSerialization.data(withJSONObject: raw),
-                       let jsonStr = String(data: data, encoding: .utf8) {
+                        let jsonStr = String(data: data, encoding: .utf8)
+                    {
                         argsStr = jsonStr
                     } else {
                         argsStr = "{}"
@@ -455,8 +473,8 @@ final class GeminiProvider: AIProvider, @unchecked Sendable {
     }
 }
 
-private extension String {
-    var nilIfEmpty: String? {
+extension String {
+    fileprivate var nilIfEmpty: String? {
         isEmpty ? nil : self
     }
 }

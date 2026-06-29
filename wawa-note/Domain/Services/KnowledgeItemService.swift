@@ -36,7 +36,8 @@ final class KnowledgeItemService {
         try context.save()
         // Write body.md for text-based items (notes, journals) — defense in depth
         if let body = bodyText, !body.isEmpty,
-           type == .note || type == .journalEntry {
+            type == .note || type == .journalEntry
+        {
             let dir = FileArtifactStore().itemDirectoryURL(for: item.id)
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             try? body.write(to: dir.appendingPathComponent("body.md"), atomically: true, encoding: .utf8)
@@ -144,9 +145,11 @@ final class KnowledgeItemService {
         if !successIDs.isEmpty {
             let annPred = FetchDescriptor<Annotation>(predicate: #Predicate { successIDs.contains($0.itemID) })
             if let anns = try? context.fetch(annPred) { for ann in anns { context.delete(ann) } }
-            let edges = try context.fetch(FetchDescriptor<GraphEdge>(predicate: #Predicate {
-                successIDs.contains($0.fromID) || successIDs.contains($0.toID)
-            }))
+            let edges = try context.fetch(
+                FetchDescriptor<GraphEdge>(
+                    predicate: #Predicate {
+                        successIDs.contains($0.fromID) || successIDs.contains($0.toID)
+                    }))
             for edge in edges { context.delete(edge) }
         }
 
@@ -154,7 +157,9 @@ final class KnowledgeItemService {
         for id in deletedIDs { SpotlightIndexService().deleteItem(id) }
 
         if !failedIDs.isEmpty {
-            AppLog.storage.warning("KnowledgeItemService: batch delete — \(deletedCount) deleted, \(failedIDs.count) failed: \(failedIDs.map(\.uuidString).joined(separator: ", "))")
+            AppLog.storage.warning(
+                "KnowledgeItemService: batch delete — \(deletedCount) deleted, \(failedIDs.count) failed: \(failedIDs.map(\.uuidString).joined(separator: ", "))"
+            )
         } else {
             AppLog.event("batch", "Batch deleted \(deletedCount) items")
         }

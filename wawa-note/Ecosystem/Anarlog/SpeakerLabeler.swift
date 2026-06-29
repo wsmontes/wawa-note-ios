@@ -54,7 +54,10 @@ struct SpeakerLabeler {
             if speakerHumanID != nil { return true }
             // DirectMic without speaker_index → likely the self
             if channel == 0, speakerIndex == nil,
-               context?.selfHumanID != nil { return true }
+                context?.selfHumanID != nil
+            {
+                return true
+            }
             return false
         }
 
@@ -72,7 +75,8 @@ struct SpeakerLabeler {
             // 2. DirectMic without speaker_index → "You" (self)
             if channel == 0, speakerIndex == nil {
                 if let selfID = context?.selfHumanID,
-                   let selfName = context?.humanNameByID[selfID] {
+                    let selfName = context?.humanNameByID[selfID]
+                {
                     return selfName
                 }
                 return "You"
@@ -259,10 +263,11 @@ extension SpeakerLabeler {
             } else if let start = overlapStart {
                 let duration = event.time - start
                 if duration >= minOverlapMs, !overlapSpeakers.isEmpty {
-                    overlaps.append(SpeakerOverlap(
-                        startMs: start, endMs: event.time,
-                        speakers: Array(overlapSpeakers).sorted()
-                    ))
+                    overlaps.append(
+                        SpeakerOverlap(
+                            startMs: start, endMs: event.time,
+                            speakers: Array(overlapSpeakers).sorted()
+                        ))
                 }
                 overlapStart = nil
                 overlapSpeakers = []

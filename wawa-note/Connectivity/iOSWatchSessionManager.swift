@@ -1,5 +1,5 @@
-import WatchConnectivity
 import OSLog
+import WatchConnectivity
 
 final class iOSWatchSessionManager: NSObject, WCSessionDelegate, @unchecked Sendable {
     private let coordinator: RecordingCoordinator
@@ -97,7 +97,7 @@ final class iOSWatchSessionManager: NSObject, WCSessionDelegate, @unchecked Send
                     WatchMessageKey.state: "error",
                     WatchMessageKey.elapsedTime: 0,
                     WatchMessageKey.audioLevel: 0,
-                    WatchMessageKey.isActive: false
+                    WatchMessageKey.isActive: false,
                 ])
                 return
             }
@@ -132,7 +132,8 @@ final class iOSWatchSessionManager: NSObject, WCSessionDelegate, @unchecked Send
         MainActor.assumeIsolated {
             switch command {
             case .startRecording:
-                _ = coordinator; coordinator.startRecording()
+                _ = coordinator
+                coordinator.startRecording()
             case .pauseRecording:
                 coordinator.pauseRecording()
             case .resumeRecording:

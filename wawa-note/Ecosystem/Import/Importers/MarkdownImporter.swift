@@ -52,7 +52,9 @@ final class MarkdownImporter: FormatImporter, @unchecked Sendable {
                         case "type": type = KnowledgeItemType(rawValue: value) ?? .note
                         case "tags":
                             if value.hasPrefix("[") {
-                                tags = value.dropFirst().dropLast().split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "\"", with: "") }
+                                tags = value.dropFirst().dropLast().split(separator: ",").map {
+                                    String($0).trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "\"", with: "")
+                                }
                             }
                         default: break
                         }

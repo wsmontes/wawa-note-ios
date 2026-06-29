@@ -11,29 +11,29 @@ enum ChatContext: Equatable, Hashable, Codable {
 
     var key: String {
         switch self {
-        case .global:           return "global"
-        case .inbox:            return "inbox"
-        case .item(let id):     return "item:\(id.uuidString)"
-        case .exploreProjects:  return "explore:projects"
-        case .project(let id):  return "project:\(id.uuidString)"
+        case .global: return "global"
+        case .inbox: return "inbox"
+        case .item(let id): return "item:\(id.uuidString)"
+        case .exploreProjects: return "explore:projects"
+        case .project(let id): return "project:\(id.uuidString)"
         }
     }
 
     var displayName: String {
         switch self {
-        case .global:           return "General"
-        case .inbox:            return "Inbox"
-        case .item:             return "Item"
-        case .exploreProjects:  return "Projects"
-        case .project:          return "Project"
+        case .global: return "General"
+        case .inbox: return "Inbox"
+        case .item: return "Item"
+        case .exploreProjects: return "Projects"
+        case .project: return "Project"
         }
     }
 
     var associatedID: UUID? {
         switch self {
-        case .item(let id):     return id
-        case .project(let id):  return id
-        default:                return nil
+        case .item(let id): return id
+        case .project(let id): return id
+        default: return nil
         }
     }
 

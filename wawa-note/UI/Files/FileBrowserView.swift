@@ -1,5 +1,5 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 /// Finder-like file browser for navigating the virtual filesystem.
 /// Used as a tab within the Explore section.
@@ -74,7 +74,7 @@ struct FileBrowserView: View {
             }
         }
         .alert("Delete \"\(nodeToDelete?.name ?? "")\"?", isPresented: $showDeleteConfirmation) {
-            Button("Cancel", role: .cancel) { }
+            Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) {
                 if let node = nodeToDelete {
                     viewModel.delete(node)
@@ -122,7 +122,9 @@ struct FileBrowserView: View {
         VStack(spacing: 0) {
             // Back / Forward / Parent
             HStack(spacing: 2) {
-                Button { viewModel.goBack() } label: {
+                Button {
+                    viewModel.goBack()
+                } label: {
                     Image(systemName: "chevron.left")
                         .font(.body).fontWeight(.medium)
                         .frame(width: 32, height: 32)
@@ -131,7 +133,9 @@ struct FileBrowserView: View {
                 .buttonStyle(.plain)
                 .opacity(viewModel.canGoBack ? 1 : 0.3)
 
-                Button { viewModel.goForward() } label: {
+                Button {
+                    viewModel.goForward()
+                } label: {
                     Image(systemName: "chevron.right")
                         .font(.body).fontWeight(.medium)
                         .frame(width: 32, height: 32)
@@ -140,7 +144,9 @@ struct FileBrowserView: View {
                 .buttonStyle(.plain)
                 .opacity(viewModel.canGoForward ? 1 : 0.3)
 
-                Button { viewModel.goToParent() } label: {
+                Button {
+                    viewModel.goToParent()
+                } label: {
                     Image(systemName: "arrow.up.circle")
                         .font(.body).fontWeight(.medium)
                         .frame(width: 32, height: 32)

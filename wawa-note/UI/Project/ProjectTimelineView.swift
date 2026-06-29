@@ -1,5 +1,5 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 // MARK: - Enriched Timeline Models
 
@@ -18,9 +18,15 @@ enum TimelineEventKind: String, CaseIterable {
 
     var color: Color {
         switch self {
-        case .audio: .blue; case .note: .orange; case .journalEntry: .purple
-        case .webBookmark: .green; case .image: .pink; case .task: .teal
-        case .decision: .indigo; case .risk: .red; case .question: .orange
+        case .audio: .blue
+        case .note: .orange
+        case .journalEntry: .purple
+        case .webBookmark: .green
+        case .image: .pink
+        case .task: .teal
+        case .decision: .indigo
+        case .risk: .red
+        case .question: .orange
         case .done: .gray
         }
     }
@@ -77,7 +83,9 @@ struct ProjectTimelineView: View {
             filterBar
             Divider()
             if isLoading {
-                Spacer(); ProgressView("Building timeline..."); Spacer()
+                Spacer()
+                ProgressView("Building timeline...")
+                Spacer()
             } else if clusters.isEmpty {
                 Spacer()
                 VStack(spacing: 12) {
@@ -101,8 +109,7 @@ struct ProjectTimelineView: View {
                 HStack(spacing: AppSpacing.xs) {
                     ForEach(TimelineEventKind.allCases, id: \.rawValue) { kind in
                         Button {
-                            if selectedKinds.contains(kind) { selectedKinds.remove(kind) }
-                            else { selectedKinds.insert(kind) }
+                            if selectedKinds.contains(kind) { selectedKinds.remove(kind) } else { selectedKinds.insert(kind) }
                         } label: {
                             HStack(spacing: AppSpacing.xs) {
                                 Image(systemName: iconFor(kind)).font(.system(size: 10))
@@ -150,8 +157,9 @@ struct ProjectTimelineView: View {
 
     private var filteredClusters: [TimelineCluster] {
         clusters.map { c in
-            TimelineCluster(weekStart: c.weekStart, label: c.label,
-                            events: c.events.filter { selectedKinds.contains($0.kind) })
+            TimelineCluster(
+                weekStart: c.weekStart, label: c.label,
+                events: c.events.filter { selectedKinds.contains($0.kind) })
         }.filter { !$0.events.isEmpty }
     }
 
@@ -164,17 +172,20 @@ struct ProjectTimelineView: View {
                 Text(cluster.label).font(.caption).fontWeight(.semibold).foregroundStyle(.secondary)
                 if cluster.decisionCount > 0 {
                     HStack(spacing: 2) {
-                        Image(systemName: "lightbulb.fill").font(.system(size: 8)); Text("\(cluster.decisionCount)").font(.system(size: 9))
+                        Image(systemName: "lightbulb.fill").font(.system(size: 8))
+                        Text("\(cluster.decisionCount)").font(.system(size: 9))
                     }.foregroundStyle(.indigo)
                 }
                 if cluster.riskCount > 0 {
                     HStack(spacing: 2) {
-                        Image(systemName: "exclamationmark.shield.fill").font(.system(size: 8)); Text("\(cluster.riskCount)").font(.system(size: 9))
+                        Image(systemName: "exclamationmark.shield.fill").font(.system(size: 8))
+                        Text("\(cluster.riskCount)").font(.system(size: 9))
                     }.foregroundStyle(.red)
                 }
                 if cluster.actionCount > 0 {
                     HStack(spacing: 2) {
-                        Image(systemName: "checklist").font(.system(size: 8)); Text("\(cluster.actionCount)").font(.system(size: 9))
+                        Image(systemName: "checklist").font(.system(size: 8))
+                        Text("\(cluster.actionCount)").font(.system(size: 9))
                     }.foregroundStyle(.teal)
                 }
                 Spacer()
@@ -259,7 +270,8 @@ struct ProjectTimelineView: View {
         let itemDescriptor = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.projectID == pid })
         if let items = try? ctx.fetch(itemDescriptor) {
             for item in items {
-                var event = TimelineEvent(id: item.id, title: item.title.isEmpty ? "Untitled" : item.title,
+                var event = TimelineEvent(
+                    id: item.id, title: item.title.isEmpty ? "Untitled" : item.title,
                     subtitle: item.type.label, date: item.createdAt, kind: .from(itemType: item.type), sourceItemID: item.id)
 
                 if let analysis = try? FileArtifactStore().readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) {
@@ -267,16 +279,22 @@ struct ProjectTimelineView: View {
                     event.riskTitles = analysis.risks.map { $0.risk }
                     event.actionItems = analysis.actionItems.map { $0.task }
                     for d in analysis.decisions {
-                        allEvents.append(TimelineEvent(id: UUID(), title: d.title, subtitle: "Decision · \(item.title)",
-                            date: item.createdAt, kind: .decision, sourceItemID: item.id))
+                        allEvents.append(
+                            TimelineEvent(
+                                id: UUID(), title: d.title, subtitle: "Decision · \(item.title)",
+                                date: item.createdAt, kind: .decision, sourceItemID: item.id))
                     }
                     for r in analysis.risks {
-                        allEvents.append(TimelineEvent(id: UUID(), title: r.risk, subtitle: "Risk · \(item.title)",
-                            date: item.createdAt, kind: .risk, sourceItemID: item.id))
+                        allEvents.append(
+                            TimelineEvent(
+                                id: UUID(), title: r.risk, subtitle: "Risk · \(item.title)",
+                                date: item.createdAt, kind: .risk, sourceItemID: item.id))
                     }
                     for q in analysis.openQuestions {
-                        allEvents.append(TimelineEvent(id: UUID(), title: q.question, subtitle: "Question · \(item.title)",
-                            date: item.createdAt, kind: .question, sourceItemID: item.id))
+                        allEvents.append(
+                            TimelineEvent(
+                                id: UUID(), title: q.question, subtitle: "Question · \(item.title)",
+                                date: item.createdAt, kind: .question, sourceItemID: item.id))
                     }
                 }
                 allEvents.append(event)
@@ -286,11 +304,15 @@ struct ProjectTimelineView: View {
         let taskDescriptor = FetchDescriptor<TaskItem>(predicate: #Predicate { $0.projectID == pid })
         if let tasks = try? ctx.fetch(taskDescriptor) {
             for task in tasks {
-                allEvents.append(TimelineEvent(id: task.id, title: task.title,
-                    subtitle: "Task · \(task.status.rawValue.capitalized)", date: task.createdAt, kind: .task, sourceItemID: task.sourceItemID))
+                allEvents.append(
+                    TimelineEvent(
+                        id: task.id, title: task.title,
+                        subtitle: "Task · \(task.status.rawValue.capitalized)", date: task.createdAt, kind: .task, sourceItemID: task.sourceItemID))
                 if task.status == .done {
-                    allEvents.append(TimelineEvent(id: UUID(), title: "Completed: \(task.title)",
-                        subtitle: "Task done", date: task.updatedAt, kind: .done, sourceItemID: task.sourceItemID))
+                    allEvents.append(
+                        TimelineEvent(
+                            id: UUID(), title: "Completed: \(task.title)",
+                            subtitle: "Task done", date: task.updatedAt, kind: .done, sourceItemID: task.sourceItemID))
                 }
             }
         }
@@ -336,10 +358,16 @@ struct ProjectTimelineView: View {
 
     private func iconFor(_ kind: TimelineEventKind) -> String {
         switch kind {
-        case .audio: "mic.fill"; case .note: "note.text"; case .journalEntry: "book.fill"
-        case .webBookmark: "bookmark.fill"; case .image: "photo.fill"; case .task: "checklist"
-        case .decision: "lightbulb.fill"; case .risk: "exclamationmark.shield.fill"
-        case .question: "questionmark.circle.fill"; case .done: "checkmark.circle.fill"
+        case .audio: "mic.fill"
+        case .note: "note.text"
+        case .journalEntry: "book.fill"
+        case .webBookmark: "bookmark.fill"
+        case .image: "photo.fill"
+        case .task: "checklist"
+        case .decision: "lightbulb.fill"
+        case .risk: "exclamationmark.shield.fill"
+        case .question: "questionmark.circle.fill"
+        case .done: "checkmark.circle.fill"
         }
     }
 }

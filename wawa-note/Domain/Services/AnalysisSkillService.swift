@@ -1,6 +1,6 @@
 import Foundation
-import SwiftData
 import OSLog
+import SwiftData
 
 // MARK: - Analysis Skill Service
 
@@ -65,16 +65,19 @@ struct AnalysisSkillService {
         var lastResponse: String?
 
         for attempt in 1...maxRetries + 1 {
-            let taskDescription = attempt == 1 ? userPrompt : """
-            \(userPrompt)
+            let taskDescription =
+                attempt == 1
+                ? userPrompt
+                : """
+                \(userPrompt)
 
-            PREVIOUS ATTEMPT FAILED: \(lastError ?? "unknown")
-            Fix the issues and retry.
-            """
+                PREVIOUS ATTEMPT FAILED: \(lastError ?? "unknown")
+                Fix the issues and retry.
+                """
 
             let messages = [
                 AIMessage(role: .system, content: [.text(systemPrompt)]),
-                AIMessage(role: .user, content: [.text(taskDescription)])
+                AIMessage(role: .user, content: [.text(taskDescription)]),
             ]
 
             let params = AIConfigService.shared.requestParams(for: "analysis", model: model)
@@ -87,12 +90,14 @@ struct AnalysisSkillService {
 
                 // Validate
                 if let data = content.data(using: .utf8),
-                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                {
                     let evalResult = eval.validateAnalysis(json)
                     if evalResult.isPassing {
                         let analysis = try parseAnalysisJSON(content, template: template, meetingId: item.id)
-                        cache.set(markdown: content, transcript: userPrompt, templateID: template.id,
-                                  systemPrompt: systemPrompt, modelProvider: provider.id, modelName: model)
+                        cache.set(
+                            markdown: content, transcript: userPrompt, templateID: template.id,
+                            systemPrompt: systemPrompt, modelProvider: provider.id, modelName: model)
                         logger.info("Analysis passed (score: \(evalResult.score)) on attempt \(attempt)")
                         return analysis
                     } else {
@@ -129,13 +134,13 @@ struct AnalysisSkillService {
 
         prompt += """
 
-        ## CRITICAL
-        - You MUST write the analysis using: echo '{"short_summary":"...","decisions":[...],...}' > /inbox/<id>/analysis.json
-        - For project items: echo '...' > /projects/<slug>/analysis/<id>.json
-        - All JSON fields in the template MUST be present
-        - If a field has no data, use null or empty array
-        - Do NOT just describe the analysis — WRITE it with echo
-        """
+            ## CRITICAL
+            - You MUST write the analysis using: echo '{"short_summary":"...","decisions":[...],...}' > /inbox/<id>/analysis.json
+            - For project items: echo '...' > /projects/<slug>/analysis/<id>.json
+            - All JSON fields in the template MUST be present
+            - If a field has no data, use null or empty array
+            - Do NOT just describe the analysis — WRITE it with echo
+            """
 
         return prompt
     }
@@ -162,15 +167,19 @@ struct AnalysisSkillService {
 
     private func extractJSON(from response: String) -> String {
         var text = response
-        if let start = text.range(of: "```json") { text = String(text[start.upperBound...]) }
-        else if let start = text.range(of: "```") { text = String(text[start.upperBound...]) }
+        if let start = text.range(of: "```json") {
+            text = String(text[start.upperBound...])
+        } else if let start = text.range(of: "```") {
+            text = String(text[start.upperBound...])
+        }
         if let end = text.range(of: "```", options: .backwards) { text = String(text[..<end.lowerBound]) }
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func parseAnalysisJSON(_ jsonString: String, template: MeetilyTemplateService.MeetilyTemplate, meetingId: UUID) throws -> MeetingAnalysis {
         guard let data = jsonString.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
             throw ServiceError.invalidJSON
         }
 

@@ -9,11 +9,12 @@ final class FocusModeSensor: ContextSensor, @unchecked Sendable {
         let status = INFocusStatusCenter.default.focusStatus
 
         var annotations: [CapturedAnnotation] = []
-        annotations.append(CapturedAnnotation(
-            source: sensorName,
-            key: "focus_active",
-            value: status.isFocused == true ? "true" : "false"
-        ))
+        annotations.append(
+            CapturedAnnotation(
+                source: sensorName,
+                key: "focus_active",
+                value: status.isFocused == true ? "true" : "false"
+            ))
 
         return annotations
     }

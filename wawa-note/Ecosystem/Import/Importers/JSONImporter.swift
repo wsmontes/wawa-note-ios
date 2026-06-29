@@ -59,7 +59,8 @@ final class JSONImporter: FormatImporter, @unchecked Sendable {
 
         let itemType = KnowledgeItemType(rawValue: imported.item?.type ?? "audio") ?? .audio
 
-        let bodyText = imported.item?.body ?? imported.item?.summary
+        let bodyText =
+            imported.item?.body ?? imported.item?.summary
             ?? imported.meeting?.body ?? imported.meeting?.summary
 
         let item = KnowledgeItem(

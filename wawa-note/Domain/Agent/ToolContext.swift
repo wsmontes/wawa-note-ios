@@ -44,12 +44,14 @@ final class ToolContext: @unchecked Sendable {
         projectColorHexes[projectID]
     }
 
-    init(modelContext: ModelContext, fileStore: FileArtifactStore = FileArtifactStore(),
-         activeProjectID: UUID? = nil, activeProjectName: String? = nil,
-         activeProjectSlug: String? = nil,
-         activeItemID: UUID? = nil, contextKey: String? = nil, contextDisplayName: String? = nil,
-         activeProjectColorHex: String? = nil, projectColorHexes: [UUID: String] = [:],
-         sandboxedItemID: UUID? = nil, activeFramework: ProjectFramework? = nil) {
+    init(
+        modelContext: ModelContext, fileStore: FileArtifactStore = FileArtifactStore(),
+        activeProjectID: UUID? = nil, activeProjectName: String? = nil,
+        activeProjectSlug: String? = nil,
+        activeItemID: UUID? = nil, contextKey: String? = nil, contextDisplayName: String? = nil,
+        activeProjectColorHex: String? = nil, projectColorHexes: [UUID: String] = [:],
+        sandboxedItemID: UUID? = nil, activeFramework: ProjectFramework? = nil
+    ) {
         self.modelContext = modelContext
         self.fileStore = fileStore
         self.activeProjectID = activeProjectID

@@ -33,8 +33,9 @@ struct AnarlogExporter {
 
         // Try to restore original frontmatter for round-trip fidelity
         if let provenanceB64 = item.fieldProvenanceJSON,
-           let provenanceData = Data(base64Encoded: provenanceB64),
-           let provenance = try? JSONDecoder().decode(AnarlogImportProvenance.self, from: provenanceData) {
+            let provenanceData = Data(base64Encoded: provenanceB64),
+            let provenance = try? JSONDecoder().decode(AnarlogImportProvenance.self, from: provenanceData)
+        {
             // Round-trip: restore original frontmatter
             fm = provenance.originalFrontmatter
         } else {

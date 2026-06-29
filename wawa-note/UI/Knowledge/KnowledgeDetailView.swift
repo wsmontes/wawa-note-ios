@@ -1,5 +1,5 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 private enum ReprocessMode: CustomStringConvertible {
     case transcribeOnly
@@ -49,11 +49,7 @@ struct KnowledgeDetailView: View {
     private var isPipelineProcessing: Bool {
         processingQueue.entries.contains(where: {
             $0.itemID == item.id && ($0.status == .queued || $0.status == .processing)
-        }) ||
-        item.status == .preparingAudio ||
-        item.status == .queuedForTranscription ||
-        item.status == .transcribing ||
-        item.status == .analyzing
+        }) || item.status == .preparingAudio || item.status == .queuedForTranscription || item.status == .transcribing || item.status == .analyzing
     }
     @State private var audioPlaybackURL: URL?
     @State private var isPreparingAudio = false
@@ -74,10 +70,10 @@ struct KnowledgeDetailView: View {
         if let p = transcriptionProgress { return p }
         if !pipelineStage.isEmpty { return pipelineStage }
         switch item.status {
-        case .preparingAudio:        return "Preparing audio…"
+        case .preparingAudio: return "Preparing audio…"
         case .queuedForTranscription: return "Queued for transcription…"
-        case .transcribing:          return "Transcribing…"
-        default:                     return "Processing…"
+        case .transcribing: return "Transcribing…"
+        default: return "Processing…"
         }
     }
 
@@ -87,7 +83,7 @@ struct KnowledgeDetailView: View {
                 header
                     .padding(.horizontal, 16)
 
-                if isTranscribing || isPipelineProcessing {
+                if isTranscribing || isPipelineProcessing || (item.type == .audio && transcript == nil && item.status != .failed) {
                     VStack(spacing: 0) {
                         // Current status bar
                         HStack(spacing: 10) {
@@ -138,6 +134,24 @@ struct KnowledgeDetailView: View {
                                 guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
                                 UIApplication.shared.open(url)
                             }.font(.subheadline)
+                        }
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.red.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                } else if item.status == .failed, !isPipelineProcessing {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Transcription failed").font(.subheadline).fontWeight(.medium)
+                                Text(transcriptionError ?? "Unknown error")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                     .padding(12)
@@ -217,11 +231,12 @@ struct KnowledgeDetailView: View {
                 // Gated behind #if DEBUG so it's NEVER compiled into App Store builds,
                 // even if the UserDefaults key is accidentally set.
                 #if DEBUG
-                if UserDefaults.standard.bool(forKey: "developer_mode_enabled"),
-                   let a = analysis, a.shortSummary.trimmingCharacters(in: .whitespaces).isEmpty {
-                    rawResponseSection
-                        .padding(.top, 12)
-                }
+                    if UserDefaults.standard.bool(forKey: "developer_mode_enabled"),
+                        let a = analysis, a.shortSummary.trimmingCharacters(in: .whitespaces).isEmpty
+                    {
+                        rawResponseSection
+                            .padding(.top, 12)
+                    }
                 #endif
 
                 if !annotations.isEmpty {
@@ -235,7 +250,7 @@ struct KnowledgeDetailView: View {
             }
             .padding(.vertical, 16)
         }
-        .id(refreshID) // force re-render on pipeline complete
+        .id(refreshID)  // force re-render on pipeline complete
         .background(Color(.systemGroupedBackground))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -265,7 +280,8 @@ struct KnowledgeDetailView: View {
                     }
 
                     // Reprocess menu — available for any processable item.
-                    let canReprocess = item.type == .audio || item.type == .image
+                    let canReprocess =
+                        item.type == .audio || item.type == .image
                         || item.bodyText != nil || item.analysisProviderId != nil
                         || item.transcriptionEngineId != nil
                     if canReprocess {
@@ -276,14 +292,16 @@ struct KnowledgeDetailView: View {
                                     Button {
                                         Task { await reprocessItem(mode: .transcribeOnly, forceAppleOnDevice: true) }
                                     } label: {
-                                        Label(already ? "Re-transcribe (Apple)" : "Transcribe (Apple)",
-                                              systemImage: "iphone.gen3")
+                                        Label(
+                                            already ? "Re-transcribe (Apple)" : "Transcribe (Apple)",
+                                            systemImage: "iphone.gen3")
                                     }
                                     Button {
                                         Task { await reprocessItem(mode: .transcribeOnly, forceAppleOnDevice: false) }
                                     } label: {
-                                        Label(already ? "Re-transcribe (Whisper)" : "Transcribe (Whisper)",
-                                              systemImage: "cloud")
+                                        Label(
+                                            already ? "Re-transcribe (Whisper)" : "Transcribe (Whisper)",
+                                            systemImage: "cloud")
                                     }
                                 }
                             }
@@ -291,12 +309,14 @@ struct KnowledgeDetailView: View {
                                 Button {
                                     Task { await reprocessItem(mode: .transcribeOnly) }
                                 } label: {
-                                    Label(item.bodyText?.isEmpty != false ? "Extract Text" : "Re-extract Text",
-                                          systemImage: "text.viewfinder")
+                                    Label(
+                                        item.bodyText?.isEmpty != false ? "Extract Text" : "Re-extract Text",
+                                        systemImage: "text.viewfinder")
                                 }
                             }
                             // Re-analyze: only when there's content to analyze
-                            let canAnalyze = (item.type == .audio && item.transcriptionEngineId != nil)
+                            let canAnalyze =
+                                (item.type == .audio && item.transcriptionEngineId != nil)
                                 || (item.type == .image && item.bodyText?.isEmpty == false)
                                 || item.bodyText?.isEmpty == false
                                 || item.analysisProviderId != nil
@@ -307,7 +327,8 @@ struct KnowledgeDetailView: View {
                                     Label("Re-analyze", systemImage: "brain.head.profile")
                                 }
                             }
-                            let canFullReprocess = (item.type == .audio && item.transcriptionEngineId != nil && item.analysisProviderId != nil)
+                            let canFullReprocess =
+                                (item.type == .audio && item.transcriptionEngineId != nil && item.analysisProviderId != nil)
                                 || (item.type == .image && item.bodyText?.isEmpty == false && item.analysisProviderId != nil)
                             if canFullReprocess {
                                 Divider()
@@ -332,29 +353,35 @@ struct KnowledgeDetailView: View {
                                     ShareLink("Markdown", item: url)
                                 }
                                 if let jsonData = try? JSONExporter().export(item: item, transcript: transcript, analysis: analysis),
-                                   let jsonString = String(data: jsonData, encoding: .utf8),
-                                   let url = tempExportURL(ext: "json", content: jsonString) {
+                                    let jsonString = String(data: jsonData, encoding: .utf8),
+                                    let url = tempExportURL(ext: "json", content: jsonString)
+                                {
                                     ShareLink("JSON Export", item: url)
                                 }
                             }
                             // Subtitle exports (when transcript is available)
                             if let t = transcript,
-                               let srt = SRTExporter.export(transcript: t, totalDuration: item.durationSeconds),
-                               let url = tempExportURL(ext: "srt", content: srt) {
+                                let srt = SRTExporter.export(transcript: t, totalDuration: item.durationSeconds),
+                                let url = tempExportURL(ext: "srt", content: srt)
+                            {
                                 ShareLink("Subtitles (.srt)", item: url)
                             }
                             if let t = transcript,
-                               let vtt = VTTExporter.export(transcript: t, totalDuration: item.durationSeconds,
-                                                            note: "Exported from Wawa Note"),
-                               let url = tempExportURL(ext: "vtt", content: vtt) {
+                                let vtt = VTTExporter.export(
+                                    transcript: t, totalDuration: item.durationSeconds,
+                                    note: "Exported from Wawa Note"),
+                                let url = tempExportURL(ext: "vtt", content: vtt)
+                            {
                                 ShareLink("Subtitles (.vtt)", item: url)
                             }
                             if let anarlogMD = try? AnarlogExporter().exportMarkdown(item: item),
-                               let url = tempExportURL(ext: "md", content: anarlogMD) {
+                                let url = tempExportURL(ext: "md", content: anarlogMD)
+                            {
                                 ShareLink("Anarlog .md", item: url)
                             }
                             if let meetilyData = try? MeetilyExporter().exportJSON(item: item),
-                               let meetilyString = String(data: meetilyData, encoding: .utf8) {
+                                let meetilyString = String(data: meetilyData, encoding: .utf8)
+                            {
                                 ShareLink("Meetily .json", item: meetilyString)
                             }
                             // Audio export — available even without transcript
@@ -382,10 +409,12 @@ struct KnowledgeDetailView: View {
             connectToItemSheet
         }
         .alert("Re-process Item", isPresented: $showReprocessWarning) {
-            Button("Cancel", role: .cancel) { }
+            Button("Cancel", role: .cancel) {}
             Button("Continue") { Task { await reprocessItem(mode: pendingReprocessMode, confirmed: true) } }
         } message: {
-            Text("You have manually edited this item's content. Re-processing will re-analyze it. Your edits will be protected and AI may suggest changes for your review instead of overwriting them.")
+            Text(
+                "You have manually edited this item's content. Re-processing will re-analyze it. Your edits will be protected and AI may suggest changes for your review instead of overwriting them."
+            )
         }
         .onAppear {
             chatState.context = .item(item.id)
@@ -408,13 +437,17 @@ struct KnowledgeDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: .pipelineCompleted)) { n in
             if n.object as? String == item.id.uuidString {
                 pipelineStage = ""
-                // Force SwiftUI to re-render with fresh data — the managed object
-                // may have been updated in another context.
                 refreshID = UUID()
                 Task { @MainActor in
                     loadRawAnalysisJSON()
                     loadData()
                 }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .transcriptionFailed)) { n in
+            guard n.object as? String == item.id.uuidString else { return }
+            if let errorMsg = n.userInfo?["error"] as? String {
+                transcriptionError = errorMsg
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .contentPipelineStageChanged)) { n in
@@ -442,7 +475,8 @@ struct KnowledgeDetailView: View {
             guard n.object as? String == item.id.uuidString else { return }
             Task { @MainActor in
                 transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id)
-                isTranscribing = false; transcriptionProgress = nil
+                isTranscribing = false
+                transcriptionProgress = nil
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .analysisReady)) { n in
@@ -534,7 +568,8 @@ struct KnowledgeDetailView: View {
                         .padding()
                         .onChange(of: connectSearchText) { _, _ in
                             let all = (try? KnowledgeItemService(context: modelContext).allItems()) ?? []
-                            connectableItems = all
+                            connectableItems =
+                                all
                                 .filter { $0.id != item.id && (connectSearchText.isEmpty || $0.title.localizedCaseInsensitiveContains(connectSearchText)) }
                                 .prefix(20).map { $0 }
                         }
@@ -576,7 +611,10 @@ struct KnowledgeDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Cancel") { showConnectSheet = false; connectSearchText = "" }
+                    Button("Cancel") {
+                        showConnectSheet = false
+                        connectSearchText = ""
+                    }
                 }
             }
         }
@@ -584,10 +622,8 @@ struct KnowledgeDetailView: View {
     }
 
     private var hasContextFields: Bool {
-        item.contextPlaceName != nil || item.contextAudioRoute != nil ||
-        item.contextLatitude != nil || item.contextFocusActive != nil ||
-        item.contextMotionActivity != nil || item.contextBatteryLevel != nil ||
-        item.contextCalendarEventTitle != nil
+        item.contextPlaceName != nil || item.contextAudioRoute != nil || item.contextLatitude != nil || item.contextFocusActive != nil
+            || item.contextMotionActivity != nil || item.contextBatteryLevel != nil || item.contextCalendarEventTitle != nil
     }
 
     private var contextSection: some View {
@@ -637,9 +673,9 @@ struct KnowledgeDetailView: View {
     /// Whether the export menu has anything to offer.
     private var hasExportableContent: Bool {
         transcript != nil || analysis != nil
-        || item.type == .image || item.type == .note
-        || item.type == .journalEntry || item.type == .webBookmark
-        || hasPlayableAudio
+            || item.type == .image || item.type == .note
+            || item.type == .journalEntry || item.type == .webBookmark
+            || hasPlayableAudio
     }
 
     private func resolveAudioAsset() async {
@@ -648,8 +684,13 @@ struct KnowledgeDetailView: View {
         case .singleFileReady(let url):
             audioPlaybackURL = url
         case .segmentsAvailable:
-            // Don't auto-render — wait for user to tap Play or Export.
-            audioPlaybackURL = nil
+            // Auto-render segments into single file — user should see
+            // the player immediately, not a "Prepare Audio" button.
+            // Set rendering state synchronously to avoid flickering the
+            // button before the async render starts.
+            isPreparingAudio = true
+            audioAssetState = .rendering
+            await prepareAudioForPlayback()
         case .unavailable, .failed, .rendering:
             audioPlaybackURL = nil
         }
@@ -685,14 +726,19 @@ struct KnowledgeDetailView: View {
         if let engineId = item.transcriptionEngineId {
             let label = transcriptionServiceLabel(engineId)
             b.append((label, "text.alignleft", .success))
-        } else if hasPlayableAudio { b.append(("Not transcribed", "text.alignleft", .warning)) }
+            // Privacy indicator: show when cloud processing was used
+            if engineId == "apple-cloud" {
+                b.append(("Cloud processed", "cloud", .warning))
+            }
+        } else if hasPlayableAudio {
+            b.append(("Not transcribed", "text.alignleft", .warning))
+        }
         if item.analysisProviderId != nil {
             b.append(("Analyzed", "sparkles", .success))
         } else if item.bodyText != nil && !item.bodyText!.isEmpty {
             b.append(("Analysis pending", "sparkles", .neutral))
         }
-        if item.projectID != nil { b.append((projectName ?? "In project", "folder", .success)) }
-        else { b.append(("No project", "folder", .neutral)) }
+        if item.projectID != nil { b.append((projectName ?? "In project", "folder", .success)) } else { b.append(("No project", "folder", .neutral)) }
         if let cal = item.contextCalendarEventTitle { b.append((cal, "calendar", .neutral)) }
         if let route = item.contextAudioRoute { b.append((route, "airpodspro", .neutral)) }
         return b
@@ -1135,10 +1181,11 @@ struct KnowledgeDetailView: View {
 
     private func dynamicListItem(_ item: Any) -> AnyView {
         if let str = item as? String {
-            return AnyView(HStack(spacing: 6) {
-                Image(systemName: "circle.fill").font(.system(size: 5))
-                Text(str).font(.body).textSelection(.enabled)
-            })
+            return AnyView(
+                HStack(spacing: 6) {
+                    Image(systemName: "circle.fill").font(.system(size: 5))
+                    Text(str).font(.body).textSelection(.enabled)
+                })
         }
         if let dict = item as? [String: Any] {
             return AnyView(dynamicDictView(dict))
@@ -1150,41 +1197,42 @@ struct KnowledgeDetailView: View {
     }
 
     private func dynamicDictView(_ dict: [String: Any]) -> AnyView {
-        AnyView(VStack(alignment: .leading, spacing: 4) {
-            ForEach(dict.keys.sorted(), id: \.self) { k in
-                if let v = dict[k] {
-                    if let str = v as? String, !str.isEmpty {
-                        HStack(spacing: 6) {
-                            Text(k.replacingOccurrences(of: "_", with: " ").capitalized + ":")
-                                .font(.caption).foregroundStyle(.secondary)
-                            Text(str).font(.body).textSelection(.enabled)
-                        }
-                    } else if let nestedArr = v as? [Any] {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(k.replacingOccurrences(of: "_", with: " ").capitalized)
-                                .font(.caption).foregroundStyle(.secondary)
-                            ForEach(Array(nestedArr.enumerated()), id: \.offset) { _, nestedItem in
-                                dynamicListItem(nestedItem)
+        AnyView(
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(dict.keys.sorted(), id: \.self) { k in
+                    if let v = dict[k] {
+                        if let str = v as? String, !str.isEmpty {
+                            HStack(spacing: 6) {
+                                Text(k.replacingOccurrences(of: "_", with: " ").capitalized + ":")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Text(str).font(.body).textSelection(.enabled)
+                            }
+                        } else if let nestedArr = v as? [Any] {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(k.replacingOccurrences(of: "_", with: " ").capitalized)
+                                    .font(.caption).foregroundStyle(.secondary)
+                                ForEach(Array(nestedArr.enumerated()), id: \.offset) { _, nestedItem in
+                                    dynamicListItem(nestedItem)
+                                        .padding(.leading, 8)
+                                }
+                            }
+                        } else if let nestedDict = v as? [String: Any] {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(k.replacingOccurrences(of: "_", with: " ").capitalized)
+                                    .font(.caption).foregroundStyle(.secondary)
+                                dynamicDictView(nestedDict)
                                     .padding(.leading, 8)
                             }
+                        } else {
+                            Text("\(k): \(String(describing: v))").font(.body).textSelection(.enabled)
                         }
-                    } else if let nestedDict = v as? [String: Any] {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(k.replacingOccurrences(of: "_", with: " ").capitalized)
-                                .font(.caption).foregroundStyle(.secondary)
-                            dynamicDictView(nestedDict)
-                                .padding(.leading, 8)
-                        }
-                    } else {
-                        Text("\(k): \(String(describing: v))").font(.body).textSelection(.enabled)
                     }
                 }
             }
-        }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 8)
-        .background(Color(.tertiarySystemFill))
-        .clipShape(RoundedRectangle(cornerRadius: 8)))
+            .padding(.vertical, 4)
+            .padding(.horizontal, 8)
+            .background(Color(.tertiarySystemFill))
+            .clipShape(RoundedRectangle(cornerRadius: 8)))
     }
 
     private func iconForKey(_ key: String) -> String {
@@ -1254,7 +1302,11 @@ struct KnowledgeDetailView: View {
             if !analysis.entities.isEmpty {
                 card(title: renderer.title, systemImage: renderer.icon ?? "person.3") {
                     ForEach(analysis.entities.prefix(10)) { e in
-                        HStack { Text(e.name).font(.body); Spacer(); Text(e.type.rawValue).font(.caption).foregroundStyle(.secondary) }
+                        HStack {
+                            Text(e.name).font(.body)
+                            Spacer()
+                            Text(e.type.rawValue).font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -1262,7 +1314,10 @@ struct KnowledgeDetailView: View {
             if !analysis.importantDates.isEmpty {
                 card(title: renderer.title, systemImage: renderer.icon ?? "calendar") {
                     ForEach(analysis.importantDates) { d in
-                        HStack { Text(d.date).font(.caption).foregroundStyle(.secondary); Text(d.meaning).font(.body) }
+                        HStack {
+                            Text(d.date).font(.caption).foregroundStyle(.secondary)
+                            Text(d.meaning).font(.body)
+                        }
                     }
                 }
             }
@@ -1387,32 +1442,32 @@ struct KnowledgeDetailView: View {
                 .padding(.horizontal, 16)
 
             ForEach(backlinks, id: \.edge.id) { link in
-                    NavigationLink {
-                        KnowledgeDetailView(item: link.sourceItem)
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: edgeIcon(for: link.edge.edgeType))
-                                .font(.caption)
-                                .foregroundStyle(edgeColor(for: link.edge.edgeType))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(link.sourceItem.title.isEmpty ? "Untitled" : link.sourceItem.title)
-                                    .font(.subheadline)
-                                    .lineLimit(1)
-                                Text(edgeLabel(for: link.edge.edgeType))
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
+                NavigationLink {
+                    KnowledgeDetailView(item: link.sourceItem)
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: edgeIcon(for: link.edge.edgeType))
+                            .font(.caption)
+                            .foregroundStyle(edgeColor(for: link.edge.edgeType))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(link.sourceItem.title.isEmpty ? "Untitled" : link.sourceItem.title)
+                                .font(.subheadline)
+                                .lineLimit(1)
+                            Text(edgeLabel(for: link.edge.edgeType))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                         }
-                        .padding(10)
-                        .background(Color(.secondarySystemGroupedBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
                     }
-                    .padding(.horizontal, 16)
+                    .padding(10)
+                    .background(Color(.secondarySystemGroupedBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
+                .padding(.horizontal, 16)
+            }
         }
         .padding(.top, 20)
     }
@@ -1510,10 +1565,12 @@ struct KnowledgeDetailView: View {
         if let text = item.bodyText, !text.isEmpty {
             let hasVision = text.contains("VISUAL ANALYSIS")
             VStack(alignment: .leading, spacing: 6) {
-                Label(hasVision ? "OCR + Vision" : "OCR Text",
-                      systemImage: hasVision ? "eye.fill" : "doc.text.magnifyingglass")
-                    .font(.subheadline).fontWeight(.medium)
-                    .foregroundStyle(hasVision ? .purple : .secondary)
+                Label(
+                    hasVision ? "OCR + Vision" : "OCR Text",
+                    systemImage: hasVision ? "eye.fill" : "doc.text.magnifyingglass"
+                )
+                .font(.subheadline).fontWeight(.medium)
+                .foregroundStyle(hasVision ? .purple : .secondary)
                 Text(text).font(.body)
             }
             .padding(16)
@@ -1583,7 +1640,7 @@ struct KnowledgeDetailView: View {
     private func deletePage(_ index: Int) {
         let dir = fileStore.itemDirectoryURL(for: item.id)
         let count = scannedPages.count
-        guard count > 1 else { return } // Don't delete the only page
+        guard count > 1 else { return }  // Don't delete the only page
 
         // Delete the page file
         let pageURL = dir.appendingPathComponent("scan_\(index).jpg")
@@ -1660,24 +1717,24 @@ struct KnowledgeDetailView: View {
 
     private func contextLabel(for key: String) -> String {
         switch key {
-        case "route_name":  "Microphone"
-        case "route_type":  "Audio Type"
-        case "level":       "Battery"
-        case "state":       "Charging"
+        case "route_name": "Microphone"
+        case "route_type": "Audio Type"
+        case "level": "Battery"
+        case "state": "Charging"
         case "event_title": "Calendar"
         case "event_proximity": "When"
         case "event_location": "Event Location"
         case "place_name", "city", "country": "Location"
         case "lat", "lon", "accuracy": "GPS"
-        case "activity":    "Activity"
-        case "confidence":  "Confidence"
+        case "activity": "Activity"
+        case "confidence": "Confidence"
         default: key.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }
 
     private func contextValue(for key: String, raw: String) -> String {
         switch key {
-        case "level":   "\(raw)%"
+        case "level": "\(raw)%"
         case "lat", "lon": String(raw.prefix(8))
         case "accuracy": "±\(raw)m"
         case "activity": raw.capitalized
@@ -1686,7 +1743,7 @@ struct KnowledgeDetailView: View {
             switch raw {
             case "during": "During meeting"
             case "before": "Upcoming"
-            case "after":  "Just ended"
+            case "after": "Just ended"
             default: raw
             }
         default: raw
@@ -1704,8 +1761,10 @@ struct KnowledgeDetailView: View {
 
     private var filteredAnnotationKeys: [String] {
         // Show most important keys first
-        let priority = ["event_title", "event_proximity", "place_name", "city",
-                        "route_name", "activity", "level", "state"]
+        let priority = [
+            "event_title", "event_proximity", "place_name", "city",
+            "route_name", "activity", "level", "state",
+        ]
         let all = Array(groupedAnnotations.keys)
         let ordered = priority.filter { all.contains($0) }
         let rest = all.filter { !priority.contains($0) }.sorted()
@@ -1763,7 +1822,8 @@ struct KnowledgeDetailView: View {
 
     private func transcribe() async {
         // Check for audio via manifest (segmented) or legacy audio.m4a
-        let hasAudio = fileStore.recordingManifestExists(for: item.id)
+        let hasAudio =
+            fileStore.recordingManifestExists(for: item.id)
             || fileStore.audioFileExists(for: item.id)
         guard hasAudio else {
             transcriptionError = "Audio file not found."
@@ -1825,17 +1885,22 @@ struct KnowledgeDetailView: View {
 
         // Try analysis.json first (agent WriteAnalysisTool output)
         if let data = try? Data(contentsOf: dir.appendingPathComponent("analysis.json")),
-           var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        {
             // Strip metadata wrapper added by WriteAnalysisTool
             json.removeValue(forKey: "_metadata")
-            if !json.isEmpty { rawAnalysisJSON = json; return }
+            if !json.isEmpty {
+                rawAnalysisJSON = json
+                return
+            }
         }
 
         // Try analysis.dynamic.json (pipeline DynamicAnalysis output)
         if let data = try? Data(contentsOf: dir.appendingPathComponent("analysis.dynamic.json")),
-           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let results = dict["results"] as? [String: Any],
-           let storage = results["storage"] as? [String: Any] {
+            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let results = dict["results"] as? [String: Any],
+            let storage = results["storage"] as? [String: Any]
+        {
             rawAnalysisJSON = storage
         }
     }
@@ -1872,7 +1937,8 @@ struct KnowledgeDetailView: View {
         let service = KnowledgeItemService(context: modelContext)
         try? service.updateItem(
             item,
-            title: editedTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? item.title : editedTitle.trimmingCharacters(in: .whitespacesAndNewlines),
+            title: editedTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? item.title : editedTitle.trimmingCharacters(in: .whitespacesAndNewlines),
             bodyText: editedBody.isEmpty ? nil : editedBody,
             tags: nil
         )
@@ -1891,9 +1957,11 @@ struct KnowledgeDetailView: View {
 
     // MARK: - Reprocess
 
-    private func reprocessItem(mode: ReprocessMode = .analyzeOnly,
-                                confirmed: Bool = false,
-                                forceAppleOnDevice: Bool = false) async {
+    private func reprocessItem(
+        mode: ReprocessMode = .analyzeOnly,
+        confirmed: Bool = false,
+        forceAppleOnDevice: Bool = false
+    ) async {
         // Guard against double-tap or race conditions
         guard !isReprocessing else { return }
         // Whisper path needs an AI provider; Apple on-device does not.
@@ -1905,7 +1973,8 @@ struct KnowledgeDetailView: View {
         }
         // Re-analysis modes always need an AI provider.
         if mode != .transcribeOnly,
-           !AIConfigService.shared.isAnalysisAvailable(context: modelContext) {
+            !AIConfigService.shared.isAnalysisAvailable(context: modelContext)
+        {
             analysisError = "No AI provider with an API key is configured. Go to Settings → AI Services."
             return
         }
@@ -1969,14 +2038,17 @@ struct KnowledgeDetailView: View {
             }
             isTranscribing = false
             let fetchedItem = try? KnowledgeItemService(context: modelContext).fetchItem(id: item.id)
-            AppLog.provider.info("🔍 reprocessItem: extraction done — bodyText=\(fetchedItem?.bodyText?.count ?? 0) chars, hasVision=\(fetchedItem?.bodyText?.contains("VISUAL ANALYSIS") ?? false)")
+            AppLog.provider.info(
+                "🔍 reprocessItem: extraction done — bodyText=\(fetchedItem?.bodyText?.count ?? 0) chars, hasVision=\(fetchedItem?.bodyText?.contains("VISUAL ANALYSIS") ?? false)"
+            )
             refreshID = UUID()
             loadData()
         } else {
             // Analysis or full reprocess: enqueue for pipeline processing.
             // The queue handles both extraction + analysis with full progress tracking.
-            processingQueue.enqueue(itemID: item.id, projectID: item.projectID,
-                                    trigger: .directUserAction)
+            processingQueue.enqueue(
+                itemID: item.id, projectID: item.projectID,
+                trigger: .directUserAction)
             AppLog.provider.info("🔍 reprocessItem: enqueued mode=\(mode) for \(item.id.uuidString.prefix(8))")
         }
     }
@@ -2074,10 +2146,11 @@ struct KnowledgeDetailView: View {
     private func pendingConfirmations() -> [[String: Any]]? {
         let url = fileStore.itemDirectoryURL(for: item.id).appendingPathComponent("speakers.json")
         guard FileManager.default.fileExists(atPath: url.path),
-              let data = try? Data(contentsOf: url),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let pending = json["pending_confirmations"] as? [[String: Any]],
-              !pending.isEmpty else { return nil }
+            let data = try? Data(contentsOf: url),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let pending = json["pending_confirmations"] as? [[String: Any]],
+            !pending.isEmpty
+        else { return nil }
         return pending
     }
 
@@ -2097,15 +2170,18 @@ struct KnowledgeDetailView: View {
         case "yes":
             confirmMsg = "✅ CONFIRMED: \(label) is \(guess). Update speakers.json to mark this as high confidence."
             // Update in-memory: move from pending to confirmed
-            speakers["speakers"] = (speakers["speakers"] as? [[String: Any]] ?? []) + [[
-                "label": label, "resolved_to": guess, "confidence": "high",
-                "evidence_summary": "User confirmed this identification."
-            ]]
+            speakers["speakers"] =
+                (speakers["speakers"] as? [[String: Any]] ?? []) + [
+                    [
+                        "label": label, "resolved_to": guess, "confidence": "high",
+                        "evidence_summary": "User confirmed this identification.",
+                    ]
+                ]
             pending.remove(at: index)
         case "no":
             confirmMsg = "❌ REJECTED: \(label) is NOT \(guess). Remove this candidate and reconsider."
             pending.remove(at: index)
-        default: // rephrase
+        default:  // rephrase
             confirmMsg = "❓ REPHRASE: The user wants you to reformulate the question about \(label). Use data from other confirmed speakers to improve."
             // Keep pending, add rephrase flag
             pending[index] = pc.merging(["rephrase": true]) { $1 }
@@ -2122,8 +2198,9 @@ struct KnowledgeDetailView: View {
         // Enqueue re-analysis with confirmation context
         item.analysisProviderId = nil
         try? modelContext.save()
-        processingQueue.enqueue(itemID: item.id, projectID: item.projectID,
-                                trigger: .directUserAction)
+        processingQueue.enqueue(
+            itemID: item.id, projectID: item.projectID,
+            trigger: .directUserAction)
         AppLog.provider.info("🔍 confirmSpeaker: enqueued re-analysis for \(item.id.uuidString.prefix(8))")
     }
 
@@ -2131,8 +2208,9 @@ struct KnowledgeDetailView: View {
     private func readSpeakersJSON() -> [String: Any]? {
         let url = fileStore.itemDirectoryURL(for: item.id).appendingPathComponent("speakers.json")
         guard FileManager.default.fileExists(atPath: url.path),
-              let data = try? Data(contentsOf: url),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+            let data = try? Data(contentsOf: url),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
         return json
     }
 
@@ -2261,8 +2339,17 @@ struct ChipFlowLayout: Layout {
         return rows
     }
 
-    struct LayoutItem { let index: Int; let x: CGFloat; let width: CGFloat; let height: CGFloat }
-    struct LayoutRow { let items: [LayoutItem]; let y: CGFloat; var maxY: CGFloat { (items.map(\.height).max() ?? 0) + y } }
+    struct LayoutItem {
+        let index: Int
+        let x: CGFloat
+        let width: CGFloat
+        let height: CGFloat
+    }
+    struct LayoutRow {
+        let items: [LayoutItem]
+        let y: CGFloat
+        var maxY: CGFloat { (items.map(\.height).max() ?? 0) + y }
+    }
 }
 
 // MARK: - Rich Body Renderer
@@ -2283,8 +2370,10 @@ struct RichBodyView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             // Fallback: plain text with basic markdown
-            let md = (try? AttributedString(markdown: text,
-                options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            let md =
+                (try? AttributedString(
+                    markdown: text,
+                    options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
                 ?? AttributedString(text)
             Text(md)
                 .font(.body)

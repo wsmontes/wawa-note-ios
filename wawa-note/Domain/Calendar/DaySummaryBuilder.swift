@@ -31,12 +31,14 @@ final class DaySummaryBuilder {
 
         for item in items {
             let day = cal.startOfDay(for: item.scheduledDate ?? item.createdAt)
-            var summary = result[day] ?? DaySummary(
-                date: day,
-                itemCounts: [:],
-                hasOnThisDay: false,
-                journalMood: nil
-            )
+            var summary =
+                result[day]
+                ?? DaySummary(
+                    date: day,
+                    itemCounts: [:],
+                    hasOnThisDay: false,
+                    journalMood: nil
+                )
 
             summary.itemCounts[item.type, default: 0] += 1
 

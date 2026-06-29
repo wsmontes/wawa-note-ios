@@ -1,6 +1,6 @@
 import Foundation
-import UniformTypeIdentifiers
 import PDFKit
+import UniformTypeIdentifiers
 
 struct PDFImporter: FormatImporter {
     let formatIdentifier = "pdf"
@@ -22,7 +22,8 @@ struct PDFImporter: FormatImporter {
             }
         }
 
-        let title = pdf.documentAttributes?[PDFDocumentAttribute.titleAttribute] as? String
+        let title =
+            pdf.documentAttributes?[PDFDocumentAttribute.titleAttribute] as? String
             ?? url.deletingPathExtension().lastPathComponent
 
         let item = KnowledgeItem(

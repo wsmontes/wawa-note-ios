@@ -24,7 +24,8 @@ final class OnThisDayService {
             return []
         }
 
-        return allItems
+        return
+            allItems
             .filter { item in
                 let itemYear = cal.component(.year, from: item.createdAt)
                 let itemMonth = cal.component(.month, from: item.createdAt)

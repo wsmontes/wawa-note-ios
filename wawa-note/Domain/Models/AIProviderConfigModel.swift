@@ -30,8 +30,9 @@ final class AIProviderConfigModel {
     var availableModels: [String] {
         get {
             guard let json = availableModelsJSON,
-                  let data = json.data(using: .utf8),
-                  let arr = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+                let data = json.data(using: .utf8),
+                let arr = try? JSONDecoder().decode([String].self, from: data)
+            else { return [] }
             return arr
         }
         set {
@@ -95,7 +96,8 @@ final class AIProviderConfigModel {
         // Validate availableModelsJSON parses correctly
         if let json = availableModelsJSON, !json.isEmpty {
             if let data = json.data(using: .utf8),
-               (try? JSONDecoder().decode([String].self, from: data)) == nil {
+                (try? JSONDecoder().decode([String].self, from: data)) == nil
+            {
                 errors.append("availableModelsJSON is corrupted (not a valid JSON string array)")
             }
         }

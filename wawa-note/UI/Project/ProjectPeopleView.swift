@@ -1,5 +1,5 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 // MARK: - DEPRECATED: Subsumed by file browser with type filter (2026-06-18)
 struct PersonSummary: Identifiable {
@@ -75,7 +75,8 @@ struct ProjectPeopleView: View {
         let taskSvc = TaskService(context: modelContext)
         let store = FileArtifactStore()
         guard let tasks = try? taskSvc.tasks(for: projectID),
-              let items = try? projSvc.items(in: projectID) else {
+            let items = try? projSvc.items(in: projectID)
+        else {
             isLoading = false
             return
         }
@@ -111,8 +112,10 @@ struct ProjectPeopleView: View {
             nameToSummary[person.displayName] = s
         }
 
-        people = nameToSummary.map { PersonSummary(id: $1.id, name: $0, role: $1.role, taskCount: $1.taskCount, openTaskCount: $1.openTaskCount, mentionCount: $1.mentionCount) }
-            .sorted { $0.taskCount > $1.taskCount }
+        people = nameToSummary.map {
+            PersonSummary(id: $1.id, name: $0, role: $1.role, taskCount: $1.taskCount, openTaskCount: $1.openTaskCount, mentionCount: $1.mentionCount)
+        }
+        .sorted { $0.taskCount > $1.taskCount }
         isLoading = false
     }
 }

@@ -1,5 +1,5 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 struct DayActivityView: View {
     let date: Date
@@ -43,10 +43,14 @@ struct DayActivityView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button { showNewNote = true } label: {
+                    Button {
+                        showNewNote = true
+                    } label: {
                         Label("New Note", systemImage: "square.and.pencil")
                     }
-                    Button { showNewJournal = true } label: {
+                    Button {
+                        showNewJournal = true
+                    } label: {
                         Label("New Journal", systemImage: "book")
                     }
                 } label: {

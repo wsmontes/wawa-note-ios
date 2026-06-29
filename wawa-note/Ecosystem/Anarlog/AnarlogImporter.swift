@@ -1,6 +1,6 @@
 import Foundation
-import UniformTypeIdentifiers
 import OSLog
+import UniformTypeIdentifiers
 
 /// Imports anarlog `.md` session notes as KnowledgeItem records.
 ///
@@ -20,7 +20,8 @@ struct AnarlogImporter: FormatImporter {
 
     func canRead(url: URL) -> Bool {
         guard let data = try? Data(contentsOf: url),
-              let content = String(data: data, encoding: .utf8) else {
+            let content = String(data: data, encoding: .utf8)
+        else {
             return false
         }
         return isAnarlogDocument(content)
@@ -45,11 +46,7 @@ struct AnarlogImporter: FormatImporter {
         }
         let fm = doc.frontmatter
         // At least one anarlog-specific field
-        return fm.participants != nil ||
-               fm.transcript != nil ||
-               fm.session != nil ||
-               fm.template != nil ||
-               fm.duration != nil
+        return fm.participants != nil || fm.transcript != nil || fm.session != nil || fm.template != nil || fm.duration != nil
     }
 
     // MARK: - Import
@@ -76,7 +73,8 @@ struct AnarlogImporter: FormatImporter {
         // Get file modification date as fallback
         let fileDate: Date
         if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
-           let modDate = attrs[.modificationDate] as? Date {
+            let modDate = attrs[.modificationDate] as? Date
+        {
             fileDate = modDate
         } else {
             fileDate = Date()
@@ -114,8 +112,9 @@ struct AnarlogImporter: FormatImporter {
         if let transcript = fm.transcript, !transcript.segments.isEmpty {
             let anarlogTranscript = AnarlogTranscriptData(
                 segments: transcript.segments.map { seg in
-                    TranscriptSegmentData(speaker: seg.speaker, text: seg.text,
-                                          startMs: nil, endMs: nil)
+                    TranscriptSegmentData(
+                        speaker: seg.speaker, text: seg.text,
+                        startMs: nil, endMs: nil)
                 }
             )
             do {

@@ -32,13 +32,13 @@ final class ModelResolver: ObservableObject {
 
     enum Task: String, CaseIterable, Codable {
         case chat
-        case enhance       // meeting analysis
-        case title         // auto-title generation
-        case toolCalling   // agent tool execution
-        case audio         // transcription
-        case embedding     // semantic search embeddings
-        case summary       // daily/weekly summaries
-        case quick         // fast, cheap operations
+        case enhance  // meeting analysis
+        case title  // auto-title generation
+        case toolCalling  // agent tool execution
+        case audio  // transcription
+        case embedding  // semantic search embeddings
+        case summary  // daily/weekly summaries
+        case quick  // fast, cheap operations
 
         var displayName: String {
             switch self {
@@ -76,43 +76,43 @@ final class ModelResolver: ObservableObject {
             "claude-opus-4-7",
             "gpt-5.5",
             "claude-haiku-4.5",
-            "gpt-4o"
+            "gpt-4o",
         ],
         .enhance: [
             "claude-sonnet-4-6",
             "gpt-5.5",
             "claude-opus-4-7",
-            "gpt-4o"
+            "gpt-4o",
         ],
         .title: [
             "gpt-5-nano",
             "claude-haiku-4.5",
-            "gpt-4o-mini"
+            "gpt-4o-mini",
         ],
         .toolCalling: [
             "claude-sonnet-4-6",
             "claude-opus-4-7",
             "gpt-5.5",
-            "claude-haiku-4.5"
+            "claude-haiku-4.5",
         ],
         .audio: [
-            "gpt-5.5",           // Whisper via OpenAI
-            "claude-sonnet-4-6"  // Some models support audio
+            "gpt-5.5",  // Whisper via OpenAI
+            "claude-sonnet-4-6",  // Some models support audio
         ],
         .embedding: [
             "gpt-5.5",
-            "gpt-4o"
+            "gpt-4o",
         ],
         .summary: [
             "claude-haiku-4.5",
             "gpt-5-nano",
-            "gpt-4o-mini"
+            "gpt-4o-mini",
         ],
         .quick: [
             "gpt-5-nano",
             "claude-haiku-4.5",
-            "gpt-4o-mini"
-        ]
+            "gpt-4o-mini",
+        ],
     ]
 
     /// User-customized model tiers (overrides defaults).
@@ -138,7 +138,8 @@ final class ModelResolver: ObservableObject {
     func fallbackModel(after failedModel: String, for task: Task) -> String? {
         let tier = models(for: task)
         guard let failedIndex = tier.firstIndex(of: failedModel),
-              failedIndex + 1 < tier.count else {
+            failedIndex + 1 < tier.count
+        else {
             return nil
         }
         return tier[failedIndex + 1]
@@ -173,7 +174,8 @@ final class ModelResolver: ObservableObject {
 
     private func loadCustomTiers() {
         guard let data = defaults.data(forKey: "model_resolver_tiers"),
-              let decoded = try? JSONDecoder().decode([String: [String]].self, from: data) else {
+            let decoded = try? JSONDecoder().decode([String: [String]].self, from: data)
+        else {
             return
         }
         for (key, models) in decoded {
@@ -205,7 +207,7 @@ extension ModelResolver {
                 return model
             }
         }
-        return availableModels.first // Fallback to whatever is available
+        return availableModels.first  // Fallback to whatever is available
     }
 
     /// Check if a model is appropriate for a given task.

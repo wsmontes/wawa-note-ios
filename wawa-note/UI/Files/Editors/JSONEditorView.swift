@@ -109,13 +109,19 @@ struct JSONEditorView: View {
             if mode != .form {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        Button { prettyPrint() } label: {
+                        Button {
+                            prettyPrint()
+                        } label: {
                             Label("Pretty Print", systemImage: "text.alignleft")
                         }
-                        Button { validateOnly() } label: {
+                        Button {
+                            validateOnly()
+                        } label: {
                             Label("Validate", systemImage: "checkmark.shield")
                         }
-                        Button { switchToForm() } label: {
+                        Button {
+                            switchToForm()
+                        } label: {
                             Label("Open in Form", systemImage: "rectangle.3.group")
                         }
                     } label: {
@@ -157,9 +163,10 @@ struct JSONEditorView: View {
 
     private func prettyPrint() {
         guard let data = content.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data),
-              let prettyData = try? JSONSerialization.data(withJSONObject: obj, options: .prettyPrinted),
-              let pretty = String(data: prettyData, encoding: .utf8) else {
+            let obj = try? JSONSerialization.jsonObject(with: data),
+            let prettyData = try? JSONSerialization.data(withJSONObject: obj, options: .prettyPrinted),
+            let pretty = String(data: prettyData, encoding: .utf8)
+        else {
             jsonError = "Invalid JSON — cannot pretty-print"
             return
         }

@@ -1,5 +1,5 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 enum ProjectSortOrder: CaseIterable { case recent, name, created }
 
@@ -24,10 +24,12 @@ struct ProjectListView: View {
 
     private var sortedProjects: [Project] {
         let nonConfig = projects.filter { !ConfigProjectService.isConfigProject($0) }
-        let filtered = searchText.isEmpty ? nonConfig : nonConfig.filter {
-            $0.name.localizedCaseInsensitiveContains(searchText) ||
-            ($0.summary ?? "").localizedCaseInsensitiveContains(searchText)
-        }
+        let filtered =
+            searchText.isEmpty
+            ? nonConfig
+            : nonConfig.filter {
+                $0.name.localizedCaseInsensitiveContains(searchText) || ($0.summary ?? "").localizedCaseInsensitiveContains(searchText)
+            }
         switch sortOrder {
         case .recent: return filtered.sorted { $0.updatedAt > $1.updatedAt }
         case .name: return filtered.sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
@@ -48,7 +50,9 @@ struct ProjectListView: View {
         .searchable(text: $searchText, prompt: "Search projects")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { showNewProject = true } label: {
+                Button {
+                    showNewProject = true
+                } label: {
                     Label("New Project", systemImage: "plus")
                 }
             }
@@ -118,7 +122,9 @@ struct ProjectListView: View {
                         project.status = project.status == .archived ? .active : .archived
                         try? modelContext.save()
                     } label: {
-                        Label(project.status == .archived ? "Restore" : "Archive", systemImage: project.status == .archived ? "arrow.uturn.backward" : "archivebox")
+                        Label(
+                            project.status == .archived ? "Restore" : "Archive",
+                            systemImage: project.status == .archived ? "arrow.uturn.backward" : "archivebox")
                     }.tint(.orange)
                     Button(role: .destructive) {
                         let svc = ProjectService(context: modelContext)

@@ -26,12 +26,15 @@ struct FileRowView: View {
             // Name + metadata
             VStack(alignment: .leading, spacing: 2) {
                 if isRenaming {
-                    TextField("Name", text: $newName, onCommit: {
-                        if !newName.isEmpty, newName != node.name {
-                            onRename?(newName)
+                    TextField(
+                        "Name", text: $newName,
+                        onCommit: {
+                            if !newName.isEmpty, newName != node.name {
+                                onRename?(newName)
+                            }
+                            isRenaming = false
                         }
-                        isRenaming = false
-                    })
+                    )
                     .textFieldStyle(.plain)
                     .font(.body)
                 } else {
@@ -82,14 +85,18 @@ struct FileRowView: View {
         }
         .swipeActions(edge: .trailing) {
             if onDelete != nil {
-                Button(role: .destructive) { onDelete?() } label: {
+                Button(role: .destructive) {
+                    onDelete?()
+                } label: {
                     Label("Delete", systemImage: "trash")
                 }
             }
         }
         .swipeActions(edge: .leading) {
             if onMove != nil {
-                Button { onMove?() } label: {
+                Button {
+                    onMove?()
+                } label: {
                     Label("Move", systemImage: "arrow.right.circle")
                 }.tint(.orange)
             }
@@ -109,13 +116,17 @@ struct FileRowView: View {
     @ViewBuilder
     private var contextMenuContent: some View {
         if let onOpen {
-            Button { onOpen() } label: {
+            Button {
+                onOpen()
+            } label: {
                 Label(node.isDirectory ? "Open Folder" : "Open File", systemImage: node.isDirectory ? "arrow.right.circle" : "doc.text.fill")
             }
         }
 
         if onEdit != nil, !node.isDirectory {
-            Button { onEdit?() } label: {
+            Button {
+                onEdit?()
+            } label: {
                 Label("Edit", systemImage: "pencil")
             }
         }
@@ -132,33 +143,43 @@ struct FileRowView: View {
         }
 
         if onDuplicate != nil {
-            Button { onDuplicate?() } label: {
+            Button {
+                onDuplicate?()
+            } label: {
                 Label("Duplicate", systemImage: "plus.square.on.square")
             }
         }
 
         if onMove != nil {
-            Button { onMove?() } label: {
+            Button {
+                onMove?()
+            } label: {
                 Label("Move to...", systemImage: "arrow.right.circle")
             }
         }
 
         if onExport != nil {
-            Button { onExport?() } label: {
+            Button {
+                onExport?()
+            } label: {
                 Label("Export", systemImage: "square.and.arrow.up")
             }
         }
 
         if onInfo != nil {
             Divider()
-            Button { onInfo?() } label: {
+            Button {
+                onInfo?()
+            } label: {
                 Label("Get Info", systemImage: "info.circle")
             }
         }
 
         if onDelete != nil {
             Divider()
-            Button(role: .destructive) { onDelete?() } label: {
+            Button(role: .destructive) {
+                onDelete?()
+            } label: {
                 Label("Delete", systemImage: "trash")
             }
         }

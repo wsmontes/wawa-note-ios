@@ -1,8 +1,8 @@
-import Foundation
 import Contacts
 import EventKit
-import SwiftData
+import Foundation
 import OSLog
+import SwiftData
 
 /// Bridges participants between Wawa Note's iOS ecosystem (Contacts, Calendar)
 /// and anarlog's participant format.
@@ -44,7 +44,8 @@ enum AnarlogParticipantBridge {
     static func fromKnowledgeItem(_ item: KnowledgeItem) -> [AnarlogParticipant] {
         let eventStore = EKEventStore()
         guard let eventId = item.calendarEventIdentifier,
-              let event = eventStore.event(withIdentifier: eventId) else {
+            let event = eventStore.event(withIdentifier: eventId)
+        else {
             return []
         }
         return fromCalendarEvent(event)
@@ -63,13 +64,15 @@ enum AnarlogParticipantBridge {
             CNContactFamilyNameKey as CNKeyDescriptor,
             CNContactJobTitleKey as CNKeyDescriptor,
             CNContactOrganizationNameKey as CNKeyDescriptor,
-            CNContactEmailAddressesKey as CNKeyDescriptor
+            CNContactEmailAddressesKey as CNKeyDescriptor,
         ]
 
         let predicate = CNContact.predicateForContacts(matchingName: name)
-        guard let contact = try? store.unifiedContacts(
-            matching: predicate, keysToFetch: keys
-        ).first else {
+        guard
+            let contact = try? store.unifiedContacts(
+                matching: predicate, keysToFetch: keys
+            ).first
+        else {
             return nil
         }
 
@@ -136,19 +139,21 @@ enum AnarlogParticipantBridge {
         var annotations: [CapturedAnnotation] = []
 
         for (idx, p) in participants.enumerated() {
-            annotations.append(CapturedAnnotation(
-                source: source,
-                key: "participant_\(idx)_name",
-                value: p.name,
-                confidence: 1.0
-            ))
-            if let jobTitle = p.jobTitle {
-                annotations.append(CapturedAnnotation(
+            annotations.append(
+                CapturedAnnotation(
                     source: source,
-                    key: "participant_\(idx)_job_title",
-                    value: jobTitle,
-                    confidence: 0.8
+                    key: "participant_\(idx)_name",
+                    value: p.name,
+                    confidence: 1.0
                 ))
+            if let jobTitle = p.jobTitle {
+                annotations.append(
+                    CapturedAnnotation(
+                        source: source,
+                        key: "participant_\(idx)_job_title",
+                        value: jobTitle,
+                        confidence: 0.8
+                    ))
             }
         }
 

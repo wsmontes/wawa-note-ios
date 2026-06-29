@@ -1,6 +1,6 @@
 import AVFoundation
-import UIKit
 import OSLog
+import UIKit
 
 enum AudioSessionError: Error {
     case configurationFailed
@@ -141,7 +141,9 @@ final class AudioSessionManager {
         if let preferred {
             do {
                 try session.setPreferredInput(preferred)
-                AppLog.audio.info("Preferred input: \(preferred.portName)(\(preferred.portType.rawValue)) ch=\(preferred.channels?.count ?? 0) | all=\(self.availableInputsDescription)")
+                AppLog.audio.info(
+                    "Preferred input: \(preferred.portName)(\(preferred.portType.rawValue)) ch=\(preferred.channels?.count ?? 0) | all=\(self.availableInputsDescription)"
+                )
             } catch {
                 AppLog.audio.error("setPreferredInput failed: \(error.localizedDescription) | all=\(self.availableInputsDescription)")
             }
@@ -158,10 +160,12 @@ final class AudioSessionManager {
             // currentRoute.inputs before activation can return stale data
             // during Bluetooth transitions, causing the wrong mode to be set
             // and Bluetooth HFP to enter headset profile instead of HFP.
-            try session.setCategory(.playAndRecord, mode: .default, options: [
-                .allowBluetooth,
-                .defaultToSpeaker
-            ])
+            try session.setCategory(
+                .playAndRecord, mode: .default,
+                options: [
+                    .allowBluetooth,
+                    .defaultToSpeaker,
+                ])
             if let preferredInput = bestAvailableInput {
                 try? session.setPreferredInput(preferredInput)
             }
@@ -187,10 +191,12 @@ final class AudioSessionManager {
         let mode = bestModeForCurrentRoute()
         let snapshot = routeSnapshot(label: "adaptToRouteChange")
         do {
-            try session.setCategory(.playAndRecord, mode: mode, options: [
-                .allowBluetooth,
-                .defaultToSpeaker
-            ])
+            try session.setCategory(
+                .playAndRecord, mode: mode,
+                options: [
+                    .allowBluetooth,
+                    .defaultToSpeaker,
+                ])
             AppLog.audio.info("Session adapted to route: mode=\(mode.rawValue) \(snapshot)")
         } catch {
             AppLog.error("audio", "Failed to adapt session to route change: \(error.localizedDescription) \(snapshot)")
@@ -215,7 +221,8 @@ final class AudioSessionManager {
         let category = session.category.rawValue
         let rate = Int(session.sampleRate)
         let ioBuf = String(format: "%.1fms", session.ioBufferDuration * 1000)
-        return "[\(label)] mode=\(mode) cat=\(category) rate=\(rate)Hz ioBuf=\(ioBuf) | in=[\(inputs.isEmpty ? "none" : inputs)] out=[\(outputs.isEmpty ? "none" : outputs)] avail=[\(available.isEmpty ? "none" : available)]"
+        return
+            "[\(label)] mode=\(mode) cat=\(category) rate=\(rate)Hz ioBuf=\(ioBuf) | in=[\(inputs.isEmpty ? "none" : inputs)] out=[\(outputs.isEmpty ? "none" : outputs)] avail=[\(available.isEmpty ? "none" : available)]"
     }
 
     func reconfigureForRecording() throws {
@@ -240,10 +247,10 @@ final class AudioSessionManager {
             if let freeSize = attrs[.systemFreeSize] as? Int64 {
                 return freeSize >= requiredBytes
             }
-            return true // If we can't determine, don't block
+            return true  // If we can't determine, don't block
         } catch {
             AppLog.audio.warning("Could not check disk space: \(error)")
-            return true // Don't block on failure to check
+            return true  // Don't block on failure to check
         }
     }
 
@@ -287,9 +294,7 @@ final class AudioSessionManager {
     /// Filter to viable recording inputs (has channels, not music-only Bluetooth).
     private func viableInputs(from inputs: [AVAudioSessionPortDescription]) -> [AVAudioSessionPortDescription] {
         inputs.filter {
-            $0.portType != .bluetoothA2DP &&
-            $0.portType != .bluetoothLE &&
-            ($0.channels?.count ?? 0) > 0
+            $0.portType != .bluetoothA2DP && $0.portType != .bluetoothLE && ($0.channels?.count ?? 0) > 0
         }
     }
 

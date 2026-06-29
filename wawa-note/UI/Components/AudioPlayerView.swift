@@ -1,5 +1,5 @@
-import SwiftUI
 import AVFoundation
+import SwiftUI
 
 // MARK: - Reusable Audio Player View
 
@@ -79,7 +79,9 @@ struct AudioPlayerView: View {
             // Controls
             HStack(spacing: 24) {
                 // Skip back 15s
-                Button { service.seek(by: -15) } label: {
+                Button {
+                    service.seek(by: -15)
+                } label: {
                     Image(systemName: "gobackward.15")
                         .font(.title3)
                 }
@@ -88,7 +90,9 @@ struct AudioPlayerView: View {
                 .disabled(service.duration == 0)
 
                 // Play/Pause
-                Button { service.togglePlayPause() } label: {
+                Button {
+                    service.togglePlayPause()
+                } label: {
                     Image(systemName: playIcon)
                         .font(.system(size: 36))
                         .foregroundStyle(.purple)
@@ -96,7 +100,9 @@ struct AudioPlayerView: View {
                 .buttonStyle(.plain)
 
                 // Skip forward 15s
-                Button { service.seek(by: 15) } label: {
+                Button {
+                    service.seek(by: 15)
+                } label: {
                     Image(systemName: "goforward.15")
                         .font(.title3)
                 }
@@ -112,7 +118,9 @@ struct AudioPlayerView: View {
     private var compactLayout: some View {
         HStack(spacing: 8) {
             // Play/Pause
-            Button { service.togglePlayPause() } label: {
+            Button {
+                service.togglePlayPause()
+            } label: {
                 Image(systemName: playIcon)
                     .font(.title2)
                     .foregroundStyle(.purple)

@@ -173,7 +173,7 @@ private struct SkillEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { onSave() } // dismiss
+                Button("Cancel") { onSave() }  // dismiss
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save", action: onSave)

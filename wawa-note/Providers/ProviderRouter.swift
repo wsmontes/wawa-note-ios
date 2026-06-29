@@ -1,6 +1,6 @@
 import Foundation
-import SwiftData
 import OSLog
+import SwiftData
 
 final class ProviderRouter: Sendable {
     private let keychain: SecureKeyStore
@@ -74,9 +74,10 @@ final class ProviderRouter: Sendable {
             guard let keychainId = config.apiKeyKeychainIdentifier else {
                 throw ProviderError.missingAPIKey
             }
-            do { apiKey = try keychain.loadAPIKey(for: keychainId) }
-            catch { throw ProviderError.missingAPIKey }
-        } else { apiKey = "" }
+            do { apiKey = try keychain.loadAPIKey(for: keychainId) } catch { throw ProviderError.missingAPIKey }
+        } else {
+            apiKey = ""
+        }
 
         let id = config.id.uuidString
 

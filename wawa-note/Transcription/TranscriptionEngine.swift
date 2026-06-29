@@ -23,12 +23,12 @@ struct TranscriptionCheckpoint: Codable, Sendable {
 /// Declares what a transcription engine can do.
 /// Guideline: "Modele explicitamente os estados. Tenha uma interface comum."
 struct TranscriptionCapabilities: Sendable {
-    let supportsLive: Bool           // Buffer-based real-time
-    let supportsFile: Bool           // URL-based batch
-    let isOnDevice: Bool             // Guaranteed local (no network)
-    let maxDuration: TimeInterval    // Max audio duration (seconds)
+    let supportsLive: Bool  // Buffer-based real-time
+    let supportsFile: Bool  // URL-based batch
+    let isOnDevice: Bool  // Guaranteed local (no network)
+    let maxDuration: TimeInterval  // Max audio duration (seconds)
     let supportedLocales: [Locale]
-    let hasModelDownload: Bool       // Needs asset download step
+    let hasModelDownload: Bool  // Needs asset download step
 }
 
 // MARK: - Live Transcription Types

@@ -90,7 +90,8 @@ final class AnalysisSkillStore: ObservableObject {
 
             for fileURL in files {
                 guard let data = try? Data(contentsOf: fileURL),
-                      var skill = try? JSONDecoder().decode(AnalysisSkill.self, from: data) else {
+                    var skill = try? JSONDecoder().decode(AnalysisSkill.self, from: data)
+                else {
                     logger.warning("Failed to parse skill: \(fileURL.lastPathComponent)")
                     continue
                 }
@@ -106,8 +107,9 @@ final class AnalysisSkillStore: ObservableObject {
 
     private func applyUserOverrides() {
         guard fileManager.fileExists(atPath: overridesURL.path),
-              let data = try? Data(contentsOf: overridesURL),
-              let overrides = try? JSONDecoder().decode([String: AnalysisSkill].self, from: data) else {
+            let data = try? Data(contentsOf: overridesURL),
+            let overrides = try? JSONDecoder().decode([String: AnalysisSkill].self, from: data)
+        else {
             return
         }
         for (key, skill) in overrides where skill.isUserEdited {
@@ -155,7 +157,8 @@ final class AnalysisSkillStore: ObservableObject {
         case .audio:
             // Check if calendar event title suggests a standup
             if let title = item.contextCalendarEventTitle?.lowercased(),
-               title.contains("standup") || title.contains("daily") {
+                title.contains("standup") || title.contains("daily")
+            {
                 return skill(named: "daily_standup") ?? defaultSkill
             }
             return skill(named: "meeting_analysis") ?? defaultSkill

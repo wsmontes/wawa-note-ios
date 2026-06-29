@@ -19,33 +19,33 @@ struct TranscriptPatchService {
     // MARK: - System Prompt (from anarlog's transcript-patch.system.md.jinja)
 
     static let systemPrompt = """
-    # General Instructions
+        # General Instructions
 
-    You correct ASR transcript words and respond with an RFC 6902 JSON Patch.
+        You correct ASR transcript words and respond with an RFC 6902 JSON Patch.
 
-    # Output Contract
+        # Output Contract
 
-    - Output exactly one JSON object with this shape: {"patch":[...]}.
-    - `patch` must be a valid JSON Patch array.
-    - If no correction is needed, return {"patch":[]}.
-    - Do not wrap the JSON in markdown code fences.
-    - Do not include any explanation.
+        - Output exactly one JSON object with this shape: {"patch":[...]}.
+        - `patch` must be a valid JSON Patch array.
+        - If no correction is needed, return {"patch":[]}.
+        - Do not wrap the JSON in markdown code fences.
+        - Do not include any explanation.
 
-    # Patch Rules
+        # Patch Rules
 
-    - The input document shape is {"words":[{"id":"...","text":"..."}]}.
-    - Only use `replace` operations.
-    - Only modify `/words/<index>/text`.
-    - Never add, remove, reorder, or move words.
-    - Never change `/words/<index>/id`.
-    - Preserve the original language unless the transcript clearly contains mixed-language speech.
+        - The input document shape is {"words":[{"id":"...","text":"..."}]}.
+        - Only use `replace` operations.
+        - Only modify `/words/<index>/text`.
+        - Never add, remove, reorder, or move words.
+        - Never change `/words/<index>/id`.
+        - Preserve the original language unless the transcript clearly contains mixed-language speech.
 
-    # Editing Guidance
+        # Editing Guidance
 
-    - Fix obvious ASR mistakes, punctuation, casing, spacing, and short filler artifacts only when the correction is highly likely.
-    - Prefer conservative edits. If uncertain, leave the word unchanged.
-    - Keep wording faithful to what was probably spoken. Do not summarize or paraphrase.
-    """
+        - Fix obvious ASR mistakes, punctuation, casing, spacing, and short filler artifacts only when the correction is highly likely.
+        - Prefer conservative edits. If uncertain, leave the word unchanged.
+        - Keep wording faithful to what was probably spoken. Do not summarize or paraphrase.
+        """
 
     // MARK: - Types
 
@@ -63,9 +63,9 @@ struct TranscriptPatchService {
     }
 
     struct JSONPatchOperation: Codable {
-        let op: String       // "replace"
-        let path: String     // "/words/0/text"
-        let value: String    // corrected text
+        let op: String  // "replace"
+        let path: String  // "/words/0/text"
+        let value: String  // corrected text
     }
 
     struct PatchResult {
@@ -91,10 +91,10 @@ struct TranscriptPatchService {
         let jsonString = String(data: jsonData, encoding: .utf8) ?? ""
 
         return """
-        Apply corrections to this transcript JSON document:
+            Apply corrections to this transcript JSON document:
 
-        \(jsonString)
-        """
+            \(jsonString)
+            """
     }
 
     // MARK: - Parse response
@@ -138,11 +138,12 @@ struct TranscriptPatchService {
 
             if originalText != correctedText {
                 words[index] = EditableWord(id: words[index].id, text: correctedText)
-                corrections.append(Correction(
-                    wordID: words[index].id,
-                    original: originalText,
-                    corrected: correctedText
-                ))
+                corrections.append(
+                    Correction(
+                        wordID: words[index].id,
+                        original: originalText,
+                        corrected: correctedText
+                    ))
             }
         }
 
@@ -197,8 +198,9 @@ struct TranscriptPatchService {
         // "/words/15/text" → 15
         let components = path.components(separatedBy: "/")
         guard components.count >= 3,
-              components[1] == "words",
-              let index = Int(components[2]) else {
+            components[1] == "words",
+            let index = Int(components[2])
+        else {
             return nil
         }
         return index
@@ -252,7 +254,8 @@ extension TranscriptPatchService {
             let correctedWords = segmentWords.map { word -> String in
                 let trimmed = word.trimmingCharacters(in: .whitespaces)
                 if trimmed.isEmpty { return word }
-                let wordID = "seg\(segments.firstIndex(where: { $0.speaker == segment.speaker }) ?? 0)_\(segment.speaker.replacingOccurrences(of: " ", with: "_"))_w\(wordIndex % segmentWords.count)"
+                let wordID =
+                    "seg\(segments.firstIndex(where: { $0.speaker == segment.speaker }) ?? 0)_\(segment.speaker.replacingOccurrences(of: " ", with: "_"))_w\(wordIndex % segmentWords.count)"
                 let corrected = correctionMap[wordID] ?? trimmed
                 wordIndex += 1
                 return corrected

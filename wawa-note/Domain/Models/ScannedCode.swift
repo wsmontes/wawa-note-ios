@@ -6,11 +6,11 @@ import SwiftData
 /// Represents a single barcode/QR code scan with full metadata.
 struct ScannedCode: Identifiable, Codable, Sendable {
     let id: UUID
-    let value: String           // The decoded string value
-    let type: CodeType           // QR, barcode, etc.
-    let symbology: String        // Raw AVFoundation symbology string (e.g. "org.iso.QRCode")
-    let scannedAt: Date          // Timestamp of scan
-    let index: Int               // Ordinal position in the session
+    let value: String  // The decoded string value
+    let type: CodeType  // QR, barcode, etc.
+    let symbology: String  // Raw AVFoundation symbology string (e.g. "org.iso.QRCode")
+    let scannedAt: Date  // Timestamp of scan
+    let index: Int  // Ordinal position in the session
 
     init(value: String, type: CodeType, symbology: String, index: Int) {
         self.id = UUID()
@@ -26,18 +26,18 @@ struct ScannedCode: Identifiable, Codable, Sendable {
     /// Parses the raw AVFoundation symbology into a user-friendly name.
     var symbologyName: String {
         let raw = symbology
-        if raw == "org.iso.QRCode"           { return "QR Code" }
-        if raw == "org.iso.Aztec"            { return "Aztec" }
-        if raw == "org.iso.PDF417"           { return "PDF417" }
-        if raw == "org.iso.DataMatrix"       { return "Data Matrix" }
-        if raw == "org.gs1.EAN-13"           { return "EAN-13" }
-        if raw == "org.gs1.EAN-8"            { return "EAN-8" }
-        if raw == "org.iso.Code128"          { return "Code 128" }
-        if raw == "org.iso.Code39"           { return "Code 39" }
-        if raw == "org.iso.Code39Mod43"      { return "Code 39 mod 43" }
-        if raw == "org.iso.Code93"           { return "Code 93" }
-        if raw == "org.gs1.ITF14"            { return "ITF-14" }
-        if raw == "org.iso.UPC-E"            { return "UPC-E" }
+        if raw == "org.iso.QRCode" { return "QR Code" }
+        if raw == "org.iso.Aztec" { return "Aztec" }
+        if raw == "org.iso.PDF417" { return "PDF417" }
+        if raw == "org.iso.DataMatrix" { return "Data Matrix" }
+        if raw == "org.gs1.EAN-13" { return "EAN-13" }
+        if raw == "org.gs1.EAN-8" { return "EAN-8" }
+        if raw == "org.iso.Code128" { return "Code 128" }
+        if raw == "org.iso.Code39" { return "Code 39" }
+        if raw == "org.iso.Code39Mod43" { return "Code 39 mod 43" }
+        if raw == "org.iso.Code93" { return "Code 93" }
+        if raw == "org.gs1.ITF14" { return "ITF-14" }
+        if raw == "org.iso.UPC-E" { return "UPC-E" }
         if raw.hasPrefix("org.iso") {
             return raw.replacingOccurrences(of: "org.iso.", with: "").replacingOccurrences(of: "org.gs1.", with: "")
         }
@@ -157,7 +157,7 @@ struct ScanSession: Codable, Sendable {
         var dict: [String: Any] = [
             "sessionID": sessionID.uuidString,
             "startedAt": startedAt.ISO8601Format(),
-            "codeCount": codes.count
+            "codeCount": codes.count,
         ]
         if let endedAt = endedAt {
             dict["endedAt"] = endedAt.ISO8601Format()
@@ -170,11 +170,12 @@ struct ScanSession: Codable, Sendable {
                 "type": code.type.rawValue,
                 "symbology": code.symbology,
                 "detectedDataType": code.detectedDataType.rawValue,
-                "scannedAt": code.scannedAt.ISO8601Format()
+                "scannedAt": code.scannedAt.ISO8601Format(),
             ]
         }
         guard let data = try? JSONSerialization.data(withJSONObject: dict, options: .prettyPrinted),
-              let json = String(data: data, encoding: .utf8) else { return "{}" }
+            let json = String(data: data, encoding: .utf8)
+        else { return "{}" }
         return json
     }
 

@@ -66,7 +66,8 @@ final class BudgetTracker: @unchecked Sendable {
     private func _spentToday() -> Double {
         let today = Calendar.current.startOfDay(for: Date())
         if let storedDate = defaults.object(forKey: spendDateKey) as? Date,
-           Calendar.current.isDate(storedDate, inSameDayAs: today) {
+            Calendar.current.isDate(storedDate, inSameDayAs: today)
+        {
             return defaults.double(forKey: dailySpendKey)
         }
         // New day — reset
@@ -106,9 +107,9 @@ final class BudgetTracker: @unchecked Sendable {
 
     /// Best model tier given the current budget state.
     enum Tier {
-        case premium   // budget remaining > 50%
+        case premium  // budget remaining > 50%
         case standard  // budget remaining 25-50%
-        case economy   // budget remaining < 25% or over budget
+        case economy  // budget remaining < 25% or over budget
     }
 
     var recommendedTier: Tier {
@@ -153,9 +154,11 @@ struct ModelOverride: Sendable {
     var maxTokens: Int?
     var providerID: String?
 
-    init(model: String? = nil, tier: String? = nil,
-         temperature: Double? = nil, maxTokens: Int? = nil,
-         providerID: String? = nil) {
+    init(
+        model: String? = nil, tier: String? = nil,
+        temperature: Double? = nil, maxTokens: Int? = nil,
+        providerID: String? = nil
+    ) {
         self.model = model
         self.tier = tier
         self.temperature = temperature
@@ -183,12 +186,12 @@ enum ProviderPreference: Sendable {
 }
 
 struct ProviderMetrics: Codable, Sendable {
-    var ttftMs: Double?          // Time to first token
-    var totalLatencyMs: Double   // Total request latency
-    var tokensPerSecond: Double? // Throughput
+    var ttftMs: Double?  // Time to first token
+    var totalLatencyMs: Double  // Total request latency
+    var tokensPerSecond: Double?  // Throughput
     var promptTokens: Int?
     var completionTokens: Int?
-    var costUSD: Double?         // OpenRouter cost tracking
+    var costUSD: Double?  // OpenRouter cost tracking
 
     var summary: String {
         var parts: [String] = []
@@ -203,15 +206,15 @@ struct ProviderMetrics: Codable, Sendable {
 // MARK: - Request priority
 
 enum RequestPriority: Sendable, Comparable {
-    case interactive   // user-facing chat — highest priority
-    case userInitiated // user action (export, analyze) — medium
-    case background    // pipeline, indexing — lowest
+    case interactive  // user-facing chat — highest priority
+    case userInitiated  // user action (export, analyze) — medium
+    case background  // pipeline, indexing — lowest
 
     var timeoutSeconds: TimeInterval {
         switch self {
-        case .interactive: 60    // users won't wait >60s
+        case .interactive: 60  // users won't wait >60s
         case .userInitiated: 120
-        case .background: 300    // pipelines can wait
+        case .background: 300  // pipelines can wait
         }
     }
 }
@@ -229,7 +232,8 @@ final class MetricsHistoryStore: @unchecked Sendable {
 
     private func key(for providerID: String, date: Date) -> String {
         let day = Calendar.current.startOfDay(for: date)
-        let fmt = DateFormatter(); fmt.dateFormat = "yyyy-MM-dd"
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
         return "\(prefix)\(providerID)_\(fmt.string(from: day))"
     }
 
@@ -253,7 +257,10 @@ final class MetricsHistoryStore: @unchecked Sendable {
         agg.requestCount += 1
         agg.totalTokens += (metrics.promptTokens ?? 0) + (metrics.completionTokens ?? 0)
         agg.totalLatencyMs += metrics.totalLatencyMs
-        if let ttft = metrics.ttftMs { agg.minTTFTMs = min(agg.minTTFTMs, ttft); agg.maxTTFTMs = max(agg.maxTTFTMs, ttft) }
+        if let ttft = metrics.ttftMs {
+            agg.minTTFTMs = min(agg.minTTFTMs, ttft)
+            agg.maxTTFTMs = max(agg.maxTTFTMs, ttft)
+        }
         if let cost = metrics.costUSD { agg.totalCost += cost }
         save(agg, key: k)
     }
@@ -271,7 +278,8 @@ final class MetricsHistoryStore: @unchecked Sendable {
 
     private func load(key: String) -> DailyAggregate {
         guard let data = defaults.data(forKey: key),
-              let agg = try? JSONDecoder().decode(DailyAggregate.self, from: data) else {
+            let agg = try? JSONDecoder().decode(DailyAggregate.self, from: data)
+        else {
             return DailyAggregate()
         }
         return agg
@@ -304,7 +312,8 @@ final class MetricsTracker {
             let generateTime = max(0.001, (now - (firstTokenTime ?? startTime)) * 1000)
             return Double(totalTokens) / (generateTime / 1000.0)
         }
-        return ProviderMetrics(ttftMs: ttft, totalLatencyMs: totalMs, tokensPerSecond: tps,
+        return ProviderMetrics(
+            ttftMs: ttft, totalLatencyMs: totalMs, tokensPerSecond: tps,
             promptTokens: promptTokens, completionTokens: completionTokens, costUSD: totalCost > 0 ? totalCost : nil)
     }
 }
@@ -322,9 +331,10 @@ final class ModelCache: @unchecked Sendable {
 
     func getCachedModels(for providerId: String) -> [String]? {
         guard let ttl = defaults.object(forKey: ttlKeyPrefix + providerId) as? Date,
-              Date() < ttl,
-              let data = defaults.data(forKey: cacheKeyPrefix + providerId),
-              let models = try? JSONDecoder().decode([String].self, from: data) else {
+            Date() < ttl,
+            let data = defaults.data(forKey: cacheKeyPrefix + providerId),
+            let models = try? JSONDecoder().decode([String].self, from: data)
+        else {
             return nil
         }
         return models
@@ -363,9 +373,13 @@ struct UnifiedModelsResponse: Decodable {
     private struct OllamaItem: Decodable { let name: String }
 
     private struct DynamicKeys: CodingKey {
-        var stringValue: String; var intValue: Int? = nil
+        var stringValue: String
+        var intValue: Int? = nil
         init?(stringValue: String) { self.stringValue = stringValue }
-        init?(intValue: Int) { self.stringValue = "\(intValue)"; self.intValue = intValue }
+        init?(intValue: Int) {
+            self.stringValue = "\(intValue)"
+            self.intValue = intValue
+        }
     }
 }
 
@@ -395,8 +409,8 @@ struct AIRequest: Sendable {
 
     var tools: [AIToolDefinition]?
     var toolChoice: String?
-    var stop: [String]?              // stop sequences (for local models that don't stop naturally)
-    var thinkingBudgetTokens: Int?   // max tokens for thinking/reasoning (Claude, DeepSeek)
+    var stop: [String]?  // stop sequences (for local models that don't stop naturally)
+    var thinkingBudgetTokens: Int?  // max tokens for thinking/reasoning (Claude, DeepSeek)
 }
 
 // MARK: - Message
@@ -429,7 +443,7 @@ struct AIResponse: Codable, Sendable {
     var id: String?
     var model: String?
     var content: String
-    var reasoningContent: String?    // DeepSeek/Claude thinking tokens
+    var reasoningContent: String?  // DeepSeek/Claude thinking tokens
     var rawResponsePath: String?
     var usage: AIUsage?
     var toolCalls: [AIToolCall]?
@@ -461,7 +475,7 @@ enum AIFinishReason: String, Codable, Sendable {
 
 enum AIStreamEvent: Sendable {
     case textDelta(String)
-    case thinkingDelta(String)       // reasoning/thinking tokens (Claude, DeepSeek)
+    case thinkingDelta(String)  // reasoning/thinking tokens (Claude, DeepSeek)
     case toolCallDelta(id: String, name: String?, arguments: String?)
     case finished(AIFinishReason?)
 }
@@ -547,11 +561,15 @@ enum ProviderError: LocalizedError {
         case .invalidBaseURL:
             "The server address doesn't look right. Check it in Settings > AI Services."
         case .requestFailed(let code):
-            code == 401 ? "Your API key was rejected. Check that it's correct in Settings > AI Services." :
-            code == 404 ? "Couldn't reach the server at that address. Check the server address in Settings." :
-            code == 429 ? "You've made too many requests. Wait a moment, then try again." :
-            code >= 500 ? "The AI service is having trouble. This is on their end — try again in a few minutes." :
-            "Something went wrong (error \(code)). Check your connection in Settings."
+            code == 401
+                ? "Your API key was rejected. Check that it's correct in Settings > AI Services."
+                : code == 404
+                    ? "Couldn't reach the server at that address. Check the server address in Settings."
+                    : code == 429
+                        ? "You've made too many requests. Wait a moment, then try again."
+                        : code >= 500
+                            ? "The AI service is having trouble. This is on their end — try again in a few minutes."
+                            : "Something went wrong (error \(code)). Check your connection in Settings."
         case .apiError(let code, let body):
             "Error \(code): \(extractErrorBody(body))"
         case .decodingFailed:
@@ -576,9 +594,10 @@ enum ProviderError: LocalizedError {
 
 private func extractErrorBody(_ body: String) -> String {
     guard let data = body.data(using: .utf8),
-          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let error = json["error"] as? [String: Any],
-          let message = error["message"] as? String else {
+        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let error = json["error"] as? [String: Any],
+        let message = error["message"] as? String
+    else {
         return String(body.prefix(200))
     }
     return message
@@ -639,7 +658,8 @@ final class CircuitBreaker: @unchecked Sendable {
     var state: State {
         lock.withLock {
             if case .open = _state, let last = _lastFailureTime,
-               Date().timeIntervalSince(last) > recoveryTimeout {
+                Date().timeIntervalSince(last) > recoveryTimeout
+            {
                 _state = .halfOpen
             }
             return _state
@@ -652,7 +672,10 @@ final class CircuitBreaker: @unchecked Sendable {
     }
 
     func recordSuccess() {
-        lock.withLock { _state = .closed; _failureCount = 0 }
+        lock.withLock {
+            _state = .closed
+            _failureCount = 0
+        }
     }
 
     func recordFailure() {
@@ -754,8 +777,11 @@ final class LocalProviderScanner: @unchecked Sendable {
     static let shared = LocalProviderScanner()
 
     private struct LocalProviderDef: Sendable {
-        let id: String; let name: String; let defaultPort: Int
-        let modelPath: String; let providerType: ProviderType
+        let id: String
+        let name: String
+        let defaultPort: Int
+        let modelPath: String
+        let providerType: ProviderType
     }
 
     private static let knownProviders: [LocalProviderDef] = [
@@ -803,9 +829,12 @@ final class LocalProviderScanner: @unchecked Sendable {
         let baseURL = URL(string: "http://localhost:\(def.defaultPort)")!
         let modelsURL = baseURL.appendingPathComponent(def.modelPath)
         let start = CFAbsoluteTimeGetCurrent()
-        var isReachable = false; var models: [String] = []; var latencyMs: Double?
+        var isReachable = false
+        var models: [String] = []
+        var latencyMs: Double?
         var request = URLRequest(url: modelsURL)
-        request.httpMethod = "GET"; request.timeoutInterval = probeTimeout
+        request.httpMethod = "GET"
+        request.timeoutInterval = probeTimeout
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -820,7 +849,8 @@ final class LocalProviderScanner: @unchecked Sendable {
         }
         guard isReachable else { return nil }
         AppLog.provider.info("Local scan: found \(def.name) with \(models.count) models (latency: \(String(format: "%.0f", latencyMs ?? 0))ms)")
-        return DiscoveredProvider(id: def.id, name: def.name, providerType: def.providerType,
+        return DiscoveredProvider(
+            id: def.id, name: def.name, providerType: def.providerType,
             baseURL: baseURL, scanPath: def.modelPath, category: .local,
             models: models, isReachable: true, latencyMs: latencyMs, bonjourName: nil)
     }
@@ -855,19 +885,24 @@ final class LocalProviderScanner: @unchecked Sendable {
                     for service in services {
                         let baseURL = URL(string: "http://\(service.host):\(service.port)")!
                         let modelPath = service.name.lowercased().contains("ollama") ? "api/tags" : "v1/models"
-                        var models: [String] = []; var isReachable = false
+                        var models: [String] = []
+                        var isReachable = false
                         var req = URLRequest(url: baseURL.appendingPathComponent(modelPath))
-                        req.httpMethod = "GET"; req.timeoutInterval = 3
+                        req.httpMethod = "GET"
+                        req.timeoutInterval = 3
                         if let (data, resp) = try? await URLSession.shared.data(for: req),
-                           let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode) {
+                            let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode)
+                        {
                             isReachable = true
                             let decoded = try? JSONDecoder().decode(UnifiedModelsResponse.self, from: data)
                             models = decoded?.modelIDs.sorted() ?? []
                         }
-                        results.append(DiscoveredProvider(id: "bonjour-\(service.name)", name: service.name,
-                            providerType: .openAICompatible, baseURL: baseURL, scanPath: modelPath,
-                            category: .local, models: models, isReachable: isReachable,
-                            latencyMs: isReachable ? nil : nil, bonjourName: service.name))
+                        results.append(
+                            DiscoveredProvider(
+                                id: "bonjour-\(service.name)", name: service.name,
+                                providerType: .openAICompatible, baseURL: baseURL, scanPath: modelPath,
+                                category: .local, models: models, isReachable: isReachable,
+                                latencyMs: isReachable ? nil : nil, bonjourName: service.name))
                     }
                     continuation.resume(returning: results)
                 }
@@ -878,7 +913,8 @@ final class LocalProviderScanner: @unchecked Sendable {
     func fetchModels(from url: URL, scanPath: String?) async throws -> [String] {
         let endpoint = url.appendingPathComponent(scanPath ?? "v1/models")
         var request = URLRequest(url: endpoint)
-        request.httpMethod = "GET"; request.timeoutInterval = 10
+        request.httpMethod = "GET"
+        request.timeoutInterval = 10
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             throw ProviderError.requestFailed(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0)

@@ -1,5 +1,5 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 struct ProviderPickerView: View {
     @Query(sort: \AIProviderConfigModel.name) private var providers: [AIProviderConfigModel]
@@ -34,14 +34,17 @@ struct ProviderPickerView: View {
                     }
                     .pickerStyle(.menu)
                     if let active = activeProvider {
-                        Picker("Model", selection: Binding(
-                            get: { active.defaultModel },
-                            set: { newModel in
-                                active.defaultModel = newModel
-                                try? modelContext.save()
-                                syncActiveSelection()
-                            }
-                        )) {
+                        Picker(
+                            "Model",
+                            selection: Binding(
+                                get: { active.defaultModel },
+                                set: { newModel in
+                                    active.defaultModel = newModel
+                                    try? modelContext.save()
+                                    syncActiveSelection()
+                                }
+                            )
+                        ) {
                             ForEach(availableModelsForActive, id: \.self) { model in
                                 Text(model).tag(model)
                             }
@@ -83,7 +86,8 @@ struct ProviderPickerView: View {
 
     private var activeProvider: AIProviderConfigModel? {
         guard let activeId = activeManager.getActiveProviderID(),
-              let uuid = UUID(uuidString: activeId) else { return nil }
+            let uuid = UUID(uuidString: activeId)
+        else { return nil }
         return providers.first(where: { $0.id == uuid })
     }
 
@@ -100,8 +104,9 @@ struct ProviderPickerView: View {
 
     private func syncActiveSelection() {
         if let activeId = activeManager.getActiveProviderID(),
-           let uuid = UUID(uuidString: activeId),
-           let active = providers.first(where: { $0.id == uuid }) {
+            let uuid = UUID(uuidString: activeId),
+            let active = providers.first(where: { $0.id == uuid })
+        {
             activeModelKey = "\(active.type.displayName) · \(active.defaultModel)"
         } else if let first = providers.first {
             activeManager.setActiveProviderID(first.id.uuidString)
@@ -173,7 +178,9 @@ struct ProviderPickerView: View {
     private var advancedSection: some View {
         Section {
             DisclosureGroup("Advanced") {
-                Button { showCustomEditor = true } label: {
+                Button {
+                    showCustomEditor = true
+                } label: {
                     Label("Custom Provider", systemImage: "gearshape.2")
                 }
             }
@@ -228,7 +235,8 @@ struct ProviderPickerView: View {
     private func probeEndpoint(baseURL: String, path: String) async -> Bool {
         guard let url = URL(string: baseURL)?.appendingPathComponent(path) else { return false }
         var request = URLRequest(url: url)
-        request.httpMethod = "GET"; request.timeoutInterval = 3
+        request.httpMethod = "GET"
+        request.timeoutInterval = 3
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
             return (response as? HTTPURLResponse)?.statusCode == 200

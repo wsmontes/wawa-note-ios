@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import Wawa_Note
 
 final class AnarlogDocumentTests: XCTestCase {
@@ -7,17 +8,17 @@ final class AnarlogDocumentTests: XCTestCase {
 
     func testParseBasic() throws {
         let input = """
----
-title: "Sprint Review"
-date: 2025-06-08T10:00:00Z
-duration: 3600
-tags:
-  - sprint
-  - engineering
----
-# Summary
-We reviewed the sprint progress.
-"""
+            ---
+            title: "Sprint Review"
+            date: 2025-06-08T10:00:00Z
+            duration: 3600
+            tags:
+              - sprint
+              - engineering
+            ---
+            # Summary
+            We reviewed the sprint progress.
+            """
 
         let doc = try AnarlogDocument.parse(from: input)
         XCTAssertEqual(doc.frontmatter.title, "Sprint Review")
@@ -28,16 +29,16 @@ We reviewed the sprint progress.
 
     func testParseWithParticipants() throws {
         let input = """
----
-title: "Design Review"
-participants:
-  - name: "Alice"
-    job_title: "Design Lead"
-  - name: "Bob"
----
-# Design Review
-Discussed the new design system.
-"""
+            ---
+            title: "Design Review"
+            participants:
+              - name: "Alice"
+                job_title: "Design Lead"
+              - name: "Bob"
+            ---
+            # Design Review
+            Discussed the new design system.
+            """
 
         let doc = try AnarlogDocument.parse(from: input)
         XCTAssertEqual(doc.frontmatter.participants?.count, 2)
@@ -49,19 +50,19 @@ Discussed the new design system.
 
     func testParseWithTranscript() throws {
         let input = """
----
-title: "Standup"
-transcript:
-  segments:
-    - speaker: "Alice"
-      text: "Shipped the login page"
-    - speaker: "Bob"
-      text: "Working on API"
----
-# Standup Notes
-- Login shipped
-- API in progress
-"""
+            ---
+            title: "Standup"
+            transcript:
+              segments:
+                - speaker: "Alice"
+                  text: "Shipped the login page"
+                - speaker: "Bob"
+                  text: "Working on API"
+            ---
+            # Standup Notes
+            - Login shipped
+            - API in progress
+            """
 
         let doc = try AnarlogDocument.parse(from: input)
         XCTAssertEqual(doc.frontmatter.transcript?.segments.count, 2)
@@ -71,19 +72,19 @@ transcript:
 
     func testParseWithTemplate() throws {
         let input = """
----
-title: "Sprint Planning"
-template:
-  title: "Sprint Plan"
-  description: "Weekly sprint planning template"
-  sections:
-    - title: "Goals"
-      description: "What we want to achieve"
-    - title: "Capacity"
----
-# Goals
-- Ship feature X
-"""
+            ---
+            title: "Sprint Planning"
+            template:
+              title: "Sprint Plan"
+              description: "Weekly sprint planning template"
+              sections:
+                - title: "Goals"
+                  description: "What we want to achieve"
+                - title: "Capacity"
+            ---
+            # Goals
+            - Ship feature X
+            """
 
         let doc = try AnarlogDocument.parse(from: input)
         XCTAssertEqual(doc.frontmatter.template?.title, "Sprint Plan")
@@ -93,17 +94,17 @@ template:
 
     func testParseWithSession() throws {
         let input = """
----
-title: "Q2 Review"
-session:
-  title: "Calendar Event"
-  started_at: "2025-06-08 10:00"
-  ended_at: "2025-06-08 11:00"
-  event:
-    name: "Quarterly Review"
----
-Content here.
-"""
+            ---
+            title: "Q2 Review"
+            session:
+              title: "Calendar Event"
+              started_at: "2025-06-08 10:00"
+              ended_at: "2025-06-08 11:00"
+              event:
+                name: "Quarterly Review"
+            ---
+            Content here.
+            """
 
         let doc = try AnarlogDocument.parse(from: input)
         XCTAssertEqual(doc.frontmatter.session?.title, "Calendar Event")
@@ -113,10 +114,10 @@ Content here.
 
     func testParseEmptyFrontmatter() throws {
         let input = """
----
----
-Content without frontmatter.
-"""
+            ---
+            ---
+            Content without frontmatter.
+            """
 
         let doc = try AnarlogDocument.parse(from: input)
         XCTAssertNil(doc.frontmatter.title)
@@ -132,12 +133,12 @@ Content without frontmatter.
 
     func testParseContentWithDashesInBody() throws {
         let input = """
----
-title: "Test"
----
-Some content with --- dashes in the middle.
-And another --- line.
-"""
+            ---
+            title: "Test"
+            ---
+            Some content with --- dashes in the middle.
+            And another --- line.
+            """
 
         let doc = try AnarlogDocument.parse(from: input)
         XCTAssertTrue(doc.content.contains("--- dashes"))
@@ -165,17 +166,17 @@ And another --- line.
 
     func testRoundTripBasic() throws {
         let input = """
----
-title: "Sprint Review"
-date: 2025-06-08T10:00:00Z
-duration: 3600
-tags:
-  - sprint
-  - engineering
----
-# Summary
-We reviewed the sprint progress.
-"""
+            ---
+            title: "Sprint Review"
+            date: 2025-06-08T10:00:00Z
+            duration: 3600
+            tags:
+              - sprint
+              - engineering
+            ---
+            # Summary
+            We reviewed the sprint progress.
+            """
 
         let doc = try AnarlogDocument.parse(from: input)
         let rendered = try doc.render()
@@ -190,16 +191,16 @@ We reviewed the sprint progress.
 
     func testRoundTripWithParticipants() throws {
         let input = """
----
-participants:
-  - name: "Alice"
-    job_title: "Engineer"
-  - name: "Bob"
-title: "Design Review"
----
-# Notes
-Discussed design system.
-"""
+            ---
+            participants:
+              - name: "Alice"
+                job_title: "Engineer"
+              - name: "Bob"
+            title: "Design Review"
+            ---
+            # Notes
+            Discussed design system.
+            """
 
         let doc = try AnarlogDocument.parse(from: input)
         let rendered = try doc.render()
@@ -214,43 +215,43 @@ Discussed design system.
     func testRoundTripFullDocument() throws {
         // Full anarlog document with all fields
         let input = """
----
-date: 2025-06-08T10:00:00Z
-duration: 3600
-participants:
-  - job_title: "Engineering Lead"
-    name: "Alice"
-  - name: "Bob"
-session:
-  event:
-    name: "Sprint Planning"
-  started_at: "2025-06-08 10:00"
-  title: "Calendar Event"
-tags:
-  - sprint
-  - planning
-template:
-  description: "Weekly sprint planning template"
-  sections:
-    - title: "Goals"
-    - description: "Who is available"
-      title: "Capacity"
-  title: "Sprint Plan"
-title: "Sprint Planning Session"
-transcript:
-  segments:
-    - speaker: "Alice"
-      text: "Let's plan the sprint"
-    - speaker: "Bob"
-      text: "I have capacity for 8 points"
----
-# Goals
-- Complete user auth feature
+            ---
+            date: 2025-06-08T10:00:00Z
+            duration: 3600
+            participants:
+              - job_title: "Engineering Lead"
+                name: "Alice"
+              - name: "Bob"
+            session:
+              event:
+                name: "Sprint Planning"
+              started_at: "2025-06-08 10:00"
+              title: "Calendar Event"
+            tags:
+              - sprint
+              - planning
+            template:
+              description: "Weekly sprint planning template"
+              sections:
+                - title: "Goals"
+                - description: "Who is available"
+                  title: "Capacity"
+              title: "Sprint Plan"
+            title: "Sprint Planning Session"
+            transcript:
+              segments:
+                - speaker: "Alice"
+                  text: "Let's plan the sprint"
+                - speaker: "Bob"
+                  text: "I have capacity for 8 points"
+            ---
+            # Goals
+            - Complete user auth feature
 
-# Capacity
-- Alice: 8 points
-- Bob: 8 points
-"""
+            # Capacity
+            - Alice: 8 points
+            - Bob: 8 points
+            """
 
         let doc = try AnarlogDocument.parse(from: input)
         let rendered = try doc.render()
@@ -274,13 +275,13 @@ transcript:
     func testRoundTripSortedKeys() throws {
         // Verify that rendered keys are sorted alphabetically
         let input = """
----
-title: "Test"
-duration: 3600
-date: 2025-06-08T10:00:00Z
----
-Content
-"""
+            ---
+            title: "Test"
+            duration: 3600
+            date: 2025-06-08T10:00:00Z
+            ---
+            Content
+            """
 
         let doc = try AnarlogDocument.parse(from: input)
         let rendered = try doc.render()
@@ -290,7 +291,8 @@ Content
         let keys = lines.compactMap { line -> String? in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty, !trimmed.hasPrefix("-"), !trimmed.hasPrefix("#"),
-                  !trimmed.hasPrefix("---"), let colonIdx = trimmed.firstIndex(of: ":") else {
+                !trimmed.hasPrefix("---"), let colonIdx = trimmed.firstIndex(of: ":")
+            else {
                 return nil
             }
             return String(trimmed[..<colonIdx])
@@ -298,8 +300,9 @@ Content
 
         // date should come before duration, which comes before title
         if let dateIdx = keys.firstIndex(of: "date"),
-           let durationIdx = keys.firstIndex(of: "duration"),
-           let titleIdx = keys.firstIndex(of: "title") {
+            let durationIdx = keys.firstIndex(of: "duration"),
+            let titleIdx = keys.firstIndex(of: "title")
+        {
             XCTAssertLessThan(dateIdx, durationIdx)
             XCTAssertLessThan(durationIdx, titleIdx)
         }
@@ -312,37 +315,37 @@ Content
 
         // Valid anarlog doc with participants
         let validWithParticipants = """
----
-title: "Test"
-participants:
-  - name: "Alice"
----
-Content
-"""
+            ---
+            title: "Test"
+            participants:
+              - name: "Alice"
+            ---
+            Content
+            """
         let data1 = validWithParticipants.data(using: .utf8)!
         XCTAssertTrue(importer.canRead(data: data1))
 
         // Valid anarlog doc with transcript
         let validWithTranscript = """
----
-title: "Test"
-transcript:
-  segments:
-    - speaker: "A"
-      text: "hello"
----
-Content
-"""
+            ---
+            title: "Test"
+            transcript:
+              segments:
+                - speaker: "A"
+                  text: "hello"
+            ---
+            Content
+            """
         let data2 = validWithTranscript.data(using: .utf8)!
         XCTAssertTrue(importer.canRead(data: data2))
 
         // Plain markdown (no anarlog fields)
         let plainMarkdown = """
----
-title: "Just a title"
----
-Content
-"""
+            ---
+            title: "Just a title"
+            ---
+            Content
+            """
         let data3 = plainMarkdown.data(using: .utf8)!
         // We may or may not accept this depending on heuristic
         // Currently: no anarlog-specific fields → not anarlog

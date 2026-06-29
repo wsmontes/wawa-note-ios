@@ -44,7 +44,8 @@ extension VFSPath {
     var isProjectLike: Bool {
         switch self {
         case .projectItems, .projectItem, .projectItemContents,
-                .projectTasks, .projectTask: return true
+            .projectTasks, .projectTask:
+            return true
         default: return false
         }
     }
@@ -336,7 +337,8 @@ enum VFSService {
         case .root:
             let projects = (try? ProjectService(context: context.modelContext).allProjects()) ?? []
             let allItems = (try? KnowledgeItemService(context: context.modelContext).allItems()) ?? []
-            return .directory(path: "/", name: "Workspace", childrenCount: 3,
+            return .directory(
+                path: "/", name: "Workspace", childrenCount: 3,
                 metadata: VFSNodeMetadata(taskCount: allItems.count, itemCount: allItems.count))
         case .inbox:
             let items = (try? KnowledgeItemService(context: context.modelContext).allItems()) ?? []
@@ -348,7 +350,8 @@ enum VFSService {
             guard let p = try? ProjectService(context: context.modelContext).fetch(id: pid) else { return nil }
             let tasks = (try? TaskService(context: context.modelContext).tasks(for: pid)) ?? []
             let items = (try? ProjectService(context: context.modelContext).items(in: pid)) ?? []
-            return .directory(path: "/projects/\(safeDirName(p))", name: p.name,
+            return .directory(
+                path: "/projects/\(safeDirName(p))", name: p.name,
                 childrenCount: 7,
                 metadata: VFSNodeMetadata(
                     projectStatus: p.statusRaw, healthStatus: p.healthStatus,
@@ -369,11 +372,13 @@ enum VFSService {
             let projects = (try? ProjectService(context: context.modelContext).allProjects()) ?? []
             let allItems = (try? KnowledgeItemService(context: context.modelContext).allItems()) ?? []
             return [
-                .directory(path: "/inbox", name: "Inbox", childrenCount: allItems.count,
+                .directory(
+                    path: "/inbox", name: "Inbox", childrenCount: allItems.count,
                     metadata: VFSNodeMetadata(itemCount: allItems.count)),
-                .directory(path: "/projects", name: "Projects", childrenCount: projects.count,
+                .directory(
+                    path: "/projects", name: "Projects", childrenCount: projects.count,
                     metadata: VFSNodeMetadata(itemCount: projects.count)),
-                .directory(path: "/agent", name: "Agent", childrenCount: 3)
+                .directory(path: "/agent", name: "Agent", childrenCount: 3),
             ]
 
         case .inbox:
@@ -412,15 +417,18 @@ enum VFSService {
             let base = "/projects/\(slug)"
 
             var nodes: [VFSNode] = [
-                .file(path: "\(base)/project.json", name: "project.json", nodeType: .projectFile,
-                      modifiedAt: p.updatedAt,
-                      metadata: VFSNodeMetadata(
-                          projectStatus: p.statusRaw, healthStatus: p.healthStatus,
-                          swiftDataID: pid, isConfigProject: isConfig
-                      )),
-                .directory(path: "\(base)/items", name: "Items", childrenCount: items.count,
+                .file(
+                    path: "\(base)/project.json", name: "project.json", nodeType: .projectFile,
+                    modifiedAt: p.updatedAt,
+                    metadata: VFSNodeMetadata(
+                        projectStatus: p.statusRaw, healthStatus: p.healthStatus,
+                        swiftDataID: pid, isConfigProject: isConfig
+                    )),
+                .directory(
+                    path: "\(base)/items", name: "Items", childrenCount: items.count,
                     metadata: VFSNodeMetadata(itemCount: items.count)),
-                .directory(path: "\(base)/tasks", name: "Tasks", childrenCount: tasks.count,
+                .directory(
+                    path: "\(base)/tasks", name: "Tasks", childrenCount: tasks.count,
                     metadata: VFSNodeMetadata(taskCount: tasks.count)),
             ]
 
@@ -513,7 +521,8 @@ enum VFSService {
             let base = "/projects/\(slug)/analysis"
             return items.compactMap { item in
                 let dir = context.fileStore.itemDirectoryURL(for: item.id)
-                let hasAnalysis = FileManager.default.fileExists(atPath: dir.appendingPathComponent("analysis.json").path)
+                let hasAnalysis =
+                    FileManager.default.fileExists(atPath: dir.appendingPathComponent("analysis.json").path)
                     || FileManager.default.fileExists(atPath: dir.appendingPathComponent("analysis.dynamic.json").path)
                 let hasTranscript = FileManager.default.fileExists(atPath: dir.appendingPathComponent("transcript.json").path)
                 guard hasAnalysis || hasTranscript else { return nil }
@@ -606,74 +615,80 @@ enum VFSService {
         var nodes: [VFSNode] = []
 
         // metadata.json
-        nodes.append(.file(
-            path: "\(base)/metadata.json", name: "metadata.json",
-            nodeType: .jsonFile, modifiedAt: item.updatedAt,
-            metadata: VFSNodeMetadata(
-                itemType: item.typeRaw, itemStatus: item.statusRaw,
-                tags: item.tags, durationSeconds: item.durationSeconds,
-                swiftDataID: itemID, isFlagged: item.isFlagged,
-                languageCode: item.languageCode,
-                calendarEventIdentifier: item.calendarEventIdentifier
-            )
-        ))
+        nodes.append(
+            .file(
+                path: "\(base)/metadata.json", name: "metadata.json",
+                nodeType: .jsonFile, modifiedAt: item.updatedAt,
+                metadata: VFSNodeMetadata(
+                    itemType: item.typeRaw, itemStatus: item.statusRaw,
+                    tags: item.tags, durationSeconds: item.durationSeconds,
+                    swiftDataID: itemID, isFlagged: item.isFlagged,
+                    languageCode: item.languageCode,
+                    calendarEventIdentifier: item.calendarEventIdentifier
+                )
+            ))
 
         // body.md (for notes, journals, or any item with body text)
         if item.bodyText != nil || item.typeRaw == "note" || item.typeRaw == "journalEntry" {
             let size = item.bodyText.map { Int64($0.utf8.count) }
-            nodes.append(.file(
-                path: "\(base)/body.md", name: "body.md",
-                nodeType: .markdownFile, size: size, modifiedAt: item.updatedAt,
-                metadata: VFSNodeMetadata(swiftDataID: itemID)
-            ))
+            nodes.append(
+                .file(
+                    path: "\(base)/body.md", name: "body.md",
+                    nodeType: .markdownFile, size: size, modifiedAt: item.updatedAt,
+                    metadata: VFSNodeMetadata(swiftDataID: itemID)
+                ))
         }
 
         // audio.m4a
         let audioURL = context.fileStore.audioFileURL(for: item.id)
         if fm.fileExists(atPath: audioURL.path) {
             let attrs = try? fm.attributesOfItem(atPath: audioURL.path)
-            nodes.append(.file(
-                path: "\(base)/audio.m4a", name: "audio.m4a",
-                nodeType: .audioFile,
-                size: attrs?[.size] as? Int64,
-                modifiedAt: attrs?[.modificationDate] as? Date,
-                metadata: VFSNodeMetadata(durationSeconds: item.durationSeconds)
-            ))
+            nodes.append(
+                .file(
+                    path: "\(base)/audio.m4a", name: "audio.m4a",
+                    nodeType: .audioFile,
+                    size: attrs?[.size] as? Int64,
+                    modifiedAt: attrs?[.modificationDate] as? Date,
+                    metadata: VFSNodeMetadata(durationSeconds: item.durationSeconds)
+                ))
         }
 
         // recording.manifest.json (segmented recordings)
         let manifestURL = context.fileStore.recordingManifestURL(for: item.id)
         if fm.fileExists(atPath: manifestURL.path) {
             let attrs = try? fm.attributesOfItem(atPath: manifestURL.path)
-            nodes.append(.file(
-                path: "\(base)/recording.manifest.json", name: "recording.manifest.json",
-                nodeType: .jsonFile,
-                size: attrs?[.size] as? Int64,
-                modifiedAt: attrs?[.modificationDate] as? Date
-            ))
+            nodes.append(
+                .file(
+                    path: "\(base)/recording.manifest.json", name: "recording.manifest.json",
+                    nodeType: .jsonFile,
+                    size: attrs?[.size] as? Int64,
+                    modifiedAt: attrs?[.modificationDate] as? Date
+                ))
         }
 
         // segments/ directory
         let segmentsDir = context.fileStore.segmentsDirectoryURL(for: item.id)
         if fm.fileExists(atPath: segmentsDir.path) {
             let segFiles = (try? fm.contentsOfDirectory(at: segmentsDir, includingPropertiesForKeys: [.fileSizeKey])) ?? []
-            nodes.append(.directory(
-                path: "\(base)/segments", name: "segments",
-                childrenCount: segFiles.count,
-                modifiedAt: item.updatedAt
-            ))
+            nodes.append(
+                .directory(
+                    path: "\(base)/segments", name: "segments",
+                    childrenCount: segFiles.count,
+                    modifiedAt: item.updatedAt
+                ))
         }
 
         // transcript.json
         let transcriptURL = dir.appendingPathComponent("transcript.json")
         if fm.fileExists(atPath: transcriptURL.path) {
             let attrs = try? fm.attributesOfItem(atPath: transcriptURL.path)
-            nodes.append(.file(
-                path: "\(base)/transcript.json", name: "transcript.json",
-                nodeType: .jsonFile,
-                size: attrs?[.size] as? Int64,
-                modifiedAt: attrs?[.modificationDate] as? Date
-            ))
+            nodes.append(
+                .file(
+                    path: "\(base)/transcript.json", name: "transcript.json",
+                    nodeType: .jsonFile,
+                    size: attrs?[.size] as? Int64,
+                    modifiedAt: attrs?[.modificationDate] as? Date
+                ))
         }
 
         // analysis.json
@@ -681,21 +696,23 @@ enum VFSService {
         let dynamicURL = dir.appendingPathComponent("analysis.dynamic.json")
         if fm.fileExists(atPath: analysisURL.path) {
             let attrs = try? fm.attributesOfItem(atPath: analysisURL.path)
-            nodes.append(.file(
-                path: "\(base)/analysis.json", name: "analysis.json",
-                nodeType: .jsonFile,
-                size: attrs?[.size] as? Int64,
-                modifiedAt: attrs?[.modificationDate] as? Date
-            ))
+            nodes.append(
+                .file(
+                    path: "\(base)/analysis.json", name: "analysis.json",
+                    nodeType: .jsonFile,
+                    size: attrs?[.size] as? Int64,
+                    modifiedAt: attrs?[.modificationDate] as? Date
+                ))
         }
         if fm.fileExists(atPath: dynamicURL.path) {
             let attrs = try? fm.attributesOfItem(atPath: dynamicURL.path)
-            nodes.append(.file(
-                path: "\(base)/analysis.dynamic.json", name: "analysis.dynamic.json",
-                nodeType: .jsonFile,
-                size: attrs?[.size] as? Int64,
-                modifiedAt: attrs?[.modificationDate] as? Date
-            ))
+            nodes.append(
+                .file(
+                    path: "\(base)/analysis.dynamic.json", name: "analysis.dynamic.json",
+                    nodeType: .jsonFile,
+                    size: attrs?[.size] as? Int64,
+                    modifiedAt: attrs?[.modificationDate] as? Date
+                ))
         }
 
         // Scan images
@@ -705,12 +722,13 @@ enum VFSService {
                 let name = url.lastPathComponent
                 if name.hasPrefix(scanPattern) && (name.hasSuffix(".jpg") || name.hasSuffix(".jpeg") || name.hasSuffix(".png")) {
                     let attrs = try? fm.attributesOfItem(atPath: url.path)
-                    nodes.append(.file(
-                        path: "\(base)/\(name)", name: name,
-                        nodeType: .imageFile,
-                        size: attrs?[.size] as? Int64,
-                        modifiedAt: attrs?[.modificationDate] as? Date
-                    ))
+                    nodes.append(
+                        .file(
+                            path: "\(base)/\(name)", name: name,
+                            nodeType: .imageFile,
+                            size: attrs?[.size] as? Int64,
+                            modifiedAt: attrs?[.modificationDate] as? Date
+                        ))
                 }
             }
         }
@@ -720,10 +738,11 @@ enum VFSService {
         if fm.fileExists(atPath: exportsDir.path) {
             let exportContents = (try? fm.contentsOfDirectory(at: exportsDir, includingPropertiesForKeys: nil)) ?? []
             if !exportContents.isEmpty {
-                nodes.append(.directory(
-                    path: "\(base)/exports", name: "Exports",
-                    childrenCount: exportContents.count
-                ))
+                nodes.append(
+                    .directory(
+                        path: "\(base)/exports", name: "Exports",
+                        childrenCount: exportContents.count
+                    ))
             }
         }
 
@@ -733,13 +752,14 @@ enum VFSService {
     private static func makeItemDirNode(item: KnowledgeItem, path: String, context: ToolContext) -> VFSNode {
         let dir = context.fileStore.itemDirectoryURL(for: item.id)
         let fm = FileManager.default
-        var fileCount = 1 // metadata.json
+        var fileCount = 1  // metadata.json
         if item.bodyText != nil || item.typeRaw == "note" || item.typeRaw == "journalEntry" { fileCount += 1 }
         if fm.fileExists(atPath: context.fileStore.audioFileURL(for: item.id).path) { fileCount += 1 }
         if fm.fileExists(atPath: dir.appendingPathComponent("transcript.json").path) { fileCount += 1 }
         if fm.fileExists(atPath: dir.appendingPathComponent("analysis.json").path) { fileCount += 1 }
         if fm.fileExists(atPath: dir.appendingPathComponent("analysis.dynamic.json").path) { fileCount += 1 }
-        let scanCount = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil))?
+        let scanCount =
+            (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil))?
             .filter { $0.lastPathComponent.hasPrefix("scan_") }.count ?? 0
         fileCount += scanCount
 
@@ -765,32 +785,35 @@ enum VFSService {
         let analysisURL = dir.appendingPathComponent("analysis.json")
         if fm.fileExists(atPath: analysisURL.path) {
             let attrs = try? fm.attributesOfItem(atPath: analysisURL.path)
-            nodes.append(.file(
-                path: "\(base)/analysis.json", name: "analysis.json",
-                nodeType: .jsonFile,
-                size: attrs?[.size] as? Int64,
-                modifiedAt: attrs?[.modificationDate] as? Date
-            ))
+            nodes.append(
+                .file(
+                    path: "\(base)/analysis.json", name: "analysis.json",
+                    nodeType: .jsonFile,
+                    size: attrs?[.size] as? Int64,
+                    modifiedAt: attrs?[.modificationDate] as? Date
+                ))
         }
         let dynamicURL = dir.appendingPathComponent("analysis.dynamic.json")
         if fm.fileExists(atPath: dynamicURL.path) {
             let attrs = try? fm.attributesOfItem(atPath: dynamicURL.path)
-            nodes.append(.file(
-                path: "\(base)/analysis.dynamic.json", name: "analysis.dynamic.json",
-                nodeType: .jsonFile,
-                size: attrs?[.size] as? Int64,
-                modifiedAt: attrs?[.modificationDate] as? Date
-            ))
+            nodes.append(
+                .file(
+                    path: "\(base)/analysis.dynamic.json", name: "analysis.dynamic.json",
+                    nodeType: .jsonFile,
+                    size: attrs?[.size] as? Int64,
+                    modifiedAt: attrs?[.modificationDate] as? Date
+                ))
         }
         let transcriptURL = dir.appendingPathComponent("transcript.json")
         if fm.fileExists(atPath: transcriptURL.path) {
             let attrs = try? fm.attributesOfItem(atPath: transcriptURL.path)
-            nodes.append(.file(
-                path: "\(base)/transcript.json", name: "transcript.json",
-                nodeType: .jsonFile,
-                size: attrs?[.size] as? Int64,
-                modifiedAt: attrs?[.modificationDate] as? Date
-            ))
+            nodes.append(
+                .file(
+                    path: "\(base)/transcript.json", name: "transcript.json",
+                    nodeType: .jsonFile,
+                    size: attrs?[.size] as? Int64,
+                    modifiedAt: attrs?[.modificationDate] as? Date
+                ))
         }
         return nodes
     }
@@ -825,7 +848,8 @@ enum VFSService {
         case .agentMemory(let id):
             let memories = AgentMemoryStore.shared.listAll()
             guard let m = memories.first(where: { $0.id == id }),
-                  let data = try? JSONEncoder().encode(m) else { return nil }
+                let data = try? JSONEncoder().encode(m)
+            else { return nil }
             return String(data: data, encoding: .utf8)
 
         case .agentChatConversation(let id):
@@ -836,7 +860,8 @@ enum VFSService {
 
         case .configSchema(_, _, let name):
             guard let fw = FrameworkService.builtInFramework(named: name),
-                  let data = try? JSONEncoder().encode(fw) else { return nil }
+                let data = try? JSONEncoder().encode(fw)
+            else { return nil }
             return String(data: data, encoding: .utf8)
 
         default:
@@ -869,15 +894,15 @@ enum VFSService {
         if isInbox {
             // /inbox/{id}/{filename}
             guard parts.count >= 3,
-                  let id = UUID(uuidString: stripJSONSuffix(parts[1]))
+                let id = UUID(uuidString: stripJSONSuffix(parts[1]))
             else { return nil }
             itemID = id
             file = parts.count > 2 ? parts[2] : ""
         } else {
             // /projects/{slug}/items/{id}/{filename} or /projects/{slug}/analysis/{id}/{filename}
             guard parts.count >= 5,
-                  parts[2] == "items" || parts[2] == "analysis",
-                  let id = resolveItemID(from: parts[3], context: context) ?? UUID(uuidString: stripJSONSuffix(parts[3]))
+                parts[2] == "items" || parts[2] == "analysis",
+                let id = resolveItemID(from: parts[3], context: context) ?? UUID(uuidString: stripJSONSuffix(parts[3]))
             else { return nil }
             itemID = id
             let filenameIdx = parts[2] == "analysis" ? 4 : 4
@@ -895,7 +920,7 @@ enum VFSService {
             guard let item = try? KnowledgeItemService(context: context.modelContext).fetchItem(id: itemID) else { return nil }
             return formatItemJSON(item, fileStore: context.fileStore)
         case "audio.m4a":
-            return nil // Binary, not readable as string
+            return nil  // Binary, not readable as string
         case "transcript.json":
             return readTranscript(itemID: itemID, fileStore: context.fileStore)
         case "analysis.json":
@@ -907,7 +932,8 @@ enum VFSService {
         }
 
         guard let data = try? Data(contentsOf: fileURL),
-              let text = String(data: data, encoding: .utf8) else { return nil }
+            let text = String(data: data, encoding: .utf8)
+        else { return nil }
         return text
     }
 
@@ -959,7 +985,8 @@ enum VFSService {
         case .agentMemory:
             // Memory write via JSON: parse and apply pattern/strategy updates
             if let data = text.data(using: .utf8),
-               let memJSON = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                let memJSON = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            {
                 let pattern = memJSON["pattern"] as? String ?? ""
                 let strategy = memJSON["strategy"] as? String ?? ""
                 let itemType = memJSON["itemType"] as? String
@@ -997,13 +1024,13 @@ enum VFSService {
         if isInbox {
             // /inbox/{id}/{filename}
             guard parts.count >= 3,
-                  let id = UUID(uuidString: stripJSONSuffix(parts[1]))
+                let id = UUID(uuidString: stripJSONSuffix(parts[1]))
             else { throw VFSError.fileNotFound(path: rawPath) }
             itemID = id
             filename = parts[2]
         } else if isProject {
             guard parts.count >= 5,
-                  let id = resolveItemID(from: parts[3], context: context) ?? UUID(uuidString: stripJSONSuffix(parts[3]))
+                let id = resolveItemID(from: parts[3], context: context) ?? UUID(uuidString: stripJSONSuffix(parts[3]))
             else { throw VFSError.fileNotFound(path: rawPath) }
             itemID = id
             filename = parts.last ?? ""
@@ -1026,7 +1053,8 @@ enum VFSService {
 
         case "project.json":
             if let projectID = item.projectID,
-               let project = try? ProjectService(context: context.modelContext).fetch(id: projectID) {
+                let project = try? ProjectService(context: context.modelContext).fetch(id: projectID)
+            {
                 try updateProjectFromJSON(project, jsonText: content, context: context)
             }
 
@@ -1087,7 +1115,7 @@ enum VFSService {
         case .agentMemory(let id):
             var memories = AgentMemoryStore.shared.listAll()
             memories.removeAll { $0.id == id }
-            // Note: AgentMemoryStore doesn't have a delete method, but resetting is the best we can do
+        // Note: AgentMemoryStore doesn't have a delete method, but resetting is the best we can do
 
         // Chat conversations
         case .agentChatConversation(let id):
@@ -1149,10 +1177,13 @@ enum VFSService {
             "healthStatus": p.healthStatus as Any, "summary": p.summary as Any,
             "intention": p.intention as Any, "taskCount": tasks.count,
             "itemCount": items.count, "createdAt": p.createdAt.ISO8601Format(),
-            "updatedAt": p.updatedAt.ISO8601Format()
+            "updatedAt": p.updatedAt.ISO8601Format(),
         ]
         if let data = try? JSONSerialization.data(withJSONObject: dict, options: .prettyPrinted),
-           let json = String(data: data, encoding: .utf8) { return json }
+            let json = String(data: data, encoding: .utf8)
+        {
+            return json
+        }
         return "{}"
     }
 
@@ -1160,7 +1191,7 @@ enum VFSService {
         var dict: [String: Any] = [
             "id": item.id.uuidString, "type": item.typeRaw, "title": item.title,
             "status": item.statusRaw, "createdAt": item.createdAt.ISO8601Format(),
-            "updatedAt": item.updatedAt.ISO8601Format()
+            "updatedAt": item.updatedAt.ISO8601Format(),
         ]
         if let proj = item.projectID { dict["projectID"] = proj.uuidString }
         if let body = item.bodyText { dict["body"] = body }
@@ -1168,20 +1199,26 @@ enum VFSService {
         if let dur = item.durationSeconds { dict["durationSeconds"] = dur }
         if let lang = item.languageCode { dict["languageCode"] = lang }
         if let data = try? JSONSerialization.data(withJSONObject: dict, options: .prettyPrinted),
-           let json = String(data: data, encoding: .utf8) { return json }
+            let json = String(data: data, encoding: .utf8)
+        {
+            return json
+        }
         return "{}"
     }
 
     private static func formatTaskJSON(_ t: TaskItem) -> String {
         var dict: [String: Any] = [
             "id": t.id.uuidString, "title": t.title,
-            "status": t.statusRaw, "priority": t.priorityRaw
+            "status": t.statusRaw, "priority": t.priorityRaw,
         ]
         if let owner = t.ownerName { dict["owner"] = owner }
         if let due = t.dueAt { dict["dueAt"] = due.ISO8601Format() }
         if let notes = t.notes { dict["notes"] = notes }
         if let data = try? JSONSerialization.data(withJSONObject: dict, options: .prettyPrinted),
-           let json = String(data: data, encoding: .utf8) { return json }
+            let json = String(data: data, encoding: .utf8)
+        {
+            return json
+        }
         return "{}"
     }
 
@@ -1189,12 +1226,19 @@ enum VFSService {
 
     private static func updateProjectFromJSON(_ project: Project, jsonText: String, context: ToolContext) throws {
         guard let data = jsonText.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
             throw VFSError.invalidJSON
         }
-        if let v = json["name"] as? String { project.name = v; project.nameIsAutoGenerated = false }
+        if let v = json["name"] as? String {
+            project.name = v
+            project.nameIsAutoGenerated = false
+        }
         if let v = json["summary"] as? String { project.summary = v }
-        if let v = json["intention"] as? String { project.intention = v; project.intentionIsAutoGenerated = false }
+        if let v = json["intention"] as? String {
+            project.intention = v
+            project.intentionIsAutoGenerated = false
+        }
         if let v = json["synthesis"] as? String { project.synthesis = v }
         if let v = json["customInstructions"] as? String { project.customInstructions = v }
         if let v = json["colorHex"] as? String { project.colorHex = v }
@@ -1209,7 +1253,8 @@ enum VFSService {
 
     static func updateItemFromJSON(_ item: KnowledgeItem, jsonText: String, context: ToolContext) throws {
         guard let data = jsonText.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
             throw VFSError.invalidJSON
         }
         // Core fields
@@ -1225,8 +1270,11 @@ enum VFSService {
         // Assignment
         if let v = json["projectID"] as? String, let pid = UUID(uuidString: v) { item.projectID = pid }
         if let v = json["folderID"] as? String, let fid = UUID(uuidString: v) { item.folderID = fid }
-        if json["inboxDate"] is NSNull || json["removeFromInbox"] as? Bool == true { item.inboxDate = nil }
-        else if let v = json["inboxDate"] as? String { item.inboxDate = ISO8601DateFormatter().date(from: v) }
+        if json["inboxDate"] is NSNull || json["removeFromInbox"] as? Bool == true {
+            item.inboxDate = nil
+        } else if let v = json["inboxDate"] as? String {
+            item.inboxDate = ISO8601DateFormatter().date(from: v)
+        }
 
         // Metadata
         if let v = json["durationSeconds"] as? Double { item.durationSeconds = v }
@@ -1256,7 +1304,8 @@ enum VFSService {
 
     static func updateTaskFromJSON(_ task: TaskItem, jsonText: String, context: ToolContext) throws {
         guard let data = jsonText.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
             throw VFSError.invalidJSON
         }
         let svc = TaskService(context: context.modelContext)
@@ -1282,12 +1331,20 @@ enum VFSService {
         var newDue: Date?
         if let dueStr = json["due"] as? String ?? json["dueAt"] as? String {
             let fmts: [ISO8601DateFormatter] = {
-                let a = ISO8601DateFormatter(); let b = ISO8601DateFormatter()
-                b.formatOptions = [.withFullDate]; return [a, b]
+                let a = ISO8601DateFormatter()
+                let b = ISO8601DateFormatter()
+                b.formatOptions = [.withFullDate]
+                return [a, b]
             }()
-            for f in fmts { if let d = f.date(from: dueStr) { newDue = d; break } }
+            for f in fmts {
+                if let d = f.date(from: dueStr) {
+                    newDue = d
+                    break
+                }
+            }
             if newDue == nil {
-                let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
+                let df = DateFormatter()
+                df.dateFormat = "yyyy-MM-dd"
                 newDue = df.date(from: dueStr)
             }
         }
@@ -1312,8 +1369,10 @@ enum VFSService {
 
         // Schemas — accessible via /projects/{slug}/config/schemas/ VFS routing
         let schemaNodes = configSchemaNodes(base: base)
-        nodes.append(.directory(path: "\(base)/config/schemas", name: "Schemas",
-            childrenCount: schemaNodes.count))
+        nodes.append(
+            .directory(
+                path: "\(base)/config/schemas", name: "Schemas",
+                childrenCount: schemaNodes.count))
 
         // Settings — flattened as files
         nodes.append(contentsOf: configSettingsNodes(base: base))
@@ -1328,7 +1387,8 @@ enum VFSService {
     private static func configProviderNodes(context: ToolContext, base: String = "/projects/wawa-note-config") -> [VFSNode] {
         let configs = (try? context.modelContext.fetch(FetchDescriptor<AIProviderConfigModel>())) ?? []
         return configs.map { config in
-            let safeName = config.name.replacingOccurrences(of: " ", with: "-")
+            let safeName =
+                config.name.replacingOccurrences(of: " ", with: "-")
                 .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? config.name
             return .file(
                 path: "\(base)/provider-\(safeName).json",
@@ -1373,13 +1433,16 @@ enum VFSService {
     /// App settings as JSON files (generated on read).
     private static func configSettingsNodes(base: String = "/projects/wawa-note-config") -> [VFSNode] {
         return [
-            .file(path: "\(base)/settings-general.json", name: "settings-general.json",
+            .file(
+                path: "\(base)/settings-general.json", name: "settings-general.json",
                 nodeType: .jsonFile,
                 metadata: VFSNodeMetadata(itemStatus: "app-config")),
-            .file(path: "\(base)/settings-models.json", name: "settings-models.json",
+            .file(
+                path: "\(base)/settings-models.json", name: "settings-models.json",
                 nodeType: .jsonFile,
                 metadata: VFSNodeMetadata(itemStatus: "model-presets")),
-            .file(path: "\(base)/settings-features.json", name: "settings-features.json",
+            .file(
+                path: "\(base)/settings-features.json", name: "settings-features.json",
                 nodeType: .jsonFile,
                 metadata: VFSNodeMetadata(itemStatus: "feature-configs")),
         ]
@@ -1407,8 +1470,9 @@ enum VFSService {
     private static func readConfigProjectFile(_ rawPath: String, context: ToolContext) -> String? {
         let parts = rawPath.split(separator: "/").map(String.init).filter { !$0.isEmpty }
         guard parts.count >= 3,
-              parts[0] == "projects",
-              parts[1] == "wawa-note-config" else { return nil }
+            parts[0] == "projects",
+            parts[1] == "wawa-note-config"
+        else { return nil }
 
         let fileName = parts.last ?? ""
 
@@ -1418,10 +1482,11 @@ enum VFSService {
             let providerName = encoded.removingPercentEncoding ?? encoded
             let configs = (try? context.modelContext.fetch(FetchDescriptor<AIProviderConfigModel>())) ?? []
             // Match by decoded name (space-safe) or by percent-encoded prefix
-            guard let config = configs.first(where: {
-                $0.name == providerName ||
-                $0.name.replacingOccurrences(of: " ", with: "-") == encoded
-            }) else { return nil }
+            guard
+                let config = configs.first(where: {
+                    $0.name == providerName || $0.name.replacingOccurrences(of: " ", with: "-") == encoded
+                })
+            else { return nil }
             let dict: [String: Any] = [
                 "name": config.name, "type": config.typeRaw,
                 "defaultModel": config.defaultModel,
@@ -1429,7 +1494,7 @@ enum VFSService {
                 "supportsStreaming": config.supportsStreaming,
                 "supportsTools": config.supportsTools,
                 "supportsAudio": config.supportsAudio,
-                "supportsEmbeddings": config.supportsEmbeddings
+                "supportsEmbeddings": config.supportsEmbeddings,
             ]
             guard let data = try? JSONSerialization.data(withJSONObject: dict, options: .prettyPrinted) else { return nil }
             return String(data: data, encoding: .utf8)
@@ -1464,7 +1529,8 @@ enum VFSService {
     static func readTranscript(itemID: UUID, fileStore: FileArtifactStore) -> String? {
         let url = fileStore.itemDirectoryURL(for: itemID).appendingPathComponent("transcript.json")
         guard let data = try? Data(contentsOf: url),
-              let text = String(data: data, encoding: .utf8) else { return nil }
+            let text = String(data: data, encoding: .utf8)
+        else { return nil }
         if text.count > 15000 {
             return String(text.prefix(15000)) + "\n\n... [truncated]"
         }
@@ -1475,11 +1541,14 @@ enum VFSService {
         let dir = fileStore.itemDirectoryURL(for: itemID)
         let urls = [
             dir.appendingPathComponent("analysis.json"),
-            dir.appendingPathComponent("analysis.dynamic.json")
+            dir.appendingPathComponent("analysis.dynamic.json"),
         ]
         for url in urls {
             if let data = try? Data(contentsOf: url),
-               let text = String(data: data, encoding: .utf8) { return text }
+                let text = String(data: data, encoding: .utf8)
+            {
+                return text
+            }
         }
         return nil
     }
@@ -1487,7 +1556,14 @@ enum VFSService {
     // MARK: - Type icon (shared with ShellInterpreter)
 
     static func typeIcon(_ t: String) -> String {
-        switch t { case "audio": "🎙️"; case "note": "📝"; case "image": "🖼️"; case "journalEntry": "📓"; case "webBookmark": "🔗"; default: "📄" }
+        switch t {
+        case "audio": "🎙️"
+        case "note": "📝"
+        case "image": "🖼️"
+        case "journalEntry": "📓"
+        case "webBookmark": "🔗"
+        default: "📄"
+        }
     }
 
     // MARK: - Fuzzy UUID matching
@@ -1524,7 +1600,8 @@ enum VFSService {
     // MARK: - Filename sanitization
 
     static func sanitizeFileName(_ title: String) -> String {
-        let sanitized = title
+        let sanitized =
+            title
             .replacingOccurrences(of: "/", with: "-")
             .replacingOccurrences(of: ":", with: "-")
             .replacingOccurrences(of: "\\", with: "-")
@@ -1558,19 +1635,23 @@ enum VFSService {
         if let dur = item.durationSeconds { lines.append("Duration: \(Int(dur))s") }
         if !item.tags.isEmpty { lines.append("Tags: \(item.tags.joined(separator: ", "))") }
         if let body = item.bodyText, !body.isEmpty {
-            lines.append(""); lines.append("## Body"); lines.append(body)
+            lines.append("")
+            lines.append("## Body")
+            lines.append(body)
         }
         let dir = fileStore.itemDirectoryURL(for: item.id)
         var artifacts: [String] = []
         if FileManager.default.fileExists(atPath: dir.appendingPathComponent("transcript.json").path) {
             artifacts.append("analysis/\(item.id.uuidString.prefix(8)).transcript.json")
         }
-        if FileManager.default.fileExists(atPath: dir.appendingPathComponent("analysis.json").path) ||
-           FileManager.default.fileExists(atPath: dir.appendingPathComponent("analysis.dynamic.json").path) {
+        if FileManager.default.fileExists(atPath: dir.appendingPathComponent("analysis.json").path)
+            || FileManager.default.fileExists(atPath: dir.appendingPathComponent("analysis.dynamic.json").path)
+        {
             artifacts.append("analysis/\(item.id.uuidString.prefix(8)).json")
         }
         if !artifacts.isEmpty {
-            lines.append(""); lines.append("## Available Artifacts")
+            lines.append("")
+            lines.append("## Available Artifacts")
             for a in artifacts { lines.append("  \(a)") }
         }
         return lines.joined(separator: "\n")
@@ -1580,7 +1661,7 @@ enum VFSService {
         var dict: [String: Any] = [
             "id": item.id.uuidString, "type": item.typeRaw, "title": item.title,
             "status": item.statusRaw, "createdAt": item.createdAt.ISO8601Format(),
-            "updatedAt": item.updatedAt.ISO8601Format()
+            "updatedAt": item.updatedAt.ISO8601Format(),
         ]
         if let proj = item.projectID { dict["projectID"] = proj.uuidString }
         if let body = item.bodyText { dict["body"] = body }

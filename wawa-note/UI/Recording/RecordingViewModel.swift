@@ -1,6 +1,6 @@
 import Combine
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 enum RecordingUIState: Equatable {
     case idle

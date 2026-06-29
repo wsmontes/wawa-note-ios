@@ -327,9 +327,15 @@ final class ProjectService {
         // items to the project itself (both loops would match those edges).
         var deletedEdgeIDs = Set<UUID>()
         let edgesOut = try context.fetch(FetchDescriptor<GraphEdge>(predicate: #Predicate { $0.fromID == pid }))
-        for edge in edgesOut { context.delete(edge); deletedEdgeIDs.insert(edge.id) }
+        for edge in edgesOut {
+            context.delete(edge)
+            deletedEdgeIDs.insert(edge.id)
+        }
         let edgesIn = try context.fetch(FetchDescriptor<GraphEdge>(predicate: #Predicate { $0.toID == pid }))
-        for edge in edgesIn { context.delete(edge); deletedEdgeIDs.insert(edge.id) }
+        for edge in edgesIn {
+            context.delete(edge)
+            deletedEdgeIDs.insert(edge.id)
+        }
 
         // Clean up inter-item edges, skipping any already deleted in the project-level pass
         let itemIDs = items.map(\.id)

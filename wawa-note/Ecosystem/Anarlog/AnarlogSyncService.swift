@@ -1,6 +1,6 @@
 import Foundation
-import SwiftData
 import OSLog
+import SwiftData
 
 /// Manages bidirectional sync between a watched folder and Wawa Note's SwiftData store.
 ///
@@ -58,12 +58,14 @@ final class AnarlogSyncService: ObservableObject {
             return nil
         }
         var isStale = false
-        guard let url = try? URL(
-            resolvingBookmarkData: bookmark,
-            options: .withoutUI,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        ) else {
+        guard
+            let url = try? URL(
+                resolvingBookmarkData: bookmark,
+                options: .withoutUI,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            )
+        else {
             // Bookmark is invalid; clear it
             defaults.removeObject(forKey: bookmarkKey)
             return nil
@@ -122,7 +124,8 @@ final class AnarlogSyncService: ObservableObject {
                     // Check if modified since last import
                     let attrs = try FileManager.default.attributesOfItem(atPath: fileURL.path)
                     if let modDate = attrs[.modificationDate] as? Date,
-                       modDate <= existingEntry.lastImportedAt {
+                        modDate <= existingEntry.lastImportedAt
+                    {
                         continue  // Not modified, skip
                     }
                     // File was modified — re-import
@@ -131,8 +134,9 @@ final class AnarlogSyncService: ObservableObject {
 
                 // Import the file
                 guard let data = try? Data(contentsOf: fileURL),
-                      let content = String(data: data, encoding: .utf8),
-                      (try? AnarlogDocument.parse(from: content)) != nil else {
+                    let content = String(data: data, encoding: .utf8),
+                    (try? AnarlogDocument.parse(from: content)) != nil
+                else {
                     continue
                 }
 
@@ -218,7 +222,8 @@ final class AnarlogSyncService: ObservableObject {
     private func readSyncState(in folder: URL) throws -> SyncState {
         let url = syncStateURL(in: folder)
         guard FileManager.default.fileExists(atPath: url.path),
-              let data = try? Data(contentsOf: url) else {
+            let data = try? Data(contentsOf: url)
+        else {
             return SyncState()
         }
         return (try? JSONDecoder().decode(SyncState.self, from: data)) ?? SyncState()

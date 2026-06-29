@@ -61,7 +61,7 @@ struct DeepgramAdapter: STTAdapter {
         var components = URLComponents(string: "https://api.deepgram.com/v1/listen")!
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "punctuate", value: "\(config.punctuate)"),
-            URLQueryItem(name: "utterances", value: "true")
+            URLQueryItem(name: "utterances", value: "true"),
         ]
         if let model = config.model {
             queryItems.append(URLQueryItem(name: "model", value: model))
@@ -88,22 +88,25 @@ struct DeepgramAdapter: STTAdapter {
     func parseResponse(_ data: Data) throws -> [STTWord] {
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         guard let results = json?["results"] as? [String: Any],
-              let channels = results["channels"] as? [[String: Any]] else {
+            let channels = results["channels"] as? [[String: Any]]
+        else {
             return []
         }
         var words: [STTWord] = []
         for (chIdx, channel) in channels.enumerated() {
             guard let alternatives = channel["alternatives"] as? [[String: Any]],
-                  let alt = alternatives.first,
-                  let rawWords = alt["words"] as? [[String: Any]] else { continue }
+                let alt = alternatives.first,
+                let rawWords = alt["words"] as? [[String: Any]]
+            else { continue }
             for word in rawWords {
-                words.append(STTWord(
-                    text: word["punctuated_word"] as? String ?? word["word"] as? String ?? "",
-                    startMs: (word["start"] as? Double ?? 0) * 1000,
-                    endMs: (word["end"] as? Double ?? 0) * 1000,
-                    channel: chIdx,
-                    speakerIndex: word["speaker"] as? Int
-                ))
+                words.append(
+                    STTWord(
+                        text: word["punctuated_word"] as? String ?? word["word"] as? String ?? "",
+                        startMs: (word["start"] as? Double ?? 0) * 1000,
+                        endMs: (word["end"] as? Double ?? 0) * 1000,
+                        channel: chIdx,
+                        speakerIndex: word["speaker"] as? Int
+                    ))
             }
         }
         return words
@@ -136,7 +139,7 @@ struct AssemblyAIAdapter: STTAdapter {
     func buildTranscribeRequest(audioURL: String, config: STTConfig) throws -> URLRequest {
         var body: [String: Any] = [
             "audio_url": audioURL,
-            "punctuate": config.punctuate
+            "punctuate": config.punctuate,
         ]
         if let model = config.model { body["speech_model"] = model }
         if let lang = config.language { body["language_code"] = lang }
@@ -208,8 +211,9 @@ struct GladiaAdapter: STTAdapter {
     func parseResponse(_ data: Data) throws -> [STTWord] {
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         guard let result = json?["result"] as? [String: Any],
-              let transcription = result["transcription"] as? [String: Any],
-              let utterances = transcription["utterances"] as? [[String: Any]] else {
+            let transcription = result["transcription"] as? [String: Any],
+            let utterances = transcription["utterances"] as? [[String: Any]]
+        else {
             return []
         }
         var words: [STTWord] = []
@@ -217,13 +221,14 @@ struct GladiaAdapter: STTAdapter {
             guard let rawWords = utterance["words"] as? [[String: Any]] else { continue }
             let speakerIdx = utterance["speaker"] as? Int
             for word in rawWords {
-                words.append(STTWord(
-                    text: word["word"] as? String ?? "",
-                    startMs: word["start"] as? Double ?? 0,
-                    endMs: word["end"] as? Double ?? 0,
-                    channel: speakerIdx ?? 0,
-                    speakerIndex: speakerIdx
-                ))
+                words.append(
+                    STTWord(
+                        text: word["word"] as? String ?? "",
+                        startMs: word["start"] as? Double ?? 0,
+                        endMs: word["end"] as? Double ?? 0,
+                        channel: speakerIdx ?? 0,
+                        speakerIndex: speakerIdx
+                    ))
             }
         }
         return words
@@ -344,13 +349,17 @@ final class STTAdapterRegistry {
         // OpenAI Whisper is handled by the existing RemoteTranscriptionEngine
         // These providers below share OpenAI-compatible APIs:
         "openai": OpenAISTTAdapter(),
-        "fireworks": OpenAICompatibleSTTAdapter(providerID: "fireworks",
+        "fireworks": OpenAICompatibleSTTAdapter(
+            providerID: "fireworks",
             baseURL: "https://api.fireworks.ai/inference/v1"),
-        "soniox": OpenAICompatibleSTTAdapter(providerID: "soniox",
+        "soniox": OpenAICompatibleSTTAdapter(
+            providerID: "soniox",
             baseURL: "https://api.soniox.com/v1"),
-        "aquavoice": OpenAICompatibleSTTAdapter(providerID: "aquavoice",
+        "aquavoice": OpenAICompatibleSTTAdapter(
+            providerID: "aquavoice",
             baseURL: "https://api.aquavoice.io/v1"),
-        "smallestai": OpenAICompatibleSTTAdapter(providerID: "smallestai",
+        "smallestai": OpenAICompatibleSTTAdapter(
+            providerID: "smallestai",
             baseURL: "https://api.smallest.ai/v1"),
     ]
 
@@ -443,11 +452,13 @@ private struct OpenAICompatibleSTTAdapter: STTAdapter {
     func buildRequest(audioData: Data, config: STTConfig) throws -> URLRequest {
         // Delegate to OpenAI adapter's format
         let openAI = OpenAISTTAdapter()
-        return try openAI.buildRequest(audioData: audioData, config: STTConfig(
-            model: config.model, language: config.language,
-            apiKey: config.apiKey, baseURL: config.baseURL ?? baseURL,
-            diarization: config.diarization, punctuate: config.punctuate
-        ))
+        return try openAI.buildRequest(
+            audioData: audioData,
+            config: STTConfig(
+                model: config.model, language: config.language,
+                apiKey: config.apiKey, baseURL: config.baseURL ?? baseURL,
+                diarization: config.diarization, punctuate: config.punctuate
+            ))
     }
 
     func parseResponse(_ data: Data) throws -> [STTWord] {

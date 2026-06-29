@@ -42,7 +42,7 @@ struct MeetilyExporter {
             "id": item.id.uuidString,
             "title": item.title,
             "created_at": ISO8601DateFormatter().string(from: item.createdAt),
-            "updated_at": ISO8601DateFormatter().string(from: item.updatedAt)
+            "updated_at": ISO8601DateFormatter().string(from: item.updatedAt),
         ]
 
         // Transcript
@@ -59,7 +59,7 @@ struct MeetilyExporter {
             if !analysis.shortSummary.isEmpty || !analysis.detailedSummary.isEmpty {
                 let summaryParts = [
                     analysis.shortSummary.isEmpty ? nil : analysis.shortSummary,
-                    analysis.detailedSummary.isEmpty ? nil : analysis.detailedSummary
+                    analysis.detailedSummary.isEmpty ? nil : analysis.detailedSummary,
                 ].compactMap { $0 }
                 json["summary"] = summaryParts.joined(separator: "\n\n")
             }
@@ -103,7 +103,7 @@ struct MeetilyExporter {
         var metadata: [String: Any] = [
             "exported_from": "Wawa Note",
             "wawa_item_id": item.id.uuidString,
-            "wawa_item_type": item.type.rawValue
+            "wawa_item_type": item.type.rawValue,
         ]
         if let duration = item.durationSeconds {
             metadata["duration_secs"] = duration

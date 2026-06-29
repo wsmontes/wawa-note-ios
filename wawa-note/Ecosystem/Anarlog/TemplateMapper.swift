@@ -91,11 +91,13 @@ enum TemplateMapper {
 
     /// Import all templates from a directory.
     static func importAllTemplates(from directoryURL: URL, promptStore: PromptStore) -> [String] {
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: directoryURL,
-            includingPropertiesForKeys: nil,
-            options: .skipsHiddenFiles
-        ).filter({ $0.pathExtension == "jinja" }) else {
+        guard
+            let files = try? FileManager.default.contentsOfDirectory(
+                at: directoryURL,
+                includingPropertiesForKeys: nil,
+                options: .skipsHiddenFiles
+            ).filter({ $0.pathExtension == "jinja" })
+        else {
             return []
         }
         return files.compactMap { importTemplateFile(at: $0, promptStore: promptStore) }
@@ -120,7 +122,8 @@ enum TemplateMapper {
 
         for mapping in templateMap {
             guard let prompt = promptStore.prompt(named: mapping.wawaPromptName),
-                  prompt.isUserEdited else { continue }
+                prompt.isUserEdited
+            else { continue }
 
             let jinja = exportAsJinja(prompt: prompt, originalFilename: mapping.jinjaFile)
             let fileURL = directoryURL.appendingPathComponent(mapping.jinjaFile)
@@ -153,7 +156,8 @@ enum TemplateMapper {
             // "transcripts | length" → "transcripts"
             let parts = expr.components(separatedBy: "|")
             let varPart = parts[0].trimmingCharacters(in: .whitespaces)
-            let cleanName = varPart
+            let cleanName =
+                varPart
                 .replacingOccurrences(of: ".", with: "_")
                 .replacingOccurrences(of: "()", with: "")
                 .trimmingCharacters(in: .whitespaces)

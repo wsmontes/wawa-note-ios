@@ -41,13 +41,14 @@ final class SRTImporter: FormatImporter, @unchecked Sendable {
             let segmentText = textLines.joined(separator: " ").trimmingCharacters(in: .whitespaces)
 
             if !segmentText.isEmpty {
-                segments.append(TranscriptSegment(
-                    meetingId: itemId,
-                    startTime: startTime,
-                    endTime: endTime,
-                    text: segmentText,
-                    sourceEngineId: "srt_import"
-                ))
+                segments.append(
+                    TranscriptSegment(
+                        meetingId: itemId,
+                        startTime: startTime,
+                        endTime: endTime,
+                        text: segmentText,
+                        sourceEngineId: "srt_import"
+                    ))
             }
         }
 
@@ -100,8 +101,8 @@ final class SRTImporter: FormatImporter, @unchecked Sendable {
     }
 }
 
-private extension Array {
-    subscript(safe index: Int) -> Element? {
+extension Array {
+    fileprivate subscript(safe index: Int) -> Element? {
         guard index >= 0, index < count else { return nil }
         return self[index]
     }

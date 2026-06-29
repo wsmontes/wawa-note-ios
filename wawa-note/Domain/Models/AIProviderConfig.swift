@@ -5,9 +5,9 @@ enum ProviderType: String, Codable, CaseIterable {
     case openAI
     case anthropic
     case gemini
-    case localNetwork      // legacy — mapped to .local in routing
-    case appleLocal         // legacy — mapped to .local in routing
-    case local             // unified local type (replaces localNetwork + appleLocal)
+    case localNetwork  // legacy — mapped to .local in routing
+    case appleLocal  // legacy — mapped to .local in routing
+    case local  // unified local type (replaces localNetwork + appleLocal)
 
     /// Human-readable display name suitable for user-facing UI.
     var displayName: String {

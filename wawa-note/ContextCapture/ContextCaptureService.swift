@@ -17,7 +17,7 @@ final class ContextCaptureService: @unchecked Sendable {
             LocationContextSensor(),
             BatterySensor(),
             MotionActivitySensor(),
-            FocusModeSensor()
+            FocusModeSensor(),
         ]
     }
 

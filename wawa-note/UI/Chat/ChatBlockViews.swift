@@ -1,5 +1,5 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 // MARK: - Block Rendering Views
 /// Extracted from ChatView.swift for file size management.
@@ -30,8 +30,12 @@ struct TableBlockView: View {
                     HStack(spacing: 0) {
                         ForEach(Array(table.headers.enumerated()), id: \.offset) { idx, header in
                             Button {
-                                if sortColumn == idx { sortAscending.toggle() }
-                                else { sortColumn = idx; sortAscending = true }
+                                if sortColumn == idx {
+                                    sortAscending.toggle()
+                                } else {
+                                    sortColumn = idx
+                                    sortAscending = true
+                                }
                             } label: {
                                 HStack(spacing: 4) {
                                     Text(header).font(.caption).fontWeight(.bold)
@@ -68,7 +72,10 @@ struct TableBlockView: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(.separator)))
-            HStack { Spacer(); Text("\(table.rows.count) rows").font(.caption2).foregroundStyle(.tertiary) }
+            HStack {
+                Spacer()
+                Text("\(table.rows.count) rows").font(.caption2).foregroundStyle(.tertiary)
+            }
         }
         .padding(.vertical, 4)
     }
@@ -85,7 +92,9 @@ struct ActionBlockView: View {
             }
             ForEach(Array(actions.items.enumerated()), id: \.offset) { idx, item in
                 HStack(spacing: 8) {
-                    Button { checked.insert(idx) } label: {
+                    Button {
+                        checked.insert(idx)
+                    } label: {
                         Image(systemName: checked.contains(idx) ? "checkmark.circle.fill" : "circle")
                             .font(.title3).foregroundStyle(checked.contains(idx) ? .green : .secondary)
                     }.buttonStyle(.plain)
@@ -180,7 +189,10 @@ struct CodeBlockView: View {
                 Button {
                     UIPasteboard.general.string = codeBlock.code
                     copied = true
-                    Task { try? await Task.sleep(nanoseconds: 2_000_000_000); copied = false }
+                    Task {
+                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                        copied = false
+                    }
                 } label: {
                     Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
                         .font(.caption2)
@@ -212,8 +224,12 @@ struct KnowledgeItemNavigationView: View {
 }
 
 struct EvidenceCardView: View {
-    let itemTitle: String; let itemID: UUID; let snippet: String
-    let segmentID: String?; let confidence: Double?; let edgeType: String?
+    let itemTitle: String
+    let itemID: UUID
+    let snippet: String
+    let segmentID: String?
+    let confidence: Double?
+    let edgeType: String?
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -224,7 +240,9 @@ struct EvidenceCardView: View {
                 HStack(spacing: 6) {
                     if let seg = segmentID { Text("Seg \(seg.prefix(8))").font(.system(size: 9)).foregroundStyle(.tertiary) }
                     if let conf = confidence { ConfidenceBadge(value: conf) }
-                    if let et = edgeType { Text(et).font(.system(size: 9)).padding(.horizontal,4).padding(.vertical,1).background(Color.blue.opacity(0.1)).clipShape(Capsule()) }
+                    if let et = edgeType {
+                        Text(et).font(.system(size: 9)).padding(.horizontal, 4).padding(.vertical, 1).background(Color.blue.opacity(0.1)).clipShape(Capsule())
+                    }
                 }
             }
             Spacer()
@@ -246,7 +264,8 @@ struct ConfidenceBadge: View {
 }
 
 struct AIGeneratedBadge: View {
-    let confidence: Double?; let source: String?
+    let confidence: Double?
+    let source: String?
 
     var body: some View {
         HStack(spacing: 4) {
@@ -286,10 +305,24 @@ struct FileLinkCardView: View {
     }
 
     private func typeIcon(_ t: String) -> String {
-        switch t { case "note": "doc.text"; case "audio": "mic"; case "image": "photo"; case "journalEntry": "book"; case "webBookmark": "bookmark"; default: "doc" }
+        switch t {
+        case "note": "doc.text"
+        case "audio": "mic"
+        case "image": "photo"
+        case "journalEntry": "book"
+        case "webBookmark": "bookmark"
+        default: "doc"
+        }
     }
     private func typeColor(_ t: String) -> Color {
-        switch t { case "note": .orange; case "audio": .blue; case "image": .pink; case "journalEntry": .purple; case "webBookmark": .green; default: .secondary }
+        switch t {
+        case "note": .orange
+        case "audio": .blue
+        case "image": .pink
+        case "journalEntry": .purple
+        case "webBookmark": .green
+        default: .secondary
+        }
     }
 }
 

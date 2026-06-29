@@ -1,5 +1,5 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 // MARK: - Live OCR Scanner View
 
@@ -54,8 +54,7 @@ struct LiveOCRView: View {
         HStack {
             Button {
                 viewModel.stopScanning()
-                if viewModel.accumulatedText.isEmpty { dismiss() }
-                else { showSaveSheet = true }
+                if viewModel.accumulatedText.isEmpty { dismiss() } else { showSaveSheet = true }
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "xmark")
@@ -191,7 +190,9 @@ struct LiveOCRView: View {
                         Text("Captured Text")
                             .font(.caption).fontWeight(.semibold)
                         Spacer()
-                        Button { showClearConfirm = true } label: {
+                        Button {
+                            showClearConfirm = true
+                        } label: {
                             Text("Clear").font(.caption2).foregroundStyle(.red)
                         }
                     }
@@ -265,7 +266,10 @@ struct LiveOCRView: View {
                         .onTapGesture {
                             UIPasteboard.general.string = viewModel.accumulatedText
                             textCopied = true
-                            Task { try? await Task.sleep(nanoseconds: 1_500_000_000); textCopied = false }
+                            Task {
+                                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                                textCopied = false
+                            }
                         }
 
                         if textCopied {

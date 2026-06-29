@@ -81,38 +81,38 @@ final class ProjectAgent {
 
         // 5. Run agent autonomously
         var taskPrompt = """
-        You are the Project Agent for "\(project.name)".
-        Your universe is this project's items and their derivations.
+            You are the Project Agent for "\(project.name)".
+            Your universe is this project's items and their derivations.
 
-        ## PROJECT CONTEXT
-        \(contextDescription)
+            ## PROJECT CONTEXT
+            \(contextDescription)
 
-        ## YOUR TASK
-        Generate a project synthesis that:
+            ## YOUR TASK
+            Generate a project synthesis that:
 
-        1. Summarizes the current state of the project (2-3 paragraphs)
-        2. Lists active decisions and their status
-        3. Identifies risks and their mitigation status
-        4. Highlights cross-item connections and patterns
-        5. Provides metrics: decision velocity, task completion rate, risk exposure
+            1. Summarizes the current state of the project (2-3 paragraphs)
+            2. Lists active decisions and their status
+            3. Identifies risks and their mitigation status
+            4. Highlights cross-item connections and patterns
+            5. Provides metrics: decision velocity, task completion rate, risk exposure
 
-        Use the `synthesize_project` tool to save your output.
-        If you detect contradictions across items, create signals using `emit_signal`.
-        If you find items that need re-analysis with project context, use `request_reprocess`.
-        Use `create_connection` to link related items.
-        """
+            Use the `synthesize_project` tool to save your output.
+            If you detect contradictions across items, create signals using `emit_signal`.
+            If you find items that need re-analysis with project context, use `request_reprocess`.
+            Use `create_connection` to link related items.
+            """
 
         // Append framework-specific synthesis instructions if available
         if let fw = domainFramework {
             taskPrompt += """
 
-            ## DOMAIN FRAMEWORK: \(fw.name)
+                ## DOMAIN FRAMEWORK: \(fw.name)
 
-            This project has been classified under the "\(fw.name)" domain framework.
+                This project has been classified under the "\(fw.name)" domain framework.
 
-            Framework synthesis instructions:
-            \(fw.projectSynthesis.systemPrompt)
-            """
+                Framework synthesis instructions:
+                \(fw.projectSynthesis.systemPrompt)
+                """
         }
 
         let fullOutput = try await runAutonomousLoop(
@@ -146,7 +146,8 @@ final class ProjectAgent {
             let analysisURL = store.meetingDirectoryURL(for: item.id)
                 .appendingPathComponent("analysis.json")
             if let data = try? Data(contentsOf: analysisURL),
-               let text = String(data: data, encoding: .utf8) {
+                let text = String(data: data, encoding: .utf8)
+            {
                 sampleText += String(text.prefix(200)) + "\n"
             }
         }
@@ -258,7 +259,7 @@ final class ProjectAgent {
                 AppLog.agent.error("ProjectAgent loop error: \(error.localizedDescription)")
             case .truncated(let reason, let progress):
                 AppLog.agent.warning("ProjectAgent loop truncated: \(reason) (\(progress))")
-                // Continue collecting partial output rather than throwing
+            // Continue collecting partial output rather than throwing
             case .finished:
                 break
             default:
@@ -344,13 +345,14 @@ final class ProjectAgent {
         for line in lines {
             if line.hasPrefix("## ") {
                 if !currentTitle.isEmpty {
-                    sections.append(SynthesisSection(
-                        id: UUID().uuidString,
-                        title: currentTitle,
-                        renderType: "markdown",
-                        content: currentContent,
-                        order: order
-                    ))
+                    sections.append(
+                        SynthesisSection(
+                            id: UUID().uuidString,
+                            title: currentTitle,
+                            renderType: "markdown",
+                            content: currentContent,
+                            order: order
+                        ))
                     order += 1
                 }
                 currentTitle = String(line.dropFirst(3))
@@ -360,13 +362,14 @@ final class ProjectAgent {
             }
         }
         if !currentTitle.isEmpty {
-            sections.append(SynthesisSection(
-                id: UUID().uuidString,
-                title: currentTitle,
-                renderType: "markdown",
-                content: currentContent,
-                order: order
-            ))
+            sections.append(
+                SynthesisSection(
+                    id: UUID().uuidString,
+                    title: currentTitle,
+                    renderType: "markdown",
+                    content: currentContent,
+                    order: order
+                ))
         }
         return sections
     }
@@ -392,7 +395,7 @@ final class ProjectAgent {
                 format: "number",
                 status: activeSignals.contains { $0.isCritical } ? "critical" : (activeSignals.count > 5 ? "warning" : "healthy"),
                 icon: "waveform.path.ecg"
-            )
+            ),
         ]
     }
 }

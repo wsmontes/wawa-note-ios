@@ -1,5 +1,5 @@
-import Foundation
 import AVFoundation
+import Foundation
 import OSLog
 
 /// Splits audio into speech-only segments using VoiceActivityDetector.
@@ -14,27 +14,29 @@ import OSLog
 ///
 /// Unlike VADAudioChunker (which splits by fixed time), VADChunker
 /// splits by actual speech boundaries — smarter and more efficient.
-@MainActor
 struct VADChunker {
-    private let vad: VoiceActivityDetector
     private let maxChunkDuration: TimeInterval
     private let logger = Logger(subsystem: "com.wawa.note", category: "VADChunker")
 
     /// - Parameters:
     ///   - maxChunkDuration: Maximum seconds per chunk (engine limit, e.g. 50s for Apple Speech)
     init(maxChunkDuration: TimeInterval = 50) {
-        self.vad = VoiceActivityDetector()
         self.maxChunkDuration = maxChunkDuration
+    }
+
+    /// Split an audio file into speech-only chunks.
+    @MainActor
+    func chunkAudio(url: URL) async throws -> [VADAudioChunk] {
+        // VoiceActivityDetector is @MainActor — created inside this @MainActor
+        // method to avoid storing a main-actor object across actor boundaries.
+        let vad = VoiceActivityDetector()
         // Tune VAD for transcription pre-processing
         vad.energyThreshold = 0.03
         vad.minSpeechDuration = 0.5
         vad.minSilenceDuration = 0.3
         vad.preSpeechPad = 0.3
         vad.postSpeechPad = 0.4
-    }
 
-    /// Split an audio file into speech-only chunks.
-    func chunkAudio(url: URL) async throws -> [VADAudioChunk] {
         // 1. Detect speech segments via VAD
         let segments = try vad.detectSpeech(in: url)
 
@@ -51,7 +53,12 @@ struct VADChunker {
         // 3. Merge adjacent short segments that fit within maxChunkDuration
         let merged = mergeShortSegments(vadSegments, maxDuration: maxChunkDuration)
 
-        // 4. Write each merged segment to a temporary file
+        // 3b. Split any segment longer than maxChunkDuration.
+        // mergeShortSegments only merges; a long continuous-speech segment
+        // (monologue without silence) must be split to stay within the engine limit.
+        let bounded = splitLongSegments(merged, maxDuration: maxChunkDuration)
+
+        // 4. Write each bounded segment to a temporary file
         let audioFile = try AVAudioFile(forReading: url)
         let format = audioFile.processingFormat
         let fileManager = FileManager.default
@@ -59,7 +66,7 @@ struct VADChunker {
         try fileManager.createDirectory(at: tempDir, withIntermediateDirectories: true)
 
         var chunks: [VADAudioChunk] = []
-        for (idx, vadSeg) in merged.enumerated() {
+        for (idx, vadSeg) in bounded.enumerated() {
             let chunkURL = tempDir.appendingPathComponent("chunk_\(idx).caf")
             try writeChunk(from: url, startFrame: vadSeg.startFrame, frameCount: vadSeg.frameCount, format: format, to: chunkURL)
             chunks.append(VADAudioChunk(url: chunkURL, startTime: vadSeg.startTime, duration: vadSeg.endTime - vadSeg.startTime))
@@ -112,8 +119,44 @@ struct VADChunker {
         return merged
     }
 
+    /// Split any single segment longer than maxDuration into bounded windows.
+    /// mergeShortSegments only merges; this prevents a continuous-speech segment
+    /// from exceeding the engine's max duration limit (e.g. 50s for SFSpeech).
+    private func splitLongSegments(_ segments: [VADAudioSegment], maxDuration: TimeInterval) -> [VADAudioSegment] {
+        var result: [VADAudioSegment] = []
+        for seg in segments {
+            let segDuration = seg.endTime - seg.startTime
+            guard segDuration > maxDuration else {
+                result.append(seg)
+                continue
+            }
+            // Split into maxDuration windows from startTime to endTime
+            var t = seg.startTime
+            while t < seg.endTime {
+                let windowEnd = min(t + maxDuration, seg.endTime)
+                let windowDuration = windowEnd - t
+                let fraction = windowDuration / segDuration
+                let frameCount = AVAudioFrameCount(Double(seg.frameCount) * fraction)
+                let frameOffset = AVAudioFramePosition(
+                    Double(seg.frameCount) * (t - seg.startTime) / segDuration
+                )
+                result.append(
+                    VADAudioSegment(
+                        startTime: t,
+                        endTime: windowEnd,
+                        startFrame: seg.startFrame + frameOffset,
+                        frameCount: frameCount,
+                        confidence: seg.confidence
+                    ))
+                t = windowEnd
+            }
+        }
+        return result
+    }
+
     /// Write a range of audio frames from source to a new file.
-    private func writeChunk(from sourceURL: URL, startFrame: AVAudioFramePosition, frameCount: AVAudioFrameCount, format: AVAudioFormat, to destURL: URL) throws {
+    private func writeChunk(from sourceURL: URL, startFrame: AVAudioFramePosition, frameCount: AVAudioFrameCount, format: AVAudioFormat, to destURL: URL) throws
+    {
         let sourceFile = try AVAudioFile(forReading: sourceURL)
         sourceFile.framePosition = startFrame
 
@@ -128,7 +171,7 @@ struct VADChunker {
             AVNumberOfChannelsKey: format.channelCount,
             AVLinearPCMBitDepthKey: 16,
             AVLinearPCMIsFloatKey: false,
-            AVLinearPCMIsBigEndianKey: false
+            AVLinearPCMIsBigEndianKey: false,
         ]
 
         let destFile = try AVAudioFile(forWriting: destURL, settings: settings, commonFormat: .pcmFormatInt16, interleaved: false)
