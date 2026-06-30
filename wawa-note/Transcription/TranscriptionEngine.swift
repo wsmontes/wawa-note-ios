@@ -165,9 +165,12 @@ enum TranscriptionLocaleProvider {
 
   private static func liveLocales() -> [(id: String, name: String)] {
     let configured = Set(fallbackLocales.map(\.id))
+    // Show all system-supported locales — do NOT filter by isAvailable.
+    // If the model hasn't been downloaded yet, the engine returns a clear
+    // .modelMissing error telling the user to connect to Wi-Fi. Silent
+    // fallback to a different language is far worse than a clear error.
     return SFSpeechRecognizer.supportedLocales()
       .filter { configured.contains($0.identifier) }
-      .filter { SFSpeechRecognizer(locale: $0)?.isAvailable == true }
       .map { ($0.identifier, displayName($0.identifier)) }
       .sorted { $0.1 < $1.1 }
   }
