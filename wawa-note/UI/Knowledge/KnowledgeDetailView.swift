@@ -70,12 +70,7 @@ struct KnowledgeDetailView: View {
   private var statusLabel: String {
     if let p = transcriptionProgress { return p }
     if !pipelineStage.isEmpty { return pipelineStage }
-    switch item.status {
-    case .preparingAudio: return "Preparing audio…"
-    case .queuedForTranscription: return "Queued for transcription…"
-    case .transcribing: return "Transcribing…"
-    default: return "Processing…"
-    }
+    return item.status.label
   }
 
   var body: some View {

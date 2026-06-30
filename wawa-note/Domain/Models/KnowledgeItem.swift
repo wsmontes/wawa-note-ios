@@ -62,6 +62,55 @@ enum ItemStatus: String, Codable, CaseIterable {
   func canTransition(to next: ItemStatus) -> Bool {
     validNextStatuses.contains(next)
   }
+
+  /// Human-readable label for UI badges and status bars.
+  var label: String {
+    switch self {
+    case .draft: return "Draft"
+    case .recording: return "Recording"
+    case .preparingAudio: return "Preparing audio"
+    case .queuedForTranscription: return "Queued"
+    case .recorded: return "Recorded"
+    case .transcribing: return "Transcribing"
+    case .transcribed: return "Transcribed"
+    case .pendingReview: return "Needs review"
+    case .analyzing: return "Analyzing"
+    case .analyzed: return "Analyzed"
+    case .failed: return "Failed"
+    case .archived: return "Archived"
+    }
+  }
+
+  /// SF Symbol for the status badge.
+  var icon: String {
+    switch self {
+    case .draft: return "doc"
+    case .recording: return "recordingtape"
+    case .preparingAudio: return "gearshape"
+    case .queuedForTranscription: return "hourglass"
+    case .recorded: return "circle.dotted"
+    case .transcribing: return "text.alignleft"
+    case .transcribed: return "text.alignleft"
+    case .pendingReview: return "eye"
+    case .analyzing: return "sparkles"
+    case .analyzed: return "sparkles.rectangle.stack"
+    case .failed: return "exclamationmark.triangle"
+    case .archived: return "archivebox"
+    }
+  }
+
+  /// Semantic tone for color-coding badges.
+  enum StatusTone { case neutral, active, success, warning, error }
+  var tone: StatusTone {
+    switch self {
+    case .draft, .recorded: return .neutral
+    case .recording, .preparingAudio, .queuedForTranscription, .transcribing, .analyzing:
+      return .active
+    case .transcribed, .analyzed: return .success
+    case .pendingReview, .archived: return .warning
+    case .failed: return .error
+    }
+  }
 }
 
 enum KnowledgeItemType: String, Codable, CaseIterable, Hashable {

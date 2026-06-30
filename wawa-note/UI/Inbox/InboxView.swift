@@ -537,6 +537,8 @@ struct InboxView: View {
         Image(systemName: item.type.icon).foregroundStyle(item.type.color)
         Text(item.type.label).font(.caption).foregroundStyle(.secondary)
         Spacer()
+        // Status badge — matches KnowledgeDetailView
+        statusBadge(item.status)
         Text(item.createdAt.formatted(date: .abbreviated, time: .shortened))
           .font(.caption2).foregroundStyle(.tertiary)
       }
@@ -547,6 +549,30 @@ struct InboxView: View {
     }
     .padding()
     .frame(width: 300)
+  }
+
+  @ViewBuilder
+  private func statusBadge(_ status: ItemStatus) -> some View {
+    HStack(spacing: 4) {
+      Image(systemName: status.icon)
+        .font(.caption2)
+      Text(status.label)
+        .font(.caption2)
+    }
+    .foregroundStyle(statusToneColor(status.tone))
+    .padding(.horizontal, 6)
+    .padding(.vertical, 2)
+    .background(statusToneColor(status.tone).opacity(0.12), in: Capsule())
+  }
+
+  private func statusToneColor(_ tone: ItemStatus.StatusTone) -> Color {
+    switch tone {
+    case .neutral: return .secondary
+    case .active: return .blue
+    case .success: return .green
+    case .warning: return .orange
+    case .error: return .red
+    }
   }
 
   // MARK: - Folder picker
