@@ -44,6 +44,8 @@ struct KnowledgeDetailView: View {
   @State private var transcriptionProgress: String?
   @State private var showPromoteSheet = false
   @State private var showConnectSheet = false
+  @State private var showTranscribeSheet = false
+  @State private var pendingTranscribeEngine: TranscriptionOverride?
   @State private var connectSearchText = ""
   @State private var connectableItems: [KnowledgeItem] = []
   @State private var isAnalyzing = false
@@ -289,20 +291,24 @@ struct KnowledgeDetailView: View {
                 let already = item.transcriptionEngineId != nil
                 let prefix = already ? "Re-transcribe" : "Transcribe"
                 Section("Transcription Engine") {
+                  // Apple engines need a locale — show language picker modal
                   Button {
-                    Task { await reprocessItem(mode: .transcribeOnly, engine: .appleOnDevice) }
+                    pendingTranscribeEngine = .appleOnDevice
+                    showTranscribeSheet = true
                   } label: {
                     Label(
                       "\(prefix) (On-Device)",
                       systemImage: TranscriptionOverride.appleOnDevice.icon)
                   }
                   Button {
-                    Task { await reprocessItem(mode: .transcribeOnly, engine: .appleCloud) }
+                    pendingTranscribeEngine = .appleCloud
+                    showTranscribeSheet = true
                   } label: {
                     Label(
                       "\(prefix) (Cloud Fallback)",
                       systemImage: TranscriptionOverride.appleCloud.icon)
                   }
+                  // Whisper auto-detects language — no picker needed
                   Button {
                     Task { await reprocessItem(mode: .transcribeOnly, engine: .whisper) }
                   } label: {
@@ -399,6 +405,9 @@ struct KnowledgeDetailView: View {
     }
     .sheet(isPresented: $showConnectSheet) {
       connectToItemSheet
+    }
+    .sheet(isPresented: $showTranscribeSheet) {
+      transcribeLanguageSheet
     }
     .alert("Re-process Item", isPresented: $showReprocessWarning) {
       Button("Cancel", role: .cancel) {}
@@ -634,6 +643,59 @@ struct KnowledgeDetailView: View {
       }
     }
     .presentationDetents([.medium, .large])
+  }
+
+  /// Language confirmation sheet shown before Apple transcription.
+  /// Whisper auto-detects language, so this only appears for On-Device and Cloud Fallback.
+  private var transcribeLanguageSheet: some View {
+    NavigationStack {
+      List {
+        Section {
+          ForEach(availableLocales, id: \.id) { locale in
+            Button {
+              selectedLocale = locale.id
+            } label: {
+              HStack {
+                Text(locale.name)
+                  .font(.subheadline)
+                  .foregroundStyle(.primary)
+                Spacer()
+                if selectedLocale == locale.id {
+                  Image(systemName: "checkmark")
+                    .foregroundStyle(.blue)
+                }
+              }
+            }
+          }
+        } header: {
+          Text("Transcription Language")
+        } footer: {
+          Text(
+            "Apple's on-device speech recognition needs the correct language to produce accurate results. Select the language spoken in this audio."
+          )
+        }
+      }
+      .navigationTitle(pendingTranscribeEngine?.rawValue ?? "Transcribe")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .topBarLeading) {
+          Button("Cancel") {
+            showTranscribeSheet = false
+            pendingTranscribeEngine = nil
+          }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+          Button("Start") {
+            let engine = pendingTranscribeEngine
+            showTranscribeSheet = false
+            pendingTranscribeEngine = nil
+            Task { await reprocessItem(mode: .transcribeOnly, engine: engine) }
+          }
+          .fontWeight(.semibold)
+        }
+      }
+    }
+    .presentationDetents([.medium])
   }
 
   private var hasContextFields: Bool {
