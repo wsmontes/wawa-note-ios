@@ -619,9 +619,13 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
     /// WAV and other uncompressed formats pass through unchanged.
     private func prepareForRecognition(_ url: URL) throws -> URL {
         let ext = url.pathExtension.lowercased()
-        guard ext == "m4a" || ext == "mp4" else { return url }
+        // SFSpeechRecognizer cloud servers reject CAF (Core Audio Format).
+        // VADChunker produces 16kHz mono CAF chunks — remux to WAV container.
+        // M4A/MP4 need AAC→PCM decode. Other formats (WAV, etc.) pass through.
+        if ext == "wav" || ext == "wave" { return url }
+        guard ext == "m4a" || ext == "mp4" || ext == "caf" else { return url }
 
-        AppLog.transcription.info("Decoding AAC to PCM: \(url.lastPathComponent)")
+        AppLog.transcription.info("Decoding to 16kHz PCM WAV: \(url.lastPathComponent)")
 
         let inputFile = try AVAudioFile(forReading: url)
         let inputFormat = inputFile.processingFormat
