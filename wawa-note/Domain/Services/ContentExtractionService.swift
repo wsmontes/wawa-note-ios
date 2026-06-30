@@ -205,11 +205,17 @@ final class ContentExtractionService {
     let audioURL = fileStore.audioFileURL(for: item.id)
     guard FileManager.default.fileExists(atPath: audioURL.path) else {
       AppLog.provider.warning("ContentExtraction: no audio file for item \(item.id)")
+      item.status = .failed
+      try? modelContext.save()
       return nil
     }
 
     let engine = resolveTranscriptionEngine()
-    guard let engine else { return nil }
+    guard let engine else {
+      item.status = .failed
+      try? modelContext.save()
+      return nil
+    }
 
     do {
       var result = try await engine.transcribeFile(audioURL, meetingId: item.id)
@@ -476,6 +482,8 @@ final class ContentExtractionService {
         "ContentExtraction.analyze: PERMANENT failure for item \(item.id): \(error.localizedDescription)"
       )
       try? fileStore.createMeetingDirectory(for: item.id)
+      item.status = .failed
+      try? modelContext.save()
       return false
     } catch {
       // Transient errors: network timeout, rate limit, server error — retryable

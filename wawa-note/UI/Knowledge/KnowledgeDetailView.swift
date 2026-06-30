@@ -802,7 +802,7 @@ struct KnowledgeDetailView: View {
 
         HStack(spacing: 8) {
           Button {
-            item.status = .draft
+            item.status = .analyzing
             try? modelContext.save()
             // Re-queue for analysis now that user approved
             processingQueue.enqueue(

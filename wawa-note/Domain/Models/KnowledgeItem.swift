@@ -32,7 +32,7 @@ enum ItemStatus: String, Codable, CaseIterable {
   var validNextStatuses: Set<ItemStatus> {
     switch self {
     case .draft:
-      [.recording]
+      [.recording, .analyzing]
     case .recording:
       [.preparingAudio, .recorded, .failed]
     case .preparingAudio:
@@ -46,7 +46,7 @@ enum ItemStatus: String, Codable, CaseIterable {
     case .transcribed:
       [.pendingReview, .analyzing, .failed]
     case .pendingReview:
-      [.analyzing, .failed]
+      [.analyzing, .recorded, .failed]
     case .analyzing:
       [.analyzed, .failed]
     case .analyzed:

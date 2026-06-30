@@ -384,6 +384,13 @@ final class ContentPipelineService: ObservableObject {
         return
       }
 
+      // Enter analysis phase — transition to .analyzing so the UI
+      // reflects that the agent is actively working on this item.
+      if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+        fresh.status = .analyzing
+        try? modelContext.save()
+      }
+
       let loop = AgentLoop(
         registry: registry, toolContext: toolContext,
         maxIterations: iterationBudget, mode: agentMode,
@@ -403,11 +410,16 @@ final class ContentPipelineService: ObservableObject {
       // Uses the extractionSvc already created in Phase 0 above.
       let availableText = await extractionSvc.bestAvailableText(for: item) ?? ""
       if availableText.trimmingCharacters(in: .whitespaces).isEmpty {
-        // Transcription or extraction failed — status was already set by the extraction
-        // phase (.failed if transcription failed, .recorded if not yet transcribed).
-        // Do NOT override to .draft — that makes items invisible to retry logic.
+        // Transcription or extraction produced no usable text.
+        // If extraction didn't already set a terminal status, do it now.
         AppLog.provider.warning(
           "ContentPipeline: no extractable text for item \(itemID) — pipeline cannot proceed")
+        if item.status != .failed, item.status != .transcribed, item.status != .analyzed {
+          if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+            fresh.status = .failed
+            try? modelContext.save()
+          }
+        }
         return
       }
 
