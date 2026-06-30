@@ -205,9 +205,11 @@ final class ContentPipelineService: ObservableObject {
                             }
                         }
                     } else {
-                        AppLog.provider.warning("ContentPipeline: pre-transcription failed for item \(itemID) — marking as failed")
+                        let reason = extractionSvc.extractionError?.errorDescription ?? "unknown error"
+                        AppLog.provider.warning("ContentPipeline: pre-transcription failed for item \(itemID) — \(reason)")
                         if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
                             fresh.status = .failed
+                            fresh.transcriptionEngineId = nil  // clear stale engine ID on failure
                             try? modelContext.save()
                         }
                     }
@@ -237,7 +239,11 @@ final class ContentPipelineService: ObservableObject {
                             }
                         }
                     } else {
-                        AppLog.provider.warning("ContentPipeline: OCR failed for item \(itemID)")
+                        AppLog.provider.warning("ContentPipeline: OCR failed for item \(itemID) — marking as failed")
+                        if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+                            fresh.status = .failed
+                            try? modelContext.save()
+                        }
                     }
                 }
                 if item.type == .webBookmark, item.bodyText == nil {
@@ -590,11 +596,14 @@ final class ContentPipelineService: ObservableObject {
             var token: NSObjectProtocol?
             token = NotificationCenter.default.addObserver(forName: .pipelineCompleted, object: nil, queue: .main) { note in
                 guard let completedID = note.object as? String, completedID == itemID.uuidString else { return }
-                if let t = token { NotificationCenter.default.removeObserver(t) }
                 guard !resumed else { return }
+                if let t = token { NotificationCenter.default.removeObserver(t) }
                 resumed = true
                 continuation.resume()
             }
+            // Start processing AFTER observer is registered to avoid race:
+            // if process() completes synchronously (e.g. item already analyzed),
+            // the notification fires before the observer exists.
             process(itemID, using: ctx)
             // Safety timeout: if notification never fires, resume after 600s.
             // This is longer than the worst-case pipeline duration (2 retries × 300s

@@ -59,6 +59,25 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     let fileWriter: AudioFileWriter
     var outputFileURL: URL? { fileWriter.currentFileURL }
 
+    /// Force the audio session to use the built-in microphone, abandoning Bluetooth/HFP.
+    /// Used by RecordingCoordinator's pre-flight retry as a last-resort fallback
+    /// when the current route keeps failing.
+    func forceBuiltInMic() {
+        guard
+            let builtIn = sessionManager.session.availableInputs?.first(where: { $0.portType == .builtInMic })
+                ?? sessionManager.session.currentRoute.inputs.first(where: { $0.portType == .builtInMic })
+        else {
+            AppLog.audio.warning("forceBuiltInMic: no built-in mic available")
+            return
+        }
+        do {
+            try sessionManager.session.setPreferredInput(builtIn)
+            AppLog.audio.info("forceBuiltInMic: switched to \(builtIn.portName)")
+        } catch {
+            AppLog.audio.warning("forceBuiltInMic: setPreferredInput failed — \(error.localizedDescription)")
+        }
+    }
+
     // MARK: Internal
 
     private var engine: AVAudioEngine?
