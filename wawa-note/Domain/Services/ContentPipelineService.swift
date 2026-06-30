@@ -386,9 +386,25 @@ final class ContentPipelineService: ObservableObject {
 
       // Enter analysis phase — transition to .analyzing so the UI
       // reflects that the agent is actively working on this item.
+      // Defer: if we exit this scope without reaching .analyzed or .failed,
+      // roll back to .transcribed so the item doesn't get stuck.
       if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
         fresh.status = .analyzing
         try? modelContext.save()
+      }
+      var didComplete = false
+      defer {
+        if !didComplete {
+          if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID),
+            fresh.status == .analyzing
+          {
+            fresh.status = .transcribed
+            try? modelContext.save()
+            AppLog.provider.warning(
+              "ContentPipeline: item \(itemID) exited analysis without reaching terminal state — rolled back to .transcribed"
+            )
+          }
+        }
       }
 
       let loop = AgentLoop(
@@ -604,6 +620,7 @@ final class ContentPipelineService: ObservableObject {
               // Mark item as analyzed now that we have valid analysis
               if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID)
               {
+                didComplete = true
                 fresh.status = .analyzed
                 fresh.analysisProviderId = executorModel
                 // Read analysis for AI-suggested metadata
@@ -666,6 +683,7 @@ final class ContentPipelineService: ObservableObject {
       }
       // Mark item as processed. On success, clear inboxDate so the
       // Unprocessed badge disappears — item is fully analyzed, no review needed.
+      didComplete = true  // defer won't roll back
       if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
         fresh.analysisProviderId = provider.id
         fresh.status = lastError == nil ? .analyzed : .failed
