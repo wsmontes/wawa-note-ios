@@ -1,6 +1,8 @@
 import SwiftData
 import SwiftUI
 
+// Related JIRA: KAN-10, KAN-51, KAN-93
+
 private enum ReprocessMode: CustomStringConvertible {
     case transcribeOnly
     case analyzeOnly
@@ -16,11 +18,24 @@ private enum ReprocessMode: CustomStringConvertible {
 }
 
 struct KnowledgeDetailView: View {
-    let item: KnowledgeItem
+    let itemID: UUID
+    @Query private var items: [KnowledgeItem]
     @Environment(\.modelContext) private var modelContext
+
+    init(itemID: UUID) {
+        self.itemID = itemID
+        _items = Query(
+            filter: #Predicate<KnowledgeItem> { $0.id == itemID },
+            sort: \KnowledgeItem.createdAt
+        )
+    }
+
+    /// Always non-nil when items is non-empty (which we guard in body).
+    private var item: KnowledgeItem { items.first! }
     @EnvironmentObject private var contentPipeline: ContentPipelineService
     @EnvironmentObject private var processingQueue: ProcessingQueueService
     @EnvironmentObject private var chatState: ChatOverlayState
+    @EnvironmentObject private var services: ServiceContainer
     @State private var transcript: Transcript?
     @State private var analysis: MeetingAnalysis?
     @State private var annotations: [Annotation] = []
@@ -34,7 +49,7 @@ struct KnowledgeDetailView: View {
     @State private var isAnalyzing = false
     @State private var analysisError: String?
     @State private var selectedModel: String = ""
-    @State private var selectedLocale = "pt-BR"
+    @State private var selectedLocale = "en-US"
     @State private var showLocalePicker = false
     @State private var isEditing = false
     @State private var editedTitle = ""
@@ -78,394 +93,408 @@ struct KnowledgeDetailView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                    .padding(.horizontal, 16)
+        if items.isEmpty {
+            ContentUnavailableView(
+                "Item not found", systemImage: "doc.text.magnifyingglass",
+                description: Text("This item may have been deleted."))
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    header
+                        .padding(.horizontal, 16)
 
-                if isTranscribing || isPipelineProcessing {
-                    VStack(spacing: 0) {
-                        // Current status bar
-                        HStack(spacing: 10) {
-                            ProgressView()
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(statusLabel)
-                                    .font(.subheadline).foregroundStyle(.primary)
-                                if isAgentThinking {
-                                    Text("Agent is thinking…").font(.caption2).foregroundStyle(.secondary)
+                    if isTranscribing || isPipelineProcessing {
+                        VStack(spacing: 0) {
+                            // Current status bar
+                            HStack(spacing: 10) {
+                                ProgressView()
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(statusLabel)
+                                        .font(.subheadline).foregroundStyle(.primary)
+                                    if isAgentThinking {
+                                        Text("Agent is thinking…").font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                if !agentEvents.isEmpty {
+                                    Text("\(agentEvents.count) steps").font(.caption2).foregroundStyle(.secondary)
                                 }
                             }
-                            Spacer()
+                            .padding(12)
+
+                            // Agent trace — collapsible log of tool calls & results
                             if !agentEvents.isEmpty {
-                                Text("\(agentEvents.count) steps").font(.caption2).foregroundStyle(.secondary)
+                                Divider().padding(.horizontal, 12)
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 6) {
+                                        ForEach(agentEvents) { evt in
+                                            agentEventBadge(evt)
+                                        }
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .background(Color(.secondarySystemGroupedBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                    }
+
+                    if let error = transcriptionError {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                                Text(error).font(.subheadline)
+                            }
+                            if error.contains("Settings") {
+                                Button("Open Settings") {
+                                    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                                    UIApplication.shared.open(url)
+                                }.font(.subheadline)
                             }
                         }
                         .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                    }
 
-                        // Agent trace — collapsible log of tool calls & results
-                        if !agentEvents.isEmpty {
-                            Divider().padding(.horizontal, 12)
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 6) {
-                                    ForEach(agentEvents) { evt in
-                                        agentEventBadge(evt)
-                                    }
-                                }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
+                    if let error = analysisError {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                                Text(error).font(.subheadline)
+                            }
+                            if error.contains("Settings") {
+                                Button("Open Settings") {
+                                    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                                    UIApplication.shared.open(url)
+                                }.font(.subheadline)
                             }
                         }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
                     }
-                    .frame(maxWidth: .infinity)
-                    .background(Color(.secondarySystemGroupedBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                }
 
-                if let error = transcriptionError {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
-                            Text(error).font(.subheadline)
-                        }
-                        if error.contains("Settings") {
-                            Button("Open Settings") {
-                                guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-                                UIApplication.shared.open(url)
-                            }.font(.subheadline)
-                        }
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.red.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                }
+                    Divider().padding(.top, 16)
 
-                if let error = analysisError {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
-                            Text(error).font(.subheadline)
-                        }
-                        if error.contains("Settings") {
-                            Button("Open Settings") {
-                                guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-                                UIApplication.shared.open(url)
-                            }.font(.subheadline)
-                        }
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.red.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                }
-
-                Divider().padding(.top, 16)
-
-                // Audio player — shown when item has playable audio (single file or segments)
-                if hasPlayableAudio {
-                    if isPreparingAudio {
-                        HStack {
-                            ProgressView()
-                            Text("Preparing audio…").font(.subheadline).foregroundStyle(.secondary)
-                        }
-                        .padding(.horizontal, 16).padding(.top, 12)
-                    } else if let url = audioPlaybackURL {
-                        AudioPlayerView(audioURL: url, title: item.title)
+                    // Audio player — shown when item has playable audio (single file or segments)
+                    if hasPlayableAudio {
+                        if isPreparingAudio {
+                            HStack {
+                                ProgressView()
+                                Text("Preparing audio…").font(.subheadline).foregroundStyle(.secondary)
+                            }
                             .padding(.horizontal, 16).padding(.top, 12)
-                    } else if case .segmentsAvailable(let count) = audioAssetState {
+                        } else if let url = audioPlaybackURL {
+                            AudioPlayerView(audioURL: url, title: item.title)
+                                .padding(.horizontal, 16).padding(.top, 12)
+                        } else if case .segmentsAvailable(let count) = audioAssetState {
+                            Button {
+                                Task { await prepareAudioForPlayback() }
+                            } label: {
+                                Label("Prepare Audio (\(count) segments)", systemImage: "waveform.circle")
+                            }
+                            .buttonStyle(.bordered)
+                            .padding(.horizontal, 16).padding(.top, 12)
+                        }
+                    } else if case .failed(let reason) = audioAssetState {
+                        HStack {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                            Text(reason).font(.caption).foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 16).padding(.top, 8)
+                    }
+
+                    // Analysis always at the top — like every other item type
+                    if transcript != nil || analysis != nil { artifactSections }
+
+                    // Image gallery + OCR for scanned documents
+                    if item.type == .image { imageSection }
+
+                    // Body text for notes, journals, and any non-image item with bodyText
+                    // Images: OCR text already shown inside imageSection
+                    if (item.bodyText != nil && item.type != .image) || item.type == .note || item.type == .journalEntry { textContentSection }
+                    if item.type == .webBookmark { bookmarkSection }
+
+                    // Context metadata (read-only display)
+                    if hasContextFields { contextSection }
+
+                    // Debug: show raw LLM response (Developer Mode only).
+                    // Gated behind #if DEBUG so it's NEVER compiled into App Store builds,
+                    // even if the UserDefaults key is accidentally set.
+                    #if DEBUG
+                        if UserDefaults.standard.bool(forKey: "developer_mode_enabled"),
+                            let a = analysis, a.shortSummary.trimmingCharacters(in: .whitespaces).isEmpty
+                        {
+                            rawResponseSection
+                                .padding(.top, 12)
+                        }
+                    #endif
+
+                    if !annotations.isEmpty {
+                        annotationsSection
+                            .padding(.top, 20)
+                    }
+
+                    if !backlinks.isEmpty {
+                        backlinksSection
+                    }
+                }
+                .padding(.vertical, 16)
+            }
+            .id(refreshID)  // force re-render on pipeline complete
+            .background(Color(.systemGroupedBackground))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 12) {
+                        if item.bodyText != nil {
+                            if isEditing {
+                                Button("Save") { saveEdits() }
+                                    .fontWeight(.semibold)
+                                Button("Cancel") { cancelEditing() }
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Button("Edit") { startEditing() }
+                            }
+                        }
+
                         Button {
-                            Task { await prepareAudioForPlayback() }
+                            showPromoteSheet = true
                         } label: {
-                            Label("Prepare Audio (\(count) segments)", systemImage: "waveform.circle")
+                            Label("Turn into Project", systemImage: "sparkles.rectangle.stack")
                         }
-                        .buttonStyle(.bordered)
-                        .padding(.horizontal, 16).padding(.top, 12)
-                    }
-                } else if case .failed(let reason) = audioAssetState {
-                    HStack {
-                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                        Text(reason).font(.caption).foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 16).padding(.top, 8)
-                }
 
-                // Analysis always at the top — like every other item type
-                if transcript != nil || analysis != nil { artifactSections }
-
-                // Image gallery + OCR for scanned documents
-                if item.type == .image { imageSection }
-
-                // Body text for notes, journals, and any non-image item with bodyText
-                // Images: OCR text already shown inside imageSection
-                if (item.bodyText != nil && item.type != .image) || item.type == .note || item.type == .journalEntry { textContentSection }
-                if item.type == .webBookmark { bookmarkSection }
-
-                // Context metadata (read-only display)
-                if hasContextFields { contextSection }
-
-                // Debug: show raw LLM response (Developer Mode only).
-                // Gated behind #if DEBUG so it's NEVER compiled into App Store builds,
-                // even if the UserDefaults key is accidentally set.
-                #if DEBUG
-                    if UserDefaults.standard.bool(forKey: "developer_mode_enabled"),
-                        let a = analysis, a.shortSummary.trimmingCharacters(in: .whitespaces).isEmpty
-                    {
-                        rawResponseSection
-                            .padding(.top, 12)
-                    }
-                #endif
-
-                if !annotations.isEmpty {
-                    annotationsSection
-                        .padding(.top, 20)
-                }
-
-                if !backlinks.isEmpty {
-                    backlinksSection
-                }
-            }
-            .padding(.vertical, 16)
-        }
-        .id(refreshID)  // force re-render on pipeline complete
-        .background(Color(.systemGroupedBackground))
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 12) {
-                    if item.bodyText != nil {
-                        if isEditing {
-                            Button("Save") { saveEdits() }
-                                .fontWeight(.semibold)
-                            Button("Cancel") { cancelEditing() }
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Button("Edit") { startEditing() }
+                        Button {
+                            showConnectSheet = true
+                        } label: {
+                            Label("Connect to Item", systemImage: "arrow.triangle.pull")
                         }
-                    }
 
-                    Button {
-                        showPromoteSheet = true
-                    } label: {
-                        Label("Turn into Project", systemImage: "sparkles.rectangle.stack")
-                    }
-
-                    Button {
-                        showConnectSheet = true
-                    } label: {
-                        Label("Connect to Item", systemImage: "arrow.triangle.pull")
-                    }
-
-                    // Reprocess menu — available for any processable item.
-                    let canReprocess =
-                        item.type == .audio || item.type == .image
-                        || item.bodyText != nil || item.analysisProviderId != nil
-                        || item.transcriptionEngineId != nil
-                    if canReprocess {
-                        Menu {
-                            if item.type == .audio {
-                                let already = item.transcriptionEngineId != nil
-                                Section {
-                                    Button {
-                                        Task { await reprocessItem(mode: .transcribeOnly, forceAppleOnDevice: true) }
-                                    } label: {
-                                        Label(
-                                            already ? "Re-transcribe (Apple)" : "Transcribe (Apple)",
-                                            systemImage: "iphone.gen3")
-                                    }
-                                    Button {
-                                        Task { await reprocessItem(mode: .transcribeOnly, forceAppleOnDevice: false) }
-                                    } label: {
-                                        Label(
-                                            already ? "Re-transcribe (Whisper)" : "Transcribe (Whisper)",
-                                            systemImage: "cloud")
+                        // Reprocess menu — available for any processable item.
+                        let canReprocess =
+                            item.type == .audio || item.type == .image
+                            || item.bodyText != nil || item.analysisProviderId != nil
+                            || item.transcriptionEngineId != nil
+                        if canReprocess {
+                            Menu {
+                                if item.type == .audio {
+                                    let already = item.transcriptionEngineId != nil
+                                    Section {
+                                        Button {
+                                            Task { await reprocessItem(mode: .transcribeOnly, forceAppleOnDevice: true) }
+                                        } label: {
+                                            Label(
+                                                already ? "Re-transcribe (Apple)" : "Transcribe (Apple)",
+                                                systemImage: "iphone.gen3")
+                                        }
+                                        Button {
+                                            Task { await reprocessItem(mode: .transcribeOnly, forceAppleOnDevice: false) }
+                                        } label: {
+                                            Label(
+                                                already ? "Re-transcribe (Whisper)" : "Transcribe (Whisper)",
+                                                systemImage: "cloud")
+                                        }
                                     }
                                 }
-                            }
-                            if item.type == .image {
-                                Button {
-                                    Task { await reprocessItem(mode: .transcribeOnly) }
-                                } label: {
-                                    Label(
-                                        item.bodyText?.isEmpty != false ? "Extract Text" : "Re-extract Text",
-                                        systemImage: "text.viewfinder")
+                                if item.type == .image {
+                                    Button {
+                                        Task { await reprocessItem(mode: .transcribeOnly) }
+                                    } label: {
+                                        Label(
+                                            item.bodyText?.isEmpty != false ? "Extract Text" : "Re-extract Text",
+                                            systemImage: "text.viewfinder")
+                                    }
                                 }
-                            }
-                            // Re-analyze: only when there's content to analyze
-                            let canAnalyze =
-                                (item.type == .audio && item.transcriptionEngineId != nil)
-                                || (item.type == .image && item.bodyText?.isEmpty == false)
-                                || item.bodyText?.isEmpty == false
-                                || item.analysisProviderId != nil
-                            if canAnalyze {
-                                Button {
-                                    Task { await reprocessItem(mode: .analyzeOnly) }
-                                } label: {
-                                    Label("Re-analyze", systemImage: "brain.head.profile")
+                                // Re-analyze: only when there's content to analyze
+                                let canAnalyze =
+                                    (item.type == .audio && item.transcriptionEngineId != nil)
+                                    || (item.type == .image && item.bodyText?.isEmpty == false)
+                                    || item.bodyText?.isEmpty == false
+                                    || item.analysisProviderId != nil
+                                if canAnalyze {
+                                    Button {
+                                        Task { await reprocessItem(mode: .analyzeOnly) }
+                                    } label: {
+                                        Label("Re-analyze", systemImage: "brain.head.profile")
+                                    }
                                 }
-                            }
-                            let canFullReprocess =
-                                (item.type == .audio && item.transcriptionEngineId != nil && item.analysisProviderId != nil)
-                                || (item.type == .image && item.bodyText?.isEmpty == false && item.analysisProviderId != nil)
-                            if canFullReprocess {
-                                Divider()
-                                Button {
-                                    Task { await reprocessItem(mode: .full) }
-                                } label: {
-                                    Label("Full Reprocess", systemImage: "arrow.triangle.2.circlepath")
+                                let canFullReprocess =
+                                    (item.type == .audio && item.transcriptionEngineId != nil && item.analysisProviderId != nil)
+                                    || (item.type == .image && item.bodyText?.isEmpty == false && item.analysisProviderId != nil)
+                                if canFullReprocess {
+                                    Divider()
+                                    Button {
+                                        Task { await reprocessItem(mode: .full) }
+                                    } label: {
+                                        Label("Full Reprocess", systemImage: "arrow.triangle.2.circlepath")
+                                    }
                                 }
+                            } label: {
+                                Label("Reprocess", systemImage: "arrow.triangle.2.circlepath")
                             }
-                        } label: {
-                            Label("Reprocess", systemImage: "arrow.triangle.2.circlepath")
+                            .disabled(isReprocessing || isPipelineProcessing)
                         }
-                        .disabled(isReprocessing || isPipelineProcessing)
-                    }
 
-                    if hasExportableContent {
-                        Menu {
-                            // Textual exports (when transcript/analysis available)
-                            if transcript != nil || analysis != nil {
-                                let md = MarkdownExporter().export(item: item, transcript: transcript, analysis: analysis)
-                                if let url = tempExportURL(ext: "md", content: md) {
-                                    ShareLink("Markdown", item: url)
+                        if hasExportableContent {
+                            Menu {
+                                // Textual exports (when transcript/analysis available)
+                                if transcript != nil || analysis != nil {
+                                    let md = MarkdownExporter().export(item: item, transcript: transcript, analysis: analysis)
+                                    if let url = tempExportURL(ext: "md", content: md) {
+                                        ShareLink("Markdown", item: url)
+                                    }
+                                    if let jsonData = try? JSONExporter().export(item: item, transcript: transcript, analysis: analysis),
+                                        let jsonString = String(data: jsonData, encoding: .utf8),
+                                        let url = tempExportURL(ext: "json", content: jsonString)
+                                    {
+                                        ShareLink("JSON Export", item: url)
+                                    }
                                 }
-                                if let jsonData = try? JSONExporter().export(item: item, transcript: transcript, analysis: analysis),
-                                    let jsonString = String(data: jsonData, encoding: .utf8),
-                                    let url = tempExportURL(ext: "json", content: jsonString)
+                                // Subtitle exports (when transcript is available)
+                                if let t = transcript,
+                                    let srt = SRTExporter.export(transcript: t, totalDuration: item.durationSeconds),
+                                    let url = tempExportURL(ext: "srt", content: srt)
                                 {
-                                    ShareLink("JSON Export", item: url)
+                                    ShareLink("Subtitles (.srt)", item: url)
                                 }
-                            }
-                            // Subtitle exports (when transcript is available)
-                            if let t = transcript,
-                                let srt = SRTExporter.export(transcript: t, totalDuration: item.durationSeconds),
-                                let url = tempExportURL(ext: "srt", content: srt)
-                            {
-                                ShareLink("Subtitles (.srt)", item: url)
-                            }
-                            if let t = transcript,
-                                let vtt = VTTExporter.export(
-                                    transcript: t, totalDuration: item.durationSeconds,
-                                    note: "Exported from Wawa Note"),
-                                let url = tempExportURL(ext: "vtt", content: vtt)
-                            {
-                                ShareLink("Subtitles (.vtt)", item: url)
-                            }
-                            if let anarlogMD = try? AnarlogExporter().exportMarkdown(item: item),
-                                let url = tempExportURL(ext: "md", content: anarlogMD)
-                            {
-                                ShareLink("Anarlog .md", item: url)
-                            }
-                            if let meetilyData = try? MeetilyExporter().exportJSON(item: item),
-                                let meetilyString = String(data: meetilyData, encoding: .utf8)
-                            {
-                                ShareLink("Meetily .json", item: meetilyString)
-                            }
-                            // Audio export — available even without transcript
-                            if hasPlayableAudio, let url = audioPlaybackURL {
-                                ShareLink("Audio", item: url)
-                            } else if case .segmentsAvailable = audioAssetState {
-                                Button("Export Audio") {
-                                    Task { await prepareAudioForExport() }
+                                if let t = transcript,
+                                    let vtt = VTTExporter.export(
+                                        transcript: t, totalDuration: item.durationSeconds,
+                                        note: "Exported from Wawa Note"),
+                                    let url = tempExportURL(ext: "vtt", content: vtt)
+                                {
+                                    ShareLink("Subtitles (.vtt)", item: url)
                                 }
-                                .disabled(isPreparingAudio)
+                                if let anarlogMD = try? AnarlogExporter().exportMarkdown(item: item),
+                                    let url = tempExportURL(ext: "md", content: anarlogMD)
+                                {
+                                    ShareLink("Anarlog .md", item: url)
+                                }
+                                // Meetily export removed (KAN-258)
+                                // Audio export — available even without transcript
+                                if hasPlayableAudio, let url = audioPlaybackURL {
+                                    ShareLink("Audio", item: url)
+                                } else if case .segmentsAvailable = audioAssetState {
+                                    Button("Export Audio") {
+                                        Task { await prepareAudioForExport() }
+                                    }
+                                    .disabled(isPreparingAudio)
+                                }
+                            } label: {
+                                Label("Export", systemImage: "square.and.arrow.up")
                             }
-                        } label: {
-                            Label("Export", systemImage: "square.and.arrow.up")
                         }
                     }
                 }
             }
-        }
-        .sheet(isPresented: $showPromoteSheet) {
-            PromoteToProjectSheet(item: item) { _ in
-                showPromoteSheet = false
+            .sheet(isPresented: $showPromoteSheet) {
+                PromoteToProjectSheet(item: item) { _ in
+                    showPromoteSheet = false
+                }
             }
-        }
-        .sheet(isPresented: $showConnectSheet) {
-            connectToItemSheet
-        }
-        .alert("Re-process Item", isPresented: $showReprocessWarning) {
-            Button("Cancel", role: .cancel) {}
-            Button("Continue") { Task { await reprocessItem(mode: pendingReprocessMode, confirmed: true) } }
-        } message: {
-            Text(
-                "You have manually edited this item's content. Re-processing will re-analyze it. Your edits will be protected and AI may suggest changes for your review instead of overwriting them."
-            )
-        }
-        .onAppear {
-            chatState.context = .item(item.id)
-            analysisAvailable = AIConfigService.shared.isProviderConfigured(context: modelContext)
-            // Load scanned pages ONCE to avoid blocking main thread on re-renders
-            if item.type == .image, scannedPages.isEmpty {
-                scannedPages = loadScannedPages(count: item.imagePageCount ?? 1)
+            .sheet(isPresented: $showConnectSheet) {
+                connectToItemSheet
             }
-            Task { @MainActor in
-                await Task.yield()
-                await resolveAudioAsset()
-                loadRawAnalysisJSON()
-                loadData()
+            .alert("Re-process Item", isPresented: $showReprocessWarning) {
+                Button("Cancel", role: .cancel) {}
+                Button("Continue") { Task { await reprocessItem(mode: pendingReprocessMode, confirmed: true) } }
+            } message: {
+                Text(
+                    "You have manually edited this item's content. Re-processing will re-analyze it. Your edits will be protected and AI may suggest changes for your review instead of overwriting them."
+                )
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .activeProviderChanged)) { _ in
-            analysisAvailable = AIConfigService.shared.isProviderConfigured(context: modelContext)
-            loadData()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .pipelineCompleted)) { n in
-            if n.object as? String == item.id.uuidString {
-                pipelineStage = ""
-                // Force SwiftUI to re-render with fresh data — the managed object
-                // may have been updated in another context.
-                refreshID = UUID()
+            .onAppear {
+                chatState.context = .item(item.id)
+                analysisAvailable = AIConfigService.shared.isProviderConfigured(context: modelContext)
+                // Load scanned pages ONCE to avoid blocking main thread on re-renders
+                if item.type == .image, scannedPages.isEmpty {
+                    scannedPages = loadScannedPages(count: item.imagePageCount ?? 1)
+                }
                 Task { @MainActor in
+                    await Task.yield()
+                    await resolveAudioAsset()
                     loadRawAnalysisJSON()
                     loadData()
                 }
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .contentPipelineStageChanged)) { n in
-            guard n.object as? String == item.id.uuidString else { return }
-            if let stage = n.userInfo?["stage"] as? String {
-                pipelineStage = stage.capitalized
-            }
-            if let tool = n.userInfo?["tool"] as? String {
-                pipelineStage = "Agent: \(tool)"
-            }
-            if let summary = n.userInfo?["summary"] as? String {
-                pipelineStage = summary
-            }
-            if let phase = n.userInfo?["phase"] as? String {
-                pipelineStage = phase == "completed" ? "Analysis complete" : pipelineStage
-            }
-            if let events = n.userInfo?["events"] as? [PipelineAgentEvent] {
-                agentEvents = events
-            }
-            if let thinking = n.userInfo?["thinking"] as? Bool {
-                isAgentThinking = thinking
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .transcriptReady)) { n in
-            guard n.object as? String == item.id.uuidString else { return }
-            Task { @MainActor in
-                transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id)
-                isTranscribing = false
-                transcriptionProgress = nil
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .analysisReady)) { n in
-            guard n.object as? String == item.id.uuidString else { return }
-            Task { @MainActor in
-                analysis = try? fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id)
-                loadRawAnalysisJSON()
-                isAnalyzing = false
+            .onReceive(NotificationCenter.default.publisher(for: .activeProviderChanged)) { _ in
+                analysisAvailable = AIConfigService.shared.isProviderConfigured(context: modelContext)
                 loadData()
             }
-        }
+            .onReceive(NotificationCenter.default.publisher(for: .pipelineCompleted)) { n in
+                if n.object as? String == item.id.uuidString {
+                    pipelineStage = ""
+                    refreshID = UUID()
+                    Task { @MainActor in
+                        // Re-resolve audio now that concatenation has completed.
+                        // The RecordingCoordinator concat Task runs before the pipeline;
+                        // when .pipelineCompleted fires, audio.m4a should exist.
+                        // Without this the view may show stale .segmentsAvailable state.
+                        await resolveAudioAsset()
+                        loadRawAnalysisJSON()
+                        loadData()
+                        // If analysis ran but produced no visible results, surface a message
+                        if item.status == .analyzed || item.status == .failed,
+                            analysis == nil, rawAnalysisJSON.isEmpty
+                        {
+                            analysisError =
+                                "Analysis completed but no results were generated. The AI may have encountered an issue processing this item. Check Files for raw output."
+                        } else {
+                            analysisError = nil
+                        }
+                    }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .contentPipelineStageChanged)) { n in
+                guard n.object as? String == item.id.uuidString else { return }
+                if let stage = n.userInfo?["stage"] as? String {
+                    pipelineStage = stage.capitalized
+                }
+                if let tool = n.userInfo?["tool"] as? String {
+                    pipelineStage = "Agent: \(tool)"
+                }
+                if let summary = n.userInfo?["summary"] as? String {
+                    pipelineStage = summary
+                }
+                if let phase = n.userInfo?["phase"] as? String {
+                    pipelineStage = phase == "completed" ? "Analysis complete" : pipelineStage
+                }
+                if let events = n.userInfo?["events"] as? [PipelineAgentEvent] {
+                    agentEvents = events
+                }
+                if let thinking = n.userInfo?["thinking"] as? Bool {
+                    isAgentThinking = thinking
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .transcriptReady)) { n in
+                guard n.object as? String == item.id.uuidString else { return }
+                Task { @MainActor in
+                    transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id)
+                    isTranscribing = false
+                    transcriptionProgress = nil
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .analysisReady)) { n in
+                guard n.object as? String == item.id.uuidString else { return }
+                Task { @MainActor in
+                    analysis = try? fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id)
+                    loadRawAnalysisJSON()
+                    isAnalyzing = false
+                    loadData()
+                }
+            }
+        }  // else block
     }
 
     // MARK: - Header
@@ -545,7 +574,7 @@ struct KnowledgeDetailView: View {
                         .textFieldStyle(.roundedBorder)
                         .padding()
                         .onChange(of: connectSearchText) { _, _ in
-                            let all = (try? KnowledgeItemService(context: modelContext).allItems()) ?? []
+                            let all = (try? services.items.allItems()) ?? []
                             connectableItems =
                                 all
                                 .filter { $0.id != item.id && (connectSearchText.isEmpty || $0.title.localizedCaseInsensitiveContains(connectSearchText)) }
@@ -555,7 +584,7 @@ struct KnowledgeDetailView: View {
                 List {
                     ForEach(connectableItems.prefix(20)) { other in
                         Button {
-                            let gsvc = GraphEdgeService(context: modelContext)
+                            let gsvc = services.edges
                             try? gsvc.create(
                                 fromID: item.id, toID: other.id,
                                 edgeType: .relatesTo, weight: 1.0,
@@ -581,7 +610,7 @@ struct KnowledgeDetailView: View {
                     }
                 }
                 .onAppear {
-                    let all = (try? KnowledgeItemService(context: modelContext).allItems()) ?? []
+                    let all = (try? services.items.allItems()) ?? []
                     connectableItems = all.filter { $0.id != item.id }
                 }
             }
@@ -1006,7 +1035,7 @@ struct KnowledgeDetailView: View {
 
     private var resolvedFramework: ProjectFramework? {
         guard let projectID = item.projectID else { return nil }
-        let projSvc = ProjectService(context: modelContext)
+        let projSvc = services.projects
         guard let project = try? projSvc.fetch(id: projectID) else { return nil }
         return FrameworkService.shared.resolve(for: project)
     }
@@ -1412,7 +1441,7 @@ struct KnowledgeDetailView: View {
 
             ForEach(backlinks, id: \.edge.id) { link in
                 NavigationLink {
-                    KnowledgeDetailView(item: link.sourceItem)
+                    KnowledgeDetailView(itemID: link.sourceItem.id)
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: edgeIcon(for: link.edge.edgeType))
@@ -1653,7 +1682,7 @@ struct KnowledgeDetailView: View {
                         .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 8))
                 }
             }
-            .padding(12).background(Color.orange.opacity(0.06)).clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(12).background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 12))
             .padding(.horizontal, 16)
         }
     }
@@ -1743,12 +1772,12 @@ struct KnowledgeDetailView: View {
     // MARK: - Locale picker
 
     private let availableLocales: [(id: String, name: String)] = [
-        ("pt-BR", "Português (Brasil)"),
-        ("pt-PT", "Português (Portugal)"),
         ("en-US", "English (US)"),
-        ("es-ES", "Español"),
-        ("fr-FR", "Français"),
-        ("de-DE", "Deutsch"),
+        ("pt-BR", "Portuguese (Brazil)"),
+        ("pt-PT", "Portuguese (Portugal)"),
+        ("es-ES", "Spanish"),
+        ("fr-FR", "French"),
+        ("de-DE", "German"),
         ("it-IT", "Italiano"),
         ("ja-JP", "日本語"),
         ("zh-CN", "中文"),
@@ -1903,7 +1932,7 @@ struct KnowledgeDetailView: View {
     }
 
     private func saveEdits() {
-        let service = KnowledgeItemService(context: modelContext)
+        let service = services.items
         try? service.updateItem(
             item,
             title: editedTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -2006,7 +2035,7 @@ struct KnowledgeDetailView: View {
                 _ = await extractionSvc.extractTextFromImage(item)
             }
             isTranscribing = false
-            let fetchedItem = try? KnowledgeItemService(context: modelContext).fetchItem(id: item.id)
+            let fetchedItem = try? services.items.fetchItem(id: item.id)
             AppLog.provider.info(
                 "🔍 reprocessItem: extraction done — bodyText=\(fetchedItem?.bodyText?.count ?? 0) chars, hasVision=\(fetchedItem?.bodyText?.contains("VISUAL ANALYSIS") ?? false)"
             )
@@ -2025,7 +2054,7 @@ struct KnowledgeDetailView: View {
     // MARK: - Backlinks
 
     private func loadBacklinks() {
-        let edgeService = GraphEdgeService(context: modelContext)
+        let edgeService = services.edges
         let incomingEdges = (try? edgeService.edges(to: item.id)) ?? []
 
         var results: [(edge: GraphEdge, sourceItem: KnowledgeItem)] = []

@@ -36,4 +36,10 @@ final class TranscriptionSettings: @unchecked Sendable {
     var useRemoteWhisper: Bool {
         mode == .whisper
     }
+
+    /// Whether the user allows Apple's cloud transcription fallback (KAN-476).
+    var allowCloud: Bool {
+        get { defaults.bool(forKey: "transcription_allow_cloud") }
+        set { defaults.set(newValue, forKey: "transcription_allow_cloud") }
+    }
 }

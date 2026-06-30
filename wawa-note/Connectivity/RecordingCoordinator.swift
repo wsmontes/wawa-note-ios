@@ -319,7 +319,6 @@ final class RecordingCoordinator: ObservableObject {
             do {
                 if forceBuiltIn {
                     AppLog.audio.info("Pre-flight attempt \(attempt + 1): forcing built-in mic")
-                    try? await captureService.resetAudioSessionToBuiltInMic()
                 }
 
                 try await captureService.startRecording(meetingId: meetingId)
