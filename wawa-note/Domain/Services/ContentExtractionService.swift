@@ -10,6 +10,30 @@ import Vision
 
 // MARK: - Text extraction from any content type
 
+/// Specific errors for transcription failures, surfaced to UI for precise user feedback.
+enum ExtractionError: LocalizedError {
+    case audioMissing
+    case audioTooSmall(bytes: Int)
+    case audioTooShort(duration: Double)
+    case engineFailed(String)
+    case noSpeechDetected
+
+    var errorDescription: String? {
+        switch self {
+        case .audioMissing:
+            "Audio file not found. The recording may have been moved or deleted."
+        case .audioTooSmall(let bytes):
+            "Audio file is too small (\(bytes) bytes). The recording may be corrupted."
+        case .audioTooShort(let duration):
+            "Recording is too short (\(String(format: "%.1f", duration))s). Please record at least 1 second of audio."
+        case .engineFailed(let detail):
+            "Transcription engine failed: \(detail)"
+        case .noSpeechDetected:
+            "No speech detected in the recording. Try recording in a quieter environment or speak closer to the microphone."
+        }
+    }
+}
+
 /// Extracts text from content items. The single source of text for analysis,
 /// regardless of the original medium.
 ///
@@ -24,6 +48,10 @@ final class ContentExtractionService {
     /// Passed through to AppleSpeechTranscriptionEngine as the first candidate.
     /// Ignored when the remote Whisper engine is selected.
     private let preferredLocale: String?
+
+    /// The specific error from the last extraction, if it failed. Reset at the start of each extraction.
+    /// Callers should read this after `extractTextFromAudio` returns nil to show precise feedback.
+    private(set) var extractionError: ExtractionError?
 
     init(modelContext: ModelContext, fileStore: FileArtifactStore = FileArtifactStore(), preferredLocale: String? = nil) {
         self.modelContext = modelContext
@@ -44,6 +72,7 @@ final class ContentExtractionService {
     /// Never returns nil as long as a transcript exists on disk — extraction failure
     /// falls back to the existing transcript instead of blocking Phase 3.
     func extractTextFromAudio(_ item: KnowledgeItem) async -> String? {
+        extractionError = nil
         let startTime = Date()
         let id = item.id
         AppLog.provider.info(
@@ -95,11 +124,6 @@ final class ContentExtractionService {
         // Reuse existing transcript when available
         if let existing = loadExistingTranscriptText(for: item.id) {
             AppLog.provider.info("ContentExtraction: reusing existing transcript for item \(id)")
-            // Ensure status reflects that transcription is complete (KAN-518)
-            if item.status == .recorded || item.status == .queuedForTranscription || item.status == .transcribing {
-                item.status = .transcribed
-                try? modelContext.save()
-            }
             return existing
         }
 
@@ -110,14 +134,17 @@ final class ContentExtractionService {
         // - Whisper: AAC bytes sent directly via HTTP multipart
         guard audioExists else {
             AppLog.audio.error("Transcription validation FAILED: final audio missing")
+            extractionError = .audioMissing
             return nil
         }
         guard audioSize > 4096 else {
             AppLog.audio.error("Transcription validation FAILED: audio too small (\(audioSize) bytes)")
+            extractionError = .audioTooSmall(bytes: audioSize)
             return nil
         }
         guard audioDuration >= 1.0 else {
             AppLog.audio.error("Transcription validation FAILED: audio too short (\(String(format: "%.1f", audioDuration))s)")
+            extractionError = .audioTooShort(duration: audioDuration)
             return nil
         }
         if hasManifest, let m = manifest, !m.segments.isEmpty, sumSegmentDurations > 0 {
@@ -180,11 +207,15 @@ final class ContentExtractionService {
         let audioURL = fileStore.audioFileURL(for: item.id)
         guard FileManager.default.fileExists(atPath: audioURL.path) else {
             AppLog.provider.warning("ContentExtraction: no audio file for item \(item.id)")
+            extractionError = .audioMissing
             return nil
         }
 
         let engine = resolveTranscriptionEngine(preferredLocale: item.languageCode)
-        guard let engine else { return nil }
+        guard let engine else {
+            extractionError = .engineFailed("No transcription engine available. Check provider configuration in Settings.")
+            return nil
+        }
 
         do {
             var result = try await engine.transcribeFile(audioURL, meetingId: item.id)
@@ -215,6 +246,7 @@ final class ContentExtractionService {
         } catch {
             let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             AppLog.provider.error("ContentExtraction: transcription failed for item \(item.id): \(msg)")
+            extractionError = .engineFailed(msg)
             if let fallback = loadExistingTranscriptText(for: item.id) {
                 return fallback
             }

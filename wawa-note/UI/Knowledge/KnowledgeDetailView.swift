@@ -1849,8 +1849,12 @@ struct KnowledgeDetailView: View {
             return
         }
 
-        // extractionSvc.extractTextFromAudio returned nil — transcription failed
-        transcriptionError = "No speech detected or recognition failed."
+        // extractionSvc.extractTextFromAudio returned nil — surface the specific error
+        if let specificError = extractionSvc.extractionError?.errorDescription {
+            transcriptionError = specificError
+        } else {
+            transcriptionError = "Transcription failed. Please try again."
+        }
         isTranscribing = false
         transcriptionProgress = nil
     }
