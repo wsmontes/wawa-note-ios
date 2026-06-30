@@ -38,8 +38,18 @@ final class TranscriptionSettings: @unchecked Sendable {
     }
 
     /// Whether the user allows Apple's cloud transcription fallback (KAN-476).
+    /// Defaults to true (cloud allowed) — on-device recognition on iOS 18.x
+    /// can return empty segments for short audio, making transcripts invisible.
     var allowCloud: Bool {
-        get { defaults.bool(forKey: "transcription_allow_cloud") }
+        get {
+            // Default to true: cloud transcription is more reliable for short audio.
+            // UserDefaults.bool(forKey:) returns false for missing keys, which would
+            // force on-device-only and cause "No speech detected" for valid audio.
+            if defaults.object(forKey: "transcription_allow_cloud") == nil {
+                return true
+            }
+            return defaults.bool(forKey: "transcription_allow_cloud")
+        }
         set { defaults.set(newValue, forKey: "transcription_allow_cloud") }
     }
 }
