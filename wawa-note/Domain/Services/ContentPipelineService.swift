@@ -628,16 +628,22 @@ final class ContentPipelineService: ObservableObject {
                 didComplete = true
                 fresh.status = .analyzed
                 fresh.analysisProviderId = executorModel
-                // Read analysis for AI-suggested metadata
-                if let analysis = try? store.readArtifact(
-                  MeetingAnalysis.self, fileName: "analysis.json", meetingId: itemID)
+                // Read analysis for AI-suggested metadata.
+                // Try structured decode first, then raw JSON as fallback
+                // (handles both camelCase and snake_case key formats).
+                let analysisJSONURL = store.itemDirectoryURL(for: itemID)
+                  .appendingPathComponent("analysis.json")
+                if let jsonData = try? Data(contentsOf: analysisJSONURL),
+                  let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
                 {
-                  // Rename item with AI-suggested title
-                  if let title = analysis.suggestedTitle,
+                  // ── Suggested title (from snake_case or camelCase) ──
+                  let rawTitle =
+                    json["suggestedTitle"] as? String
+                    ?? json["suggested_title"] as? String
+                  if let title = rawTitle,
                     !title.trimmingCharacters(in: .whitespaces).isEmpty,
                     title != fresh.title
                   {
-                    // Preserve original title before overwriting
                     if fresh.originalTitle == nil {
                       fresh.originalTitle = fresh.title
                     }
@@ -645,18 +651,17 @@ final class ContentPipelineService: ObservableObject {
                     AppLog.provider.info(
                       "Pipeline: renamed item \(itemID.uuidString.prefix(8)) to \"\(title)\"")
                   }
-                  // Apply AI-suggested tags (normalized)
-                  if let suggested = analysis.suggestedTags, !suggested.isEmpty {
+                  // ── Suggested tags ──
+                  let rawTags =
+                    json["suggestedTags"] as? [String]
+                    ?? json["suggested_tags"] as? [String]
+                  if let tags = rawTags, !tags.isEmpty {
                     fresh.tags = TagNormalizer.merge(
-                      existing: fresh.tags, suggested: suggested)
+                      existing: fresh.tags, suggested: tags)
                     AppLog.provider.info(
-                      "Pipeline: applied \(suggested.count) AI-suggested tags to item \(itemID.uuidString.prefix(8))"
+                      "Pipeline: applied \(tags.count) AI-suggested tags to item \(itemID.uuidString.prefix(8))"
                     )
                   }
-                } else {
-                  AppLog.provider.warning(
-                    "Pipeline: analysis.json exists but failed to decode MeetingAnalysis for item \(itemID.uuidString.prefix(8))"
-                  )
                 }
                 try modelContext.save()
               } catch {
