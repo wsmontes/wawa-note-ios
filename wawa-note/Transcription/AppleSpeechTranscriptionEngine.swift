@@ -278,40 +278,30 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
         var allSegments: [TranscriptSegment] = []
         var languageCode: String?
-        var previousText = ""
 
         for (i, chunk) in chunks.enumerated() {
             try Task.checkCancellation()
             if isCancelled { throw TranscriptionError.cancelled }
 
             onProgress?(.transcribing(chunk: i + 1, totalChunks: chunks.count))
-            AppLog.transcription.info("Chunk \(i + 1)/\(chunks.count): \(String(format: "%.1f", chunk.duration))s")
 
             let transcript = try await transcribeDirect(url: chunk.url, recognizer: recognizer, meetingId: meetingId)
             languageCode = transcript.languageCode ?? languageCode
 
-            let chunkText = transcript.segments.map(\.text).joined(separator: " ")
-
             for segment in transcript.segments {
-                let adjustedStart = segment.startTime + chunk.startTime
-                let adjustedEnd = segment.endTime.map { $0 + chunk.startTime }
-                var text = segment.text
-                if i > 0 { text = transcriptionDeduplicateStart(text, against: previousText) }
-
                 allSegments.append(
                     TranscriptSegment(
                         meetingId: segment.meetingId,
-                        startTime: adjustedStart,
-                        endTime: adjustedEnd,
+                        startTime: segment.startTime + chunk.startTime,
+                        endTime: segment.endTime.map { $0 + chunk.startTime },
                         speakerId: segment.speakerId,
-                        text: text,
+                        text: segment.text,
                         originalText: segment.originalText,
                         confidence: segment.confidence,
                         languageCode: segment.languageCode,
                         sourceEngineId: segment.sourceEngineId
                     ))
             }
-            previousText = chunkText
         }
 
         AppLog.transcription.info("Chunked transcription complete: \(allSegments.count) segments from \(chunks.count) chunks")
