@@ -1,5 +1,6 @@
 import AVFoundation
 import OSLog
+import WawaNoteCore
 
 final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable {
   let id = "remote-whisper"

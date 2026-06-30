@@ -3,6 +3,7 @@ import Foundation
 import NaturalLanguage
 import OSLog
 import Speech
+import WawaNoteCore
 
 // MARK: - Transcription States
 

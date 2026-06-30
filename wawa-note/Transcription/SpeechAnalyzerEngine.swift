@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import OSLog
+import WawaNoteCore
 
 // MARK: - SpeechAnalyzer Engine (iOS 26+)
 
