@@ -350,11 +350,13 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             }
         }
 
-        let ext = url.pathExtension
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("chunks_\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
 
+        // Write chunks as CAF. CAF is Apple's native PCM container — no encoder
+        // needed. Unlike M4A (which requires AAC encoding), CAF accepts raw PCM
+        // buffers directly. SFSpeechRecognizer supports CAF natively.
         var chunks: [VADAudioChunk] = []
         for (i, bound) in boundaries.enumerated() {
             let startFrame = AVAudioFramePosition(bound.start * sampleRate)
@@ -368,7 +370,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             try audioFile.read(into: buf)
             buf.frameLength = frameCount
 
-            let chunkURL = tempDir.appendingPathComponent("chunk_\(i).\(ext)")
+            let chunkURL = tempDir.appendingPathComponent("chunk_\(i).caf")
             let out = try AVAudioFile(forWriting: chunkURL, settings: fmt.settings, commonFormat: fmt.commonFormat, interleaved: fmt.isInterleaved)
             try out.write(from: buf)
 
