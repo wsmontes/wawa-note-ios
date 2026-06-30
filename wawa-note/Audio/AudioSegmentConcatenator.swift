@@ -82,6 +82,7 @@ enum AudioSegmentConcatenator {
         let composition = AVMutableComposition()
         var cursor = CMTime.zero
         var skippedCount = 0
+        var insertedSampleRates: [CMTimeScale] = []
         for url in urls {
             let asset = AVURLAsset(url: url)
             guard let track = (try? await asset.load(.tracks))?.first(where: { $0.mediaType == .audio }) else {
@@ -98,6 +99,8 @@ enum AudioSegmentConcatenator {
                 do {
                     try compTrack.insertTimeRange(CMTimeRange(start: .zero, duration: rawDuration), of: track, at: cursor)
                     cursor = CMTimeAdd(cursor, rawDuration)
+                    let rate = track.naturalTimeScale
+                    if rate > 0 { insertedSampleRates.append(rate) }
                 } catch {
                     AppLog.audio.error("SegmentConcatenator: insertTimeRange failed for \(url.lastPathComponent) — error=\(error.localizedDescription)")
                     skippedCount += 1
@@ -105,6 +108,13 @@ enum AudioSegmentConcatenator {
             } else {
                 skippedCount += 1
             }
+        }
+
+        let uniqueRates = Set(insertedSampleRates)
+        if uniqueRates.count > 1 {
+            let ratesDesc = uniqueRates.sorted().map { "\($0) Hz" }.joined(separator: ", ")
+            AppLog.audio.warning(
+                "SegmentConcatenator: mixed sample rates [\(ratesDesc)] across \(urls.count) segments — AVFoundation will resample silently; quality may degrade (route change during BT HFP?)")
         }
 
         guard skippedCount < urls.count else {
