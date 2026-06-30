@@ -204,14 +204,47 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
           throw TranscriptionError.recognitionFailed("Remote transcription error")
         }
 
-        guard let json = try JSONSerialization.jsonObject(with: resData) as? [String: Any],
-          let text = json["text"] as? String
-        else {
+        guard let json = try JSONSerialization.jsonObject(with: resData) as? [String: Any] else {
           let body = String(data: resData, encoding: .utf8) ?? "<no body>"
           AppLog.transcription.error("Parse error: \(body.prefix(300))")
           throw TranscriptionError.recognitionFailed("Remote transcription error")
         }
 
+        // Parse verbose_json segments when available (whisper-1 with
+        // response_format=verbose_json + timestamp_granularities=[segment]).
+        // Falls back to plain text response for models that don't support
+        // verbose_json (gpt-4o-transcribe, etc.).
+        if let rawSegments = json["segments"] as? [[String: Any]], !rawSegments.isEmpty {
+          let segments: [TranscriptSegment] = rawSegments.compactMap { seg in
+            guard let text = seg["text"] as? String else { return nil }
+            return TranscriptSegment(
+              meetingId: meetingId,
+              startTime: seg["start"] as? Double ?? 0,
+              endTime: seg["end"] as? Double,
+              text: text.trimmingCharacters(in: .whitespacesAndNewlines),
+              confidence: nil,
+              languageCode: json["language"] as? String,
+              sourceEngineId: id
+            )
+          }
+          if !segments.isEmpty {
+            AppLog.transcription.info(
+              "Whisper verbose_json: \(segments.count) segments with timestamps")
+            return Transcript(
+              languageCode: json["language"] as? String,
+              segments: segments,
+              sourceEngineId: id
+            )
+          }
+        }
+
+        // Fallback: plain text response (no timestamps)
+        guard let text = json["text"] as? String else {
+          let body = String(data: resData, encoding: .utf8) ?? "<no body>"
+          AppLog.transcription.error("Parse error — no text field: \(body.prefix(300))")
+          throw TranscriptionError.recognitionFailed("Remote transcription error")
+        }
+        AppLog.transcription.info("Whisper plain text: \(text.count) chars (no timestamps)")
         return Transcript(
           languageCode: json["language"] as? String,
           segments: [
@@ -270,6 +303,16 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
     write("--\(boundary)\(lb)")
     write("Content-Disposition: form-data; name=\"model\"\(lb)\(lb)")
     write("\(model)\(lb)")
+
+    // Request verbose_json with segment timestamps for subtitle-like display.
+    // Only works with whisper-1; gpt-4o-transcribe models ignore these fields
+    // and return plain json — the parser handles both formats.
+    write("--\(boundary)\(lb)")
+    write("Content-Disposition: form-data; name=\"response_format\"\(lb)\(lb)")
+    write("verbose_json\(lb)")
+    write("--\(boundary)\(lb)")
+    write("Content-Disposition: form-data; name=\"timestamp_granularities[]\"\(lb)\(lb)")
+    write("segment\(lb)")
 
     if let prompt, !prompt.isEmpty {
       write("--\(boundary)\(lb)")
