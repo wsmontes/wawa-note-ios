@@ -253,11 +253,169 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         let duration = getDuration(audioFileURL)
         AppLog.transcription.info("Starting on-device transcription: \(String(format: "%.0f", duration))s, locale=\(recognizer.locale.identifier)")
 
-        // Transcribe the whole file directly. SFSpeechRecognizer handles files
-        // up to several minutes natively. The 120s timeout with partial-transcript
-        // recovery protects against hangs. No chunking, no VAD, no dedup.
-        onProgress?(.transcribing(chunk: 1, totalChunks: 1))
-        return try await transcribeDirect(url: audioFileURL, recognizer: recognizer, meetingId: meetingId)
+        // Simple fixed-duration chunking. Split into ~50s blocks with 0.5s overlap.
+        // Last chunk gets at least 5s — if shorter, merge into the previous chunk.
+        let chunkDuration: TimeInterval = 50
+        let overlap: TimeInterval = 0.5
+        let minLastDuration: TimeInterval = 5
+
+        if duration <= chunkDuration {
+            onProgress?(.transcribing(chunk: 1, totalChunks: 1))
+            return try await transcribeDirect(url: audioFileURL, recognizer: recognizer, meetingId: meetingId)
+        }
+
+        let chunks = try buildSimpleChunks(
+            url: audioFileURL,
+            chunkDuration: chunkDuration,
+            overlap: overlap,
+            minLastDuration: minLastDuration
+        )
+        defer {
+            if let dir = chunks.first?.url.deletingLastPathComponent() {
+                try? FileManager.default.removeItem(at: dir)
+            }
+        }
+
+        var allSegments: [TranscriptSegment] = []
+        var languageCode: String?
+        var previousText = ""
+
+        for (i, chunk) in chunks.enumerated() {
+            try Task.checkCancellation()
+            if isCancelled { throw TranscriptionError.cancelled }
+
+            onProgress?(.transcribing(chunk: i + 1, totalChunks: chunks.count))
+            AppLog.transcription.info("Chunk \(i + 1)/\(chunks.count): \(String(format: "%.1f", chunk.duration))s")
+
+            let transcript = try await transcribeDirect(url: chunk.url, recognizer: recognizer, meetingId: meetingId)
+            languageCode = transcript.languageCode ?? languageCode
+
+            let chunkText = transcript.segments.map(\.text).joined(separator: " ")
+
+            for segment in transcript.segments {
+                let adjustedStart = segment.startTime + chunk.startTime
+                let adjustedEnd = segment.endTime.map { $0 + chunk.startTime }
+                var text = segment.text
+                if i > 0 { text = transcriptionDeduplicateStart(text, against: previousText) }
+
+                allSegments.append(
+                    TranscriptSegment(
+                        meetingId: segment.meetingId,
+                        startTime: adjustedStart,
+                        endTime: adjustedEnd,
+                        speakerId: segment.speakerId,
+                        text: text,
+                        originalText: segment.originalText,
+                        confidence: segment.confidence,
+                        languageCode: segment.languageCode,
+                        sourceEngineId: segment.sourceEngineId
+                    ))
+            }
+            previousText = chunkText
+        }
+
+        AppLog.transcription.info("Chunked transcription complete: \(allSegments.count) segments from \(chunks.count) chunks")
+        return Transcript(
+            meetingId: allSegments.first?.meetingId,
+            languageCode: languageCode,
+            segments: allSegments,
+            sourceEngineId: id
+        )
+    }
+
+    /// Split audio into fixed-duration chunks with overlap. Ensures the last
+    /// chunk is at least `minLastDuration` seconds — if shorter, it borrows
+    /// from the previous chunk. Output is 16kHz mono PCM WAV.
+    private func buildSimpleChunks(
+        url: URL, chunkDuration: TimeInterval, overlap: TimeInterval, minLastDuration: TimeInterval
+    ) throws -> [VADAudioChunk] {
+        let audioFile = try AVAudioFile(forReading: url)
+        let sourceFormat = audioFile.processingFormat
+        let sampleRate = sourceFormat.sampleRate
+        let totalFrames = Double(audioFile.length)
+        let totalDuration = totalFrames / sampleRate
+
+        guard
+            let outputFormat = AVAudioFormat(
+                commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 1, interleaved: false
+            )
+        else {
+            throw TranscriptionError.recognitionFailed("Cannot create output format")
+        }
+        guard let converter = AVAudioConverter(from: sourceFormat, to: outputFormat) else {
+            throw TranscriptionError.recognitionFailed("Cannot create converter")
+        }
+
+        // Calculate chunk boundaries in seconds
+        var boundaries: [(start: TimeInterval, end: TimeInterval)] = []
+        var cursor: TimeInterval = 0
+        while cursor < totalDuration {
+            let end = min(cursor + chunkDuration, totalDuration)
+            boundaries.append((cursor, end))
+            cursor = end - overlap
+        }
+
+        // Ensure last chunk is at least minLastDuration
+        if boundaries.count >= 2 {
+            let last = boundaries[boundaries.count - 1]
+            let lastDur = last.end - last.start
+            if lastDur < minLastDuration {
+                let prev = boundaries[boundaries.count - 2]
+                // Extend previous chunk to cover the last one
+                boundaries[boundaries.count - 2] = (prev.start, last.end)
+                boundaries.removeLast()
+            }
+        }
+
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("chunks_\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        var chunks: [VADAudioChunk] = []
+        for (i, bound) in boundaries.enumerated() {
+            let startFrame = AVAudioFramePosition(bound.start * sampleRate)
+            let endFrame = AVAudioFramePosition(bound.end * sampleRate)
+            let frameCount = AVAudioFrameCount(endFrame - startFrame)
+
+            guard let sourceBuffer = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: frameCount) else {
+                throw TranscriptionError.recognitionFailed("Cannot allocate chunk buffer")
+            }
+            audioFile.framePosition = startFrame
+            try audioFile.read(into: sourceBuffer)
+            sourceBuffer.frameLength = frameCount
+
+            let ratio = outputFormat.sampleRate / sampleRate
+            let outputCapacity = AVAudioFrameCount(Double(frameCount) * ratio)
+            guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputCapacity) else {
+                throw TranscriptionError.recognitionFailed("Cannot allocate output buffer")
+            }
+
+            var convertError: NSError?
+            var provided = false
+            converter.convert(to: outputBuffer, error: &convertError) { _, outStatus in
+                if !provided {
+                    provided = true
+                    outStatus.pointee = .haveData
+                    return sourceBuffer
+                }
+                outStatus.pointee = .noDataNow
+                return nil
+            }
+            if let convertError { throw convertError }
+
+            let chunkURL = tempDir.appendingPathComponent("chunk_\(i).wav")
+            let destFile = try AVAudioFile(
+                forWriting: chunkURL, settings: outputFormat.settings,
+                commonFormat: .pcmFormatInt16, interleaved: false
+            )
+            try destFile.write(from: outputBuffer)
+
+            let dur = Double(frameCount) / sampleRate
+            chunks.append(VADAudioChunk(url: chunkURL, startTime: bound.start, duration: dur))
+        }
+
+        AppLog.transcription.info("Simple chunking: \(chunks.count) chunks from \(String(format: "%.0f", totalDuration))s")
+        return chunks
     }
 
     // MARK: - Direct transcription (guaranteed on-device)
