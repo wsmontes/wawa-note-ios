@@ -140,9 +140,9 @@ struct NoteEditorView: View {
       if item.bodyText != nil { prov.mark(field: "bodyText", origin: .user) }
       item.fieldProvenanceJSON = prov.encode()
 
-      // If journal, add mood tag if present
+      // If journal, add mood tag. Preserve existing non-mood tags.
       if type == .journalEntry, let moodTag = initialTag {
-        item.tags = [moodTag]
+        item.tags = TagNormalizer.replace(prefix: "mood/", with: moodTag, in: item.tags)
         try? modelContext.save()
       }
 

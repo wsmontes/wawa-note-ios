@@ -204,7 +204,8 @@ struct AnalysisSkillService {
       risks: parseRisks(json),
       openQuestions: parseQuestions(json),
       importantDates: [],
-      entities: []
+      entities: [],
+      suggestedTags: json["suggested_tags"] as? [String]
     )
   }
 

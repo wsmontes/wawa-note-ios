@@ -1103,9 +1103,7 @@ enum ShellInterpreter {
       // Set type-specific fields
       if kt == .webBookmark, let url = urlFlag { item.importSourceURL = url }
       if kt == .journalEntry, let mood = cmd.flags["mood"] {
-        if !item.tags.contains(where: { $0.hasPrefix("mood/") }) {
-          item.tags = item.tags + ["mood/\(mood)"]
-        }
+        item.tags = TagNormalizer.replace(prefix: "mood/", with: "mood/\(mood)", in: item.tags)
       }
       let resolvedProjectID = vpath.projectID ?? ctx.activeProjectID
       let proj = resolvedProjectID.flatMap {

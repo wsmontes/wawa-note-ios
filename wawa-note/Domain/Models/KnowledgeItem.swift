@@ -252,3 +252,41 @@ extension KnowledgeItem: FieldProvidence {
     fieldProvenanceJSON = provenance.encode()
   }
 }
+
+// MARK: - Tag normalization
+
+/// Normalizes and merges tags to keep the tag vocabulary consistent.
+/// All tags are lowercased, trimmed, deduplicated, and sorted.
+enum TagNormalizer {
+  /// Normalize a single tag: lowercase, trim whitespace.
+  static func normalize(_ tag: String) -> String {
+    tag.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+  }
+
+  /// Normalize and deduplicate an array of tags.
+  static func normalize(_ tags: [String]) -> [String] {
+    let cleaned = tags.map { normalize($0) }.filter { !$0.isEmpty }
+    var seen = Set<String>()
+    return cleaned.filter { seen.insert($0).inserted }.sorted()
+  }
+
+  /// Merge AI-suggested tags with existing user/in-app tags.
+  /// Existing tags are preserved; suggested tags are appended (normalized, deduped).
+  static func merge(existing: [String], suggested: [String]) -> [String] {
+    let normalized = normalize(existing + suggested)
+    return normalized
+  }
+
+  /// Append a single tag to an existing array, normalizing and deduplicating.
+  /// Use this instead of raw `.append()` to keep tags consistent.
+  static func append(tag: String, to existing: [String]) -> [String] {
+    merge(existing: existing, suggested: [tag])
+  }
+
+  /// Replace tags matching a prefix with a new tag (e.g. mood/ tags).
+  /// Non-matching tags are preserved as-is.
+  static func replace(prefix: String, with tag: String, in tags: [String]) -> [String] {
+    let kept = tags.filter { !$0.hasPrefix(prefix) }
+    return merge(existing: kept, suggested: [tag])
+  }
+}

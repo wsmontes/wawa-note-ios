@@ -188,7 +188,7 @@ struct JournalEditorView: View {
     switch mode {
     case .create(let folderID):
       var tags: [String] = []
-      if let mood = selectedMood { tags.append(mood.tag) }
+      if let mood = selectedMood { tags = TagNormalizer.normalize([mood.tag]) }
 
       if let item = try? service.createItem(
         type: .journalEntry,
@@ -210,8 +210,12 @@ struct JournalEditorView: View {
       }
 
     case .edit(let item):
-      var tags = item.tags.filter { !$0.hasPrefix("mood/") }
-      if let mood = selectedMood { tags.append(mood.tag) }
+      let tags: [String]
+      if let mood = selectedMood {
+        tags = TagNormalizer.replace(prefix: "mood/", with: mood.tag, in: item.tags)
+      } else {
+        tags = item.tags.filter { !$0.hasPrefix("mood/") }
+      }
 
       try? service.updateItem(
         item,

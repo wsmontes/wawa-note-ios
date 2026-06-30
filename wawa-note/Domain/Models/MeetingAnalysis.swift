@@ -187,6 +187,7 @@ struct MeetingAnalysis: Identifiable, Codable {
   var importantDates: [ImportantDate]
   var entities: [EntityMention]
   var topicTimeline: [TopicBlock]
+  var suggestedTags: [String]?
   var rawProviderResponsePath: String?
 
   init(
@@ -204,6 +205,7 @@ struct MeetingAnalysis: Identifiable, Codable {
     importantDates: [ImportantDate] = [],
     entities: [EntityMention] = [],
     topicTimeline: [TopicBlock] = [],
+    suggestedTags: [String]? = nil,
     rawProviderResponsePath: String? = nil
   ) {
     self.id = id
@@ -220,6 +222,7 @@ struct MeetingAnalysis: Identifiable, Codable {
     self.importantDates = importantDates
     self.entities = entities
     self.topicTimeline = topicTimeline
+    self.suggestedTags = suggestedTags
     self.rawProviderResponsePath = rawProviderResponsePath
   }
 

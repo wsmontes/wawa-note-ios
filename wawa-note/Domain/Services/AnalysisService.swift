@@ -16,6 +16,7 @@ private struct AnalysisResponse: Decodable {
   let mentionedOrganizations: [String]?
   let mentionedRepositories: [String]?
   let mentionedLocations: [String]?
+  let suggestedTags: [String]?
   let followUpEmailDraft: String?
 
   enum CodingKeys: String, CodingKey {
@@ -31,6 +32,7 @@ private struct AnalysisResponse: Decodable {
     case mentionedOrganizations = "mentioned_organizations"
     case mentionedRepositories = "mentioned_repositories"
     case mentionedLocations = "mentioned_locations"
+    case suggestedTags = "suggested_tags"
     case followUpEmailDraft = "follow_up_email_draft"
   }
 
@@ -542,7 +544,8 @@ final class AnalysisService: @unchecked Sendable {
         organizations: parsed.mentionedOrganizations, repositories: parsed.mentionedRepositories,
         locations: parsed.mentionedLocations
       ),
-      topicTimeline: []
+      topicTimeline: [],
+      suggestedTags: parsed.suggestedTags
     )
   }
 

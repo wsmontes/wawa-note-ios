@@ -594,6 +594,17 @@ final class ContentPipelineService: ObservableObject {
               {
                 fresh.status = .analyzed
                 fresh.analysisProviderId = executorModel
+                // Apply AI-suggested tags (normalized)
+                if let analysis = try? store.readArtifact(
+                  MeetingAnalysis.self, fileName: "analysis.json", meetingId: itemID),
+                  let suggested = analysis.suggestedTags, !suggested.isEmpty
+                {
+                  fresh.tags = TagNormalizer.merge(
+                    existing: fresh.tags, suggested: suggested)
+                  AppLog.provider.info(
+                    "Pipeline: applied \(suggested.count) AI-suggested tags to item \(itemID.uuidString.prefix(8))"
+                  )
+                }
                 try? modelContext.save()
               }
               break  // Success — analysis exists and DynamicAnalysis created
