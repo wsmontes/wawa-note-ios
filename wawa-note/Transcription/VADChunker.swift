@@ -26,12 +26,15 @@ struct VADChunker: @unchecked Sendable {
     init(maxChunkDuration: TimeInterval = 50) {
         self.vad = VoiceActivityDetector()
         self.maxChunkDuration = maxChunkDuration
-        // Tune VAD for transcription pre-processing
-        vad.energyThreshold = 0.03
-        vad.minSpeechDuration = 0.5
-        vad.minSilenceDuration = 0.3
-        vad.preSpeechPad = 0.3
-        vad.postSpeechPad = 0.4
+        // Defensive VAD tuning: err on the side of keeping audio.
+        // Lower energy threshold catches quiet speech; shorter min speech
+        // duration prevents dropping short utterances; longer min silence
+        // avoids splitting on natural pauses. Pre/post pads add context.
+        vad.energyThreshold = 0.02  // was 0.03 — catch quieter speech
+        vad.minSpeechDuration = 0.2  // was 0.5 — don't drop short words
+        vad.minSilenceDuration = 0.6  // was 0.3 — fewer splits on pauses
+        vad.preSpeechPad = 0.5  // was 0.3 — more context before speech
+        vad.postSpeechPad = 0.6  // was 0.4 — more context after speech
     }
 
     /// Split an audio file into speech-only chunks.

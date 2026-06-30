@@ -264,6 +264,18 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         let chunks = try await chunker.chunkAudio(url: audioFileURL)
         defer { chunker.cleanup(chunks: chunks) }
 
+        // Defensive check: if VAD removed too much audio, fall back to
+        // full-file transcription. VAD is an optimization for long recordings;
+        // it must not discard audible speech.
+        let totalChunkDuration = chunks.reduce(0) { $0 + $1.duration }
+        let coverageRatio = duration > 0 ? totalChunkDuration / duration : 0
+        if chunks.isEmpty || coverageRatio < 0.7 {
+            AppLog.transcription.warning(
+                "VAD coverage too low (\(String(format: "%.0f", coverageRatio * 100))% of \(String(format: "%.0f", duration))s) — falling back to full-file transcription"
+            )
+            return try await transcribeDirect(url: audioFileURL, recognizer: recognizer, meetingId: meetingId)
+        }
+
         // Resume from checkpoint if the app was killed mid-transcription.
         // Avoids re-transcribing chunks that were already completed.
         var allSegments: [TranscriptSegment] = []
@@ -346,7 +358,10 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             )
         }
 
-        allSegments = allSegments.filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
+        // Do NOT filter empty segments — the transcription engine's output
+        // is authoritative. Filtering here silently drops data that the user
+        // expects to see (e.g., partial utterances, filler words).
+        // Deduplication at chunk boundaries is handled above.
 
         // Success — clear the checkpoint so next launch doesn't resume a completed job.
         clearTranscriptionCheckpoint(meetingId: meetingId)
