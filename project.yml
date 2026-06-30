@@ -36,6 +36,22 @@ schemes:
         - wawa-noteTests
 
 targets:
+  WawaNoteCore:
+    type: framework
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: WawaNoteCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wawa-note.core
+        REQUIRE_ONLY_APP_EXTENSION_SAFE_API: "YES"
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: "YES"
+        DEVELOPMENT_TEAM: 955573A4YH
+        CODE_SIGN_STYLE: Automatic
+
   wawa-note:
     type: application
     platform: iOS
@@ -50,6 +66,7 @@ targets:
       - appGroups:
           - group.com.wawa-note
     dependencies:
+      - target: WawaNoteCore
       - target: wawa-note-watch
       - target: wawa-note-share
       - package: Yams
@@ -92,6 +109,8 @@ targets:
     capabilities:
       - appGroups:
           - group.com.wawa-note
+    dependencies:
+      - target: WawaNoteCore
     settings:
       base:
         INFOPLIST_FILE: wawa-note-share/Info.plist
