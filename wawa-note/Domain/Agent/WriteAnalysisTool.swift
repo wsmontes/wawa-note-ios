@@ -873,18 +873,33 @@ struct SetTitleTool: AgentTool {
     }
 
     let fetch = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.id == itemID })
-    guard let item = try? context.modelContext.fetch(fetch).first else {
+    let item: KnowledgeItem
+    do {
+      guard let fetched = try context.modelContext.fetch(fetch).first else {
+        return ToolResult(
+          content: "Error: item \(itemID) not found", isError: true, displaySummary: "Not found")
+      }
+      item = fetched
+    } catch {
+      AppLog.provider.error("set_title: fetch failed: \(error.localizedDescription)")
       return ToolResult(
-        content: "Error: item \(itemID) not found",
-        isError: true, displaySummary: "Not found")
+        content: "Error fetching item: \(error.localizedDescription)",
+        isError: true, displaySummary: "Fetch failed")
     }
 
     if item.originalTitle == nil {
       item.originalTitle = item.title
     }
     item.title = newTitle
-    try? context.modelContext.save()
-    AppLog.provider.info("set_title: \"\(newTitle)\" (was: \"\(item.originalTitle ?? "")\")")
-    return ToolResult(content: "Title set to: \(newTitle)", displaySummary: "Renamed")
+    do {
+      try context.modelContext.save()
+      AppLog.provider.info("set_title: \"\(newTitle)\" (was: \"\(item.originalTitle ?? "")\")")
+      return ToolResult(content: "Title set to: \(newTitle)", displaySummary: "Renamed")
+    } catch {
+      AppLog.provider.error("set_title: save failed: \(error.localizedDescription)")
+      return ToolResult(
+        content: "Error saving title: \(error.localizedDescription)",
+        isError: true, displaySummary: "Save failed")
+    }
   }
 }
