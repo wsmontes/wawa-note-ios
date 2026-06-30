@@ -524,6 +524,9 @@ struct WriteAnalysisTool: AgentTool {
     // Normalize LLM snake_case keys to camelCase so MeetingAnalysis
     // (which uses default Codable) can decode the JSON correctly.
     let normalizedJSON = Self.normalizeKeysToCamelCase(json)
+    if let title = normalizedJSON["suggestedTitle"] as? String {
+      AppLog.provider.info("write_analysis: LLM suggested title: \"\(title)\"")
+    }
 
     // Add provenance metadata so consumers know who wrote this and when
     var enrichedJSON = normalizedJSON

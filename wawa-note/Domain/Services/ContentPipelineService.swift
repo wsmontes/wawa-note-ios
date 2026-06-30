@@ -618,8 +618,13 @@ final class ContentPipelineService: ObservableObject {
             }
             if !failed {
               // Mark item as analyzed now that we have valid analysis
-              if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID)
-              {
+              do {
+                guard
+                  let fresh = try KnowledgeItemService(context: modelContext).fetchItem(id: itemID)
+                else {
+                  AppLog.provider.error("Pipeline: item \(itemID) vanished after analysis")
+                  break
+                }
                 didComplete = true
                 fresh.status = .analyzed
                 fresh.analysisProviderId = executorModel
@@ -648,8 +653,16 @@ final class ContentPipelineService: ObservableObject {
                       "Pipeline: applied \(suggested.count) AI-suggested tags to item \(itemID.uuidString.prefix(8))"
                     )
                   }
+                } else {
+                  AppLog.provider.warning(
+                    "Pipeline: analysis.json exists but failed to decode MeetingAnalysis for item \(itemID.uuidString.prefix(8))"
+                  )
                 }
-                try? modelContext.save()
+                try modelContext.save()
+              } catch {
+                AppLog.provider.error(
+                  "Pipeline: failed to save analyzed item \(itemID.uuidString.prefix(8)): \(error.localizedDescription)"
+                )
               }
               break  // Success — analysis exists and DynamicAnalysis created
             }
