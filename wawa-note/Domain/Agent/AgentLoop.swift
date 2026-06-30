@@ -151,6 +151,10 @@ final class AgentLoop: @unchecked Sendable {
 
         var consecutiveFailures = 0
         let maxConsecutiveFailures = 5
+        // Tracks how many times in a row the LLM responded with text and no tool calls.
+        // Used to cap pushbacks: if the model ignores tools twice consecutively, it
+        // has clearly finished its reasoning — accept the response instead of looping.
+        var consecutiveTextOnly = 0
 
         for iteration in 0..<iterations {
             // Cooperative cancellation — allows ProcessingQueueService to cancel
@@ -349,6 +353,7 @@ final class AgentLoop: @unchecked Sendable {
                 } else if !toolMessages.isEmpty {
                     consecutiveFailures = 0  // at least one tool succeeded
                 }
+                consecutiveTextOnly = 0  // tool calls happened — reset pushback counter
             } else {
                 AppLog.event("agent", "Response (no tool calls): \(fullContent.prefix(300))")
                 messages.append(ChatMessage(conversationId: UUID(), role: .assistant, content: fullContent, citations: allCitations))
@@ -356,12 +361,23 @@ final class AgentLoop: @unchecked Sendable {
                 // No tool calls in this iteration — the LLM is just talking.
                 // Reset the circuit breaker since no tool errors occurred.
                 consecutiveFailures = 0
+                consecutiveTextOnly += 1
 
-                // If the LLM responded with text but no tool calls, and we still have
-                // iterations left, push back — the agent MUST use tools to complete tasks.
-                // Use a request-local message (not persisted to chat history) to avoid
-                // polluting the user's conversation with synthetic instructions.
-                if iteration + 1 < iterations {
+                // Two conditions under which we skip the pushback and accept
+                // the text response as a natural completion:
+                //
+                // 1. Provider doesn't support tool calling — effectiveTools is empty,
+                //    so the LLM can never issue a tool call regardless of how many
+                //    times we push back. Continuing would exhaust all iterations and
+                //    yield .truncated instead of .finished, which is misleading.
+                //
+                // 2. The model has already been pushed back once and still responded
+                //    with text — it clearly has the answer without needing tools
+                //    (e.g. simple factual question). A second pushback wastes tokens
+                //    and delays the response.
+                let shouldAccept = effectiveTools.isEmpty || consecutiveTextOnly >= 2
+
+                if !shouldAccept && iteration + 1 < iterations {
                     let pushBack = ChatMessage(
                         conversationId: UUID(), role: .user,
                         content: "You must use the available tools to execute actions. Do not just describe what you would do — actually run the commands.")
@@ -369,9 +385,8 @@ final class AgentLoop: @unchecked Sendable {
                     continue
                 }
 
-                // Last iteration, no tool calls — the model chose to respond
-                // with text. This is a natural completion (the agent finished
-                // its work and is summarizing), not truncation.
+                // Text response accepted — either tools unavailable, pushback cap
+                // reached, or last iteration. Treat as natural completion.
                 continuation.yield(.finished(citations: allCitations))
                 continuation.finish()
                 return

@@ -59,9 +59,15 @@ final class FileArtifactStore: @unchecked Sendable {
         if let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
             self.baseURL = appSupport.appendingPathComponent(AppDirectoryNames.base, isDirectory: true)
             AppLog.storage.info("FileArtifactStore: using applicationSupportDirectory — \(self.baseURL.path)")
-        } else {
+        } else if let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first {
             AppLog.storage.error("FileArtifactStore: applicationSupportDirectory unavailable, using caches fallback")
-            self.baseURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
+            self.baseURL = caches.appendingPathComponent(AppDirectoryNames.base, isDirectory: true)
+        } else {
+            // Last resort: use a temp directory scoped to this process.
+            // Both standard directories being unavailable is an extreme edge case
+            // (corrupted sandbox, early-boot before directories are mounted).
+            AppLog.storage.fault("FileArtifactStore: both applicationSupport and caches unavailable — falling back to temp directory")
+            self.baseURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
                 .appendingPathComponent(AppDirectoryNames.base, isDirectory: true)
         }
 
