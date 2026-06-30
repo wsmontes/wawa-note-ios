@@ -214,9 +214,23 @@ struct CodeBlockView: View {
 
 struct KnowledgeItemNavigationView: View {
     let itemID: UUID
+    @Environment(\.modelContext) private var modelContext
+    @State private var item: KnowledgeItem?
 
     var body: some View {
-        KnowledgeDetailView(itemID: itemID)
+        Group {
+            if let item {
+                KnowledgeDetailView(item: item)
+            } else {
+                ProgressView()
+            }
+        }
+        .onAppear {
+            let ctx = modelContext
+            let id = itemID
+            let descriptor = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.id == id })
+            item = try? ctx.fetch(descriptor).first
+        }
     }
 }
 
