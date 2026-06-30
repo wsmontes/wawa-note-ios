@@ -569,8 +569,20 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
     private func buildTranscript(from segments: [SFTranscriptionSegment], recognizer: SFSpeechRecognizer, meetingId: UUID) -> Transcript {
         // Filter out intermediate hypothesis segments: these have near-zero duration
         // because Apple packs all partial tokens into fake timestamps (e.g. 0.011s apart).
-        // Real final segments have duration > 50ms typically.
-        let validSegments = segments.filter { $0.duration > 0.05 || $0.confidence > 0 }
+        // Real final segments have duration > 10ms typically. KAN-518: threshold was
+        // 50ms but on-device short audio can yield segments with duration 20-40ms and
+        // confidence 0 — those are real, not intermediate hypotheses.
+        var validSegments = segments.filter { $0.duration > 0.01 || $0.confidence > 0 }
+
+        // Safety net: if filtering removed ALL segments (possible with on-device
+        // short audio on iOS 18.x), keep everything. An empty transcript is worse
+        // than a transcript with a few intermediate-hypothesis artifacts.
+        if validSegments.isEmpty, !segments.isEmpty {
+            AppLog.transcription.warning(
+                "buildTranscript: filter removed all \(segments.count) segments — falling back to unfiltered"
+            )
+            validSegments = segments
+        }
 
         let fullText = validSegments.map(\.substring).joined(separator: " ")
         let detectedLang = detectLanguage(fullText)
@@ -587,9 +599,12 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             )
         }
 
-        AppLog.transcription.info(
-            "buildTranscript: \(segments.count) raw → \(validSegments.count) valid segments (filtered \(segments.count - validSegments.count) intermediate hypotheses)"
-        )
+        let filteredCount = segments.count - validSegments.count
+        if filteredCount > 0 {
+            AppLog.transcription.info(
+                "buildTranscript: \(segments.count) raw → \(validSegments.count) valid (filtered \(filteredCount) intermediate hypotheses)"
+            )
+        }
 
         return Transcript(
             meetingId: meetingId,
