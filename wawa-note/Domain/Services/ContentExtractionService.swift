@@ -231,9 +231,25 @@ final class ContentExtractionService {
             let result = try await engine.transcribeFile(audioURL, meetingId: item.id)
             let transcriptText = result.segments.map(\.text).joined(separator: "\n")
             guard !transcriptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                // ── Diagnostic dump: why did the engine return empty text? ──
+                let engineId = self.resolvedEngineId(engine)
+                let audioFileSize = (try? FileManager.default.attributesOfItem(atPath: audioURL.path)[.size] as? Int) ?? 0
+                let audioFileDur = Self.audioDuration(url: audioURL)
+                let segmentDump = result.segments.enumerated().map { idx, seg in
+                    "seg[\(idx)]: text=\"\(seg.text.prefix(50))\" confidence=\(seg.confidence.map { String(format: "%.2f", $0) } ?? "nil") start=\(String(format: "%.2f", seg.startTime))s end=\(seg.endTime.map { String(format: "%.2f", $0) + "s" } ?? "nil") lang=\(seg.languageCode ?? "nil")"
+                }.joined(separator: "\n  ")
                 AppLog.error(
                     "transcription",
-                    "ContentExtraction: transcription returned no speech for item \(item.id) — engine=\(self.resolvedEngineId(engine)) segments=\(result.segments.count)"
+                    """
+                    ContentExtraction: transcription returned no speech for item \(item.id):
+                    • engine: \(engineId)
+                    • totalSegments: \(result.segments.count)
+                    • languageCode: \(result.languageCode ?? "nil")
+                    • audioSize: \(audioFileSize) bytes
+                    • audioDuration: \(String(format: "%.1f", audioFileDur))s
+                    • rawSegmentDump:
+                      \(segmentDump.isEmpty ? "(no segments)" : segmentDump)
+                    """
                 )
                 extractionError = .noSpeechDetected
                 return nil
