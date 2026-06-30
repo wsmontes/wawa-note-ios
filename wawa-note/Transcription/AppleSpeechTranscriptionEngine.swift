@@ -77,7 +77,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
     static let maxFileDuration: TimeInterval = 3600  // 1 hour max
 
     private let candidateLocales: [Locale]
-    private let chunker: VADChunker
+    // chunker removed — direct transcription, no chunking needed for typical files
     private var activeRecognitionTask: SFSpeechRecognitionTask?
     private let fileStore = FileArtifactStore()
     /// Cached cloud-allowed flag — read once at init to avoid
@@ -148,7 +148,6 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
         self.candidateLocales = locales
         let bestLabel = locales.first?.identifier ?? "unknown"
-        self.chunker = VADChunker(maxChunkDuration: Self.maxLocalDuration)
         self.allowCloud = TranscriptionSettings.shared.allowCloud
         AppLog.transcription.info("AppleSpeech ready — best=\(bestLabel) locales=\(locales.map(\.identifier).prefix(5).joined(separator: ", "))")
     }
@@ -254,218 +253,14 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         let duration = getDuration(audioFileURL)
         AppLog.transcription.info("Starting on-device transcription: \(String(format: "%.0f", duration))s, locale=\(recognizer.locale.identifier)")
 
-        if duration <= Self.maxLocalDuration {
-            return try await transcribeDirect(url: audioFileURL, recognizer: recognizer, meetingId: meetingId)
-        }
-
-        // Chunking for long files (>50s).
-        // VADChunker detects speech boundaries dynamically — total chunk count
-        // is determined by actual speech segments, not a fixed duration window.
-        onProgress?(.chunking(completed: 0, total: 1))
-
-        var chunks = try await chunker.chunkAudio(url: audioFileURL)
-        defer { chunker.cleanup(chunks: chunks) }
-
-        // Defensive check: if VAD removed too much audio, fall back to
-        // fixed-duration chunks. Never pass a long file directly to
-        // transcribeDirect — the 120s timeout can't handle it.
-        let totalChunkDuration = chunks.reduce(0) { $0 + $1.duration }
-        let coverageRatio = duration > 0 ? totalChunkDuration / duration : 0
-        var fixedFallbackCleanup: (() -> Void)?
-        if chunks.isEmpty || coverageRatio < 0.7 {
-            AppLog.transcription.warning(
-                "VAD coverage too low (\(String(format: "%.0f", coverageRatio * 100))% of \(String(format: "%.0f", duration))s) — falling back to fixed \(Int(Self.maxLocalDuration))s chunks"
-            )
-            let fixedChunks = try buildFixedChunks(url: audioFileURL, chunkDuration: Self.maxLocalDuration)
-            if let dir = fixedChunks.first?.url.deletingLastPathComponent() {
-                fixedFallbackCleanup = { try? FileManager.default.removeItem(at: dir) }
-            }
-            chunks = fixedChunks
-        }
-        defer { fixedFallbackCleanup?() }
-
-        // Resume from checkpoint if the app was killed mid-transcription.
-        // Avoids re-transcribing chunks that were already completed.
-        var allSegments: [TranscriptSegment] = []
-        var languageCode: String?
-        var startIndex = 0
-        if let cp = loadTranscriptionCheckpoint(meetingId: meetingId),
-            cp.lastChunkIndex < chunks.count,
-            cp.totalChunks == chunks.count
-        {
-            allSegments = cp.segments
-            languageCode = cp.languageCode
-            startIndex = cp.lastChunkIndex + 1
-            AppLog.transcription.info("Resuming transcription from chunk \(startIndex)/\(chunks.count) — \(allSegments.count) segments from checkpoint")
-        }
-
-        var previousText = allSegments.map(\.text).joined(separator: " ")
-
-        for (i, chunk) in chunks.enumerated() where i >= startIndex {
-            try Task.checkCancellation()
-            if isCancelled { throw TranscriptionError.cancelled }
-
-            // Per-chunk background task: tells iOS we're still working.
-            // Without this, iOS kills the process after ~30s of background CPU.
-            let chunkBgID = await withCheckedContinuation { (c: CheckedContinuation<UIBackgroundTaskIdentifier, Never>) in
-                Task { @MainActor in
-                    c.resume(
-                        returning: UIApplication.shared.beginBackgroundTask(
-                            withName: "WawaTranscribe-\(meetingId.uuidString.prefix(8))-\(i)"))
-                }
-            }
-            defer {
-                Task { @MainActor in UIApplication.shared.endBackgroundTask(chunkBgID) }
-            }
-
-            onProgress?(.transcribing(chunk: i + 1, totalChunks: chunks.count))
-            AppLog.transcription.info("On-device chunk \(i+1)/\(chunks.count)")
-
-            let transcript = try await transcribeDirect(url: chunk.url, recognizer: recognizer, meetingId: meetingId)
-            languageCode = transcript.languageCode ?? languageCode
-
-            let chunkText = transcript.segments.map(\.text).joined(separator: " ")
-
-            for segment in transcript.segments {
-                let adjustedStart = segment.startTime + chunk.startTime
-                let adjustedEnd = segment.endTime.map { $0 + chunk.startTime }
-                var text = segment.text
-                if i > 0 { text = deduplicateStart(text, against: previousText) }
-
-                allSegments.append(
-                    TranscriptSegment(
-                        meetingId: segment.meetingId,
-                        startTime: adjustedStart,
-                        endTime: adjustedEnd,
-                        speakerId: segment.speakerId,
-                        text: text,
-                        originalText: segment.originalText,
-                        confidence: segment.confidence,
-                        languageCode: segment.languageCode,
-                        sourceEngineId: segment.sourceEngineId
-                    ))
-            }
-            previousText = chunkText
-
-            // Checkpoint after each chunk — persisted to disk for crash recovery.
-            // If the app is killed mid-transcription, the next launch resumes
-            // from the last saved chunk instead of restarting from scratch.
-            let partial = Transcript(
-                meetingId: allSegments.first?.meetingId,
-                languageCode: languageCode,
-                segments: allSegments,
-                sourceEngineId: id
-            )
-            onCheckpoint?(partial, i + 1)
-            saveTranscriptionCheckpoint(
-                meetingId: meetingId,
-                lastChunkIndex: i,
-                totalChunks: chunks.count,
-                segments: allSegments,
-                languageCode: languageCode
-            )
-        }
-
-        // Do NOT filter empty segments — the transcription engine's output
-        // is authoritative. Filtering here silently drops data that the user
-        // expects to see (e.g., partial utterances, filler words).
-        // Deduplication at chunk boundaries is handled above.
-
-        // Success — clear the checkpoint so next launch doesn't resume a completed job.
-        clearTranscriptionCheckpoint(meetingId: meetingId)
-
-        AppLog.transcription.info("On-device transcription complete: \(allSegments.count) segments")
-        return Transcript(
-            meetingId: allSegments.first?.meetingId,
-            languageCode: languageCode,
-            segments: allSegments,
-            sourceEngineId: id
-        )
+        // Transcribe the whole file directly. SFSpeechRecognizer handles files
+        // up to several minutes natively. The 120s timeout with partial-transcript
+        // recovery protects against hangs. No chunking, no VAD, no dedup.
+        onProgress?(.transcribing(chunk: 1, totalChunks: 1))
+        return try await transcribeDirect(url: audioFileURL, recognizer: recognizer, meetingId: meetingId)
     }
 
     // MARK: - Direct transcription (guaranteed on-device)
-
-    /// Split an audio file into fixed-duration chunks, converting to 16kHz mono
-    /// PCM WAV via explicit AVAudioConverter. Uses the same conversion as VADChunker.
-    private func buildFixedChunks(url: URL, chunkDuration: TimeInterval) throws -> [VADAudioChunk] {
-        let audioFile = try AVAudioFile(forReading: url)
-        let sourceFormat = audioFile.processingFormat
-        let sampleRate = sourceFormat.sampleRate
-        let totalFrames = AVAudioFrameCount(audioFile.length)
-        let framesPerChunk = AVAudioFrameCount(chunkDuration * sampleRate)
-
-        guard
-            let outputFormat = AVAudioFormat(
-                commonFormat: .pcmFormatInt16,
-                sampleRate: 16_000,
-                channels: 1,
-                interleaved: false
-            )
-        else {
-            throw TranscriptionError.recognitionFailed("Cannot create output format")
-        }
-        guard let converter = AVAudioConverter(from: sourceFormat, to: outputFormat) else {
-            throw TranscriptionError.recognitionFailed("Cannot create converter")
-        }
-
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("fixed_chunks_\(UUID().uuidString.prefix(8))")
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-
-        var chunks: [VADAudioChunk] = []
-        var offset: AVAudioFramePosition = 0
-        var index = 0
-
-        while offset < totalFrames {
-            let remaining = AVAudioFrameCount(Int64(totalFrames) - offset)
-            let frameCount = min(framesPerChunk, remaining)
-
-            guard let sourceBuffer = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: frameCount) else {
-                throw TranscriptionError.recognitionFailed("Cannot allocate chunk buffer")
-            }
-            audioFile.framePosition = offset
-            try audioFile.read(into: sourceBuffer)
-            sourceBuffer.frameLength = frameCount
-
-            let ratio = outputFormat.sampleRate / sourceFormat.sampleRate
-            let outputCapacity = AVAudioFrameCount(Double(frameCount) * ratio)
-            guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputCapacity) else {
-                throw TranscriptionError.recognitionFailed("Cannot allocate output buffer")
-            }
-
-            var convertError: NSError?
-            var provided = false
-            converter.convert(to: outputBuffer, error: &convertError) { _, outStatus in
-                if !provided {
-                    provided = true
-                    outStatus.pointee = .haveData
-                    return sourceBuffer
-                }
-                outStatus.pointee = .noDataNow
-                return nil
-            }
-            if let convertError { throw convertError }
-
-            let chunkURL = tempDir.appendingPathComponent("chunk_\(index).wav")
-            let destFile = try AVAudioFile(
-                forWriting: chunkURL,
-                settings: outputFormat.settings,
-                commonFormat: .pcmFormatInt16,
-                interleaved: false
-            )
-            try destFile.write(from: outputBuffer)
-
-            let startTime = Double(offset) / sampleRate
-            let dur = Double(frameCount) / sampleRate
-            chunks.append(VADAudioChunk(url: chunkURL, startTime: startTime, duration: dur))
-
-            offset += AVAudioFramePosition(frameCount)
-            index += 1
-        }
-
-        AppLog.transcription.info("Fixed chunking: \(chunks.count) chunks from \(String(format: "%.0f", Double(totalFrames) / sampleRate))s audio")
-        return chunks
-    }
 
     /// Transcribe a single audio URL.
     /// SFSpeechRecognizer uses AVFoundation internally — it decodes M4A, CAF,
