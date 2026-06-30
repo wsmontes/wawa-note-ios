@@ -405,6 +405,32 @@ struct SelectSkillTool: AgentTool {
     r += "\n## GUIDANCE\n\(skill.systemPrompt)"
     return ToolResult(content: r, displaySummary: "Skill: \(skill.displayName)")
   }
+
+  /// Converts snake_case JSON keys to camelCase so MeetingAnalysis
+  /// (which relies on default Codable synthesis) can decode the LLM output.
+  /// Example: "suggested_title" → "suggestedTitle"
+  static func normalizeKeysToCamelCase(_ json: [String: Any]) -> [String: Any] {
+    var result: [String: Any] = [:]
+    for (key, value) in json {
+      let camelKey = Self.snakeToCamel(key)
+      if let nested = value as? [String: Any] {
+        result[camelKey] = normalizeKeysToCamelCase(nested)
+      } else if let array = value as? [[String: Any]] {
+        result[camelKey] = array.map { normalizeKeysToCamelCase($0) }
+      } else {
+        result[camelKey] = value
+      }
+    }
+    return result
+  }
+
+  private static func snakeToCamel(_ key: String) -> String {
+    let parts = key.split(separator: "_")
+    guard !parts.isEmpty else { return key }
+    let first = String(parts[0])
+    let rest = parts.dropFirst().map { $0.capitalized }
+    return ([first] + rest).joined()
+  }
 }
 
 /// Dedicated tool for writing analysis JSON.
@@ -491,8 +517,12 @@ struct WriteAnalysisTool: AgentTool {
         isError: true, displaySummary: "Invalid JSON")
     }
 
+    // Normalize LLM snake_case keys to camelCase so MeetingAnalysis
+    // (which uses default Codable) can decode the JSON correctly.
+    let normalizedJSON = Self.normalizeKeysToCamelCase(json)
+
     // Add provenance metadata so consumers know who wrote this and when
-    var enrichedJSON = json
+    var enrichedJSON = normalizedJSON
     enrichedJSON["_metadata"] = [
       "writtenBy": "WriteAnalysisTool",
       "timestamp": ISO8601DateFormatter().string(from: Date()),
@@ -625,6 +655,32 @@ struct WriteAnalysisTool: AgentTool {
     }
 
     return errors.isEmpty ? nil : errors
+  }
+
+  /// Converts snake_case JSON keys to camelCase so MeetingAnalysis
+  /// (which relies on default Codable synthesis) can decode the LLM output.
+  /// Example: "suggested_title" → "suggestedTitle"
+  static func normalizeKeysToCamelCase(_ json: [String: Any]) -> [String: Any] {
+    var result: [String: Any] = [:]
+    for (key, value) in json {
+      let camelKey = Self.snakeToCamel(key)
+      if let nested = value as? [String: Any] {
+        result[camelKey] = normalizeKeysToCamelCase(nested)
+      } else if let array = value as? [[String: Any]] {
+        result[camelKey] = array.map { normalizeKeysToCamelCase($0) }
+      } else {
+        result[camelKey] = value
+      }
+    }
+    return result
+  }
+
+  private static func snakeToCamel(_ key: String) -> String {
+    let parts = key.split(separator: "_")
+    guard !parts.isEmpty else { return key }
+    let first = String(parts[0])
+    let rest = parts.dropFirst().map { $0.capitalized }
+    return ([first] + rest).joined()
   }
 }
 
