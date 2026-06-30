@@ -1,7 +1,7 @@
 import Foundation
 import UniformTypeIdentifiers
-// Related JIRA: KAN-12, KAN-62
 
+// Related JIRA: KAN-12, KAN-62
 
 final class JSONImporter: FormatImporter, @unchecked Sendable {
     let formatIdentifier = "json"
@@ -64,7 +64,8 @@ final class JSONImporter: FormatImporter, @unchecked Sendable {
 
         let itemType = KnowledgeItemType(rawValue: imported.item?.type ?? "audio") ?? .audio
 
-        let bodyText = imported.item?.body ?? imported.item?.summary
+        let bodyText =
+            imported.item?.body ?? imported.item?.summary
             ?? imported.meeting?.body ?? imported.meeting?.summary
 
         let item = KnowledgeItem(

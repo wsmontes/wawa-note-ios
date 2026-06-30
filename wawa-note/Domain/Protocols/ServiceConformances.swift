@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
-// Related JIRA: KAN-11, KAN-56
 
+// Related JIRA: KAN-11, KAN-56
 
 // MARK: - Protocol Conformances
 //

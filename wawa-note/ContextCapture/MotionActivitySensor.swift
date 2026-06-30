@@ -1,8 +1,8 @@
 import CoreMotion
 import Foundation
 import OSLog
-// Related JIRA: KAN-151
 
+// Related JIRA: KAN-151
 
 final class MotionActivitySensor: ContextSensor, @unchecked Sendable {
     let sensorName = "motion_activity"
@@ -31,7 +31,10 @@ final class MotionActivitySensor: ContextSensor, @unchecked Sendable {
             // Timeout after 5s
             let timeoutWork = DispatchWorkItem {
                 lock.lock()
-                guard !resumed else { lock.unlock(); return }
+                guard !resumed else {
+                    lock.unlock()
+                    return
+                }
                 resumed = true
                 lock.unlock()
                 manager.stopActivityUpdates()
@@ -42,7 +45,10 @@ final class MotionActivitySensor: ContextSensor, @unchecked Sendable {
 
             manager.startActivityUpdates(to: queue) { activity in
                 lock.lock()
-                guard let activity, !resumed else { lock.unlock(); return }
+                guard let activity, !resumed else {
+                    lock.unlock()
+                    return
+                }
                 resumed = true
                 lock.unlock()
                 timeoutWork.cancel()

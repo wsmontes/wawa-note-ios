@@ -1,7 +1,7 @@
-import Foundation
 import AVFoundation
-// Related JIRA: KAN-5, KAN-18
+import Foundation
 
+// Related JIRA: KAN-5, KAN-18
 
 /// What kind of audio is available for playback/export.
 enum AudioAssetState: Equatable, Sendable {
@@ -38,7 +38,8 @@ final class AudioAssetResolver: Sendable {
         }
 
         if store.recordingManifestExists(for: itemId),
-           let manifest = try? store.readRecordingManifest(for: itemId) {
+            let manifest = try? store.readRecordingManifest(for: itemId)
+        {
             let urls = manifest.segments
                 .sorted { $0.index < $1.index }
                 .map { store.segmentURL(for: itemId, fileName: $0.fileName) }

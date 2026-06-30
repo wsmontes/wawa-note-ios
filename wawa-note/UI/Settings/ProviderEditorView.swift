@@ -1,7 +1,7 @@
-import SwiftUI
 import SwiftData
-// Related JIRA: KAN-10, KAN-52
+import SwiftUI
 
+// Related JIRA: KAN-10, KAN-52
 
 @MainActor
 final class ProviderEditorViewModel: ObservableObject {
@@ -234,8 +234,8 @@ struct ProviderEditorView: View {
     }
 }
 
-private extension String {
-    var nilIfEmpty: String? {
+extension String {
+    fileprivate var nilIfEmpty: String? {
         isEmpty ? nil : self
     }
 }

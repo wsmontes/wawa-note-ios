@@ -1,6 +1,6 @@
 import Foundation
-// Related JIRA: KAN-6, KAN-21
 
+// Related JIRA: KAN-6, KAN-21
 
 struct TranscriptSegment: Identifiable, Codable {
     let id: UUID
@@ -102,12 +102,13 @@ struct Transcript: Codable {
                 let currentLen = currentTexts.joined(separator: " ").count
 
                 if gap > pauseThreshold || currentLen > maxChars {
-                    groups.append(TranscriptGroup(
-                        text: currentTexts.joined(separator: " "),
-                        startTime: currentStart,
-                        endTime: currentEnd,
-                        confidence: currentConfs.isEmpty ? nil : currentConfs.reduce(0, +) / Double(currentConfs.count)
-                    ))
+                    groups.append(
+                        TranscriptGroup(
+                            text: currentTexts.joined(separator: " "),
+                            startTime: currentStart,
+                            endTime: currentEnd,
+                            confidence: currentConfs.isEmpty ? nil : currentConfs.reduce(0, +) / Double(currentConfs.count)
+                        ))
                     currentTexts = []
                     currentStart = seg.startTime
                     currentConfs = []
@@ -121,12 +122,13 @@ struct Transcript: Codable {
 
         // Flush last group
         if !currentTexts.isEmpty {
-            groups.append(TranscriptGroup(
-                text: currentTexts.joined(separator: " "),
-                startTime: currentStart,
-                endTime: currentEnd,
-                confidence: currentConfs.isEmpty ? nil : currentConfs.reduce(0, +) / Double(currentConfs.count)
-            ))
+            groups.append(
+                TranscriptGroup(
+                    text: currentTexts.joined(separator: " "),
+                    startTime: currentStart,
+                    endTime: currentEnd,
+                    confidence: currentConfs.isEmpty ? nil : currentConfs.reduce(0, +) / Double(currentConfs.count)
+                ))
         }
 
         return groups

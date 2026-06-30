@@ -1,7 +1,7 @@
 import Foundation
 import OSLog
-// Related JIRA: KAN-9, KAN-42
 
+// Related JIRA: KAN-9, KAN-42
 
 // MARK: - Messages API
 
@@ -80,9 +80,9 @@ private struct AnthropicRequest: Encodable {
             let text: String?
             let id: String?
             let name: String?
-            let inputJSON: String?       // arguments as JSON string (tool_use)
-            let toolUseId: String?       // tool_result blocks
-            let content: String?         // tool_result text
+            let inputJSON: String?  // arguments as JSON string (tool_use)
+            let toolUseId: String?  // tool_result blocks
+            let content: String?  // tool_result text
 
             private enum CodingKeys: String, CodingKey {
                 case type, text, id, name, input
@@ -100,8 +100,9 @@ private struct AnthropicRequest: Encodable {
                     try container.encodeIfPresent(id, forKey: .id)
                     try container.encodeIfPresent(name, forKey: .name)
                     if let jsonStr = inputJSON, !jsonStr.isEmpty,
-                       let data = jsonStr.data(using: .utf8),
-                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        let data = jsonStr.data(using: .utf8),
+                        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                    {
                         try container.encode(obj.mapValues { AnyEncodableValue.from($0) }, forKey: .input)
                     }
                 case "tool_result":
@@ -115,8 +116,13 @@ private struct AnthropicRequest: Encodable {
 
         /// Type-erased encodable wrapper for JSON values in tool_use input.
         enum AnyEncodableValue: Encodable {
-            case string(String), int(Int), double(Double), bool(Bool)
-            case object([String: AnyEncodableValue]), array([AnyEncodableValue]), null
+            case string(String)
+            case int(Int)
+            case double(Double)
+            case bool(Bool)
+            case object([String: AnyEncodableValue])
+            case array([AnyEncodableValue])
+            case null
 
             func encode(to encoder: any Encoder) throws {
                 var c = encoder.singleValueContainer()
@@ -179,13 +185,21 @@ private struct AnthropicResponse: Decodable {
             let value: Any
             init(from decoder: any Decoder) throws {
                 let container = try decoder.singleValueContainer()
-                if let s = try? container.decode(String.self) { value = s }
-                else if let i = try? container.decode(Int.self) { value = i }
-                else if let d = try? container.decode(Double.self) { value = d }
-                else if let b = try? container.decode(Bool.self) { value = b }
-                else if let arr = try? container.decode([AnyDecodable].self) { value = arr.map(\.value) }
-                else if let obj = try? container.decode([String: AnyDecodable].self) { value = obj.mapValues(\.value) }
-                else { value = "null" }
+                if let s = try? container.decode(String.self) {
+                    value = s
+                } else if let i = try? container.decode(Int.self) {
+                    value = i
+                } else if let d = try? container.decode(Double.self) {
+                    value = d
+                } else if let b = try? container.decode(Bool.self) {
+                    value = b
+                } else if let arr = try? container.decode([AnyDecodable].self) {
+                    value = arr.map(\.value)
+                } else if let obj = try? container.decode([String: AnyDecodable].self) {
+                    value = obj.mapValues(\.value)
+                } else {
+                    value = "null"
+                }
             }
         }
 
@@ -256,35 +270,51 @@ final class AnthropicProvider: AIProvider, @unchecked Sendable {
     private func buildRequestBody(_ request: AIRequest, stream: Bool = false) throws -> AnthropicRequest {
         let systemPrompt = request.messages
             .filter { $0.role == .system }
-            .compactMap { msg in msg.content.compactMap { block -> String? in
-                if case .text(let t) = block { return t }; return nil
-            }.joined(separator: "\n") }
+            .compactMap { msg in
+                msg.content.compactMap { block -> String? in
+                    if case .text(let t) = block { return t }
+                    return nil
+                }.joined(separator: "\n")
+            }
             .joined(separator: "\n\n").nilIfEmpty
 
         let conversationMessages = request.messages.filter { $0.role != .system }
-        let messages: [AnthropicRequest.Message] = conversationMessages.isEmpty
+        let messages: [AnthropicRequest.Message] =
+            conversationMessages.isEmpty
             ? [AnthropicRequest.Message(role: "user", content: .string("Hello"))]
             : conversationMessages.flatMap { msg -> [AnthropicRequest.Message] in
                 let textContent = msg.content.compactMap { block -> String? in
-                    if case .text(let t) = block { return t }; return nil
+                    if case .text(let t) = block { return t }
+                    return nil
                 }.joined(separator: "\n")
                 if msg.role == .assistant, let tcs = msg.toolCalls, !tcs.isEmpty {
                     var blocks: [AnthropicRequest.Message.ContentBlock] = []
                     if !textContent.isEmpty {
-                        blocks.append(AnthropicRequest.Message.ContentBlock(type: "text", text: textContent, id: nil, name: nil, inputJSON: nil, toolUseId: nil, content: nil))
+                        blocks.append(
+                            AnthropicRequest.Message.ContentBlock(
+                                type: "text", text: textContent, id: nil, name: nil, inputJSON: nil, toolUseId: nil, content: nil))
                     }
                     for tc in tcs {
-                        blocks.append(AnthropicRequest.Message.ContentBlock(type: "tool_use", text: nil, id: tc.id, name: tc.name, inputJSON: tc.arguments, toolUseId: nil, content: nil))
+                        blocks.append(
+                            AnthropicRequest.Message.ContentBlock(
+                                type: "tool_use", text: nil, id: tc.id, name: tc.name, inputJSON: tc.arguments, toolUseId: nil, content: nil))
                     }
                     return [AnthropicRequest.Message(role: "assistant", content: .blocks(blocks))]
                 }
                 if msg.role == .tool {
                     let toolResultText = msg.content.compactMap { block -> String? in
-                        if case .text(let t) = block { return t }; return nil
+                        if case .text(let t) = block { return t }
+                        return nil
                     }.joined(separator: "\n")
-                    return [AnthropicRequest.Message(role: "user", content: .blocks([
-                        AnthropicRequest.Message.ContentBlock(type: "tool_result", text: nil, id: nil, name: nil, inputJSON: nil, toolUseId: msg.toolCallId ?? "", content: toolResultText)
-                    ]))]
+                    return [
+                        AnthropicRequest.Message(
+                            role: "user",
+                            content: .blocks([
+                                AnthropicRequest.Message.ContentBlock(
+                                    type: "tool_result", text: nil, id: nil, name: nil, inputJSON: nil, toolUseId: msg.toolCallId ?? "", content: toolResultText
+                                )
+                            ]))
+                    ]
                 }
                 let roleString = msg.role == .assistant ? "assistant" : "user"
                 return [AnthropicRequest.Message(role: roleString, content: .string(textContent))]
@@ -296,12 +326,15 @@ final class AnthropicProvider: AIProvider, @unchecked Sendable {
             let props = tool.parameters.properties.mapValues { p in
                 AnthropicRequest.AnthropicTool.InputSchema.PropertyDef(type: p.type, description: p.description, enum: p.enum)
             }
-            return AnthropicRequest.AnthropicTool(name: tool.name, description: tool.description,
-                inputSchema: AnthropicRequest.AnthropicTool.InputSchema(type: tool.parameters.type,
+            return AnthropicRequest.AnthropicTool(
+                name: tool.name, description: tool.description,
+                inputSchema: AnthropicRequest.AnthropicTool.InputSchema(
+                    type: tool.parameters.type,
                     properties: props.isEmpty ? nil : props, required: tool.parameters.required.isEmpty ? nil : tool.parameters.required))
         }
 
-        return AnthropicRequest(model: effectiveModel, maxTokens: maxTokens, system: systemPrompt,
+        return AnthropicRequest(
+            model: effectiveModel, maxTokens: maxTokens, system: systemPrompt,
             messages: messages, temperature: request.temperature, stopSequences: nil,
             tools: anthropicTools, toolChoice: (anthropicTools != nil) ? AnthropicRequest.AnthropicToolChoice(type: "auto") : nil,
             stream: stream ? true : nil)
@@ -332,8 +365,10 @@ final class AnthropicProvider: AIProvider, @unchecked Sendable {
         }
 
         let decoded: AnthropicResponse
-        do { decoded = try JSONDecoder().decode(AnthropicResponse.self, from: data) }
-        catch { AppLog.provider.error("Failed to decode Anthropic response: \(error)"); throw ProviderError.decodingFailed }
+        do { decoded = try JSONDecoder().decode(AnthropicResponse.self, from: data) } catch {
+            AppLog.provider.error("Failed to decode Anthropic response: \(error)")
+            throw ProviderError.decodingFailed
+        }
 
         let text = decoded.content.filter { $0.type == "text" }.compactMap(\.text).joined(separator: "\n")
         let thinkingText = decoded.content.filter { $0.type == "thinking" }.compactMap(\.text).joined(separator: "\n").nilIfEmpty
@@ -346,17 +381,25 @@ final class AnthropicProvider: AIProvider, @unchecked Sendable {
                 let args: String
                 if let input = block.input {
                     let raw: [String: Any] = input.mapValues { $0.value }
-                    if let data = try? JSONSerialization.data(withJSONObject: raw), let js = String(data: data, encoding: .utf8) { args = js } else { args = "{}" }
-                } else { args = "{}" }
+                    if let data = try? JSONSerialization.data(withJSONObject: raw), let js = String(data: data, encoding: .utf8) {
+                        args = js
+                    } else {
+                        args = "{}"
+                    }
+                } else {
+                    args = "{}"
+                }
                 return AIToolCall(id: id, name: name, arguments: args)
             }
         }()
 
-        let usage = AIUsage(promptTokens: decoded.usage.inputTokens, completionTokens: decoded.usage.outputTokens,
+        let usage = AIUsage(
+            promptTokens: decoded.usage.inputTokens, completionTokens: decoded.usage.outputTokens,
             totalTokens: (decoded.usage.inputTokens ?? 0) + (decoded.usage.outputTokens ?? 0))
 
         AppLog.provider.info("Anthropic response: \(text.prefix(100))... tool_calls: \(toolCalls?.count ?? 0)")
-        return AIResponse(id: decoded.id, model: decoded.model, content: text,
+        return AIResponse(
+            id: decoded.id, model: decoded.model, content: text,
             reasoningContent: thinkingText, usage: usage, toolCalls: toolCalls, finishReason: decoded.stopReason)
     }
 
@@ -386,15 +429,18 @@ final class AnthropicProvider: AIProvider, @unchecked Sendable {
                         return
                     }
 
-                    var currentToolID = ""; var currentToolName: String?; var currentToolArgs = ""
+                    var currentToolID = ""
+                    var currentToolName: String?
+                    var currentToolArgs = ""
                     var finishReason: String?
 
                     for try await line in bytes.lines {
                         guard line.hasPrefix("data: ") else { continue }
                         let jsonStr = String(line.dropFirst(6))
                         guard let data = jsonStr.data(using: .utf8),
-                              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                              let type = obj["type"] as? String else { continue }
+                            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                            let type = obj["type"] as? String
+                        else { continue }
 
                         switch type {
                         case "content_block_delta":
@@ -405,7 +451,8 @@ final class AnthropicProvider: AIProvider, @unchecked Sendable {
                                 } else if let textDelta = delta["text"] as? String {
                                     continuation.yield(.textDelta(textDelta))
                                 } else if deltaType == "input_json_delta",
-                                          let partial = delta["partial_json"] as? String {
+                                    let partial = delta["partial_json"] as? String
+                                {
                                     currentToolArgs += partial
                                     if currentToolID.isEmpty, let index = obj["index"] as? Int { currentToolID = "tc_\(index)" }
                                     continuation.yield(.toolCallDelta(id: currentToolID, name: currentToolName, arguments: partial))
@@ -424,7 +471,8 @@ final class AnthropicProvider: AIProvider, @unchecked Sendable {
                             if let delta = obj["delta"] as? [String: Any] { finishReason = delta["stop_reason"] as? String }
                         case "message_stop":
                             continuation.yield(.finished(finishReason.flatMap { AIFinishReason(rawValue: $0) }))
-                            continuation.finish(); return
+                            continuation.finish()
+                            return
                         default: break
                         }
                     }
@@ -454,8 +502,8 @@ final class AnthropicProvider: AIProvider, @unchecked Sendable {
     }
 }
 
-private extension String {
-    var nilIfEmpty: String? {
+extension String {
+    fileprivate var nilIfEmpty: String? {
         isEmpty ? nil : self
     }
 }

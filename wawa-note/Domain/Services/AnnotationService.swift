@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
-// Related JIRA: KAN-11, KAN-106
 
+// Related JIRA: KAN-11, KAN-106
 
 @MainActor
 final class AnnotationService {
@@ -19,13 +19,14 @@ final class AnnotationService {
         )
         for ann in existing { context.delete(ann) }
         for cap in annotations {
-            context.insert(Annotation(
-                source: cap.source,
-                key: cap.key,
-                value: cap.value,
-                itemID: itemID,
-                confidence: cap.confidence
-            ))
+            context.insert(
+                Annotation(
+                    source: cap.source,
+                    key: cap.key,
+                    value: cap.value,
+                    itemID: itemID,
+                    confidence: cap.confidence
+                ))
         }
         try context.save()
     }

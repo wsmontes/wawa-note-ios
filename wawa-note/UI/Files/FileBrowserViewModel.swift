@@ -1,8 +1,8 @@
-import SwiftUI
-import SwiftData
 import Combine
-// Related JIRA: KAN-141
+import SwiftData
+import SwiftUI
 
+// Related JIRA: KAN-141
 
 /// View model for the file browser. Manages VFS navigation state and file operations.
 @MainActor
@@ -131,7 +131,8 @@ final class FileBrowserViewModel: ObservableObject {
         let parts = path.split(separator: "/").map(String.init).filter { !$0.isEmpty }
         // Try to find item UUID in the path
         for part in parts {
-            let clean = part.hasSuffix(".m4a") || part.hasSuffix(".mp3") || part.hasSuffix(".wav")
+            let clean =
+                part.hasSuffix(".m4a") || part.hasSuffix(".mp3") || part.hasSuffix(".wav")
                 ? String(part.dropLast(4))
                 : part
             if let id = UUID(uuidString: VFSService.stripJSONSuffix(clean)) {
@@ -140,7 +141,8 @@ final class FileBrowserViewModel: ObservableObject {
         }
         // Fallback: try the item directory from the path
         if parts.count >= 4, parts[0] == "projects",
-           let id = UUID(uuidString: VFSService.stripJSONSuffix(parts[3])) {
+            let id = UUID(uuidString: VFSService.stripJSONSuffix(parts[3]))
+        {
             return fileStore.audioFileURL(for: id)
         }
         return nil
@@ -154,7 +156,7 @@ final class FileBrowserViewModel: ObservableObject {
     func writeFileContent(_ path: String, content: String) -> Bool {
         guard let ctx = toolContext else { return false }
         do {
-            if let _ = VFSService.node(at: path, context: ctx) {
+            if VFSService.node(at: path, context: ctx) != nil {
                 try VFSService.writeFileString(path, content: content, context: ctx)
             } else {
                 try VFSService.writeItemFile(path, content: content, context: ctx)

@@ -1,7 +1,7 @@
-import SwiftUI
 import SwiftData
-// Related JIRA: KAN-8, KAN-34
+import SwiftUI
 
+// Related JIRA: KAN-8, KAN-34
 
 struct PromoteToProjectSheet: View {
     let item: KnowledgeItem
@@ -335,7 +335,8 @@ struct PromoteToProjectSheet: View {
 
     private func selectAll() {
         guard let preview else { return }
-        let allSelected = selectedTaskIDs.count == preview.tasks.count
+        let allSelected =
+            selectedTaskIDs.count == preview.tasks.count
             && selectedPersonIDs.count == preview.people.count
             && selectedEntityIDs.count == preview.entities.count
             && selectedEdgeIDs.count == preview.edges.count
@@ -388,7 +389,8 @@ struct PromoteToProjectSheet: View {
         }
 
         do {
-            let model = selectedModel.isEmpty
+            let model =
+                selectedModel.isEmpty
                 ? ActiveModelPicker.effectiveModel(context: modelContext, feature: "analysis")
                 : selectedModel
             generationStep = "Extracting structure..."

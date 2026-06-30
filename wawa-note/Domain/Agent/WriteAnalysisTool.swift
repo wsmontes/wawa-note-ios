@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
-// Related JIRA: KAN-7, KAN-26, KAN-76
 
+// Related JIRA: KAN-7, KAN-26, KAN-76
 
 // MARK: - Analysis Schema
 
@@ -55,108 +55,226 @@ final class AnalysisSchemaStore {
 
     private static func builtInSchemas() -> [String: AnalysisSchema] {
         let raw: [(String, String, String, String, [String: Any])] = [
-            ("decisions_actions", "Decisions & Actions", "Meeting-like: decisions, tasks, risks, open questions", "meeting", [
-                "short_summary": ["type": "string"],
-                "decisions": ["type": "array", "items": ["type": "object", "properties": [
-                    "title": ["type": "string"], "details": ["type": "string"], "rationale": ["type": "string"]
-                ]]],
-                "action_items": ["type": "array", "items": ["type": "object", "properties": [
-                    "task": ["type": "string"], "owner": ["type": "string"], "due_date": ["type": "string"]
-                ]]],
-                "risks": ["type": "array", "items": ["type": "object", "properties": [
-                    "risk": ["type": "string"], "impact": ["type": "string"], "mitigation": ["type": "string"]
-                ]]],
-                "open_questions": ["type": "array", "items": ["type": "string"]],
-                "key_points": ["type": "array", "items": ["type": "string"]]
-            ]),
-            ("thematic_analysis", "Thematic Analysis", "Themes, patterns, contradictions, and insights across content", "analysis", [
-                "short_summary": ["type": "string"],
-                "themes": ["type": "array", "items": ["type": "object", "properties": [
-                    "name": ["type": "string"], "evidence": ["type": "string"],
-                    "strength": ["type": "string", "enum": ["strong", "moderate", "weak"]]
-                ]]],
-                "insights": ["type": "array", "items": ["type": "string"]],
-                "contradictions": ["type": "array", "items": ["type": "object", "properties": [
-                    "statement_a": ["type": "string"], "statement_b": ["type": "string"], "resolution": ["type": "string"]
-                ]]],
-                "people_mentioned": ["type": "array", "items": ["type": "string"]],
-                "entities": ["type": "array", "items": ["type": "object", "properties": [
-                    "name": ["type": "string"], "type": ["type": "string"]
-                ]]]
-            ]),
-            ("qa_transcript", "Q&A Transcript", "Q&A exchanges, interviews, structured conversations", "conversation", [
-                "short_summary": ["type": "string"],
-                "exchanges": ["type": "array", "items": ["type": "object", "properties": [
-                    "speaker": ["type": "string"], "question": ["type": "string"],
-                    "answer": ["type": "string"], "follow_ups": ["type": "array", "items": ["type": "string"]]
-                ]]],
-                "key_takeaways": ["type": "array", "items": ["type": "string"]],
-                "unanswered_questions": ["type": "array", "items": ["type": "string"]],
-                "participants": ["type": "array", "items": ["type": "string"]]
-            ]),
-            ("people_tracker", "People Tracker", "Attendees, commitments, sentiment, accountability", "meeting", [
-                "short_summary": ["type": "string"],
-                "attendees": ["type": "array", "items": ["type": "object", "properties": [
-                    "name": ["type": "string"], "role": ["type": "string"], "present": ["type": "boolean"]
-                ]]],
-                "commitments": ["type": "array", "items": ["type": "object", "properties": [
-                    "who": ["type": "string"], "what": ["type": "string"],
-                    "deadline": ["type": "string"], "status": ["type": "string", "enum": ["pending", "done", "overdue"]]
-                ]]],
-                "sentiment": ["type": "object", "properties": [
-                    "overall": ["type": "string", "enum": ["positive", "neutral", "negative", "mixed"]],
-                    "notes": ["type": "string"]
-                ]],
-                "notable_contributions": ["type": "array", "items": ["type": "string"]]
-            ]),
-            ("research_synthesis", "Research Synthesis", "Hypotheses, findings, sources, methodology", "research", [
-                "short_summary": ["type": "string"],
-                "hypotheses": ["type": "array", "items": ["type": "object", "properties": [
-                    "statement": ["type": "string"], "confidence": ["type": "string", "enum": ["high", "medium", "low", "speculative"]],
-                    "evidence_for": ["type": "string"], "evidence_against": ["type": "string"]
-                ]]],
-                "findings": ["type": "array", "items": ["type": "object", "properties": [
-                    "description": ["type": "string"], "source": ["type": "string"],
-                    "strength": ["type": "string", "enum": ["strong", "moderate", "weak"]]
-                ]]],
-                "methodology_notes": ["type": "string"],
-                "limitations": ["type": "array", "items": ["type": "string"]],
-                "references": ["type": "array", "items": ["type": "string"]]
-            ]),
-            ("timeline_narrative", "Timeline Narrative", "Chronological events, cause-effect chains", "analysis", [
-                "short_summary": ["type": "string"],
-                "events": ["type": "array", "items": ["type": "object", "properties": [
-                    "timestamp": ["type": "string"], "description": ["type": "string"],
-                    "speaker": ["type": "string"],
-                    "cause_of": ["type": "array", "items": ["type": "string"]],
-                    "caused_by": ["type": "array", "items": ["type": "string"]]
-                ]]],
-                "turning_points": ["type": "array", "items": ["type": "string"]],
-                "timeline_summary": ["type": "string"]
-            ]),
-            ("journal_personal", "Journal / Personal", "Personal reflection, mood, people, places, themes", "personal", [
-                "short_summary": ["type": "string"],
-                "themes": ["type": "array", "items": ["type": "string"]],
-                "mood_indicators": ["type": "array", "items": ["type": "object", "properties": [
-                    "mood": ["type": "string"], "intensity": ["type": "string", "enum": ["high", "medium", "low"]],
-                    "trigger": ["type": "string"]
-                ]]],
-                "people_mentioned": ["type": "array", "items": ["type": "string"]],
-                "places": ["type": "array", "items": ["type": "string"]],
-                "cross_references": ["type": "array", "items": ["type": "string"]]
-            ]),
-            ("knowledge_extraction", "Knowledge Extraction", "Key points, entities, relationships — for notes, articles", "general", [
-                "short_summary": ["type": "string"],
-                "key_points": ["type": "array", "items": ["type": "string"]],
-                "entities": ["type": "array", "items": ["type": "object", "properties": [
-                    "name": ["type": "string"], "type": ["type": "string", "enum": ["person", "organization", "tool", "concept", "place", "event"]]
-                ]]],
-                "relationships": ["type": "array", "items": ["type": "object", "properties": [
-                    "from": ["type": "string"], "to": ["type": "string"], "relationship": ["type": "string"]
-                ]]],
-                "source_type": ["type": "string"],
-                "confidence": ["type": "string", "enum": ["high", "medium", "low"]]
-            ])
+            (
+                "decisions_actions", "Decisions & Actions", "Meeting-like: decisions, tasks, risks, open questions", "meeting",
+                [
+                    "short_summary": ["type": "string"],
+                    "decisions": [
+                        "type": "array",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "title": ["type": "string"], "details": ["type": "string"], "rationale": ["type": "string"],
+                            ],
+                        ],
+                    ],
+                    "action_items": [
+                        "type": "array",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "task": ["type": "string"], "owner": ["type": "string"], "due_date": ["type": "string"],
+                            ],
+                        ],
+                    ],
+                    "risks": [
+                        "type": "array",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "risk": ["type": "string"], "impact": ["type": "string"], "mitigation": ["type": "string"],
+                            ],
+                        ],
+                    ],
+                    "open_questions": ["type": "array", "items": ["type": "string"]],
+                    "key_points": ["type": "array", "items": ["type": "string"]],
+                ]
+            ),
+            (
+                "thematic_analysis", "Thematic Analysis", "Themes, patterns, contradictions, and insights across content", "analysis",
+                [
+                    "short_summary": ["type": "string"],
+                    "themes": [
+                        "type": "array",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "name": ["type": "string"], "evidence": ["type": "string"],
+                                "strength": ["type": "string", "enum": ["strong", "moderate", "weak"]],
+                            ],
+                        ],
+                    ],
+                    "insights": ["type": "array", "items": ["type": "string"]],
+                    "contradictions": [
+                        "type": "array",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "statement_a": ["type": "string"], "statement_b": ["type": "string"], "resolution": ["type": "string"],
+                            ],
+                        ],
+                    ],
+                    "people_mentioned": ["type": "array", "items": ["type": "string"]],
+                    "entities": [
+                        "type": "array",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "name": ["type": "string"], "type": ["type": "string"],
+                            ],
+                        ],
+                    ],
+                ]
+            ),
+            (
+                "qa_transcript", "Q&A Transcript", "Q&A exchanges, interviews, structured conversations", "conversation",
+                [
+                    "short_summary": ["type": "string"],
+                    "exchanges": [
+                        "type": "array",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "speaker": ["type": "string"], "question": ["type": "string"],
+                                "answer": ["type": "string"], "follow_ups": ["type": "array", "items": ["type": "string"]],
+                            ],
+                        ],
+                    ],
+                    "key_takeaways": ["type": "array", "items": ["type": "string"]],
+                    "unanswered_questions": ["type": "array", "items": ["type": "string"]],
+                    "participants": ["type": "array", "items": ["type": "string"]],
+                ]
+            ),
+            (
+                "people_tracker", "People Tracker", "Attendees, commitments, sentiment, accountability", "meeting",
+                [
+                    "short_summary": ["type": "string"],
+                    "attendees": [
+                        "type": "array",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "name": ["type": "string"], "role": ["type": "string"], "present": ["type": "boolean"],
+                            ],
+                        ],
+                    ],
+                    "commitments": [
+                        "type": "array",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "who": ["type": "string"], "what": ["type": "string"],
+                                "deadline": ["type": "string"], "status": ["type": "string", "enum": ["pending", "done", "overdue"]],
+                            ],
+                        ],
+                    ],
+                    "sentiment": [
+                        "type": "object",
+                        "properties": [
+                            "overall": ["type": "string", "enum": ["positive", "neutral", "negative", "mixed"]],
+                            "notes": ["type": "string"],
+                        ],
+                    ],
+                    "notable_contributions": ["type": "array", "items": ["type": "string"]],
+                ]
+            ),
+            (
+                "research_synthesis", "Research Synthesis", "Hypotheses, findings, sources, methodology", "research",
+                [
+                    "short_summary": ["type": "string"],
+                    "hypotheses": [
+                        "type": "array",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "statement": ["type": "string"], "confidence": ["type": "string", "enum": ["high", "medium", "low", "speculative"]],
+                                "evidence_for": ["type": "string"], "evidence_against": ["type": "string"],
+                            ],
+                        ],
+                    ],
+                    "findings": [
+                        "type": "array",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "description": ["type": "string"], "source": ["type": "string"],
+                                "strength": ["type": "string", "enum": ["strong", "moderate", "weak"]],
+                            ],
+                        ],
+                    ],
+                    "methodology_notes": ["type": "string"],
+                    "limitations": ["type": "array", "items": ["type": "string"]],
+                    "references": ["type": "array", "items": ["type": "string"]],
+                ]
+            ),
+            (
+                "timeline_narrative", "Timeline Narrative", "Chronological events, cause-effect chains", "analysis",
+                [
+                    "short_summary": ["type": "string"],
+                    "events": [
+                        "type": "array",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "timestamp": ["type": "string"], "description": ["type": "string"],
+                                "speaker": ["type": "string"],
+                                "cause_of": ["type": "array", "items": ["type": "string"]],
+                                "caused_by": ["type": "array", "items": ["type": "string"]],
+                            ],
+                        ],
+                    ],
+                    "turning_points": ["type": "array", "items": ["type": "string"]],
+                    "timeline_summary": ["type": "string"],
+                ]
+            ),
+            (
+                "journal_personal", "Journal / Personal", "Personal reflection, mood, people, places, themes", "personal",
+                [
+                    "short_summary": ["type": "string"],
+                    "themes": ["type": "array", "items": ["type": "string"]],
+                    "mood_indicators": [
+                        "type": "array",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "mood": ["type": "string"], "intensity": ["type": "string", "enum": ["high", "medium", "low"]],
+                                "trigger": ["type": "string"],
+                            ],
+                        ],
+                    ],
+                    "people_mentioned": ["type": "array", "items": ["type": "string"]],
+                    "places": ["type": "array", "items": ["type": "string"]],
+                    "cross_references": ["type": "array", "items": ["type": "string"]],
+                ]
+            ),
+            (
+                "knowledge_extraction", "Knowledge Extraction", "Key points, entities, relationships — for notes, articles", "general",
+                [
+                    "short_summary": ["type": "string"],
+                    "key_points": ["type": "array", "items": ["type": "string"]],
+                    "entities": [
+                        "type": "array",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "name": ["type": "string"],
+                                "type": ["type": "string", "enum": ["person", "organization", "tool", "concept", "place", "event"]],
+                            ],
+                        ],
+                    ],
+                    "relationships": [
+                        "type": "array",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "from": ["type": "string"], "to": ["type": "string"], "relationship": ["type": "string"],
+                            ],
+                        ],
+                    ],
+                    "source_type": ["type": "string"],
+                    "confidence": ["type": "string", "enum": ["high", "medium", "low"]],
+                ]
+            ),
         ]
 
         var dict: [String: AnalysisSchema] = [:]
@@ -164,10 +282,11 @@ final class AnalysisSchemaStore {
         for (name, displayName, description, category, props) in raw {
             let schemaDict: [String: Any] = [
                 "name": name, "displayName": displayName, "description": description,
-                "category": category, "outputSchema": ["properties": props, "required": ["short_summary"]]
+                "category": category, "outputSchema": ["properties": props, "required": ["short_summary"]],
             ]
             guard let data = try? JSONSerialization.data(withJSONObject: schemaDict),
-                  let schema = try? decoder.decode(AnalysisSchema.self, from: data) else { continue }
+                let schema = try? decoder.decode(AnalysisSchema.self, from: data)
+            else { continue }
             dict[name] = schema
         }
         return dict
@@ -280,7 +399,7 @@ struct WriteAnalysisTool: AgentTool {
             "analysisJson": AIToolProperty(
                 type: "string",
                 description: "Complete analysis JSON. Keys = template section titles."
-            )
+            ),
         ],
         required: ["itemId", "analysisJson"]
     )
@@ -288,40 +407,46 @@ struct WriteAnalysisTool: AgentTool {
     /// Maximum allowed size for analysis JSON in bytes (1 MB).
     /// Larger payloads are rejected to prevent runaway LLM output from
     /// filling the disk with repetitive or hallucinated content.
-    private static let maxAnalysisSize = 1_048_576 // 1 MB
+    private static let maxAnalysisSize = 1_048_576  // 1 MB
 
     @MainActor
     func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
         guard let itemIdStr = arguments["itemId"] as? String,
-              let itemId = UUID(uuidString: itemIdStr) else {
+            let itemId = UUID(uuidString: itemIdStr)
+        else {
             let raw = String(describing: arguments["itemId"])
             AppLog.provider.error("write_analysis: invalid itemId '\(raw)'")
-            return ToolResult(content: "Error: itemId must be a valid UUID. Received: \(raw)",
-                              isError: true, displaySummary: "Invalid itemId")
+            return ToolResult(
+                content: "Error: itemId must be a valid UUID. Received: \(raw)",
+                isError: true, displaySummary: "Invalid itemId")
         }
 
         guard let jsonStr = arguments["analysisJson"] as? String else {
             AppLog.provider.error("write_analysis: missing analysisJson")
-            return ToolResult(content: "Error: analysisJson is required",
-                              isError: true, displaySummary: "Missing JSON")
+            return ToolResult(
+                content: "Error: analysisJson is required",
+                isError: true, displaySummary: "Missing JSON")
         }
 
         // Reject oversized payloads before any file I/O
         guard jsonStr.utf8.count <= Self.maxAnalysisSize else {
             let sizeMB = Double(jsonStr.utf8.count) / 1_048_576.0
             AppLog.provider.error("write_analysis: analysisJson too large — \(String(format: "%.1f", sizeMB)) MB (max 1 MB)")
-            return ToolResult(content: "Error: analysisJson exceeds 1 MB maximum. Please reduce the content size.",
-                              isError: true, displaySummary: "Content too large")
+            return ToolResult(
+                content: "Error: analysisJson exceeds 1 MB maximum. Please reduce the content size.",
+                isError: true, displaySummary: "Content too large")
         }
 
         // Validate JSON structure
         guard let data = jsonStr.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              !json.isEmpty else {
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            !json.isEmpty
+        else {
             let preview = String(jsonStr.prefix(200))
             AppLog.provider.error("write_analysis: invalid JSON: \(preview)")
-            return ToolResult(content: "Error: analysisJson is not valid JSON. Check for unescaped quotes, trailing commas, or missing braces. First 200 chars: \(preview)",
-                              isError: true, displaySummary: "Invalid JSON")
+            return ToolResult(
+                content: "Error: analysisJson is not valid JSON. Check for unescaped quotes, trailing commas, or missing braces. First 200 chars: \(preview)",
+                isError: true, displaySummary: "Invalid JSON")
         }
 
         // Add provenance metadata so consumers know who wrote this and when
@@ -329,7 +454,7 @@ struct WriteAnalysisTool: AgentTool {
         enrichedJSON["_metadata"] = [
             "writtenBy": "WriteAnalysisTool",
             "timestamp": ISO8601DateFormatter().string(from: Date()),
-            "sectionCount": json.count
+            "sectionCount": json.count,
         ]
 
         let fileStore = context.fileStore
@@ -346,10 +471,12 @@ struct WriteAnalysisTool: AgentTool {
             // Verify the write by reading back and comparing sizes.
             // Prevents silent failures (e.g. disk full, truncated write, APFS corruption).
             guard let verifyData = try? Data(contentsOf: url),
-                  abs(verifyData.count - prettyData.count) <= 1 else {
+                abs(verifyData.count - prettyData.count) <= 1
+            else {
                 AppLog.provider.error("write_analysis: read-back verification failed — size mismatch")
-                return ToolResult(content: "Error: analysis write verification failed — the file may be corrupted. Please retry.",
-                                  isError: true, displaySummary: "Write verification failed")
+                return ToolResult(
+                    content: "Error: analysis write verification failed — the file may be corrupted. Please retry.",
+                    isError: true, displaySummary: "Write verification failed")
             }
 
             AppLog.provider.info("write_analysis: saved \(json.count) sections (\(prettyData.count) bytes) to \(url.path)")
@@ -365,14 +492,14 @@ struct WriteAnalysisTool: AgentTool {
                     let errorList = errors.components(separatedBy: "\n").prefix(5).joined(separator: "\n")
                     validationNote = """
 
-                    ⚠️ SCHEMA VALIDATION ISSUES (fix and call write_analysis again):
-                    Framework: \(fw.name)
-                    \(errorList)
+                        ⚠️ SCHEMA VALIDATION ISSUES (fix and call write_analysis again):
+                        Framework: \(fw.name)
+                        \(errorList)
 
-                    Required fields: \((fw.itemAnalysis.outputSchema.required ?? Array(fw.itemAnalysis.outputSchema.properties.keys)).joined(separator: ", "))
+                        Required fields: \((fw.itemAnalysis.outputSchema.required ?? Array(fw.itemAnalysis.outputSchema.properties.keys)).joined(separator: ", "))
 
-                    Fix your analysis JSON to include all required fields with correct types, then call write_analysis again.
-                    """
+                        Fix your analysis JSON to include all required fields with correct types, then call write_analysis again.
+                        """
                     AppLog.provider.warning("write_analysis: schema validation failed — \(fw.name): \(errors)")
                 } else {
                     AppLog.provider.info("write_analysis: schema validation passed — \(fw.name)")
@@ -384,15 +511,15 @@ struct WriteAnalysisTool: AgentTool {
                     let reqFields = schema.outputSchema.required?.joined(separator: ", ") ?? "none"
                     validationNote = """
 
-                    ⚠️ SCHEMA VALIDATION ISSUES (fix and call write_analysis again):
-                    Schema: \(schema.displayName)
-                    \(String(errorList))
+                        ⚠️ SCHEMA VALIDATION ISSUES (fix and call write_analysis again):
+                        Schema: \(schema.displayName)
+                        \(String(errorList))
 
-                    Required fields: \(reqFields)
-                    All fields: \(schema.outputSchema.properties.keys.sorted().joined(separator: ", "))
+                        Required fields: \(reqFields)
+                        All fields: \(schema.outputSchema.properties.keys.sorted().joined(separator: ", "))
 
-                    Fix your analysis JSON to include all required fields with correct types, then call write_analysis again.
-                    """
+                        Fix your analysis JSON to include all required fields with correct types, then call write_analysis again.
+                        """
                     AppLog.provider.warning("write_analysis: schema validation failed — \(schema.name)")
                 } else {
                     AppLog.provider.info("write_analysis: schema validation passed — \(schema.name)")
@@ -407,8 +534,9 @@ struct WriteAnalysisTool: AgentTool {
             )
         } catch {
             AppLog.provider.error("write_analysis: write failed: \(error.localizedDescription)")
-            return ToolResult(content: "Error writing analysis: \(error.localizedDescription)",
-                              isError: true, displaySummary: "Write failed")
+            return ToolResult(
+                content: "Error writing analysis: \(error.localizedDescription)",
+                isError: true, displaySummary: "Write failed")
         }
     }
 
@@ -477,35 +605,37 @@ struct WriteSpeakersTool: AgentTool {
     @MainActor
     func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
         guard let jsonStr = arguments["speakersJson"] as? String,
-              let data = jsonStr.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            let data = jsonStr.data(using: .utf8),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
             return ToolResult(content: "Error: speakersJson must be valid JSON", isError: true, displaySummary: "Invalid JSON")
         }
 
         // Validate against strict schema
         if let errors = validateSpeakersSchema(json) {
-            return ToolResult(content: """
-                ⚠️ SCHEMA VALIDATION FAILED — fix and call write_speakers again:
+            return ToolResult(
+                content: """
+                    ⚠️ SCHEMA VALIDATION FAILED — fix and call write_speakers again:
 
-                \(errors.joined(separator: "\n"))
+                    \(errors.joined(separator: "\n"))
 
-                Required format:
-                {
-                  "speakers": [{
-                    "label": "Speaker 1",
-                    "resolved_to": "Full Name",
-                    "confidence": "high|medium|low",
-                    "evidence_summary": "1-2 sentence summary"
-                  }],
-                  "pending_confirmations": [{
-                    "speaker_label": "Speaker 3",
-                    "best_guess": "Full Name",
-                    "confidence": "low",
-                    "candidates": [{"name": "...", "evidence": "..."}],
-                    "question": "Who is this?"
-                  }]
-                }
-                """, isError: true, displaySummary: "Schema validation failed")
+                    Required format:
+                    {
+                      "speakers": [{
+                        "label": "Speaker 1",
+                        "resolved_to": "Full Name",
+                        "confidence": "high|medium|low",
+                        "evidence_summary": "1-2 sentence summary"
+                      }],
+                      "pending_confirmations": [{
+                        "speaker_label": "Speaker 3",
+                        "best_guess": "Full Name",
+                        "confidence": "low",
+                        "candidates": [{"name": "...", "evidence": "..."}],
+                        "question": "Who is this?"
+                      }]
+                    }
+                    """, isError: true, displaySummary: "Schema validation failed")
         }
 
         // Write speakers.json artifact
@@ -521,7 +651,9 @@ struct WriteSpeakersTool: AgentTool {
 
         let speakerCount = (json["speakers"] as? [[String: Any]])?.count ?? 0
         let pendingCount = (json["pending_confirmations"] as? [[String: Any]])?.count ?? 0
-        return ToolResult(content: "Speakers written: \(speakerCount) resolved, \(pendingCount) pending confirmation.", displaySummary: "\(speakerCount) speakers, \(pendingCount) pending")
+        return ToolResult(
+            content: "Speakers written: \(speakerCount) resolved, \(pendingCount) pending confirmation.",
+            displaySummary: "\(speakerCount) speakers, \(pendingCount) pending")
     }
 
     /// Validates the speakers JSON against the strict schema. Returns array of
@@ -554,7 +686,8 @@ struct WriteSpeakersTool: AgentTool {
                     errors.append("\(prefix).confidence: must be high|medium|low")
                 }
                 guard let candidates = pc["candidates"] as? [[String: Any]], !candidates.isEmpty else {
-                    errors.append("\(prefix).candidates: required non-empty array"); continue
+                    errors.append("\(prefix).candidates: required non-empty array")
+                    continue
                 }
                 for (j, c) in candidates.enumerated() {
                     if c["name"] as? String == nil { errors.append("\(prefix).candidates[\(j)].name: required") }
@@ -594,19 +727,23 @@ struct SetTitleTool: AgentTool {
     @MainActor
     func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
         guard let newTitle = arguments["title"] as? String,
-              !newTitle.trimmingCharacters(in: .whitespaces).isEmpty else {
-            return ToolResult(content: "Error: title is required and must be non-empty",
-                              isError: true, displaySummary: "Missing title")
+            !newTitle.trimmingCharacters(in: .whitespaces).isEmpty
+        else {
+            return ToolResult(
+                content: "Error: title is required and must be non-empty",
+                isError: true, displaySummary: "Missing title")
         }
         guard let itemID = context.activeItemID else {
-            return ToolResult(content: "Error: no active item in context",
-                              isError: true, displaySummary: "No item")
+            return ToolResult(
+                content: "Error: no active item in context",
+                isError: true, displaySummary: "No item")
         }
 
         let fetch = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.id == itemID })
         guard let item = try? context.modelContext.fetch(fetch).first else {
-            return ToolResult(content: "Error: item \(itemID) not found",
-                              isError: true, displaySummary: "Not found")
+            return ToolResult(
+                content: "Error: item \(itemID) not found",
+                isError: true, displaySummary: "Not found")
         }
 
         if item.originalTitle == nil {

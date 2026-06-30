@@ -1,6 +1,6 @@
 import SwiftUI
-// Related JIRA: KAN-10
 
+// Related JIRA: KAN-10
 
 enum BadgeTone {
     case neutral

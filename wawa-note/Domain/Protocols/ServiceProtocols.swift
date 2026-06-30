@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
-// Related JIRA: KAN-11, KAN-56
 
+// Related JIRA: KAN-11, KAN-56
 
 // MARK: - ProjectServiceProtocol
 
@@ -25,7 +25,10 @@ protocol ProjectServiceProtocol: AnyObject {
 
 @MainActor
 protocol KnowledgeItemServiceProtocol: AnyObject {
-    func createItem(type: KnowledgeItemType, title: String, bodyText: String?, folderID: UUID?, durationSeconds: Double?, languageCode: String?, tags: [String], inboxDate: Date?) throws -> KnowledgeItem
+    func createItem(
+        type: KnowledgeItemType, title: String, bodyText: String?, folderID: UUID?, durationSeconds: Double?, languageCode: String?, tags: [String],
+        inboxDate: Date?
+    ) throws -> KnowledgeItem
     func fetchItem(id: UUID) throws -> KnowledgeItem?
     func allItems() throws -> [KnowledgeItem]
     func removeFromInbox(_ item: KnowledgeItem) throws
@@ -36,9 +39,12 @@ protocol KnowledgeItemServiceProtocol: AnyObject {
 
 @MainActor
 protocol ProjectDerivedItemServiceProtocol: AnyObject {
-    func createTask(title: String, projectID: UUID, sourceItemID: UUID?, priority: TaskPriority, ownerName: String?, dueAt: Date?, bodyJSON: String?) throws -> ProjectDerivedItem
-    func createSignal(title: String, projectID: UUID, sourceItemID: UUID?, signalBody: SignalBody, confidence: Double?, isCritical: Bool) throws -> ProjectDerivedItem
-    func createSynthesis(projectID: UUID, markdown: String, sections: [SynthesisSection], metrics: [SynthesisMetric], updatedFromItemIDs: [UUID]) throws -> ProjectDerivedItem
+    func createTask(title: String, projectID: UUID, sourceItemID: UUID?, priority: TaskPriority, ownerName: String?, dueAt: Date?, bodyJSON: String?) throws
+        -> ProjectDerivedItem
+    func createSignal(title: String, projectID: UUID, sourceItemID: UUID?, signalBody: SignalBody, confidence: Double?, isCritical: Bool) throws
+        -> ProjectDerivedItem
+    func createSynthesis(projectID: UUID, markdown: String, sections: [SynthesisSection], metrics: [SynthesisMetric], updatedFromItemIDs: [UUID]) throws
+        -> ProjectDerivedItem
     func fetch(id: UUID) throws -> ProjectDerivedItem?
     func fetch(for projectID: UUID) throws -> [ProjectDerivedItem]
     func fetch(for projectID: UUID, type: ProjectDerivedType) throws -> [ProjectDerivedItem]
@@ -49,7 +55,8 @@ protocol ProjectDerivedItemServiceProtocol: AnyObject {
     func delete(_ item: ProjectDerivedItem) throws
     func deleteTask(_ item: ProjectDerivedItem) throws
     func tasks(for projectID: UUID) throws -> [ProjectDerivedItem]
-    func createConnection(title: String, projectID: UUID, fromDerivedID: UUID, toDerivedID: UUID, edgeType: EdgeType, provenanceItemID: UUID?) throws -> ProjectDerivedItem
+    func createConnection(title: String, projectID: UUID, fromDerivedID: UUID, toDerivedID: UUID, edgeType: EdgeType, provenanceItemID: UUID?) throws
+        -> ProjectDerivedItem
     func fetchSynthesis(for projectID: UUID) throws -> [ProjectDerivedItem]
 }
 
@@ -69,8 +76,11 @@ protocol GraphEdgeServiceProtocol: AnyObject {
 
 extension GraphEdgeServiceProtocol {
     @discardableResult
-    func create(fromID: UUID, toID: UUID, edgeType: EdgeType, weight: Double = 1.0, provenanceItemID: UUID? = nil, provenanceSegmentIDs: [String] = []) throws -> GraphEdge {
-        try create(fromID: fromID, toID: toID, edgeType: edgeType, weight: weight, provenanceItemID: provenanceItemID, provenanceSegmentIDs: provenanceSegmentIDs)
+    func create(fromID: UUID, toID: UUID, edgeType: EdgeType, weight: Double = 1.0, provenanceItemID: UUID? = nil, provenanceSegmentIDs: [String] = []) throws
+        -> GraphEdge
+    {
+        try create(
+            fromID: fromID, toID: toID, edgeType: edgeType, weight: weight, provenanceItemID: provenanceItemID, provenanceSegmentIDs: provenanceSegmentIDs)
     }
 }
 

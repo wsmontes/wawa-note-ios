@@ -1,8 +1,8 @@
 import Foundation
-import UniformTypeIdentifiers
 import OSLog
-// Related JIRA: KAN-12, KAN-62
+import UniformTypeIdentifiers
 
+// Related JIRA: KAN-12, KAN-62
 
 struct GitHubIssuesImporter: FormatImporter {
     let formatIdentifier = "github-issues"
@@ -13,7 +13,8 @@ struct GitHubIssuesImporter: FormatImporter {
         guard url.pathExtension.lowercased() == "json" else { return false }
         // Only read first 4KB for format detection instead of loading entire file
         guard let handle = try? FileHandle(forReadingFrom: url),
-              let prefix = try? handle.read(upToCount: 4096) else { return false }
+            let prefix = try? handle.read(upToCount: 4096)
+        else { return false }
         try? handle.close()
         return Self.probeForGitHubIssues(data: prefix)
     }
@@ -24,7 +25,8 @@ struct GitHubIssuesImporter: FormatImporter {
 
     private static func probeForGitHubIssues(data: Data) -> Bool {
         guard let str = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespaces),
-              str.hasPrefix("[") else { return false }
+            str.hasPrefix("[")
+        else { return false }
         // Check for expected GitHub issue keys in the first object
         return str.contains("\"title\"") && str.contains("\"html_url\"")
             && (str.contains("\"number\"") || str.contains("\"url\""))

@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import Wawa_Note
 
 final class BackgroundWorkerTests: XCTestCase {
@@ -12,8 +13,8 @@ final class BackgroundWorkerTests: XCTestCase {
 
     func testParseIngestionJSON_validJSON_returnsResponse() async {
         let json = """
-        {"item_project_view":"This note discusses API design","connections":[{"from_title":"Note A","to_title":"Task B","type":"supports"}]}
-        """
+            {"item_project_view":"This note discusses API design","connections":[{"from_title":"Note A","to_title":"Task B","type":"supports"}]}
+            """
         let result = await worker.parseIngestionJSON(json)
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.item_project_view, "This note discusses API design")
@@ -23,12 +24,12 @@ final class BackgroundWorkerTests: XCTestCase {
 
     func testParseIngestionJSON_markdownWrapped_returnsResponse() async {
         let json = """
-        Here is the analysis:
-        ```json
-        {"project_item_view":"Relevant to backend refactor","new_tasks":[{"title":"Update schema","priority":"high"}]}
-        ```
-        Hope this helps!
-        """
+            Here is the analysis:
+            ```json
+            {"project_item_view":"Relevant to backend refactor","new_tasks":[{"title":"Update schema","priority":"high"}]}
+            ```
+            Hope this helps!
+            """
         let result = await worker.parseIngestionJSON(json)
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.project_item_view, "Relevant to backend refactor")
@@ -82,7 +83,7 @@ final class AsyncSemaphoreTests: XCTestCase {
                     await semaphore.acquire()
                     await counter.increment()
                     // Simulate work
-                    try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+                    try? await Task.sleep(nanoseconds: 50_000_000)  // 50ms
                     await counter.decrement()
                     await semaphore.release()
                 }
@@ -96,12 +97,12 @@ final class AsyncSemaphoreTests: XCTestCase {
 
     func testSemaphoreReleaseUnblocksWaiters() async {
         let semaphore = AsyncSemaphore(count: 1)
-        await semaphore.acquire() // fill the single slot
+        await semaphore.acquire()  // fill the single slot
 
         let unblocked = expectation(description: "Waiter unblocked")
 
         Task {
-            await semaphore.acquire() // should block until release
+            await semaphore.acquire()  // should block until release
             unblocked.fulfill()
         }
 

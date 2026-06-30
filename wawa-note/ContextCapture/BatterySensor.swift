@@ -1,7 +1,7 @@
 import Foundation
 import UIKit
-// Related JIRA: KAN-151
 
+// Related JIRA: KAN-151
 
 final class BatterySensor: ContextSensor, @unchecked Sendable {
     let sensorName = "battery_state"

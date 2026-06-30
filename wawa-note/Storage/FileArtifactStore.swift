@@ -1,7 +1,7 @@
 import Foundation
 import OSLog
-// Related JIRA: KAN-11, KAN-55
 
+// Related JIRA: KAN-11, KAN-55
 
 enum FileArtifactStoreError: Error {
     case fileNotFound
@@ -135,7 +135,7 @@ final class FileArtifactStore: @unchecked Sendable {
             (AppDirectoryNames.configs, baseURL.appendingPathComponent(AppDirectoryNames.configs, isDirectory: true)),
             (AppDirectoryNames.chat, baseURL.appendingPathComponent(AppDirectoryNames.chat, isDirectory: true)),
             (AppDirectoryNames.media, baseURL.appendingPathComponent(AppDirectoryNames.media, isDirectory: true)),
-            (AppDirectoryNames.exports, baseURL.appendingPathComponent(AppDirectoryNames.exports, isDirectory: true))
+            (AppDirectoryNames.exports, baseURL.appendingPathComponent(AppDirectoryNames.exports, isDirectory: true)),
         ]
 
         for (name, url) in dirs {
@@ -169,7 +169,8 @@ final class FileArtifactStore: @unchecked Sendable {
     /// directory, or nil if the resource values can't be read.
     func freeSpaceForCurrentRecording() -> Int64? {
         guard let values = try? baseURL.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
-              let free = values.volumeAvailableCapacityForImportantUsage else {
+            let free = values.volumeAvailableCapacityForImportantUsage
+        else {
             return nil
         }
         return free
@@ -444,8 +445,9 @@ final class FileArtifactStore: @unchecked Sendable {
         }
 
         throw FileArtifactStoreError.readFailed(
-            NSError(domain: "FileArtifactStore", code: -1,
-                    userInfo: [NSLocalizedDescriptionKey: "Manifest not found or corrupted for \(itemId)"])
+            NSError(
+                domain: "FileArtifactStore", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Manifest not found or corrupted for \(itemId)"])
         )
     }
 
@@ -489,7 +491,10 @@ final class FileArtifactStore: @unchecked Sendable {
                 let size: Int64 = exists ? (try? fileManager.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0 : 0
                 let marker = size > 0 ? "✓" : "✗"
                 lines.append("    \(seg.fileName): \(size) bytes \(marker) (endedAt=\(seg.endedAt?.description ?? "nil"))")
-                if size > 0 { validSegmentCount += 1; totalValidBytes += size }
+                if size > 0 {
+                    validSegmentCount += 1
+                    totalValidBytes += size
+                }
             }
             lines.append("  validSegmentCount: \(validSegmentCount)")
             lines.append("  totalValidSegmentBytes: \(totalValidBytes)")
@@ -699,7 +704,8 @@ final class FileArtifactStore: @unchecked Sendable {
     func findOrphanedItemDirectories(knownItemIDs: Set<UUID>) -> [UUID] {
         let itemsDir = baseURL.appendingPathComponent(AppDirectoryNames.items, isDirectory: true)
         guard fileManager.fileExists(atPath: itemsDir.path),
-              let contents = try? fileManager.contentsOfDirectory(at: itemsDir, includingPropertiesForKeys: nil) else {
+            let contents = try? fileManager.contentsOfDirectory(at: itemsDir, includingPropertiesForKeys: nil)
+        else {
             return []
         }
         return contents.compactMap { url in
@@ -768,7 +774,7 @@ final class FileArtifactStore: @unchecked Sendable {
 struct RecordingSegment: Codable, Identifiable, Sendable {
     let id: UUID
     let index: Int
-    let fileName: String      // e.g. "segment-000.wav" (no directory prefix)
+    let fileName: String  // e.g. "segment-000.wav" (no directory prefix)
     let startedAt: Date
     var endedAt: Date?
     let inputPortName: String

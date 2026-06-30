@@ -1,7 +1,7 @@
 import Foundation
 import OSLog
-// Related JIRA: KAN-9, KAN-32, KAN-120
 
+// Related JIRA: KAN-9, KAN-32, KAN-120
 
 // MARK: - Agent mode
 
@@ -97,7 +97,7 @@ final class AgentLoop: @unchecked Sendable {
         history: [ChatMessage] = [],
         provider: any AIProvider,
         maxIterations overrideIterations: Int? = nil,
-        timeoutSeconds: TimeInterval = 300 // 5-minute default safety net (was 600s)
+        timeoutSeconds: TimeInterval = 300  // 5-minute default safety net (was 600s)
     ) -> AsyncThrowingStream<AgentStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             Task {
@@ -140,7 +140,7 @@ final class AgentLoop: @unchecked Sendable {
         maxIterations: Int? = nil,
         toolRegistry customRegistry: AgentToolRegistry? = nil,
         deadline: Date = Date.distantFuture,
-        streamTimeout: TimeInterval = 60   // per-iteration stream heartbeat (chat: 60s, autonomous: 300s)
+        streamTimeout: TimeInterval = 60  // per-iteration stream heartbeat (chat: 60s, autonomous: 300s)
     ) async throws {
         let effectiveRegistry = customRegistry ?? registry
         let iterations = maxIterations ?? self.maxIterations
@@ -154,7 +154,10 @@ final class AgentLoop: @unchecked Sendable {
 
         for iteration in 0..<iterations {
             // Cooperative cancellation — allows ProcessingQueueService to cancel
-            if Task.isCancelled { continuation.finish(); return }
+            if Task.isCancelled {
+                continuation.finish()
+                return
+            }
             // Deadline check prevents infinite hangs from stuck tool calls or API loops.
             // The pipeline marks the item as .failed so the user can retry manually.
             guard Date() < deadline else {
@@ -168,10 +171,11 @@ final class AgentLoop: @unchecked Sendable {
             // user can adjust inputs and retry manually.
             guard consecutiveFailures < maxConsecutiveFailures else {
                 AppLog.agent.error("Agent circuit breaker tripped — \(consecutiveFailures) consecutive iterations with tool errors")
-                continuation.yield(.truncated(
-                    reason: "Agent stopped after \(consecutiveFailures) consecutive failed tool calls. Please review the inputs and retry.",
-                    progress: "\(iteration)/\(iterations) iterations"
-                ))
+                continuation.yield(
+                    .truncated(
+                        reason: "Agent stopped after \(consecutiveFailures) consecutive failed tool calls. Please review the inputs and retry.",
+                        progress: "\(iteration)/\(iterations) iterations"
+                    ))
                 continuation.finish()
                 return
             }
@@ -187,9 +191,11 @@ final class AgentLoop: @unchecked Sendable {
             if wasTruncated {
                 // Use .user role instead of .system — some providers (Gemini)
                 // only accept a single systemInstruction at the top level.
-                adjusted.insert(ChatMessage(conversationId: UUID(), role: .user,
-                    content: "[SYSTEM NOTE: \(truncatedCount) older messages were truncated due to token limits.]"
-                ), at: 0)
+                adjusted.insert(
+                    ChatMessage(
+                        conversationId: UUID(), role: .user,
+                        content: "[SYSTEM NOTE: \(truncatedCount) older messages were truncated due to token limits.]"
+                    ), at: 0)
             }
 
             // Capability check: only send tools if provider supports tool calling.
@@ -198,7 +204,7 @@ final class AgentLoop: @unchecked Sendable {
             let request = buildRequest(systemPrompt: systemPrompt, contextMessages: adjusted, tools: effectiveTools, model: model)
             let stream = provider.sendStreaming(request)
             var fullContent = ""
-            var thinkingContent = ""       // accumulated thinking/reasoning tokens
+            var thinkingContent = ""  // accumulated thinking/reasoning tokens
             var pendingToolCalls: [(id: String, name: String, arguments: String)] = []
             var currentTCID = ""
             var currentTCName: String?
@@ -220,13 +226,16 @@ final class AgentLoop: @unchecked Sendable {
                             if Task.isCancelled { break }
                             lastEventLock.withLock { lastStreamEvent = Date() }
                             switch event {
-                            case .textDelta(let d): fullContent += d; continuation.yield(.textDelta(d))
+                            case .textDelta(let d):
+                                fullContent += d
+                                continuation.yield(.textDelta(d))
                             case .thinkingDelta(let t):
                                 thinkingContent += t
                                 continuation.yield(.textDelta("[thinking]\(t)[/thinking]"))
                             case .toolCallDelta(let id, let name, let args):
                                 if !currentTCID.isEmpty && id != currentTCID, let n = currentTCName {
-                                    pendingToolCalls.append((id: currentTCID, name: n, arguments: currentTCArgs)); currentTCArgs = ""
+                                    pendingToolCalls.append((id: currentTCID, name: n, arguments: currentTCArgs))
+                                    currentTCArgs = ""
                                 }
                                 currentTCID = id
                                 if let n = name { currentTCName = n }
@@ -259,14 +268,15 @@ final class AgentLoop: @unchecked Sendable {
                         // sees the iteration end (via .truncated event) and can retry
                         // or complete — prevents the pipeline from hanging alongside
                         // the stuck provider stream.
-                        continuation.yield(.truncated(
-                            reason: "Agent stream timed out after \(Int(elapsed))s of inactivity",
-                            progress: "\(iteration)/\(iterations) iterations"
-                        ))
+                        continuation.yield(
+                            .truncated(
+                                reason: "Agent stream timed out after \(Int(elapsed))s of inactivity",
+                                progress: "\(iteration)/\(iterations) iterations"
+                            ))
                         continuation.finish()
                         return
                     }
-                    try? await Task.sleep(nanoseconds: 5_000_000_000) // check every 5s
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)  // check every 5s
                 }
             }
 
@@ -288,14 +298,17 @@ final class AgentLoop: @unchecked Sendable {
             if !pendingToolCalls.isEmpty {
                 // Mark message as thinking when there's text AND tool calls (shows thinking bubble)
                 let isThinking = !fullContent.trimmingCharacters(in: .whitespaces).isEmpty
-                messages.append(ChatMessage(conversationId: UUID(), role: .assistant, content: fullContent,
-                    toolCalls: pendingToolCalls.map { PersistedToolCall(id: $0.id, name: $0.name, arguments: $0.arguments, status: .running) },
-                    isThinking: isThinking))
+                messages.append(
+                    ChatMessage(
+                        conversationId: UUID(), role: .assistant, content: fullContent,
+                        toolCalls: pendingToolCalls.map { PersistedToolCall(id: $0.id, name: $0.name, arguments: $0.arguments, status: .running) },
+                        isThinking: isThinking))
 
                 // Execute tool calls in parallel when multiple are requested.
                 // Sequential fallback for single tools (common case, avoids TaskGroup overhead).
                 if pendingToolCalls.count == 1, let tc = pendingToolCalls.first {
-                    await executeSingleTool(tc, registry: effectiveRegistry, messages: &messages,
+                    await executeSingleTool(
+                        tc, registry: effectiveRegistry, messages: &messages,
                         allCitations: &allCitations, continuation: continuation)
                 } else {
                     await withTaskGroup(of: (Int, ToolResult?).self) { group in
@@ -315,9 +328,11 @@ final class AgentLoop: @unchecked Sendable {
                                 // Preserve the original tool-call ID so the provider
                                 // can match each result to its outstanding call.
                                 let tcId = pendingToolCalls[idx].id
-                                messages.append(ChatMessage(conversationId: UUID(), role: .tool,
-                                    content: (result.isError ? "TOOL ERROR: " : "") + result.content,
-                                    toolCallId: tcId, blocks: result.blocks))
+                                messages.append(
+                                    ChatMessage(
+                                        conversationId: UUID(), role: .tool,
+                                        content: (result.isError ? "TOOL ERROR: " : "") + result.content,
+                                        toolCallId: tcId, blocks: result.blocks))
                                 allCitations.append(contentsOf: result.citations)
                             }
                         }
@@ -347,7 +362,8 @@ final class AgentLoop: @unchecked Sendable {
                 // Use a request-local message (not persisted to chat history) to avoid
                 // polluting the user's conversation with synthetic instructions.
                 if iteration + 1 < iterations {
-                    let pushBack = ChatMessage(conversationId: UUID(), role: .user,
+                    let pushBack = ChatMessage(
+                        conversationId: UUID(), role: .user,
                         content: "You must use the available tools to execute actions. Do not just describe what you would do — actually run the commands.")
                     adjusted.append(pushBack)
                     continue
@@ -470,98 +486,98 @@ final class AgentLoop: @unchecked Sendable {
     /// Dynamic: project context, current date (changes per request).
     func buildPromptFragments() -> (static: String, dynamic: String) {
         let staticPrompt = """
-        You are Wawa, an assistant in the user's personal knowledge workspace. You help capture, organize, and explore knowledge using a virtual filesystem accessed through run_command.
+            You are Wawa, an assistant in the user's personal knowledge workspace. You help capture, organize, and explore knowledge using a virtual filesystem accessed through run_command.
 
-        [CORE RULES]
-        1. ONE COMMAND PER CALL. No &&, ||, ;, or pipes. cd, then ls/cat in the next call.
-        2. NEVER show UUIDs or technical IDs to the user. Reference items by title, not ID.
-        3. The [CURRENT STATE] section below is authoritative — do not re-verify with ls / or ls /projects.
-        4. For choices, use numbered lists (1. Option A, 2. Option B). They become buttons.
-        5. touch /inbox/ for ITEMS. touch tasks/ for TASKS. echo '{...}' > path to UPDATE.
-        6. rm is soft delete (items) or permanent (tasks). mv moves between inbox and projects.
-        7. ERROR: read it, fix it, retry once. Never retry the same failing command twice.
-        8. DESTRUCTIVE commands (rm tasks, echo overwriting data): ask user first with ask_user --yes "Proceed" --no "Cancel"
+            [CORE RULES]
+            1. ONE COMMAND PER CALL. No &&, ||, ;, or pipes. cd, then ls/cat in the next call.
+            2. NEVER show UUIDs or technical IDs to the user. Reference items by title, not ID.
+            3. The [CURRENT STATE] section below is authoritative — do not re-verify with ls / or ls /projects.
+            4. For choices, use numbered lists (1. Option A, 2. Option B). They become buttons.
+            5. touch /inbox/ for ITEMS. touch tasks/ for TASKS. echo '{...}' > path to UPDATE.
+            6. rm is soft delete (items) or permanent (tasks). mv moves between inbox and projects.
+            7. ERROR: read it, fix it, retry once. Never retry the same failing command twice.
+            8. DESTRUCTIVE commands (rm tasks, echo overwriting data): ask user first with ask_user --yes "Proceed" --no "Cancel"
 
-        [COMPLEX TASK HANDLING]
-        When the user asks you to reorganize, restructure, audit, or perform multi-step work:
-        8. FIRST, explore the current state (cd, ls, cat) to understand what exists.
-        9. THEN, create a plan as numbered steps. Announce the plan to the user.
-        10. Create tasks for each step using: touch tasks/ --title "Step 1: ..."
-        11. Work through the tasks one by one. After completing each, mark it done:
-            echo '{"status":"done"}' > tasks/task-title
-        12. After all tasks are done, summarize what was accomplished.
-        13. If the user confirms the plan, proceed immediately without asking again.
+            [COMPLEX TASK HANDLING]
+            When the user asks you to reorganize, restructure, audit, or perform multi-step work:
+            8. FIRST, explore the current state (cd, ls, cat) to understand what exists.
+            9. THEN, create a plan as numbered steps. Announce the plan to the user.
+            10. Create tasks for each step using: touch tasks/ --title "Step 1: ..."
+            11. Work through the tasks one by one. After completing each, mark it done:
+                echo '{"status":"done"}' > tasks/task-title
+            12. After all tasks are done, summarize what was accomplished.
+            13. If the user confirms the plan, proceed immediately without asking again.
 
-        [INTERACTION RULES]
-        14. You CAN write text AND call a tool in the same response. The text is shown
-            to the user as you work. Use this to narrate your progress.
-        15. To ask the user a question WHILE continuing to iterate, use:
-            ask_user "question" --yes "Confirm" --no "Cancel"
-            ask_user "Pick one:" --options "Option A,Option B,Option C"
-            ask_user "What should I name this?" --text --placeholder "Name..." --submit "Save"
-            The user's response (choice or free text) is sent to you, and you continue working.
-        16. The loop ENDS only when you respond with text and NO tool calls.
-            As long as you call a tool, you keep iterating — even 20+ times.
-        17. You are free to iterate. Explore, plan, act, ask — don't stop until done.
+            [INTERACTION RULES]
+            14. You CAN write text AND call a tool in the same response. The text is shown
+                to the user as you work. Use this to narrate your progress.
+            15. To ask the user a question WHILE continuing to iterate, use:
+                ask_user "question" --yes "Confirm" --no "Cancel"
+                ask_user "Pick one:" --options "Option A,Option B,Option C"
+                ask_user "What should I name this?" --text --placeholder "Name..." --submit "Save"
+                The user's response (choice or free text) is sent to you, and you continue working.
+            16. The loop ENDS only when you respond with text and NO tool calls.
+                As long as you call a tool, you keep iterating — even 20+ times.
+            17. You are free to iterate. Explore, plan, act, ask — don't stop until done.
 
-        [QUICK REFERENCE — use 'help' for details]
-        ls <path>  List contents. Flags: --long --type --status --tag --since --limit
-        cd <path>  Change directory. cd .. to go up.
-        cat <path> Read a file. --json for raw data.
-        find <path> --tag X --since 7d --type audio. In tasks/ dir: finds tasks.
-        grep "text" <path>  Full-text search. Also works on analysis/ and transcript files.
-        touch <path> --title "Name" --priority high --owner "Name"
-        echo '{"field":"value"}' > <path>  Update item, task, project.
-        help <command>  Show detailed docs for any command.
-        help vfs  Show the virtual filesystem layout.
+            [QUICK REFERENCE — use 'help' for details]
+            ls <path>  List contents. Flags: --long --type --status --tag --since --limit
+            cd <path>  Change directory. cd .. to go up.
+            cat <path> Read a file. --json for raw data.
+            find <path> --tag X --since 7d --type audio. In tasks/ dir: finds tasks.
+            grep "text" <path>  Full-text search. Also works on analysis/ and transcript files.
+            touch <path> --title "Name" --priority high --owner "Name"
+            echo '{"field":"value"}' > <path>  Update item, task, project.
+            help <command>  Show detailed docs for any command.
+            help vfs  Show the virtual filesystem layout.
 
-        [DOCUMENT CREATION]
-        Create rich, well-structured documents as notes. Use markdown for formatting.
-        After creating, write the full body with echo '...' > items/{id}/body.md
-        Use --document-type to announce what kind of document you're creating.
+            [DOCUMENT CREATION]
+            Create rich, well-structured documents as notes. Use markdown for formatting.
+            After creating, write the full body with echo '...' > items/{id}/body.md
+            Use --document-type to announce what kind of document you're creating.
 
-        Meeting Summary:
-        # Meeting: {title}  |  **Date:** ... **Duration:** ...
-        ## Summary  {paragraph}  ## Decisions  | Decision | Owner | Status |  ## Action Items  - [ ] Task (@owner)
+            Meeting Summary:
+            # Meeting: {title}  |  **Date:** ... **Duration:** ...
+            ## Summary  {paragraph}  ## Decisions  | Decision | Owner | Status |  ## Action Items  - [ ] Task (@owner)
 
-        Status Report:
-        # Status Report: {project}  |  **Period:** start - end
-        ## Progress  {paragraph}  ## Metrics  | Metric | Value | Change |  ## Risks  ## Next Steps
+            Status Report:
+            # Status Report: {project}  |  **Period:** start - end
+            ## Progress  {paragraph}  ## Metrics  | Metric | Value | Change |  ## Risks  ## Next Steps
 
-        Decision Log:
-        # Decision: {title}  |  **Date:** ... **Status:** Confirmed|Pending|Rejected
-        ## Context  {paragraph}  ## Decision  {paragraph}  ## Rationale  ## Consequences
+            Decision Log:
+            # Decision: {title}  |  **Date:** ... **Status:** Confirmed|Pending|Rejected
+            ## Context  {paragraph}  ## Decision  {paragraph}  ## Rationale  ## Consequences
 
-        Checklist:
-        # Checklist: {title}
-        - [ ] Task (@owner, Due: date)  - [x] Completed task
+            Checklist:
+            # Checklist: {title}
+            - [ ] Task (@owner, Due: date)  - [x] Completed task
 
-        Research Notes:
-        # Research: {topic}  |  ## Sources  ## Analysis  ## Conclusions  ## Citations
+            Research Notes:
+            # Research: {topic}  |  ## Sources  ## Analysis  ## Conclusions  ## Citations
 
-        Comparative Table:
-        # Comparison: {topic}
-        | Feature | A | B |  |---|---|---|  | Price | ... | ... |
+            Comparative Table:
+            # Comparison: {topic}
+            | Feature | A | B |  |---|---|---|  | Price | ... | ... |
 
-        Digest:
-        # {Period} Digest  |  ## Highlights  ## Stats  | Metric | Value |  ## Items Processed
+            Digest:
+            # {Period} Digest  |  ## Highlights  ## Stats  | Metric | Value |  ## Items Processed
 
-        Always use: touch items/ --title "Title" --type note --document-type meeting-summary --body "summary"
-        Then: echo '# Full markdown...' > items/{id}/body.md
-        The user will see a card they can tap to open the document.
+            Always use: touch items/ --title "Title" --type note --document-type meeting-summary --body "summary"
+            Then: echo '# Full markdown...' > items/{id}/body.md
+            The user will see a card they can tap to open the document.
 
-        [NEW COMMANDS]
-        semantic "query" --limit 10    Semantic search (needs embedding model)
-        analyze <item-id>             Trigger pipeline processing on an item
-        cal list / cal add --title "X" --start "..." --end "..."   Calendar events
-        export <id> --format md|json  Export item or project
-        vision <item-id> --question "..." --save-as-note   Analyze image with AI
-        progress <step> <total> --label "..."   Show progress bar in chat
-        find /inbox/ --type note --exec "analyze {id}"   Batch process items ({id}, {title})
-        touch /inbox/ --type webBookmark --title "..." --url "https://..."   Create bookmark
-        touch /inbox/ --type journalEntry --title "..." --mood great --body "..."   Journal with mood
-        echo 'text' >> items/{id}/body.md   Append to file (>> = append, > = overwrite)
-        """
+            [NEW COMMANDS]
+            semantic "query" --limit 10    Semantic search (needs embedding model)
+            analyze <item-id>             Trigger pipeline processing on an item
+            cal list / cal add --title "X" --start "..." --end "..."   Calendar events
+            export <id> --format md|json  Export item or project
+            vision <item-id> --question "..." --save-as-note   Analyze image with AI
+            progress <step> <total> --label "..."   Show progress bar in chat
+            find /inbox/ --type note --exec "analyze {id}"   Batch process items ({id}, {title})
+            touch /inbox/ --type webBookmark --title "..." --url "https://..."   Create bookmark
+            touch /inbox/ --type journalEntry --title "..." --mood great --body "..."   Journal with mood
+            echo 'text' >> items/{id}/body.md   Append to file (>> = append, > = overwrite)
+            """
 
         var dynamicPrompt = "Today's date: \(Date().formatted(date: .complete, time: .omitted))."
 
@@ -595,7 +611,6 @@ final class AgentLoop: @unchecked Sendable {
             dynamicPrompt += "\nUse cat to read its full content."
         }
 
-
         return (static: staticPrompt, dynamic: dynamicPrompt)
     }
 
@@ -610,7 +625,8 @@ final class AgentLoop: @unchecked Sendable {
         }
         let params = AIConfigService.shared.requestParams(for: "agent", model: model)
         let hasTools = !tools.isEmpty
-        return AIRequest(model: model, messages: aiMessages,
+        return AIRequest(
+            model: model, messages: aiMessages,
             temperature: params.temperature, maxTokens: params.maxTokens,
             tools: hasTools ? tools : nil, toolChoice: hasTools ? "auto" : nil)
     }
@@ -628,8 +644,10 @@ final class AgentLoop: @unchecked Sendable {
         AppLog.event("agent", "Tool call: \(tc.name)(\(tc.arguments.prefix(120)))")
 
         guard let tool = registry.tool(named: tc.name) else {
-            messages.append(ChatMessage(conversationId: UUID(), role: .tool,
-                content: "TOOL ERROR: unknown tool '\(tc.name)'", toolCallId: tc.id))
+            messages.append(
+                ChatMessage(
+                    conversationId: UUID(), role: .tool,
+                    content: "TOOL ERROR: unknown tool '\(tc.name)'", toolCallId: tc.id))
             continuation.yield(.toolCallCompleted(name: tc.name, id: tc.id, summary: "Error"))
             return
         }
@@ -639,8 +657,10 @@ final class AgentLoop: @unchecked Sendable {
         // Validate arguments against tool schema BEFORE execution
         if let validationError = tool.validateArguments(args) {
             AppLog.agent.warning("Tool arg validation failed for \(tc.name): \(validationError)")
-            messages.append(ChatMessage(conversationId: UUID(), role: .tool,
-                content: "ARGUMENT ERROR: \(validationError). Please correct your arguments and try again.", toolCallId: tc.id))
+            messages.append(
+                ChatMessage(
+                    conversationId: UUID(), role: .tool,
+                    content: "ARGUMENT ERROR: \(validationError). Please correct your arguments and try again.", toolCallId: tc.id))
             continuation.yield(.toolCallCompleted(name: tc.name, id: tc.id, summary: "Invalid args"))
             return
         }
@@ -651,7 +671,8 @@ final class AgentLoop: @unchecked Sendable {
                 try await tool.execute(args, context: self.toolContext)
             }
         } catch {
-            let errorMsg = error is TimeoutError
+            let errorMsg =
+                error is TimeoutError
                 ? "TOOL TIMEOUT: \(tc.name) exceeded 120s — hung or stuck"
                 : "TOOL ERROR: \(tc.name): \(error.localizedDescription)"
             messages.append(ChatMessage(conversationId: UUID(), role: .tool, content: errorMsg, toolCallId: tc.id))
@@ -663,9 +684,11 @@ final class AgentLoop: @unchecked Sendable {
         continuation.yield(.toolCallCompleted(name: tc.name, id: tc.id, summary: result.displaySummary))
         let resultPreview = result.content.prefix(150).replacingOccurrences(of: "\n", with: " ")
         AppLog.event("agent", "Tool result: \(tc.name) → \(result.isError ? "ERROR: " : "")\(resultPreview)")
-        messages.append(ChatMessage(conversationId: UUID(), role: .tool,
-            content: (result.isError ? "TOOL ERROR: " : "") + result.content, toolCallId: tc.id,
-            blocks: result.blocks))
+        messages.append(
+            ChatMessage(
+                conversationId: UUID(), role: .tool,
+                content: (result.isError ? "TOOL ERROR: " : "") + result.content, toolCallId: tc.id,
+                blocks: result.blocks))
     }
 
     /// Synchronous wrapper for parallel execution — returns result instead of appending to messages.
@@ -674,12 +697,14 @@ final class AgentLoop: @unchecked Sendable {
         registry: AgentToolRegistry
     ) async -> ToolResult? {
         guard let tool = registry.tool(named: tc.name) else {
-            return ToolResult(content: "TOOL ERROR: unknown tool '\(tc.name)'", isError: true,
+            return ToolResult(
+                content: "TOOL ERROR: unknown tool '\(tc.name)'", isError: true,
                 displaySummary: "Error")
         }
         let args = parseArguments(tc.arguments, toolName: tc.name)
         if let validationError = tool.validateArguments(args) {
-            return ToolResult(content: "ARGUMENT ERROR: \(validationError)", isError: true,
+            return ToolResult(
+                content: "ARGUMENT ERROR: \(validationError)", isError: true,
                 displaySummary: "Invalid args")
         }
         do {
@@ -687,25 +712,34 @@ final class AgentLoop: @unchecked Sendable {
                 try await tool.execute(args, context: self.toolContext)
             }
         } catch {
-            let msg = error is TimeoutError
+            let msg =
+                error is TimeoutError
                 ? "TOOL TIMEOUT: \(tc.name) exceeded 120s"
                 : "TOOL ERROR: \(tc.name): \(error.localizedDescription)"
-            return ToolResult(content: msg, isError: true,
+            return ToolResult(
+                content: msg, isError: true,
                 displaySummary: error is TimeoutError ? "Timeout" : "Error")
         }
     }
 
     private func parseArguments(_ json: String, toolName: String) -> [String: any Sendable] {
         guard !json.trimmingCharacters(in: .whitespaces).isEmpty,
-              let data = json.data(using: .utf8),
-              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+            let data = json.data(using: .utf8),
+            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [:] }
         var result: [String: any Sendable] = [:]
         for (k, v) in dict {
-            if let s = v as? String { result[k] = s }
-            else if let i = v as? Int { result[k] = i }
-            else if let d = v as? Double { result[k] = d }
-            else if let b = v as? Bool { result[k] = b }
-            else if let a = v as? [String] { result[k] = a }
+            if let s = v as? String {
+                result[k] = s
+            } else if let i = v as? Int {
+                result[k] = i
+            } else if let d = v as? Double {
+                result[k] = d
+            } else if let b = v as? Bool {
+                result[k] = b
+            } else if let a = v as? [String] {
+                result[k] = a
+            }
         }
         return result
     }

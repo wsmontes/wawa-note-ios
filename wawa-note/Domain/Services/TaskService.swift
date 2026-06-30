@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
-// Related JIRA: KAN-8, KAN-38
 
+// Related JIRA: KAN-8, KAN-38
 
 /// TaskService is now a thin facade over ProjectDerivedItemService.
 /// It exists for backward compatibility during the migration period.
@@ -32,14 +32,18 @@ final class TaskService {
     ) throws -> TaskItem {
         guard let projectID else {
             // Tasks without a project go into a legacy TaskItem (orphaned tasks)
-            let task = TaskItem(title: title, priority: priority, ownerName: ownerName, dueAt: dueAt, sourceItemID: sourceItemID, sourceSegmentIDs: sourceSegmentIDs, confidence: confidence)
+            let task = TaskItem(
+                title: title, priority: priority, ownerName: ownerName, dueAt: dueAt, sourceItemID: sourceItemID, sourceSegmentIDs: sourceSegmentIDs,
+                confidence: confidence)
             task.createdBy = createdBy
             context.insert(task)
             try context.save()
             return task
         }
 
-        let body = TaskBody(description: nil, sourceSegmentIDs: sourceSegmentIDs.isEmpty ? nil : sourceSegmentIDs, aiGenerated: createdBy != .user, suggestedByItemID: sourceItemID)
+        let body = TaskBody(
+            description: nil, sourceSegmentIDs: sourceSegmentIDs.isEmpty ? nil : sourceSegmentIDs, aiGenerated: createdBy != .user,
+            suggestedByItemID: sourceItemID)
         let bodyData = try? JSONEncoder().encode(body)
         let bodyStr = bodyData.flatMap { String(data: $0, encoding: .utf8) }
 
@@ -54,7 +58,9 @@ final class TaskService {
         )
 
         // Return a shim TaskItem for legacy callers that expect the old type
-        let task = TaskItem(id: derived.id, title: title, priority: priority, ownerName: ownerName, dueAt: dueAt, sourceItemID: sourceItemID, sourceSegmentIDs: sourceSegmentIDs, confidence: confidence)
+        let task = TaskItem(
+            id: derived.id, title: title, priority: priority, ownerName: ownerName, dueAt: dueAt, sourceItemID: sourceItemID,
+            sourceSegmentIDs: sourceSegmentIDs, confidence: confidence)
         task.projectID = projectID
         task.createdBy = createdBy
         return task
@@ -64,7 +70,8 @@ final class TaskService {
     func tasks(for projectID: UUID) throws -> [TaskItem] {
         let derived = try derivedService.fetch(for: projectID, type: .task)
         return derived.map { d in
-            let task = TaskItem(id: d.id, title: d.title, priority: TaskPriority(rawValue: d.priorityRaw ?? "medium") ?? .medium, ownerName: d.ownerName, dueAt: d.dueAt)
+            let task = TaskItem(
+                id: d.id, title: d.title, priority: TaskPriority(rawValue: d.priorityRaw ?? "medium") ?? .medium, ownerName: d.ownerName, dueAt: d.dueAt)
             task.projectID = d.projectID
             if let statusRaw = d.statusRaw {
                 task.statusRaw = statusRaw
@@ -75,7 +82,8 @@ final class TaskService {
 
     func fetch(id: UUID) throws -> TaskItem? {
         guard let d = try derivedService.fetch(id: id), d.type == .task else { return nil }
-        let task = TaskItem(id: d.id, title: d.title, priority: TaskPriority(rawValue: d.priorityRaw ?? "medium") ?? .medium, ownerName: d.ownerName, dueAt: d.dueAt)
+        let task = TaskItem(
+            id: d.id, title: d.title, priority: TaskPriority(rawValue: d.priorityRaw ?? "medium") ?? .medium, ownerName: d.ownerName, dueAt: d.dueAt)
         task.projectID = d.projectID
         if let statusRaw = d.statusRaw { task.statusRaw = statusRaw }
         return task

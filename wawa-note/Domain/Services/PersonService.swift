@@ -1,8 +1,8 @@
+import Contacts
 import Foundation
 import SwiftData
-import Contacts
-// Related JIRA: KAN-8, KAN-29, KAN-40
 
+// Related JIRA: KAN-8, KAN-29, KAN-40
 
 @MainActor
 final class PersonService {
@@ -62,7 +62,7 @@ final class PersonService {
         let store = CNContactStore()
         let keys: [CNKeyDescriptor] = [
             CNContactEmailAddressesKey as CNKeyDescriptor,
-            CNContactOrganizationNameKey as CNKeyDescriptor
+            CNContactOrganizationNameKey as CNKeyDescriptor,
         ]
         let predicate = CNContact.predicateForContacts(matchingName: name)
         guard let contact = try? store.unifiedContacts(matching: predicate, keysToFetch: keys).first else {

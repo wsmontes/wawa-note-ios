@@ -1,8 +1,8 @@
+import CryptoKit
 import Foundation
 import OSLog
-import CryptoKit
-// Related JIRA: KAN-7, KAN-28
 
+// Related JIRA: KAN-7, KAN-28
 
 // MARK: - Summary Cache
 
@@ -66,8 +66,8 @@ final class SummaryCache: ObservableObject {
     /// FNV-1a 64-bit hash — fast, non-cryptographic fingerprint.
     /// Same algorithm as Meetily's `stable_text_fingerprint`.
     static func fingerprint(_ text: String) -> String {
-        let fnvOffset: UInt64 = 0xcbf29ce484222325
-        let fnvPrime: UInt64 = 0x100000001b3
+        let fnvOffset: UInt64 = 0xcbf2_9ce4_8422_2325
+        let fnvPrime: UInt64 = 0x100_0000_01b3
 
         var hash: UInt64 = fnvOffset
         for byte in text.utf8 {
@@ -203,7 +203,8 @@ final class SummaryCache: ObservableObject {
 
     private func loadFromDisk() {
         guard let data = defaults.data(forKey: cacheKey),
-              let entries = try? JSONDecoder().decode([String: CacheEntry].self, from: data) else {
+            let entries = try? JSONDecoder().decode([String: CacheEntry].self, from: data)
+        else {
             return
         }
         cacheEntries = entries
@@ -253,15 +254,15 @@ enum LanguageNormalizer {
 
     /// System prompt for English normalization pass.
     static let englishNormalizationPrompt = """
-    You are a precise English Markdown editor. Convert the provided Markdown document into English while preserving structure exactly.
+        You are a precise English Markdown editor. Convert the provided Markdown document into English while preserving structure exactly.
 
-    **CRITICAL RULES:**
-    1. Translate any non-English prose into English.
-    2. Preserve the Markdown structure EXACTLY: keep every `#`, `**`, `-`, `|`, code fence marker, and table pipe in the same position.
-    3. Do NOT translate: proper nouns (names of people, products, companies), code identifiers, file paths, URLs, numeric values, or text inside backticks.
-    4. If the document is already English, lightly preserve it without rewriting meaning.
-    5. Do not add commentary or explanation. Output ONLY the English Markdown.
-    """
+        **CRITICAL RULES:**
+        1. Translate any non-English prose into English.
+        2. Preserve the Markdown structure EXACTLY: keep every `#`, `**`, `-`, `|`, code fence marker, and table pipe in the same position.
+        3. Do NOT translate: proper nouns (names of people, products, companies), code identifiers, file paths, URLs, numeric values, or text inside backticks.
+        4. If the document is already English, lightly preserve it without rewriting meaning.
+        5. Do not add commentary or explanation. Output ONLY the English Markdown.
+        """
 
     /// Detect if text is primarily English (simple heuristic).
     static func isEnglish(_ text: String) -> Bool {
@@ -282,7 +283,7 @@ enum LanguageNormalizer {
             // Japanese/Korean/Chinese markers
             "です", "ます", "した", "いる", "ある",
             "습니다", "입니다", "하는", "그리고",
-            "的", "是", "了", "在", "有"
+            "的", "是", "了", "在", "有",
         ]
 
         var englishCount = 0
@@ -342,8 +343,8 @@ enum LanguageNormalizer {
 
     /// Resolve the final language action based on desired language and detected content language.
     enum LanguageAction {
-        case keepAsIs          // Already in target language
-        case normalizeToEnglish // Translate to English
+        case keepAsIs  // Already in target language
+        case normalizeToEnglish  // Translate to English
         case translate(to: String)  // Translate to specific language
     }
 
@@ -352,13 +353,15 @@ enum LanguageNormalizer {
         detectedContentLanguage: String?
     ) -> LanguageAction {
         guard let target = targetLanguage?.lowercased(),
-              target != "en", target != "eng",
-              let targetName = languageName(from: target),
-              targetName != "English" else {
+            target != "en", target != "eng",
+            let targetName = languageName(from: target),
+            targetName != "English"
+        else {
             // Target is English or not specified — check if content needs normalization
             if let detected = detectedContentLanguage,
-               let detectedName = languageName(from: detected),
-               detectedName != "English" {
+                let detectedName = languageName(from: detected),
+                detectedName != "English"
+            {
                 return .normalizeToEnglish
             }
             return .keepAsIs

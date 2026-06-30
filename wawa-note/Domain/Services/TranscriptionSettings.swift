@@ -1,6 +1,6 @@
 import Foundation
-// Related JIRA: KAN-6
 
+// Related JIRA: KAN-6
 
 enum TranscriptionMode: String {
     case apple = "apple"
@@ -22,7 +22,8 @@ final class TranscriptionSettings: @unchecked Sendable {
     var mode: TranscriptionMode {
         get {
             guard let raw = defaults.string(forKey: key),
-                  let mode = TranscriptionMode(rawValue: raw) else {
+                let mode = TranscriptionMode(rawValue: raw)
+            else {
                 return .apple
             }
             return mode

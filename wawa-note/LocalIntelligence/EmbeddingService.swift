@@ -1,7 +1,7 @@
 import Foundation
 import OSLog
-// Related JIRA: KAN-150
 
+// Related JIRA: KAN-150
 
 // MARK: - Embedding Container (versioned)
 
@@ -45,7 +45,8 @@ final class EmbeddingService: @unchecked Sendable {
         let data = try JSONEncoder().encode(container)
         try fileStore.createMeetingDirectory(for: itemId)
         try data.write(to: embeddingURL(for: itemId), options: .atomic)
-        let v = self.currentVersion; let m = self.embeddingModel
+        let v = self.currentVersion
+        let m = self.embeddingModel
         AppLog.general.info("Embedding stored for item \(itemId): \(vector.count) dims (v\(v), model=\(m))")
         return vector
     }

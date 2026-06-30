@@ -1,7 +1,7 @@
-import SwiftUI
 import SwiftData
-// Related JIRA: KAN-10, KAN-137
+import SwiftUI
 
+// Related JIRA: KAN-10, KAN-137
 
 struct NoteEditorView: View {
     @Environment(\.dismiss) private var dismiss
@@ -67,21 +67,30 @@ struct NoteEditorView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Save", action: save)
                         .fontWeight(.semibold)
-                        .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(
+                            title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 ToolbarItem(placement: .keyboard) {
                     HStack(spacing: 16) {
-                        Button { surroundSelection(with: "**") } label: {
+                        Button {
+                            surroundSelection(with: "**")
+                        } label: {
                             Image(systemName: "bold")
                         }
-                        Button { surroundSelection(with: "*") } label: {
+                        Button {
+                            surroundSelection(with: "*")
+                        } label: {
                             Image(systemName: "italic")
                         }
-                        Button { insertPrefixForSelectedLine("- ") } label: {
+                        Button {
+                            insertPrefixForSelectedLine("- ")
+                        } label: {
                             Image(systemName: "list.bullet")
                         }
                         Spacer()
-                        Button { dismissKeyboard() } label: {
+                        Button {
+                            dismissKeyboard()
+                        } label: {
                             Text("Done")
                                 .fontWeight(.semibold)
                         }
@@ -114,13 +123,15 @@ struct NoteEditorView: View {
             if let tag = initialTag { tags.append(tag) }
 
             let service = KnowledgeItemService(context: modelContext)
-            guard let item = try? service.createItem(
-                type: type,
-                title: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled" : title.trimmingCharacters(in: .whitespacesAndNewlines),
-                bodyText: bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bodyText,
-                folderID: folderID,
-                tags: tags
-            ) else { return }
+            guard
+                let item = try? service.createItem(
+                    type: type,
+                    title: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled" : title.trimmingCharacters(in: .whitespacesAndNewlines),
+                    bodyText: bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bodyText,
+                    folderID: folderID,
+                    tags: tags
+                )
+            else { return }
 
             // Mark as user-created
             var prov = item.provenance

@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
-// Related JIRA: KAN-8, KAN-34
 
+// Related JIRA: KAN-8, KAN-34
 
 /// Tools available to the Project Agent during synthesis.
 enum ProjectTools {
@@ -11,7 +11,7 @@ enum ProjectTools {
             SynthesizeProjectTool(projectID: projectID),
             EmitSignalTool(projectID: projectID),
             CreateConnectionTool(projectID: projectID),
-            RequestReprocessTool(projectID: projectID)
+            RequestReprocessTool(projectID: projectID),
         ]
     }
 }
@@ -30,7 +30,7 @@ struct SynthesizeProjectTool: AgentTool {
                 "markdown": AIToolProperty(type: "string", description: "Full synthesis in markdown format"),
                 "sections": AIToolProperty(type: "array", description: "Array of {title, renderType, content} objects"),
                 "metrics": AIToolProperty(type: "array", description: "Array of {label, value, format, status} objects"),
-                "updatedFromItemIDs": AIToolProperty(type: "array", description: "UUID strings of items that contributed to this version")
+                "updatedFromItemIDs": AIToolProperty(type: "array", description: "UUID strings of items that contributed to this version"),
             ],
             required: ["markdown"]
         )
@@ -47,27 +47,29 @@ struct SynthesizeProjectTool: AgentTool {
             )
         }
 
-        let sections: [SynthesisSection] = (arguments["sections"] as? [[String: Any]])?.enumerated().compactMap { idx, dict in
-            guard let title = dict["title"] as? String,
-                  let renderType = dict["renderType"] as? String,
-                  let content = dict["content"] as? String
-            else { return nil }
-            return SynthesisSection(id: UUID().uuidString, title: title, renderType: renderType, content: content, order: idx)
-        } ?? []
+        let sections: [SynthesisSection] =
+            (arguments["sections"] as? [[String: Any]])?.enumerated().compactMap { idx, dict in
+                guard let title = dict["title"] as? String,
+                    let renderType = dict["renderType"] as? String,
+                    let content = dict["content"] as? String
+                else { return nil }
+                return SynthesisSection(id: UUID().uuidString, title: title, renderType: renderType, content: content, order: idx)
+            } ?? []
 
-        let metrics: [SynthesisMetric] = (arguments["metrics"] as? [[String: Any]])?.compactMap { dict in
-            guard let label = dict["label"] as? String,
-                  let value = dict["value"] as? Double
-            else { return nil }
-            return SynthesisMetric(
-                id: UUID().uuidString,
-                label: label,
-                value: value,
-                format: dict["format"] as? String ?? "number",
-                status: dict["status"] as? String ?? "neutral",
-                icon: dict["icon"] as? String
-            )
-        } ?? []
+        let metrics: [SynthesisMetric] =
+            (arguments["metrics"] as? [[String: Any]])?.compactMap { dict in
+                guard let label = dict["label"] as? String,
+                    let value = dict["value"] as? Double
+                else { return nil }
+                return SynthesisMetric(
+                    id: UUID().uuidString,
+                    label: label,
+                    value: value,
+                    format: dict["format"] as? String ?? "number",
+                    status: dict["status"] as? String ?? "neutral",
+                    icon: dict["icon"] as? String
+                )
+            } ?? []
 
         let updatedFrom: [UUID] = (arguments["updatedFromItemIDs"] as? [String])?.compactMap(UUID.init(uuidString:)) ?? []
 
@@ -115,7 +117,7 @@ struct EmitSignalTool: AgentTool {
                 "isCritical": AIToolProperty(type: "boolean", description: "Demands immediate attention"),
                 "impactScore": AIToolProperty(type: "number", description: "0.0-1.0 impact"),
                 "urgencyScore": AIToolProperty(type: "number", description: "0.0-1.0 urgency"),
-                "relatedItemIDs": AIToolProperty(type: "array", description: "Related item UUIDs as strings")
+                "relatedItemIDs": AIToolProperty(type: "array", description: "Related item UUIDs as strings"),
             ],
             required: ["title", "signalType", "description"]
         )
@@ -124,7 +126,7 @@ struct EmitSignalTool: AgentTool {
     @MainActor
     func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
         guard let title = arguments["title"] as? String,
-              let signalType = arguments["signalType"] as? String
+            let signalType = arguments["signalType"] as? String
         else {
             return ToolResult(
                 content: "Error: title and signalType are required",
@@ -182,8 +184,9 @@ struct CreateConnectionTool: AgentTool {
                 "fromID": AIToolProperty(type: "string", description: "Source item UUID"),
                 "toID": AIToolProperty(type: "string", description: "Target item UUID"),
                 "title": AIToolProperty(type: "string", description: "Human-readable connection description"),
-                "edgeType": AIToolProperty(type: "string", description: "relatesTo, references, supports, contradicts, mentions, precedes, produced, belongsTo, assignedTo, blockedBy"),
-                "provenanceItemID": AIToolProperty(type: "string", description: "Evidence item UUID")
+                "edgeType": AIToolProperty(
+                    type: "string", description: "relatesTo, references, supports, contradicts, mentions, precedes, produced, belongsTo, assignedTo, blockedBy"),
+                "provenanceItemID": AIToolProperty(type: "string", description: "Evidence item UUID"),
             ],
             required: ["fromID", "toID", "title", "edgeType"]
         )
@@ -192,11 +195,11 @@ struct CreateConnectionTool: AgentTool {
     @MainActor
     func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
         guard let fromStr = arguments["fromID"] as? String,
-              let fromID = UUID(uuidString: fromStr),
-              let toStr = arguments["toID"] as? String,
-              let toID = UUID(uuidString: toStr),
-              let title = arguments["title"] as? String,
-              let edgeTypeStr = arguments["edgeType"] as? String
+            let fromID = UUID(uuidString: fromStr),
+            let toStr = arguments["toID"] as? String,
+            let toID = UUID(uuidString: toStr),
+            let title = arguments["title"] as? String,
+            let edgeTypeStr = arguments["edgeType"] as? String
         else {
             return ToolResult(
                 content: "Error: fromID, toID, title, and edgeType are required and must be valid UUIDs",
@@ -247,7 +250,7 @@ struct RequestReprocessTool: AgentTool {
         AIToolParameters(
             properties: [
                 "itemIDs": AIToolProperty(type: "array", description: "Item UUIDs to reprocess"),
-                "context": AIToolProperty(type: "string", description: "Why reprocessing is needed, what to focus on")
+                "context": AIToolProperty(type: "string", description: "Why reprocessing is needed, what to focus on"),
             ],
             required: ["itemIDs", "context"]
         )
@@ -256,7 +259,7 @@ struct RequestReprocessTool: AgentTool {
     @MainActor
     func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult {
         guard let itemIDStrs = arguments["itemIDs"] as? [String],
-              let reprocessContext = arguments["context"] as? String
+            let reprocessContext = arguments["context"] as? String
         else {
             return ToolResult(
                 content: "Error: itemIDs and context are required",

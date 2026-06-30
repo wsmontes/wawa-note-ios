@@ -1,6 +1,6 @@
 import Foundation
-// Related JIRA: KAN-151
 
+// Related JIRA: KAN-151
 
 struct CapturedAnnotation: Sendable {
     let source: String
@@ -39,4 +39,3 @@ protocol ContextSensor: Sendable {
     /// Failures from individual sensors are logged but do not block recording.
     func capture() async throws -> [CapturedAnnotation]
 }
-

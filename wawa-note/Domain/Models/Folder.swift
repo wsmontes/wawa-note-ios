@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
-// Related JIRA: KAN-11, KAN-143
 
+// Related JIRA: KAN-11, KAN-143
 
 @Model
 final class Folder {

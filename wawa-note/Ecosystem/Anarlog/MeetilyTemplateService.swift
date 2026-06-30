@@ -1,7 +1,7 @@
 import Foundation
 import OSLog
-// Related JIRA: KAN-12, KAN-63
 
+// Related JIRA: KAN-12, KAN-63
 
 // MARK: - Meetily Template System
 
@@ -70,10 +70,12 @@ final class MeetilyTemplateService: ObservableObject {
     // MARK: - Load built-in templates
 
     private func loadBuiltInTemplates() {
-        guard let templatesURL = Bundle.main.url(
-            forResource: "MeetilyTemplates",
-            withExtension: nil
-        ) else {
+        guard
+            let templatesURL = Bundle.main.url(
+                forResource: "MeetilyTemplates",
+                withExtension: nil
+            )
+        else {
             logger.warning("MeetilyTemplates directory not found in bundle")
             return
         }
@@ -100,7 +102,8 @@ final class MeetilyTemplateService: ObservableObject {
 
     private func loadTemplate(from url: URL) -> MeetilyTemplate? {
         guard let data = try? Data(contentsOf: url),
-              let template = try? JSONDecoder().decode(MeetilyTemplate.self, from: data) else {
+            let template = try? JSONDecoder().decode(MeetilyTemplate.self, from: data)
+        else {
             logger.warning("Failed to parse template: \(url.lastPathComponent)")
             return nil
         }
@@ -146,7 +149,8 @@ final class MeetilyTemplateService: ObservableObject {
 
     private func loadCustomTemplates() {
         guard let data = UserDefaults.standard.data(forKey: customTemplatesKey),
-              let custom = try? JSONDecoder().decode([MeetilyTemplate].self, from: data) else {
+            let custom = try? JSONDecoder().decode([MeetilyTemplate].self, from: data)
+        else {
             return
         }
         templates.append(contentsOf: custom)
@@ -158,13 +162,13 @@ final class MeetilyTemplateService: ObservableObject {
     /// The LLM is instructed to produce markdown following the template structure.
     func buildSystemPrompt(for template: MeetilyTemplate, language: String? = nil) -> String {
         var prompt = """
-        # Role
+            # Role
 
-        You are an expert meeting analyst. Generate structured meeting notes following the template below.
+            You are an expert meeting analyst. Generate structured meeting notes following the template below.
 
-        # Template: \(template.name)
+            # Template: \(template.name)
 
-        """
+            """
 
         if let desc = template.description {
             prompt += "\(desc)\n\n"
@@ -253,10 +257,11 @@ final class MeetilyTemplateService: ObservableObject {
             type: "string", items: nil, properties: nil,
             description: "One-line summary"
         )
-        renderers.append(FieldRenderer(
-            field: "short_summary", type: .card,
-            title: "Summary", icon: "text.alignleft"
-        ))
+        renderers.append(
+            FieldRenderer(
+                field: "short_summary", type: .card,
+                title: "Summary", icon: "text.alignleft"
+            ))
 
         for section in template.sections {
             let key = section.title.lowercased()
@@ -270,23 +275,27 @@ final class MeetilyTemplateService: ObservableObject {
                     type: "string", items: nil, properties: nil,
                     description: section.instruction
                 )
-                renderers.append(FieldRenderer(
-                    field: key, type: .card,
-                    title: section.title, icon: "text.alignleft"
-                ))
+                renderers.append(
+                    FieldRenderer(
+                        field: key, type: .card,
+                        title: section.title, icon: "text.alignleft"
+                    ))
             case .list, .table:
                 properties[key] = SchemaProperty(
                     type: "array",
-                    items: SchemaItems(type: "object", properties: [
-                        "item": SchemaProperty(type: "string", items: nil, properties: nil, description: nil)
-                    ]),
+                    items: SchemaItems(
+                        type: "object",
+                        properties: [
+                            "item": SchemaProperty(type: "string", items: nil, properties: nil, description: nil)
+                        ]),
                     properties: nil,
                     description: section.instruction
                 )
-                renderers.append(FieldRenderer(
-                    field: key, type: .list,
-                    title: section.title, icon: "list.bullet"
-                ))
+                renderers.append(
+                    FieldRenderer(
+                        field: key, type: .list,
+                        title: section.title, icon: "list.bullet"
+                    ))
             }
         }
 
@@ -312,7 +321,7 @@ final class MeetilyTemplateService: ObservableObject {
             views: [
                 ViewDefinition(id: "items", title: "Items", type: .list, source: "items"),
                 ViewDefinition(id: "graph", title: "Graph", type: .graph, source: "edges"),
-                ViewDefinition(id: "timeline", title: "Timeline", type: .timeline, source: "items")
+                ViewDefinition(id: "timeline", title: "Timeline", type: .timeline, source: "items"),
             ],
             entityKinds: ["person", "organization", "decision", "action"],
             edgeTypes: ["supports", "contradicts", "references", "relates_to"]

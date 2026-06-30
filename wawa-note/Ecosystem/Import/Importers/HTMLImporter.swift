@@ -1,7 +1,7 @@
 import Foundation
 import UniformTypeIdentifiers
-// Related JIRA: KAN-12, KAN-62
 
+// Related JIRA: KAN-12, KAN-62
 
 struct HTMLImporter: FormatImporter {
     let formatIdentifier = "html"
@@ -26,12 +26,14 @@ struct HTMLImporter: FormatImporter {
         // to prevent JavaScript/CSS text from appearing in output.
         // Use (?s) inline flag to make . match newlines within these blocks.
         let blockOpts: NSString.CompareOptions = [.regularExpression, .caseInsensitive]
-        let cleaned = html
+        let cleaned =
+            html
             .replacingOccurrences(of: "(?s)<script[^>]*>.*?</script>", with: "", options: blockOpts)
             .replacingOccurrences(of: "(?s)<style[^>]*>.*?</style>", with: "", options: blockOpts)
 
         // Strip HTML tags
-        let plainText = cleaned
+        let plainText =
+            cleaned
             .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
             .replacingOccurrences(of: "&amp;", with: "&")
             .replacingOccurrences(of: "&lt;", with: "<")

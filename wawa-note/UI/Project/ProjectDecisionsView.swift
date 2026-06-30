@@ -1,7 +1,7 @@
-import SwiftUI
 import SwiftData
-// Related JIRA: KAN-8, KAN-41
+import SwiftUI
 
+// Related JIRA: KAN-8, KAN-41
 
 // MARK: - DEPRECATED: Subsumed by file browser with type filter (2026-06-18)
 struct DecisionItem: Identifiable {
@@ -25,9 +25,9 @@ struct ProjectDecisionsView: View {
 
     private var filteredDecisions: [DecisionItem] {
         decisions.filter { d in
-            d.confidence >= minConfidence &&
-            (searchText.isEmpty || d.title.localizedCaseInsensitiveContains(searchText) ||
-             (d.details ?? "").localizedCaseInsensitiveContains(searchText))
+            d.confidence >= minConfidence
+                && (searchText.isEmpty || d.title.localizedCaseInsensitiveContains(searchText)
+                    || (d.details ?? "").localizedCaseInsensitiveContains(searchText))
         }
     }
 
@@ -60,7 +60,9 @@ struct ProjectDecisionsView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     ForEach([0.0, 0.5, 0.7, 0.9], id: \.self) { threshold in
-                        Button { minConfidence = threshold } label: {
+                        Button {
+                            minConfidence = threshold
+                        } label: {
                             Label(threshold == 0 ? "All confidence" : "≥ \(Int(threshold * 100))%", systemImage: minConfidence == threshold ? "checkmark" : "")
                         }
                     }
@@ -103,14 +105,15 @@ struct ProjectDecisionsView: View {
         for item in items {
             guard let analysis = try? store.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id) else { continue }
             for d in analysis.decisions {
-                result.append(DecisionItem(
-                    title: d.title,
-                    details: d.details,
-                    sourceItemID: item.id,
-                    sourceItemTitle: item.title,
-                    sourceItemDate: item.createdAt,
-                    confidence: d.confidence ?? 0.5
-                ))
+                result.append(
+                    DecisionItem(
+                        title: d.title,
+                        details: d.details,
+                        sourceItemID: item.id,
+                        sourceItemTitle: item.title,
+                        sourceItemDate: item.createdAt,
+                        confidence: d.confidence ?? 0.5
+                    ))
             }
         }
         result.sort { $0.confidence > $1.confidence }

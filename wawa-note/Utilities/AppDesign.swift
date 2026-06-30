@@ -1,6 +1,6 @@
 import SwiftUI
-// Related JIRA: KAN-10, KAN-112
 
+// Related JIRA: KAN-10, KAN-112
 
 // MARK: - Color from Hex
 
@@ -23,7 +23,7 @@ extension Color {
         self.init(uiColor: uiColor)
     }
 
-    static let defaultProjectColor = Color(hex: ProjectPalette.allHexes.first ?? "#3B82F6") // fallback blue
+    static let defaultProjectColor = Color(hex: ProjectPalette.allHexes.first ?? "#3B82F6")  // fallback blue
 }
 
 // MARK: - Project Color Palette

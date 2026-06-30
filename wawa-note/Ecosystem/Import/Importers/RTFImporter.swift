@@ -1,7 +1,7 @@
 import Foundation
 import UniformTypeIdentifiers
-// Related JIRA: KAN-12, KAN-62
 
+// Related JIRA: KAN-12, KAN-62
 
 struct RTFImporter: FormatImporter {
     let formatIdentifier = "rtf"
@@ -33,9 +33,10 @@ struct RTFImporter: FormatImporter {
             for _ in 0..<10 {
                 let before = stripped
                 stripped = stripped.replacingOccurrences(of: "\\{[^{}]*\\}", with: "", options: .regularExpression)
-                if stripped == before { break } // no more groups to remove
+                if stripped == before { break }  // no more groups to remove
             }
-            text = stripped
+            text =
+                stripped
                 .replacingOccurrences(of: "\\\\[a-z]+\\d*\\s?", with: "", options: .regularExpression)
                 .replacingOccurrences(of: "\\\n", with: "")
         }

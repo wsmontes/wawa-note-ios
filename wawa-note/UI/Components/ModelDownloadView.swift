@@ -1,7 +1,7 @@
-import SwiftUI
 import Speech
-// Related JIRA: KAN-9
+import SwiftUI
 
+// Related JIRA: KAN-9
 
 /// Shows on-device speech model availability and guides the user through download.
 ///

@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
-// Related JIRA: KAN-5, KAN-14
 
+// Related JIRA: KAN-5, KAN-14
 
 // MARK: - Notifications
 
@@ -69,7 +69,8 @@ enum ItemContextBuilder {
             ctx += "\nANALYSIS:\n"
             ctx += "Summary: \(analysis.shortSummary)\n"
             if !analysis.detailedSummary.isEmpty {
-                let detail = analysis.detailedSummary.count > 2000
+                let detail =
+                    analysis.detailedSummary.count > 2000
                     ? String(analysis.detailedSummary.prefix(2000)) + "...[truncated]"
                     : analysis.detailedSummary
                 ctx += "Detailed: \(detail)\n"
@@ -78,7 +79,10 @@ enum ItemContextBuilder {
                 ctx += "\nDecisions:\n" + analysis.decisions.map { "- \($0.title)" }.joined(separator: "\n") + "\n"
             }
             if !analysis.actionItems.isEmpty {
-                ctx += "\nAction Items:\n" + analysis.actionItems.map { "- \($0.task) (owner: \($0.owner ?? "unassigned"), confidence: \(Int(($0.confidence ?? 0) * 100))%)" }.joined(separator: "\n") + "\n"
+                ctx +=
+                    "\nAction Items:\n"
+                    + analysis.actionItems.map { "- \($0.task) (owner: \($0.owner ?? "unassigned"), confidence: \(Int(($0.confidence ?? 0) * 100))%)" }.joined(
+                        separator: "\n") + "\n"
             }
             if !analysis.risks.isEmpty {
                 ctx += "\nRisks:\n" + analysis.risks.map { "- \($0.risk)" + ($0.details.isEmpty ? "" : ": \($0.details)") }.joined(separator: "\n") + "\n"
@@ -90,7 +94,8 @@ enum ItemContextBuilder {
                 ctx += "\nEntities Mentioned:\n" + analysis.entities.map { "- \($0.name) (\($0.type.rawValue))" }.joined(separator: "\n") + "\n"
             }
         } else if let dynamic = try? fileStore.readArtifact(DynamicAnalysis.self, fileName: AppFileConstants.dynamicAnalysisFileName, meetingId: item.id),
-                  let summary = dynamic.results.stringField("short_summary") {
+            let summary = dynamic.results.stringField("short_summary")
+        {
             ctx += "\nANALYSIS (dynamic):\n"
             ctx += "Summary: \(summary)\n"
         }
@@ -114,7 +119,8 @@ enum ItemContextBuilder {
                 ctx += "   Risks: \(analysis.risks.map(\.risk).joined(separator: " | "))\n"
             }
         } else if let dynamic = try? fileStore.readArtifact(DynamicAnalysis.self, fileName: AppFileConstants.dynamicAnalysisFileName, meetingId: item.id),
-                  let summary = dynamic.results.stringField("short_summary") {
+            let summary = dynamic.results.stringField("short_summary")
+        {
             ctx += "   Summary: \(summary)\n"
         }
         return ctx

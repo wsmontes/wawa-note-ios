@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
-// Related JIRA: KAN-11, KAN-55, KAN-87
 
+// Related JIRA: KAN-11, KAN-55, KAN-87
 
 enum ItemStatus: String, Codable, CaseIterable {
     case draft
@@ -52,11 +52,11 @@ enum ItemStatus: String, Codable, CaseIterable {
         case .analyzing:
             [.analyzed, .failed]
         case .analyzed:
-            [.failed] // re-analysis allowed
+            [.failed]  // re-analysis allowed
         case .failed:
-            [.queuedForTranscription, .recorded] // retry
+            [.queuedForTranscription, .recorded]  // retry
         case .archived:
-            [] // terminal
+            []  // terminal
         }
     }
 
@@ -108,14 +108,16 @@ final class KnowledgeItem {
     var tags: [String] {
         get {
             guard let data = _tagsJSON.data(using: .utf8),
-                  let result = try? JSONDecoder().decode([String].self, from: data) else {
+                let result = try? JSONDecoder().decode([String].self, from: data)
+            else {
                 return []
             }
             return result
         }
         set {
             if let data = try? JSONEncoder().encode(newValue),
-               let json = String(data: data, encoding: .utf8) {
+                let json = String(data: data, encoding: .utf8)
+            {
                 _tagsJSON = json
             } else {
                 _tagsJSON = "[]"
@@ -220,7 +222,8 @@ final class KnowledgeItem {
         self.updatedAt = updatedAt
         self.statusRaw = status.rawValue
         if let data = try? JSONEncoder().encode(tags),
-           let json = String(data: data, encoding: .utf8) {
+            let json = String(data: data, encoding: .utf8)
+        {
             self._tagsJSON = json
         }
         self.folderID = folderID

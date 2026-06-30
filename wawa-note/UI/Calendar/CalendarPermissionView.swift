@@ -1,6 +1,6 @@
 import SwiftUI
-// Related JIRA: KAN-54, KAN-144
 
+// Related JIRA: KAN-54, KAN-144
 
 struct CalendarPermissionView: View {
     let onRequestPermission: () async -> Bool
@@ -27,7 +27,10 @@ struct CalendarPermissionView: View {
                     isRequesting = false
                 }
             } label: {
-                HStack { if isRequesting { ProgressView() }; Text("Connect Calendar") }
+                HStack {
+                    if isRequesting { ProgressView() }
+                    Text("Connect Calendar")
+                }
             }
             .buttonStyle(.borderedProminent)
             .disabled(isRequesting)

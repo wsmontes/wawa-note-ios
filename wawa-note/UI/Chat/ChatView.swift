@@ -1,9 +1,9 @@
-import SwiftUI
-import SwiftData
-import Speech
 import AVFoundation
-// Related JIRA: KAN-9, KAN-46, KAN-82
+import Speech
+import SwiftData
+import SwiftUI
 
+// Related JIRA: KAN-9, KAN-46, KAN-82
 
 struct ChatView: View {
     @ObservedObject var viewModel: ChatViewModel
@@ -45,7 +45,9 @@ struct ChatView: View {
                         // Left: context + dismiss
                         HStack(spacing: 8) {
                             if let dismiss = onDismiss, !viewModel.messages.isEmpty {
-                                Button { dismiss() } label: {
+                                Button {
+                                    dismiss()
+                                } label: {
                                     Image(systemName: "xmark.circle.fill")
                                         .font(.title3).foregroundStyle(.primary.opacity(0.7))
                                 }.buttonStyle(.plain)
@@ -63,24 +65,48 @@ struct ChatView: View {
                         // Right: status + actions
                         HStack(spacing: 8) {
                             if viewModel.isGreetingLoading {
-                                HStack(spacing: 4) { ProgressView().scaleEffect(0.7); Text("Loading...").font(.caption2).foregroundStyle(.secondary) }
-                                    .padding(.horizontal, 6).padding(.vertical, 2).background(.ultraThinMaterial, in: Capsule())
+                                HStack(spacing: 4) {
+                                    ProgressView().scaleEffect(0.7)
+                                    Text("Loading...").font(.caption2).foregroundStyle(.secondary)
+                                }
+                                .padding(.horizontal, 6).padding(.vertical, 2).background(.ultraThinMaterial, in: Capsule())
                             } else if viewModel.state == .thinking {
-                                HStack(spacing: 4) { ProgressView().scaleEffect(0.7); Text("Thinking").font(.caption2).foregroundStyle(.secondary) }
-                                    .padding(.horizontal, 6).padding(.vertical, 2).background(.ultraThinMaterial, in: Capsule())
+                                HStack(spacing: 4) {
+                                    ProgressView().scaleEffect(0.7)
+                                    Text("Thinking").font(.caption2).foregroundStyle(.secondary)
+                                }
+                                .padding(.horizontal, 6).padding(.vertical, 2).background(.ultraThinMaterial, in: Capsule())
                             } else if viewModel.state == .streaming {
-                                HStack(spacing: 4) { Circle().fill(.blue).frame(width: 5, height: 5); Text("Writing").font(.caption2).foregroundStyle(.secondary) }
-                                    .padding(.horizontal, 6).padding(.vertical, 2).background(.ultraThinMaterial, in: Capsule())
+                                HStack(spacing: 4) {
+                                    Circle().fill(.blue).frame(width: 5, height: 5)
+                                    Text("Writing").font(.caption2).foregroundStyle(.secondary)
+                                }
+                                .padding(.horizontal, 6).padding(.vertical, 2).background(.ultraThinMaterial, in: Capsule())
                             } else if !viewModel.activeToolCalls.isEmpty {
-                                HStack(spacing: 4) { ProgressView().scaleEffect(0.6); Text(viewModel.activeToolCalls.last?.toolName ?? "Tool").font(.caption2).foregroundStyle(.secondary) }
-                                    .padding(.horizontal, 6).padding(.vertical, 2).background(.ultraThinMaterial, in: Capsule())
+                                HStack(spacing: 4) {
+                                    ProgressView().scaleEffect(0.6)
+                                    Text(viewModel.activeToolCalls.last?.toolName ?? "Tool").font(.caption2).foregroundStyle(.secondary)
+                                }
+                                .padding(.horizontal, 6).padding(.vertical, 2).background(.ultraThinMaterial, in: Capsule())
                             }
                             Menu {
-                                Button { viewModel.createNewConversation() } label: { Label("New Chat", systemImage: "square.and.pencil") }
-                                Button { showConversations = true } label: { Label("Chats", systemImage: "list.bullet.rectangle") }
+                                Button {
+                                    viewModel.createNewConversation()
+                                } label: {
+                                    Label("New Chat", systemImage: "square.and.pencil")
+                                }
+                                Button {
+                                    showConversations = true
+                                } label: {
+                                    Label("Chats", systemImage: "list.bullet.rectangle")
+                                }
                                 if !viewModel.messages.isEmpty {
                                     Divider()
-                                    Button(role: .destructive) { showClearConfirmation = true } label: { Label("Clear Chat", systemImage: "trash") }
+                                    Button(role: .destructive) {
+                                        showClearConfirmation = true
+                                    } label: {
+                                        Label("Clear Chat", systemImage: "trash")
+                                    }
                                 }
                             } label: {
                                 Image(systemName: "ellipsis.circle")
@@ -102,7 +128,10 @@ struct ChatView: View {
                         Text("Ask").font(.caption2).padding(.horizontal, 8).padding(.vertical, 3)
                             .background(Color.blue.opacity(0.1)).clipShape(Capsule())
                     }.buttonStyle(.plain)
-                    Button { viewModel.activeProjectID = nil; viewModel.activeProjectName = nil } label: {
+                    Button {
+                        viewModel.activeProjectID = nil
+                        viewModel.activeProjectName = nil
+                    } label: {
                         Image(systemName: "xmark.circle.fill").font(.caption).foregroundStyle(.tertiary)
                     }.buttonStyle(.plain)
                 }
@@ -231,7 +260,7 @@ struct ChatView: View {
             ConversationListView(viewModel: viewModel)
         }
         .alert("Clear chat?", isPresented: $showClearConfirmation) {
-            Button("Cancel", role: .cancel) { }
+            Button("Cancel", role: .cancel) {}
             Button("Clear", role: .destructive) { viewModel.clearCurrentConversation() }
         } message: {
             Text("This deletes all messages in this conversation. This cannot be undone.")
@@ -269,13 +298,16 @@ struct ChatView: View {
                     LazyVStack(spacing: 12) {
                         ForEach(viewModel.messages) { msg in
                             // Skip internal messages — they're in agent history but invisible in UI
-                            if msg.isInternal { EmptyView() }
-                            else if msg.role == .assistant || msg.role == .tool {
-                                ParsedMessageView(message: msg, projectColorHex: viewModel.activeProjectColorHex,
+                            if msg.isInternal {
+                                EmptyView()
+                            } else if msg.role == .assistant || msg.role == .tool {
+                                ParsedMessageView(
+                                    message: msg, projectColorHex: viewModel.activeProjectColorHex,
                                     onSendMessage: { text in viewModel.sendInternalMessage(text) },
                                     onRunCommand: { cmd in viewModel.runCommandDirectly(cmd) },
-                                    onChooseOption: { option in viewModel.sendInternalMessage(option) })
-                                    .id(msg.id)
+                                    onChooseOption: { option in viewModel.sendInternalMessage(option) }
+                                )
+                                .id(msg.id)
                             } else {
                                 ChatMessageBubbleView(message: msg, projectColorHex: viewModel.activeProjectColorHex)
                                     .id(msg.id)
@@ -310,7 +342,9 @@ struct ChatView: View {
                                     Spacer()
                                     Button("Retry") { viewModel.retryLastMessage() }
                                         .font(.subheadline.bold())
-                                    Button { viewModel.error = nil } label: {
+                                    Button {
+                                        viewModel.error = nil
+                                    } label: {
                                         Image(systemName: "xmark.circle.fill")
                                             .font(.caption).foregroundStyle(.secondary)
                                     }
@@ -364,7 +398,8 @@ struct ChatView: View {
             .overlay(alignment: .top) {
                 GeometryReader { geo in
                     Color.clear
-                        .preference(key: ScrollOffsetKey.self,
+                        .preference(
+                            key: ScrollOffsetKey.self,
                             value: geo.frame(in: .named("scrollSpace")).minY)
                 }
                 .frame(height: 0)
@@ -493,7 +528,10 @@ struct ChatView: View {
             isDictating: dictation.isDictating,
             modelName: viewModel.selectedModel,
             onSend: { viewModel.sendMessage() },
-            onCancel: { viewModel.cancelStreaming(); isInputFocused = false },
+            onCancel: {
+                viewModel.cancelStreaming()
+                isInputFocused = false
+            },
             onDictate: { if dictation.isDictating { finishDictation() } else { startDictation() } }
         )
     }
@@ -513,8 +551,7 @@ struct ChatView: View {
         case .undetermined:
             AVAudioSession.sharedInstance().requestRecordPermission { granted in
                 DispatchQueue.main.async {
-                    if granted { self.startDictation() }
-                    else { self.dictation.error = "Microphone access denied. Enable in Settings." }
+                    if granted { self.startDictation() } else { self.dictation.error = "Microphone access denied. Enable in Settings." }
                 }
             }
             return
@@ -539,7 +576,7 @@ struct ChatView: View {
             AVNumberOfChannelsKey: 1,
             AVLinearPCMBitDepthKey: 16,
             AVLinearPCMIsFloatKey: false,
-            AVLinearPCMIsBigEndianKey: false
+            AVLinearPCMIsBigEndianKey: false,
         ]
         do {
             let recorder = try AVAudioRecorder(url: audioURL, settings: settings)
@@ -621,9 +658,11 @@ struct ChatView: View {
 
     private func transcribeViaWhisperWithFile(_ audioURL: URL) async -> String? {
         guard let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext),
-              let baseURL = config.baseURL else { return nil }
+            let baseURL = config.baseURL
+        else { return nil }
         // Only use remote if the provider actually supports audio transcription
-        let supportsTranscription = AIConfigService.shared.supportsAudioTranscription(for: config.providerConfigId)
+        let supportsTranscription =
+            AIConfigService.shared.supportsAudioTranscription(for: config.providerConfigId)
             || AIConfigService.shared.supportsAudioTranscription(for: config.typeRaw)
         guard supportsTranscription else { return nil }
         guard !Task.isCancelled else { return nil }
@@ -675,7 +714,7 @@ struct ChatView: View {
             request.shouldReportPartialResults = true
 
             let engine = AVAudioEngine()
-            self.dictation.audioEngine = engine // Store for proper cleanup
+            self.dictation.audioEngine = engine  // Store for proper cleanup
             let inputNode = engine.inputNode
             let format = inputNode.outputFormat(forBus: 0)
             var resultText: String?
@@ -685,7 +724,10 @@ struct ChatView: View {
                 request.append(buffer)
             }
             engine.prepare()
-            do { try engine.start() } catch { continuation.resume(returning: nil); return }
+            do { try engine.start() } catch {
+                continuation.resume(returning: nil)
+                return
+            }
 
             recognizer.recognitionTask(with: request) { result, error in
                 if let result { resultText = result.bestTranscription.formattedString }
@@ -707,7 +749,6 @@ struct ChatView: View {
             }
         }
     }
-
 
     private func stopDictation() {
         dictation.timer?.invalidate()
@@ -987,7 +1028,9 @@ struct AgentStatusBar: View {
     private var totalCount: Int { toolCalls.count }
 
     var body: some View {
-        if totalCount == 0 && state != .thinking { EmptyView() } else {
+        if totalCount == 0 && state != .thinking {
+            EmptyView()
+        } else {
             ExpandableStatusBar(
                 label: AnyView(
                     HStack(spacing: 6) {
@@ -1041,7 +1084,6 @@ struct AgentStatusBar: View {
         }
     }
 }
-
 
 // MARK: - Streaming message
 
@@ -1097,7 +1139,8 @@ private func shareConversation(viewModel: ChatViewModel) {
     }
     let av = UIActivityViewController(activityItems: [text], applicationActivities: nil)
     if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-       let root = scene.windows.first?.rootViewController {
+        let root = scene.windows.first?.rootViewController
+    {
         root.present(av, animated: true)
     }
 }
@@ -1182,7 +1225,7 @@ struct ConversationListView: View {
             ("Current Context", "pin", { $0.contextKey == viewModel.activeContext.key }),
             ("Projects", "rectangle.stack", { $0.contextKey?.hasPrefix("project:") == true }),
             ("Items", "doc", { $0.contextKey?.hasPrefix("item:") == true }),
-            ("Other", "ellipsis", { _ in true })
+            ("Other", "ellipsis", { _ in true }),
         ]
         return groups.compactMap { (title, icon, filter) in
             let filtered = viewModel.conversations.filter(filter)
@@ -1253,10 +1296,12 @@ struct ParsedMessageView: View {
     @State private var cachedSmartBlocks: [ChatBlock]?
     @State private var cachedParsedBlocks: [OutputBlock]?
 
-    init(message: ChatMessage, projectColorHex: String? = nil,
-         onSendMessage: ((String) -> Void)? = nil,
-         onRunCommand: ((String) -> Void)? = nil,
-         onChooseOption: ((String) -> Void)? = nil) {
+    init(
+        message: ChatMessage, projectColorHex: String? = nil,
+        onSendMessage: ((String) -> Void)? = nil,
+        onRunCommand: ((String) -> Void)? = nil,
+        onChooseOption: ((String) -> Void)? = nil
+    ) {
         self.message = message
         self.projectColorHex = projectColorHex
         self.onSendMessage = onSendMessage
@@ -1321,7 +1366,8 @@ struct ParsedMessageView: View {
         return AnyView(
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                    ChatBlockView(block: block, projectColorHex: projectColorHex,
+                    ChatBlockView(
+                        block: block, projectColorHex: projectColorHex,
                         onSendMessage: onSendMessage, onRunCommand: onRunCommand, onChooseOption: onChooseOption)
                 }
             }
@@ -1333,7 +1379,8 @@ struct ParsedMessageView: View {
         let columns = [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
         return LazyVGrid(columns: columns, spacing: 8) {
             ForEach(Array(cards.enumerated()), id: \.offset) { _, block in
-                ChatBlockView(block: block, projectColorHex: projectColorHex,
+                ChatBlockView(
+                    block: block, projectColorHex: projectColorHex,
                     onSendMessage: onSendMessage, onRunCommand: onRunCommand, onChooseOption: onChooseOption)
             }
         }
@@ -1362,7 +1409,10 @@ enum SmartBlockParser {
             if case .text(let content) = block {
                 let nsText = content as NSString
                 let matches = regex.matches(in: content, range: NSRange(location: 0, length: nsText.length))
-                guard !matches.isEmpty else { result.append(block); continue }
+                guard !matches.isEmpty else {
+                    result.append(block)
+                    continue
+                }
 
                 var lastEnd = 0
                 for match in matches {
@@ -1377,13 +1427,15 @@ enum SmartBlockParser {
                     // Emit fileLink for the matched path
                     let path = nsText.substring(with: range)
                     let filename = path.split(separator: "/").last.map(String.init) ?? path
-                    result.append(.fileLink(FileLinkData(
-                        itemID: path,
-                        title: String(filename),
-                        itemType: path.hasSuffix(".md") ? "note" : path.hasSuffix(".json") ? "json" : "unknown",
-                        snippet: path,
-                        projectSlug: nil
-                    )))
+                    result.append(
+                        .fileLink(
+                            FileLinkData(
+                                itemID: path,
+                                title: String(filename),
+                                itemType: path.hasSuffix(".md") ? "note" : path.hasSuffix(".json") ? "json" : "unknown",
+                                snippet: path,
+                                projectSlug: nil
+                            )))
                     lastEnd = range.location + range.length
                 }
                 // Emit remaining text after last match
@@ -1409,7 +1461,10 @@ enum SmartBlockParser {
         func flush() {
             guard let section = currentSection else { return }
             let content = section.content.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            guard !content.isEmpty else { currentSection = nil; return }
+            guard !content.isEmpty else {
+                currentSection = nil
+                return
+            }
             if let tasks = detectCheckboxTasks(section.content), !tasks.isEmpty {
                 blocks.append(contentsOf: tasks)
             } else if let choice = detectChoicePrompt(section.content) {
@@ -1450,9 +1505,13 @@ enum SmartBlockParser {
         flush()
 
         if !preamble.isEmpty {
-            if let choice = detectChoicePrompt(preamble) { blocks.insert(.choicePrompt(choice), at: 0) }
-            else if let tasks = detectCheckboxTasks(preamble), !tasks.isEmpty { blocks.insert(contentsOf: tasks, at: 0) }
-            else if let confirm = detectConfirmation(preamble.joined(separator: "\n")) { blocks.append(.confirmation(confirm)) }
+            if let choice = detectChoicePrompt(preamble) {
+                blocks.insert(.choicePrompt(choice), at: 0)
+            } else if let tasks = detectCheckboxTasks(preamble), !tasks.isEmpty {
+                blocks.insert(contentsOf: tasks, at: 0)
+            } else if let confirm = detectConfirmation(preamble.joined(separator: "\n")) {
+                blocks.append(.confirmation(confirm))
+            }
         }
         return blocks
     }
@@ -1490,7 +1549,10 @@ enum SmartBlockParser {
             let done = t.hasPrefix("- [x]") || t.hasPrefix("* [x]")
             let title = String(t.dropFirst(5)).trimmingCharacters(in: .whitespaces)
             guard !title.isEmpty else { return nil }
-            return .taskCard(TaskCardData(taskID: UUID().uuidString, title: title, status: done ? "done" : "todo", priority: "medium", owner: nil, projectSlug: nil, needsConfirmation: !done))
+            return .taskCard(
+                TaskCardData(
+                    taskID: UUID().uuidString, title: title, status: done ? "done" : "todo", priority: "medium", owner: nil, projectSlug: nil,
+                    needsConfirmation: !done))
         }
     }
 
@@ -1498,7 +1560,9 @@ enum SmartBlockParser {
         let lower = text.lowercased()
         guard lower.contains("warning") || lower.contains("are you sure") || lower.contains("delete?") || lower.contains("confirm") else { return nil }
         let first = text.components(separatedBy: "\n").first ?? text
-        return ConfirmationData(title: "Please confirm", message: String(first.prefix(200)), confirmLabel: "Yes, proceed", cancelLabel: "Cancel", confirmValue: "yes", cancelValue: "cancel")
+        return ConfirmationData(
+            title: "Please confirm", message: String(first.prefix(200)), confirmLabel: "Yes, proceed", cancelLabel: "Cancel", confirmValue: "yes",
+            cancelValue: "cancel")
     }
     /// Converts ContentParser OutputBlock to ChatBlock for unified rendering.
     private static func convertOutputToChatBlock(_ output: OutputBlock) -> ChatBlock {
@@ -1509,9 +1573,10 @@ enum SmartBlockParser {
         case .bulletList(let items): return .bulletList(items)
         case .orderedList(let items): return .orderedList(items)
         case .actions(let actions):
-            return .taskCard(TaskCardData(
-                taskID: UUID().uuidString, title: actions.title ?? "Actions",
-                status: "todo", priority: "medium", owner: nil, projectSlug: nil, needsConfirmation: false))
+            return .taskCard(
+                TaskCardData(
+                    taskID: UUID().uuidString, title: actions.title ?? "Actions",
+                    status: "todo", priority: "medium", owner: nil, projectSlug: nil, needsConfirmation: false))
         case .card(let card):
             return .text("**\(card.title)**\n\(card.body)")
         }
@@ -1556,24 +1621,17 @@ struct OutputBlockRenderer: View {
 
 // MARK: - Table View
 
-
 // MARK: - Action Block View
-
 
 // MARK: - Card Block View
 
-
 // MARK: - Bullet & Ordered List Views
 
-
-
 // MARK: - Code Block View
-
 
 /// Wraps KnowledgeDetailView for NavigationLink destination, loading the item from context.
 
 // MARK: - Phase F: Evidence & Confidence
-
 
 // Card views (ChatBlockView, ProjectContextCardView, TaskCardView, ItemCardView,
 // SearchResultsCardView, AnalysisAccordionView, ChoicePromptView, ConfirmationView)

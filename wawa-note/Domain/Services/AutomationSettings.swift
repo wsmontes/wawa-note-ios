@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
-// Related JIRA: KAN-5, KAN-16, KAN-528
 
+// Related JIRA: KAN-5, KAN-16, KAN-528
 
 // MARK: - Shared UserDefaults Keys
 // Centralized key constants to prevent divergence between ConfigProjectService,
@@ -126,9 +126,13 @@ struct AutomationSettings: @unchecked Sendable {
                 if models.isEmpty {
                     // If availableModels not fetched, check AIConfigService
                     let aiModels = AIConfigService.shared.availableModels(for: config.providerConfigId)
-                    if aiModels.contains(model) { found = true; break }
+                    if aiModels.contains(model) {
+                        found = true
+                        break
+                    }
                 } else if models.contains(model) {
-                    found = true; break
+                    found = true
+                    break
                 }
             }
             if !found {
@@ -153,7 +157,7 @@ struct AnalysisFieldSettings {
         "risks",
         "questions",
         "entities",
-        "dates"
+        "dates",
     ]
 
     /// Display labels for each field

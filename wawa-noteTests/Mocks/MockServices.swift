@@ -1,4 +1,5 @@
 import Foundation
+
 @testable import Wawa_Note
 
 // MARK: - MockProjectService
@@ -43,8 +44,13 @@ final class MockProjectService: ProjectServiceProtocol {
 final class MockKnowledgeItemService: KnowledgeItemServiceProtocol {
     var items: [KnowledgeItem] = []
 
-    func createItem(type: KnowledgeItemType, title: String, bodyText: String?, folderID: UUID?, durationSeconds: Double?, languageCode: String?, tags: [String], inboxDate: Date?) throws -> KnowledgeItem {
-        let item = KnowledgeItem(type: type, title: title, bodyText: bodyText, folderID: folderID, durationSeconds: durationSeconds, languageCode: languageCode, inboxDate: inboxDate)
+    func createItem(
+        type: KnowledgeItemType, title: String, bodyText: String?, folderID: UUID?, durationSeconds: Double?, languageCode: String?, tags: [String],
+        inboxDate: Date?
+    ) throws -> KnowledgeItem {
+        let item = KnowledgeItem(
+            type: type, title: title, bodyText: bodyText, folderID: folderID, durationSeconds: durationSeconds, languageCode: languageCode, inboxDate: inboxDate
+        )
         items.append(item)
         return item
     }
@@ -62,21 +68,31 @@ final class MockKnowledgeItemService: KnowledgeItemServiceProtocol {
 final class MockProjectDerivedItemService: ProjectDerivedItemServiceProtocol {
     var items: [ProjectDerivedItem] = []
 
-    func createTask(title: String, projectID: UUID, sourceItemID: UUID?, priority: TaskPriority, ownerName: String?, dueAt: Date?, bodyJSON: String?) throws -> ProjectDerivedItem {
-        let item = ProjectDerivedItem(projectID: projectID, sourceItemID: sourceItemID, type: .task, title: title, bodyJSON: bodyJSON, status: .todo, priority: priority, ownerName: ownerName, dueAt: dueAt)
+    func createTask(title: String, projectID: UUID, sourceItemID: UUID?, priority: TaskPriority, ownerName: String?, dueAt: Date?, bodyJSON: String?) throws
+        -> ProjectDerivedItem
+    {
+        let item = ProjectDerivedItem(
+            projectID: projectID, sourceItemID: sourceItemID, type: .task, title: title, bodyJSON: bodyJSON, status: .todo, priority: priority,
+            ownerName: ownerName, dueAt: dueAt)
         items.append(item)
         return item
     }
 
-    func createSignal(title: String, projectID: UUID, sourceItemID: UUID?, signalBody: SignalBody, confidence: Double?, isCritical: Bool) throws -> ProjectDerivedItem {
+    func createSignal(title: String, projectID: UUID, sourceItemID: UUID?, signalBody: SignalBody, confidence: Double?, isCritical: Bool) throws
+        -> ProjectDerivedItem
+    {
         let bodyData = try? JSONEncoder().encode(signalBody)
         let bodyStr = bodyData.flatMap { String(data: $0, encoding: .utf8) }
-        let item = ProjectDerivedItem(projectID: projectID, sourceItemID: sourceItemID, type: .signal, title: title, bodyJSON: bodyStr, status: .visible, confidence: confidence, isCritical: isCritical)
+        let item = ProjectDerivedItem(
+            projectID: projectID, sourceItemID: sourceItemID, type: .signal, title: title, bodyJSON: bodyStr, status: .visible, confidence: confidence,
+            isCritical: isCritical)
         items.append(item)
         return item
     }
 
-    func createSynthesis(projectID: UUID, markdown: String, sections: [SynthesisSection], metrics: [SynthesisMetric], updatedFromItemIDs: [UUID]) throws -> ProjectDerivedItem {
+    func createSynthesis(projectID: UUID, markdown: String, sections: [SynthesisSection], metrics: [SynthesisMetric], updatedFromItemIDs: [UUID]) throws
+        -> ProjectDerivedItem
+    {
         let item = ProjectDerivedItem(projectID: projectID, type: .synthesis, title: "Project Synthesis")
         items.append(item)
         return item
@@ -114,7 +130,8 @@ final class MockGraphEdgeService: GraphEdgeServiceProtocol {
     var edges: [GraphEdge] = []
 
     func create(fromID: UUID, toID: UUID, edgeType: EdgeType, weight: Double, provenanceItemID: UUID?, provenanceSegmentIDs: [String]) throws -> GraphEdge {
-        let edge = GraphEdge(fromID: fromID, toID: toID, edgeType: edgeType, weight: weight, provenanceItemID: provenanceItemID, provenanceSegmentIDs: provenanceSegmentIDs)
+        let edge = GraphEdge(
+            fromID: fromID, toID: toID, edgeType: edgeType, weight: weight, provenanceItemID: provenanceItemID, provenanceSegmentIDs: provenanceSegmentIDs)
         edges.append(edge)
         return edge
     }

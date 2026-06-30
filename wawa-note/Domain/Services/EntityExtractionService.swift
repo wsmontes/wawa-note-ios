@@ -1,8 +1,8 @@
 import Foundation
-import SwiftData
 import OSLog
-// Related JIRA: KAN-7, KAN-29
+import SwiftData
 
+// Related JIRA: KAN-7, KAN-29
 
 @MainActor
 final class EntityExtractionService {

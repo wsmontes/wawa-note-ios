@@ -1,12 +1,12 @@
 import Foundation
+
 // Related JIRA: KAN-9, KAN-147
 
-
 enum TemplateActivation: String, Codable, Sendable {
-    case manual      // User explicitly invokes
-    case auto        // Always active for matching items
-    case glob        // Active when item path matches globs
-    case scheduled   // Runs on schedule
+    case manual  // User explicitly invokes
+    case auto  // Always active for matching items
+    case glob  // Active when item path matches globs
+    case scheduled  // Runs on schedule
 }
 
 enum TemplateRenderer: String, Codable, Sendable {

@@ -1,7 +1,7 @@
 import AVFoundation
 import OSLog
-// Related JIRA: KAN-5, KAN-18
 
+// Related JIRA: KAN-5, KAN-18
 
 enum AudioPlaybackState {
     case idle

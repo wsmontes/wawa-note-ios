@@ -1,8 +1,8 @@
 import Foundation
 import PDFKit
 import SwiftData
-// Related JIRA: KAN-7, KAN-26
 
+// Related JIRA: KAN-7, KAN-26
 
 /// Extracted from ContentPipelineService — handles document parsing (PDF, CSV, Word/RTF, file listing).
 struct DocumentParsingService {
@@ -17,18 +17,21 @@ struct DocumentParsingService {
     func readPDF(_ itemId: String) -> String? {
         guard let uuid = UUID(uuidString: itemId) else { return nil }
         let dir = fileStore.itemDirectoryURL(for: uuid)
-        let pdfs = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil))?.filter {
-            $0.pathExtension.lowercased() == "pdf"
-        } ?? []
+        let pdfs =
+            (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil))?.filter {
+                $0.pathExtension.lowercased() == "pdf"
+            } ?? []
         guard let pdfURL = pdfs.first,
-              let pdf = PDFDocument(url: pdfURL) else { return nil }
+            let pdf = PDFDocument(url: pdfURL)
+        else { return nil }
         return pdf.string
     }
 
     func readExcel(_ itemId: String, context: ModelContext) -> [[String: Any]]? {
         guard let uuid = UUID(uuidString: itemId),
-              let item = try? context.fetch(FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.id == uuid })).first,
-              let text = item.bodyText ?? loadFileText(itemId: itemId, ext: "csv") else { return nil }
+            let item = try? context.fetch(FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.id == uuid })).first,
+            let text = item.bodyText ?? loadFileText(itemId: itemId, ext: "csv")
+        else { return nil }
         let lines = text.components(separatedBy: "\n").filter { !$0.isEmpty }
         guard lines.count >= 2 else { return nil }
         let headers = lines[0].components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
@@ -45,10 +48,11 @@ struct DocumentParsingService {
     func readWord(_ itemId: String) -> String? {
         guard let uuid = UUID(uuidString: itemId) else { return nil }
         let dir = fileStore.itemDirectoryURL(for: uuid)
-        let docs = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil))?.filter {
-            let ext = $0.pathExtension.lowercased()
-            return ext == "docx" || ext == "rtf" || ext == "txt"
-        } ?? []
+        let docs =
+            (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil))?.filter {
+                let ext = $0.pathExtension.lowercased()
+                return ext == "docx" || ext == "rtf" || ext == "txt"
+            } ?? []
         guard let docURL = docs.first else { return nil }
         if docURL.pathExtension.lowercased() == "txt" {
             return try? String(contentsOf: docURL, encoding: .utf8)
@@ -68,9 +72,10 @@ struct DocumentParsingService {
     func loadFileText(itemId: String, ext: String) -> String? {
         guard let uuid = UUID(uuidString: itemId) else { return nil }
         let dir = fileStore.itemDirectoryURL(for: uuid)
-        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil))?.filter {
-            $0.pathExtension.lowercased() == ext
-        } ?? []
+        let files =
+            (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil))?.filter {
+                $0.pathExtension.lowercased() == ext
+            } ?? []
         guard let url = files.first else { return nil }
         return try? String(contentsOf: url, encoding: .utf8)
     }

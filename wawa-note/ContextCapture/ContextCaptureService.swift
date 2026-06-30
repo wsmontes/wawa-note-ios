@@ -1,7 +1,7 @@
 import Foundation
 import OSLog
-// Related JIRA: KAN-151
 
+// Related JIRA: KAN-151
 
 final class ContextCaptureService: @unchecked Sendable {
     private let sensors: [any ContextSensor]
@@ -19,7 +19,7 @@ final class ContextCaptureService: @unchecked Sendable {
             LocationContextSensor(),
             BatterySensor(),
             MotionActivitySensor(),
-            FocusModeSensor()
+            FocusModeSensor(),
         ]
     }
 

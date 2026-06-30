@@ -59,7 +59,7 @@ final class DerivationService {
                 "decision": decision.decision,
                 "context": decision.context ?? "",
                 "owner": decision.owner ?? "",
-                "status": "pending"
+                "status": "pending",
             ]
             let bodyData = try? JSONEncoder().encode(body)
             let bodyStr = bodyData.flatMap { String(data: $0, encoding: .utf8) }
@@ -101,7 +101,7 @@ final class DerivationService {
         for question in output.openQuestions {
             let body: [String: String] = [
                 "question": question,
-                "status": "open"
+                "status": "open",
             ]
             let bodyData = try? JSONEncoder().encode(body)
             let bodyStr = bodyData.flatMap { String(data: $0, encoding: .utf8) }

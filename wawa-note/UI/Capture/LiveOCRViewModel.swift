@@ -1,10 +1,10 @@
-import SwiftUI
 import AVFoundation
-import Vision
 import CoreMotion
 import SwiftData
-// Related JIRA: KAN-136
+import SwiftUI
+import Vision
 
+// Related JIRA: KAN-136
 
 // MARK: - Motion State
 
@@ -78,32 +78,41 @@ final class LiveOCRViewModel: ObservableObject {
         case .authorized: break
         case .notDetermined:
             guard await AVCaptureDevice.requestAccess(for: .video) else {
-                error = "Camera access denied"; return
+                error = "Camera access denied"
+                return
             }
         case .denied, .restricted:
-            error = "Camera access denied. Enable in Settings > Privacy > Camera."; return
+            error = "Camera access denied. Enable in Settings > Privacy > Camera."
+            return
         @unknown default:
-            error = "Camera not available"; return
+            error = "Camera not available"
+            return
         }
 
         guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
-            error = "Camera not available"; return
+            error = "Camera not available"
+            return
         }
         guard let input = try? AVCaptureDeviceInput(device: device) else {
-            error = "Cannot create camera input"; return
+            error = "Cannot create camera input"
+            return
         }
 
         session.beginConfiguration()
         session.sessionPreset = .high
         guard session.canAddInput(input) else {
-            error = "Cannot add camera input"; session.commitConfiguration(); return
+            error = "Cannot add camera input"
+            session.commitConfiguration()
+            return
         }
         session.addInput(input)
 
         videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
         videoOutput.alwaysDiscardsLateVideoFrames = true
         guard session.canAddOutput(videoOutput) else {
-            error = "Cannot add video output"; session.commitConfiguration(); return
+            error = "Cannot add video output"
+            session.commitConfiguration()
+            return
         }
         session.addOutput(videoOutput)
 
@@ -121,9 +130,15 @@ final class LiveOCRViewModel: ObservableObject {
     // MARK: - Control
 
     func startScanning() {
-        accumulatedText = ""; sections = []; wordCount = 0; charCount = 0
-        latestSegment = nil; trackedRegions = []; frameCount = 0
-        isPaused = false; error = nil
+        accumulatedText = ""
+        sections = []
+        wordCount = 0
+        charCount = 0
+        latestSegment = nil
+        trackedRegions = []
+        frameCount = 0
+        isPaused = false
+        error = nil
 
         let delegate = OCRVideoDelegate { [weak self] observations in
             Task { @MainActor [weak self] in
@@ -147,8 +162,12 @@ final class LiveOCRViewModel: ObservableObject {
     func togglePause() { isPaused.toggle() }
 
     func clear() {
-        accumulatedText = ""; sections = []; wordCount = 0; charCount = 0
-        latestSegment = nil; trackedRegions = []
+        accumulatedText = ""
+        sections = []
+        wordCount = 0
+        charCount = 0
+        latestSegment = nil
+        trackedRegions = []
     }
 
     // MARK: - Motion
@@ -191,10 +210,14 @@ final class LiveOCRViewModel: ObservableObject {
         var newLines: [String] = []
 
         for c in candidates {
-            var bestIdx: Int?, bestIOU: CGFloat = 0
+            var bestIdx: Int?
+            var bestIOU: CGFloat = 0
             for j in 0..<trackedRegions.count {
                 let iou = c.iou(with: trackedRegions[j])
-                if iou > bestIOU, iou >= iouThreshold { bestIOU = iou; bestIdx = j }
+                if iou > bestIOU, iou >= iouThreshold {
+                    bestIOU = iou
+                    bestIdx = j
+                }
             }
             if let idx = bestIdx {
                 let old = trackedRegions[idx].text
@@ -270,7 +293,8 @@ final class LiveOCRViewModel: ObservableObject {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let md: [String: Any] = ["wordCount": wordCount, "charCount": charCount, "sectionCount": sections.count, "capturedAt": Date().ISO8601Format()]
         if let d = try? JSONSerialization.data(withJSONObject: md, options: .prettyPrinted),
-           let j = String(data: d, encoding: .utf8) {
+            let j = String(data: d, encoding: .utf8)
+        {
             try? j.write(to: dir.appendingPathComponent("ocr_metadata.json"), atomically: true, encoding: .utf8)
         }
         return item
@@ -287,9 +311,11 @@ private final class OCRVideoDelegate: NSObject, AVCaptureVideoDataOutputSampleBu
         self.onObservations = onObservations
     }
 
-    func captureOutput(_ output: AVCaptureOutput,
-                       didOutput sampleBuffer: CMSampleBuffer,
-                       from connection: AVCaptureConnection) {
+    func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
         let now = CACurrentMediaTime()
         guard now - lastTime >= 0.2 else { return }
         lastTime = now

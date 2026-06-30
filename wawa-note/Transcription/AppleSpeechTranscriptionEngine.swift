@@ -553,7 +553,9 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             )
         }
 
-        AppLog.transcription.info("buildTranscript: \(segments.count) raw → \(validSegments.count) valid segments (filtered \(segments.count - validSegments.count) intermediate hypotheses)")
+        AppLog.transcription.info(
+            "buildTranscript: \(segments.count) raw → \(validSegments.count) valid segments (filtered \(segments.count - validSegments.count) intermediate hypotheses)"
+        )
 
         return Transcript(
             meetingId: meetingId,

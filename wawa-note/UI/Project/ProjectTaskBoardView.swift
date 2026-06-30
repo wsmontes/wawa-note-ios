@@ -1,7 +1,7 @@
-import SwiftUI
 import SwiftData
-// Related JIRA: KAN-8, KAN-36, KAN-92
+import SwiftUI
 
+// Related JIRA: KAN-8, KAN-36, KAN-92
 
 // MARK: - DEPRECATED: Subsumed by BoardView using ProjectDerivedItem (2026-06-18)
 struct ProjectTaskBoardView: View {
@@ -28,7 +28,10 @@ struct ProjectTaskBoardView: View {
                     Text("Add a task or promote an item from the library.")
                         .font(.subheadline).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center).padding(.horizontal, 40)
-                    Button { newTaskStatus = .todo; showNewTask = true } label: {
+                    Button {
+                        newTaskStatus = .todo
+                        showNewTask = true
+                    } label: {
                         Label("Add Task", systemImage: "plus")
                     }
                     .buttonStyle(.borderedProminent)
@@ -179,13 +182,17 @@ struct ProjectTaskBoardView: View {
                 Menu {
                     ForEach(columns, id: \.rawValue) { col in
                         if col != status {
-                            Button { moveTask(task, to: col) } label: {
+                            Button {
+                                moveTask(task, to: col)
+                            } label: {
                                 Label("Move to \(statusLabel(col))", systemImage: "arrow.right")
                             }
                         }
                     }
                     Divider()
-                    Button(role: .destructive) { deleteTask(task) } label: {
+                    Button(role: .destructive) {
+                        deleteTask(task)
+                    } label: {
                         Label("Delete", systemImage: "trash")
                     }
                 } label: {

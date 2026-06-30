@@ -1,9 +1,9 @@
-import SwiftUI
-import SwiftData
 import AVFoundation
 import PDFKit
-// Related JIRA: KAN-12, KAN-62
+import SwiftData
+import SwiftUI
 
+// Related JIRA: KAN-12, KAN-62
 
 // MARK: - Import kind
 
@@ -54,11 +54,13 @@ struct ImportFormView: View {
     private let importService = AudioImportService()
     private let artifactStore = FileArtifactStore()
 
-    init(sourceURL: URL,
-         kind: ImportKind,
-         textImporter: (any FormatImporter)? = nil,
-         isFromShareExtension: Bool = false,
-         onComplete: @escaping (KnowledgeItem) -> Void) {
+    init(
+        sourceURL: URL,
+        kind: ImportKind,
+        textImporter: (any FormatImporter)? = nil,
+        isFromShareExtension: Bool = false,
+        onComplete: @escaping (KnowledgeItem) -> Void
+    ) {
         self.sourceURL = sourceURL
         self.kind = kind
         self.textImporter = textImporter
@@ -108,7 +110,9 @@ struct ImportFormView: View {
                 }
 
                 Section {
-                    Button { performImport() } label: {
+                    Button {
+                        performImport()
+                    } label: {
                         if isConverting {
                             HStack {
                                 ProgressView()
@@ -182,8 +186,9 @@ struct ImportFormView: View {
             Button {
                 togglePreview()
             } label: {
-                Label(player?.isPlaying == true ? "Stop" : "Play",
-                      systemImage: player?.isPlaying == true ? "stop.fill" : "play.fill")
+                Label(
+                    player?.isPlaying == true ? "Stop" : "Play",
+                    systemImage: player?.isPlaying == true ? "stop.fill" : "play.fill")
             }
             .disabled(player == nil)
 
@@ -226,11 +231,13 @@ struct ImportFormView: View {
 
         guard case .audio(let meta) = kind else { return }
 
-        guard let item = coordinator.createItemFromImport(
-            title: title,
-            date: date,
-            duration: meta.duration
-        ) else {
+        guard
+            let item = coordinator.createItemFromImport(
+                title: title,
+                date: date,
+                duration: meta.duration
+            )
+        else {
             errorMessage = "Could not create item."
             isConverting = false
             return

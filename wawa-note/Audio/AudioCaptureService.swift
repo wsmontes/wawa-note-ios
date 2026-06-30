@@ -1,8 +1,8 @@
 import AVFoundation
 import Accelerate
 import OSLog
-// Related JIRA: KAN-5, KAN-14, KAN-78
 
+// Related JIRA: KAN-5, KAN-14, KAN-78
 
 // MARK: - State
 
@@ -38,7 +38,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     /// Audio format metadata of the active recording — captured before
     /// session deactivation so it's available during item finalization.
     var captureSampleRate: Double { sessionManager.sampleRate }
-    var captureChannelCount: Int { 1 } // Always mono in current implementation
+    var captureChannelCount: Int { 1 }  // Always mono in current implementation
     var captureInputPortType: String { sessionManager.bestAvailableInput?.portType.rawValue ?? "unknown" }
 
     /// True when audio level has been below the silence threshold for >60 seconds.
@@ -65,7 +65,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     let sessionManager = AudioSessionManager()
     private var timerTask: Task<Void, Never>?
     private var recordingStartTime: Date?
-    private var interruptionBeganAt: Date?   // Tracks when the current interruption started
+    private var interruptionBeganAt: Date?  // Tracks when the current interruption started
     private var currentMeetingId: UUID?
     private var observers: [NSObjectProtocol] = []
     private var levelSmoothTask: Task<Void, Never>?
@@ -130,9 +130,11 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         try sessionManager.configureForRecording()
 
         let baseRate = sessionManager.sampleRate > 0 ? sessionManager.sampleRate : 44100
-        guard let recordFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32, sampleRate: baseRate, channels: 1, interleaved: false
-        ) else { throw AudioCaptureError.engineStartFailed }
+        guard
+            let recordFormat = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32, sampleRate: baseRate, channels: 1, interleaved: false
+            )
+        else { throw AudioCaptureError.engineStartFailed }
 
         AppLog.audio.info("Recording format: \(Int(baseRate))Hz PCM WAV")
 
@@ -341,9 +343,11 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
                 guard let self, let meetingId = self.currentMeetingId else { continue }
                 let sampleRate = self.sessionManager.sampleRate > 0 ? self.sessionManager.sampleRate : 44100
-                guard let fmt = AVAudioFormat(
-                    commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false
-                ) else { continue }
+                guard
+                    let fmt = AVAudioFormat(
+                        commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false
+                    )
+                else { continue }
                 let segIdx = self.fileWriter.segmentIndex
                 self.fileWriter.writeCheckpoint(meetingId: meetingId, segmentIndex: segIdx, format: fmt)
             }
@@ -362,13 +366,15 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private func observeNotifications() {
         let nc = NotificationCenter.default
         let q = OperationQueue.main
-        observers.append(nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: q) { [weak self] n in self?.handleInterruption(n) })
-        observers.append(nc.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: q) { [weak self] _ in
-            AppLog.audio.warning("Media services were reset — attempting engine rebuild")
-            Task { @MainActor [weak self] in
-                await self?.rebuildEngineForCurrentRoute(forceBuiltInMic: true, reason: "mediaServicesReset")
-            }
-        })
+        observers.append(
+            nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: q) { [weak self] n in self?.handleInterruption(n) })
+        observers.append(
+            nc.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: q) { [weak self] _ in
+                AppLog.audio.warning("Media services were reset — attempting engine rebuild")
+                Task { @MainActor [weak self] in
+                    await self?.rebuildEngineForCurrentRoute(forceBuiltInMic: true, reason: "mediaServicesReset")
+                }
+            })
 
         // Route changes: Bluetooth connect/disconnect, headset plug/unplug, etc.
         // When the route changes during recording, the existing tap may be
@@ -380,13 +386,14 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // routeChangeNotification fires (e.g., Bluetooth HFP handoff). The
         // engine is scoped to the current engine instance.
         if let eng = engine {
-            observers.append(nc.addObserver(forName: .AVAudioEngineConfigurationChange, object: eng, queue: q) { [weak self] n in
-                // Engine config changes don't carry AVAudioSessionRouteChangeReasonKey.
-                // handleRouteChange handles this — the guard uses optional binding and
-                // falls through to generic debounce path with nil reason.
-                AppLog.audio.info("Engine config change — routing through unified debounce path")
-                self?.handleRouteChange(n)
-            })
+            observers.append(
+                nc.addObserver(forName: .AVAudioEngineConfigurationChange, object: eng, queue: q) { [weak self] n in
+                    // Engine config changes don't carry AVAudioSessionRouteChangeReasonKey.
+                    // handleRouteChange handles this — the guard uses optional binding and
+                    // falls through to generic debounce path with nil reason.
+                    AppLog.audio.info("Engine config change — routing through unified debounce path")
+                    self?.handleRouteChange(n)
+                })
         }
     }
 
@@ -397,7 +404,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
     private func handleInterruption(_ n: Notification) {
         guard let type = n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-              let t = AVAudioSession.InterruptionType(rawValue: type) else { return }
+            let t = AVAudioSession.InterruptionType(rawValue: type)
+        else { return }
         switch t {
         case .began:
             guard state == .recording else { return }
@@ -418,7 +426,8 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             }
             interruptionBeganAt = nil
             if let opt = n.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt,
-               AVAudioSession.InterruptionOptions(rawValue: opt).contains(.shouldResume) {
+                AVAudioSession.InterruptionOptions(rawValue: opt).contains(.shouldResume)
+            {
                 // Retry engine start asynchronously — audio hardware (modem,
                 // Bluetooth SCO link) may need hundreds of ms to release after
                 // a phone call ends. A single try? is often insufficient.
@@ -495,7 +504,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             return
         }
 
-        let delay = sessionManager.settleDelayNs // 750ms BT, 500ms otherwise
+        let delay = sessionManager.settleDelayNs  // 750ms BT, 500ms otherwise
         routeChangeDebounceTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: delay)
             guard !Task.isCancelled else { return }
@@ -508,10 +517,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private func interruptionMessage(for reason: AVAudioSession.RouteChangeReason?) -> String {
         guard let reason else { return "Audio engine reconfigured — adapting." }
         switch reason {
-        case .newDeviceAvailable:  return "Audio device connected — switching."
+        case .newDeviceAvailable: return "Audio device connected — switching."
         case .oldDeviceUnavailable: return "Audio device disconnected — switching input."
-        case .override:             return "Audio route changed — adapting."
-        default:                    return "Audio route changed."
+        case .override: return "Audio route changed — adapting."
+        default: return "Audio route changed."
         }
     }
 
@@ -531,7 +540,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             guard let self else { return }
             defer { self.isRebuilding = false }
 
-            let forceOnAttempt = 2 // 0-indexed: attempt 2 = force built-in mic
+            let forceOnAttempt = 2  // 0-indexed: attempt 2 = force built-in mic
             let backoffNs: [UInt64] = [0, 500_000_000, 1_000_000_000]
 
             for attempt in 0..<3 {
@@ -653,9 +662,11 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         // 6. Open new segment for the new route
         let nextIndex = nextSegmentIndexProvider?() ?? 0
         let sampleRate = sessionManager.sampleRate > 0 ? sessionManager.sampleRate : 44100
-        guard let format = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false
-        ) else {
+        guard
+            let format = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false
+            )
+        else {
             AppLog.audio.error("rebuildEngine(\(reason)): failed to create audio format")
             return false
         }
@@ -774,19 +785,22 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
         // Re-register all non-engine-scoped observers
         let q = OperationQueue.main
-        observers.append(nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: q) { [weak self] n in self?.handleInterruption(n) })
-        observers.append(nc.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: q) { [weak self] _ in
-            AppLog.audio.warning("Media services were reset — attempting engine rebuild")
-            Task { @MainActor [weak self] in
-                await self?.rebuildEngineForCurrentRoute(forceBuiltInMic: true, reason: "mediaServicesReset")
-            }
-        })
+        observers.append(
+            nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: q) { [weak self] n in self?.handleInterruption(n) })
+        observers.append(
+            nc.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: q) { [weak self] _ in
+                AppLog.audio.warning("Media services were reset — attempting engine rebuild")
+                Task { @MainActor [weak self] in
+                    await self?.rebuildEngineForCurrentRoute(forceBuiltInMic: true, reason: "mediaServicesReset")
+                }
+            })
         observers.append(nc.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: q) { [weak self] n in self?.handleRouteChange(n) })
         // Engine-scoped observer for the new engine
-        observers.append(nc.addObserver(forName: .AVAudioEngineConfigurationChange, object: newEngine, queue: q) { [weak self] n in
-            AppLog.audio.info("Engine config change — routing through unified debounce path")
-            self?.handleRouteChange(n)
-        })
+        observers.append(
+            nc.addObserver(forName: .AVAudioEngineConfigurationChange, object: newEngine, queue: q) { [weak self] n in
+                AppLog.audio.info("Engine config change — routing through unified debounce path")
+                self?.handleRouteChange(n)
+            })
     }
 }
 

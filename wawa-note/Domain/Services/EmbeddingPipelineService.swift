@@ -1,16 +1,18 @@
 import Foundation
-import SwiftData
 import OSLog
-// Related JIRA: KAN-150
+import SwiftData
 
+// Related JIRA: KAN-150
 
 @MainActor
 final class EmbeddingPipelineService {
     private let embeddingService: EmbeddingService
     private let fileStore: FileArtifactStore
 
-    init(embeddingService: EmbeddingService = EmbeddingService(),
-         fileStore: FileArtifactStore = FileArtifactStore()) {
+    init(
+        embeddingService: EmbeddingService = EmbeddingService(),
+        fileStore: FileArtifactStore = FileArtifactStore()
+    ) {
         self.embeddingService = embeddingService
         self.fileStore = fileStore
     }

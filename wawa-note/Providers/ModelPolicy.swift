@@ -1,6 +1,6 @@
 import Foundation
-// Related JIRA: KAN-9, KAN-42
 
+// Related JIRA: KAN-9, KAN-42
 
 // MARK: - JSON-Driven Model Policy Rules
 
@@ -198,7 +198,8 @@ actor TieredModelPolicy: ModelPolicy {
         let effectiveTier = network.isAvailable ? tierKey : "local"
 
         // 4. Resolve model from feature table
-        let model = rules.model(for: feature, tier: effectiveTier)
+        let model =
+            rules.model(for: feature, tier: effectiveTier)
             ?? rules.tiers[effectiveTier]?.prefer.first
             ?? "gpt-5.1-mini"
 
@@ -211,9 +212,11 @@ actor TieredModelPolicy: ModelPolicy {
     }
 
     func availableModels() async -> [String] {
-        guard let provider = try? await providerResolver.resolve(
-            for: "chat", preference: .any, override: nil
-        ) else { return [] }
+        guard
+            let provider = try? await providerResolver.resolve(
+                for: "chat", preference: .any, override: nil
+            )
+        else { return [] }
         return (try? await provider.fetchModels()) ?? []
     }
 

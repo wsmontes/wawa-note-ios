@@ -1,6 +1,6 @@
 import Foundation
-// Related JIRA: KAN-9, KAN-45
 
+// Related JIRA: KAN-9, KAN-45
 
 // MARK: - Tool Definition (sent to LLM)
 

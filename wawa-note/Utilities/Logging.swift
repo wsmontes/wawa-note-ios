@@ -1,7 +1,7 @@
 import Foundation
 import OSLog
-// Related JIRA: KAN-11, KAN-257
 
+// Related JIRA: KAN-11, KAN-257
 
 // MARK: - OSLog (KAN-257: Standardized 7-category logging)
 
@@ -119,7 +119,8 @@ extension AppLog {
         inputTokens: Int, outputTokens: Int, latencyMs: Int64,
         correlation: CorrelationID? = nil
     ) {
-        var msg = "LLM_RES model=\(model) contentLen=\(contentLength) toolCalls=\(toolCalls) tokensIn=\(inputTokens) tokensOut=\(outputTokens) latencyMs=\(latencyMs)"
+        var msg =
+            "LLM_RES model=\(model) contentLen=\(contentLength) toolCalls=\(toolCalls) tokensIn=\(inputTokens) tokensOut=\(outputTokens) latencyMs=\(latencyMs)"
         if let cid = correlation { msg = "[\(cid)] \(msg)" }
         AppLog.llm.notice("\(msg, privacy: .public)")
         FileLogService.shared.log(category: "llm", level: "response", message: msg)
@@ -282,7 +283,8 @@ final class FileLogService: @unchecked Sendable {
 
     private func rotateIfNeeded() {
         guard let attrs = try? fileManager.attributesOfItem(atPath: currentLogURL.path),
-              let size = attrs[.size] as? Int64, size >= maxLogSize else { return }
+            let size = attrs[.size] as? Int64, size >= maxLogSize
+        else { return }
         let oldest = cachesDir.appendingPathComponent("wawa-debug.\(maxRotatedLogs).log")
         try? fileManager.removeItem(at: oldest)
         for i in stride(from: maxRotatedLogs - 1, through: 0, by: -1) {
@@ -420,7 +422,8 @@ extension String {
         var result = self
         for (pattern, replacement) in patterns {
             if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
-                result = regex.stringByReplacingMatches(in: result, options: [], range: NSRange(location: 0, length: result.utf16.count), withTemplate: replacement)
+                result = regex.stringByReplacingMatches(
+                    in: result, options: [], range: NSRange(location: 0, length: result.utf16.count), withTemplate: replacement)
             }
         }
         return result

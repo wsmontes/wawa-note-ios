@@ -1,7 +1,7 @@
 import Foundation
 import OSLog
-// Related JIRA: KAN-7, KAN-26
 
+// Related JIRA: KAN-7, KAN-26
 
 // MARK: - Response DTOs
 
@@ -21,36 +21,74 @@ private struct AnalysisResponse: Decodable {
     let followUpEmailDraft: String?
 
     enum CodingKeys: String, CodingKey {
-        case shortSummary = "short_summary", detailedSummary = "detailed_summary"
-        case decisions, actionItems = "action_items", openQuestions = "open_questions"
-        case risks, importantDates = "important_dates", mentionedPeople = "mentioned_people"
-        case mentionedSystems = "mentioned_systems", mentionedOrganizations = "mentioned_organizations"
-        case mentionedRepositories = "mentioned_repositories", mentionedLocations = "mentioned_locations"
+        case shortSummary = "short_summary"
+        case detailedSummary = "detailed_summary"
+        case decisions
+        case actionItems = "action_items"
+        case openQuestions = "open_questions"
+        case risks
+        case importantDates = "important_dates"
+        case mentionedPeople = "mentioned_people"
+        case mentionedSystems = "mentioned_systems"
+        case mentionedOrganizations = "mentioned_organizations"
+        case mentionedRepositories = "mentioned_repositories"
+        case mentionedLocations = "mentioned_locations"
         case followUpEmailDraft = "follow_up_email_draft"
     }
 
     struct DecisionItem: Decodable {
-        let title: String; let details: String?
-        let sourceSegmentIds: [String]?; let confidence: Double?
-        enum CodingKeys: String, CodingKey { case title, details, sourceSegmentIds = "source_segment_ids", confidence }
+        let title: String
+        let details: String?
+        let sourceSegmentIds: [String]?
+        let confidence: Double?
+        enum CodingKeys: String, CodingKey {
+            case title, details
+            case sourceSegmentIds = "source_segment_ids"
+            case confidence
+        }
     }
     struct ActionItemDTO: Decodable {
-        let task: String; let owner: String?; let dueDate: String?
-        let sourceSegmentIds: [String]?; let confidence: Double?
-        enum CodingKeys: String, CodingKey { case task, owner, dueDate = "due_date", sourceSegmentIds = "source_segment_ids", confidence }
+        let task: String
+        let owner: String?
+        let dueDate: String?
+        let sourceSegmentIds: [String]?
+        let confidence: Double?
+        enum CodingKeys: String, CodingKey {
+            case task, owner
+            case dueDate = "due_date"
+            case sourceSegmentIds = "source_segment_ids"
+            case confidence
+        }
     }
     struct QuestionItem: Decodable {
-        let question: String; let sourceSegmentIds: [String]?; let confidence: Double?
-        enum CodingKeys: String, CodingKey { case question, sourceSegmentIds = "source_segment_ids", confidence }
+        let question: String
+        let sourceSegmentIds: [String]?
+        let confidence: Double?
+        enum CodingKeys: String, CodingKey {
+            case question
+            case sourceSegmentIds = "source_segment_ids"
+            case confidence
+        }
     }
     struct RiskItem: Decodable {
-        let risk: String; let details: String?
-        let sourceSegmentIds: [String]?; let confidence: Double?
-        enum CodingKeys: String, CodingKey { case risk, details, sourceSegmentIds = "source_segment_ids", confidence }
+        let risk: String
+        let details: String?
+        let sourceSegmentIds: [String]?
+        let confidence: Double?
+        enum CodingKeys: String, CodingKey {
+            case risk, details
+            case sourceSegmentIds = "source_segment_ids"
+            case confidence
+        }
     }
     struct DateItem: Decodable {
-        let date: String; let meaning: String?; let sourceSegmentIds: [String]?
-        enum CodingKeys: String, CodingKey { case date, meaning, sourceSegmentIds = "source_segment_ids" }
+        let date: String
+        let meaning: String?
+        let sourceSegmentIds: [String]?
+        enum CodingKeys: String, CodingKey {
+            case date, meaning
+            case sourceSegmentIds = "source_segment_ids"
+        }
     }
 }
 
@@ -103,7 +141,8 @@ final class AnalysisService: @unchecked Sendable {
 
         AppLog.provider.info("Using map-reduce for \(totalChars) chars (\(model) context)")
         let chunks = chunker.chunkTranscript(transcript, maxCharsPerChunk: maxChunk)
-        return try await mapReduceAnalysis(chunks: chunks, provider: provider, model: model, systemPrompt: systemPrompt, meetingId: meetingId, sourceContext: sourceCtx)
+        return try await mapReduceAnalysis(
+            chunks: chunks, provider: provider, model: model, systemPrompt: systemPrompt, meetingId: meetingId, sourceContext: sourceCtx)
     }
 
     /// Framework-driven analysis: accepts a dynamic output schema and returns
@@ -124,7 +163,8 @@ final class AnalysisService: @unchecked Sendable {
         // Serialize schema so the LLM knows what JSON structure to produce
         let schemaJSON: String
         if let schemaData = try? JSONEncoder().encode(schema),
-           let json = String(data: schemaData, encoding: .utf8) {
+            let json = String(data: schemaData, encoding: .utf8)
+        {
             schemaJSON = json
         } else {
             schemaJSON = "{\"type\":\"object\",\"properties\":{\"short_summary\":{\"type\":\"string\"}},\"required\":[\"short_summary\"]}"
@@ -133,10 +173,12 @@ final class AnalysisService: @unchecked Sendable {
         let userPrompt = "\(prefix)Analyze the following content. Return ONLY valid JSON matching this schema:\n\n\(schemaJSON)\n\nCONTENT:\n\(body)"
 
         let params = configService.requestParams(for: "analysis", model: model)
-        let request = AIRequest(model: model, messages: [
-            AIMessage(role: .system, content: [.text(systemPrompt)]),
-            AIMessage(role: .user, content: [.text(userPrompt)])
-        ], temperature: params.temperature, maxTokens: params.maxTokens, responseFormat: jsonResponseFormat(for: model))
+        let request = AIRequest(
+            model: model,
+            messages: [
+                AIMessage(role: .system, content: [.text(systemPrompt)]),
+                AIMessage(role: .user, content: [.text(userPrompt)]),
+            ], temperature: params.temperature, maxTokens: params.maxTokens, responseFormat: jsonResponseFormat(for: model))
 
         let response = try await provider.send(request)
         let cleaned = ProviderAdapter.normalizeJSON(response.content)
@@ -153,13 +195,15 @@ final class AnalysisService: @unchecked Sendable {
 
     // MARK: - Direct (single request)
 
-    private func singleAnalysis(provider: any AIProvider, model: String, systemPrompt: String, userPrompt: String, meetingId: UUID) async throws -> MeetingAnalysis {
+    private func singleAnalysis(provider: any AIProvider, model: String, systemPrompt: String, userPrompt: String, meetingId: UUID) async throws
+        -> MeetingAnalysis
+    {
         let params = configService.requestParams(for: "analysis", model: model)
         let request = AIRequest(
             model: model,
             messages: [
                 AIMessage(role: .system, content: [.text(systemPrompt)]),
-                AIMessage(role: .user, content: [.text(userPrompt)])
+                AIMessage(role: .user, content: [.text(userPrompt)]),
             ],
             temperature: params.temperature,
             maxTokens: params.maxTokens,
@@ -174,7 +218,9 @@ final class AnalysisService: @unchecked Sendable {
     private static let maxConcurrentChunks = 3
     private static let maxRetries = 3
 
-    private func mapReduceAnalysis(chunks: [TextChunk], provider: any AIProvider, model: String, systemPrompt: String, meetingId: UUID, sourceContext: SourceContext) async throws -> MeetingAnalysis {
+    private func mapReduceAnalysis(
+        chunks: [TextChunk], provider: any AIProvider, model: String, systemPrompt: String, meetingId: UUID, sourceContext: SourceContext
+    ) async throws -> MeetingAnalysis {
         let chunkSummaries = await summarizeChunksWithLimit(chunks, provider: provider, model: model, sourceContext: sourceContext)
 
         let validSummaries = chunkSummaries.compactMap(\.value)
@@ -196,20 +242,20 @@ final class AnalysisService: @unchecked Sendable {
         }.joined(separator: "\n\n")
 
         let reducePrompt = """
-        Below are summaries from different parts of a content. Synthesize them into a complete meeting analysis.
-        Extract: short_summary, detailed_summary, decisions (title, details), action_items (task, owner, due_date), open_questions, risks (risk, details), important_dates (date, meaning), mentioned_people, mentioned_systems, mentioned_organizations, mentioned_repositories, mentioned_locations.
+            Below are summaries from different parts of a content. Synthesize them into a complete meeting analysis.
+            Extract: short_summary, detailed_summary, decisions (title, details), action_items (task, owner, due_date), open_questions, risks (risk, details), important_dates (date, meaning), mentioned_people, mentioned_systems, mentioned_organizations, mentioned_repositories, mentioned_locations.
 
-        \(combined)
+            \(combined)
 
-        Return only valid JSON with these keys: short_summary, detailed_summary, decisions, action_items, open_questions, risks, important_dates, mentioned_people, mentioned_systems, mentioned_organizations, mentioned_repositories, mentioned_locations.
-        """
+            Return only valid JSON with these keys: short_summary, detailed_summary, decisions, action_items, open_questions, risks, important_dates, mentioned_people, mentioned_systems, mentioned_organizations, mentioned_repositories, mentioned_locations.
+            """
 
         let params = configService.requestParams(for: "analysis", model: model)
         let request = AIRequest(
             model: model,
             messages: [
                 AIMessage(role: .system, content: [.text(systemPrompt)]),
-                AIMessage(role: .user, content: [.text(reducePrompt)])
+                AIMessage(role: .user, content: [.text(reducePrompt)]),
             ],
             temperature: params.temperature,
             maxTokens: params.maxTokens,
@@ -219,7 +265,9 @@ final class AnalysisService: @unchecked Sendable {
         return await parseResponse(response.content, meetingId: meetingId, providerId: provider.id, model: model, provider: provider)
     }
 
-    private func summarizeChunksWithLimit(_ chunks: [TextChunk], provider: any AIProvider, model: String, sourceContext: SourceContext) async -> [(index: Int, value: String?)] {
+    private func summarizeChunksWithLimit(_ chunks: [TextChunk], provider: any AIProvider, model: String, sourceContext: SourceContext) async -> [(
+        index: Int, value: String?
+    )] {
         let total = chunks.count
         var results: [(Int, String?)] = []
         results.reserveCapacity(total)
@@ -254,7 +302,9 @@ final class AnalysisService: @unchecked Sendable {
         return results
     }
 
-    private func summarizeChunkWithRetry(_ chunk: TextChunk, index: Int, total: Int, provider: any AIProvider, model: String, sourceContext: SourceContext) async -> String? {
+    private func summarizeChunkWithRetry(_ chunk: TextChunk, index: Int, total: Int, provider: any AIProvider, model: String, sourceContext: SourceContext)
+        async -> String?
+    {
         let contentLabel: String = {
             switch sourceContext.sourceType {
             case .recording: return "content excerpt"
@@ -272,19 +322,19 @@ final class AnalysisService: @unchecked Sendable {
             }
         }()
         let prompt = """
-        Summarize this \(contentLabel) concisely.
-        Focus on: key decisions, action items, risks, open questions, important dates, people mentioned, systems mentioned.
+            Summarize this \(contentLabel) concisely.
+            Focus on: key decisions, action items, risks, open questions, important dates, people mentioned, systems mentioned.
 
-        \(contentLabel.capitalized) (part \(index + 1) of \(total)):
-        \(chunk.text)
-        """
+            \(contentLabel.capitalized) (part \(index + 1) of \(total)):
+            \(chunk.text)
+            """
 
         let params = AIConfigService.shared.requestParams(for: "analysis", model: model)
         let request = AIRequest(
             model: model,
             messages: [
                 AIMessage(role: .system, content: [.text("You are a concise \(summarizerLabel) summarizer. Return only the summary text, no JSON.")]),
-                AIMessage(role: .user, content: [.text(prompt)])
+                AIMessage(role: .user, content: [.text(prompt)]),
             ],
             temperature: params.temperature,
             maxTokens: params.maxTokens
@@ -319,7 +369,7 @@ final class AnalysisService: @unchecked Sendable {
                     }
                 }()
                 if retryable && attempt < maxRetries {
-                    let delay = Double(1 << attempt) // 1s, 2s, 4s
+                    let delay = Double(1 << attempt)  // 1s, 2s, 4s
                     AppLog.provider.warning("Retrying after \(delay)s (attempt \(attempt + 1)/\(maxRetries), \(error))")
                     try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                     continue
@@ -345,8 +395,9 @@ final class AnalysisService: @unchecked Sendable {
         // Attempt 1: direct parse
         let cleaned = ProviderAdapter.normalizeJSON(content)
         if let data = cleaned.data(using: .utf8),
-           let parsed = tryDecode(AnalysisResponse.self, from: data),
-           parsed.shortSummary?.isEmpty == false {
+            let parsed = tryDecode(AnalysisResponse.self, from: data),
+            parsed.shortSummary?.isEmpty == false
+        {
             return buildAnalysis(from: parsed, meetingId: meetingId, providerId: providerId, model: model)
         }
 
@@ -365,18 +416,18 @@ final class AnalysisService: @unchecked Sendable {
     /// Retry once with a "fix your JSON" prompt. Returns parsed DTO or nil.
     private func tryRetryWithFix(provider: any AIProvider, model: String, failedJSON: String, meetingId: UUID) async -> AnalysisResponse? {
         let fixPrompt = """
-        Your previous response was not valid JSON. Here is what you returned:
+            Your previous response was not valid JSON. Here is what you returned:
 
-        \(failedJSON.prefix(3000))
+            \(failedJSON.prefix(3000))
 
-        Return ONLY valid JSON matching the original schema. No markdown, no code fences, no explanatory text. The JSON must parse correctly with a standard JSON parser.
-        """
+            Return ONLY valid JSON matching the original schema. No markdown, no code fences, no explanatory text. The JSON must parse correctly with a standard JSON parser.
+            """
 
         let request = AIRequest(
             model: model,
             messages: [
                 AIMessage(role: .system, content: [.text("You are a JSON repair assistant. Output ONLY valid JSON. No markdown, no code fences.")]),
-                AIMessage(role: .user, content: [.text(fixPrompt)])
+                AIMessage(role: .user, content: [.text(fixPrompt)]),
             ],
             responseFormat: jsonResponseFormat(for: model)
         )
@@ -386,7 +437,8 @@ final class AnalysisService: @unchecked Sendable {
             saveRawResponse(response.content, meetingId: meetingId, filename: "provider.response.fix_attempt.txt")
             let cleaned = ProviderAdapter.normalizeJSON(response.content)
             if let data = cleaned.data(using: .utf8),
-               let parsed = tryDecode(AnalysisResponse.self, from: data) {
+                let parsed = tryDecode(AnalysisResponse.self, from: data)
+            {
                 AppLog.provider.info("JSON fix retry succeeded")
                 return parsed
             }
@@ -411,11 +463,22 @@ final class AnalysisService: @unchecked Sendable {
             meetingId: meetingId, providerId: providerId, model: model,
             shortSummary: parsed.shortSummary ?? "",
             detailedSummary: parsed.detailedSummary ?? "",
-            decisions: parsed.decisions?.map { Decision(title: $0.title, details: $0.details ?? "", sourceSegmentIds: parseIDs($0.sourceSegmentIds), confidence: $0.confidence) } ?? [],
-            actionItems: parsed.actionItems?.map { ActionItem(task: $0.task, owner: $0.owner, dueDate: parseDate($0.dueDate), sourceSegmentIds: parseIDs($0.sourceSegmentIds), confidence: $0.confidence) } ?? [],
-            risks: parsed.risks?.map { Risk(risk: $0.risk, details: $0.details ?? "", sourceSegmentIds: parseIDs($0.sourceSegmentIds), confidence: $0.confidence) } ?? [],
-            openQuestions: parsed.openQuestions?.map { OpenQuestion(question: $0.question, sourceSegmentIds: parseIDs($0.sourceSegmentIds), confidence: $0.confidence) } ?? [],
-            importantDates: parsed.importantDates?.map { ImportantDate(date: $0.date, meaning: $0.meaning ?? "", sourceSegmentIds: parseIDs($0.sourceSegmentIds)) } ?? [],
+            decisions: parsed.decisions?.map {
+                Decision(title: $0.title, details: $0.details ?? "", sourceSegmentIds: parseIDs($0.sourceSegmentIds), confidence: $0.confidence)
+            } ?? [],
+            actionItems: parsed.actionItems?.map {
+                ActionItem(
+                    task: $0.task, owner: $0.owner, dueDate: parseDate($0.dueDate), sourceSegmentIds: parseIDs($0.sourceSegmentIds), confidence: $0.confidence)
+            } ?? [],
+            risks: parsed.risks?.map {
+                Risk(risk: $0.risk, details: $0.details ?? "", sourceSegmentIds: parseIDs($0.sourceSegmentIds), confidence: $0.confidence)
+            } ?? [],
+            openQuestions: parsed.openQuestions?.map {
+                OpenQuestion(question: $0.question, sourceSegmentIds: parseIDs($0.sourceSegmentIds), confidence: $0.confidence)
+            } ?? [],
+            importantDates: parsed.importantDates?.map {
+                ImportantDate(date: $0.date, meaning: $0.meaning ?? "", sourceSegmentIds: parseIDs($0.sourceSegmentIds))
+            } ?? [],
             entities: buildEntities(
                 people: parsed.mentionedPeople, systems: parsed.mentionedSystems,
                 organizations: parsed.mentionedOrganizations, repositories: parsed.mentionedRepositories,
@@ -435,7 +498,8 @@ final class AnalysisService: @unchecked Sendable {
         )
     }
 
-    func saveRawResponse(_ content: String, meetingId: UUID, fileStore: FileArtifactStore = FileArtifactStore(), filename: String = "provider.response.raw.txt") {
+    func saveRawResponse(_ content: String, meetingId: UUID, fileStore: FileArtifactStore = FileArtifactStore(), filename: String = "provider.response.raw.txt")
+    {
         let url = fileStore.meetingDirectoryURL(for: meetingId).appendingPathComponent(filename)
         try? content.data(using: .utf8)?.write(to: url, options: .atomic)
     }
@@ -445,7 +509,9 @@ final class AnalysisService: @unchecked Sendable {
     }
     private func parseDate(_ s: String?) -> Date? {
         guard let s else { return nil }
-        let f = ISO8601DateFormatter(); f.formatOptions = [.withFullDate]; return f.date(from: s)
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withFullDate]
+        return f.date(from: s)
     }
     private func buildEntities(
         people: [String]?, systems: [String]?,
@@ -461,6 +527,8 @@ final class AnalysisService: @unchecked Sendable {
         return e
     }
     private func formatTime(_ s: Double) -> String {
-        let m = Int(s)/60, sec = Int(s)%60; return String(format: "%02d:%02d", m, sec)
+        let m = Int(s) / 60
+        let sec = Int(s) % 60
+        return String(format: "%02d:%02d", m, sec)
     }
 }

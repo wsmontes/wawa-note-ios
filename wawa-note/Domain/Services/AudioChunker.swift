@@ -1,7 +1,7 @@
 @preconcurrency import AVFoundation
 import OSLog
-// Related JIRA: KAN-6, KAN-23, KAN-79
 
+// Related JIRA: KAN-6, KAN-23, KAN-79
 
 struct AudioChunk {
     let url: URL
@@ -141,7 +141,8 @@ final class AudioChunker: @unchecked Sendable {
                             if writer.status == .completed {
                                 continuation.resume()
                             } else {
-                                continuation.resume(throwing: writer.error ?? NSError(domain: "chunk", code: -8, userInfo: [NSLocalizedDescriptionKey: "WAV writer failed"]))
+                                continuation.resume(
+                                    throwing: writer.error ?? NSError(domain: "chunk", code: -8, userInfo: [NSLocalizedDescriptionKey: "WAV writer failed"]))
                             }
                         }
                         return

@@ -1,8 +1,8 @@
 import CoreLocation
 import Foundation
 import OSLog
-// Related JIRA: KAN-151
 
+// Related JIRA: KAN-151
 
 final class LocationContextSensor: ContextSensor, @unchecked Sendable {
     let sensorName = "location_context"
@@ -50,7 +50,10 @@ final class LocationContextSensor: ContextSensor, @unchecked Sendable {
             // Timeout
             let timeoutWork = DispatchWorkItem {
                 lock.lock()
-                guard !resumed else { lock.unlock(); return }
+                guard !resumed else {
+                    lock.unlock()
+                    return
+                }
                 resumed = true
                 lock.unlock()
                 continuation.resume(returning: [])
@@ -59,7 +62,10 @@ final class LocationContextSensor: ContextSensor, @unchecked Sendable {
 
             delegate.onResult = { location, placemark, error in
                 lock.lock()
-                guard !resumed else { lock.unlock(); return }
+                guard !resumed else {
+                    lock.unlock()
+                    return
+                }
                 resumed = true
                 lock.unlock()
                 timeoutWork.cancel()
@@ -74,7 +80,8 @@ final class LocationContextSensor: ContextSensor, @unchecked Sendable {
                     annotations.append(CapturedAnnotation(source: "location_context", key: "lat", value: String(location.coordinate.latitude)))
                     annotations.append(CapturedAnnotation(source: "location_context", key: "lon", value: String(location.coordinate.longitude)))
                     if location.horizontalAccuracy >= 0 {
-                        annotations.append(CapturedAnnotation(source: "location_context", key: "accuracy", value: String(format: "%.0f", location.horizontalAccuracy)))
+                        annotations.append(
+                            CapturedAnnotation(source: "location_context", key: "accuracy", value: String(format: "%.0f", location.horizontalAccuracy)))
                     }
                 }
                 if let placemark {

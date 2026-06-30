@@ -1,7 +1,7 @@
-import SwiftUI
 import SwiftData
-// Related JIRA: KAN-9, KAN-46
+import SwiftUI
 
+// Related JIRA: KAN-9, KAN-46
 
 // MARK: - Block Rendering Views
 /// Extracted from ChatView.swift for file size management.
@@ -32,8 +32,12 @@ struct TableBlockView: View {
                     HStack(spacing: 0) {
                         ForEach(Array(table.headers.enumerated()), id: \.offset) { idx, header in
                             Button {
-                                if sortColumn == idx { sortAscending.toggle() }
-                                else { sortColumn = idx; sortAscending = true }
+                                if sortColumn == idx {
+                                    sortAscending.toggle()
+                                } else {
+                                    sortColumn = idx
+                                    sortAscending = true
+                                }
                             } label: {
                                 HStack(spacing: 4) {
                                     Text(header).font(.caption).fontWeight(.bold)
@@ -70,7 +74,10 @@ struct TableBlockView: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(.separator)))
-            HStack { Spacer(); Text("\(table.rows.count) rows").font(.caption2).foregroundStyle(.tertiary) }
+            HStack {
+                Spacer()
+                Text("\(table.rows.count) rows").font(.caption2).foregroundStyle(.tertiary)
+            }
         }
         .padding(.vertical, 4)
     }
@@ -87,7 +94,9 @@ struct ActionBlockView: View {
             }
             ForEach(Array(actions.items.enumerated()), id: \.offset) { idx, item in
                 HStack(spacing: 8) {
-                    Button { checked.insert(idx) } label: {
+                    Button {
+                        checked.insert(idx)
+                    } label: {
                         Image(systemName: checked.contains(idx) ? "checkmark.circle.fill" : "circle")
                             .font(.title3).foregroundStyle(checked.contains(idx) ? .green : .secondary)
                     }.buttonStyle(.plain)
@@ -182,7 +191,10 @@ struct CodeBlockView: View {
                 Button {
                     UIPasteboard.general.string = codeBlock.code
                     copied = true
-                    Task { try? await Task.sleep(nanoseconds: 2_000_000_000); copied = false }
+                    Task {
+                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                        copied = false
+                    }
                 } label: {
                     Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
                         .font(.caption2)
@@ -209,8 +221,12 @@ struct KnowledgeItemNavigationView: View {
 }
 
 struct EvidenceCardView: View {
-    let itemTitle: String; let itemID: UUID; let snippet: String
-    let segmentID: String?; let confidence: Double?; let edgeType: String?
+    let itemTitle: String
+    let itemID: UUID
+    let snippet: String
+    let segmentID: String?
+    let confidence: Double?
+    let edgeType: String?
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -221,7 +237,9 @@ struct EvidenceCardView: View {
                 HStack(spacing: 6) {
                     if let seg = segmentID { Text("Seg \(seg.prefix(8))").font(.system(size: 9)).foregroundStyle(.tertiary) }
                     if let conf = confidence { ConfidenceBadge(value: conf) }
-                    if let et = edgeType { Text(et).font(.system(size: 9)).padding(.horizontal,4).padding(.vertical,1).background(Color.blue.opacity(0.1)).clipShape(Capsule()) }
+                    if let et = edgeType {
+                        Text(et).font(.system(size: 9)).padding(.horizontal, 4).padding(.vertical, 1).background(Color.blue.opacity(0.1)).clipShape(Capsule())
+                    }
                 }
             }
             Spacer()
@@ -243,7 +261,8 @@ struct ConfidenceBadge: View {
 }
 
 struct AIGeneratedBadge: View {
-    let confidence: Double?; let source: String?
+    let confidence: Double?
+    let source: String?
 
     var body: some View {
         HStack(spacing: 4) {
@@ -283,10 +302,24 @@ struct FileLinkCardView: View {
     }
 
     private func typeIcon(_ t: String) -> String {
-        switch t { case "note": "doc.text"; case "audio": "mic"; case "image": "photo"; case "journalEntry": "book"; case "webBookmark": "bookmark"; default: "doc" }
+        switch t {
+        case "note": "doc.text"
+        case "audio": "mic"
+        case "image": "photo"
+        case "journalEntry": "book"
+        case "webBookmark": "bookmark"
+        default: "doc"
+        }
     }
     private func typeColor(_ t: String) -> Color {
-        switch t { case "note": .orange; case "audio": .blue; case "image": .pink; case "journalEntry": .purple; case "webBookmark": .green; default: .secondary }
+        switch t {
+        case "note": .orange
+        case "audio": .blue
+        case "image": .pink
+        case "journalEntry": .purple
+        case "webBookmark": .green
+        default: .secondary
+        }
     }
 }
 
@@ -461,10 +494,19 @@ struct ProjectContextCardView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(data.projectName).font(.subheadline).fontWeight(.semibold)
                     HStack(spacing: 8) {
-                        HStack(spacing: 3) { Image(systemName: "checklist").font(.system(size: 9)); Text("\(data.taskCount)").font(.caption2) }.foregroundStyle(.secondary)
-                        HStack(spacing: 3) { Image(systemName: "doc").font(.system(size: 9)); Text("\(data.itemCount)").font(.caption2) }.foregroundStyle(.secondary)
+                        HStack(spacing: 3) {
+                            Image(systemName: "checklist").font(.system(size: 9))
+                            Text("\(data.taskCount)").font(.caption2)
+                        }.foregroundStyle(.secondary)
+                        HStack(spacing: 3) {
+                            Image(systemName: "doc").font(.system(size: 9))
+                            Text("\(data.itemCount)").font(.caption2)
+                        }.foregroundStyle(.secondary)
                         if data.signalCount > 0 {
-                            HStack(spacing: 3) { Image(systemName: "waveform.path.ecg").font(.system(size: 9)); Text("\(data.signalCount)").font(.caption2) }.foregroundStyle(.orange)
+                            HStack(spacing: 3) {
+                                Image(systemName: "waveform.path.ecg").font(.system(size: 9))
+                                Text("\(data.signalCount)").font(.caption2)
+                            }.foregroundStyle(.orange)
                         }
                     }
                 }
@@ -474,14 +516,18 @@ struct ProjectContextCardView: View {
                 Divider().padding(.vertical, 6)
                 HStack(spacing: 6) {
                     ForEach(["ls tasks/", "ls items/", "cat project.json"], id: \.self) { cmd in
-                        Button { onRunCommand?(cmd) } label: {
+                        Button {
+                            onRunCommand?(cmd)
+                        } label: {
                             Text(cmd).font(.caption2).padding(.horizontal, 8).padding(.vertical, 4)
                                 .background(.ultraThinMaterial).clipShape(Capsule())
                         }.buttonStyle(.plain)
                     }
                 }
             }
-            Button { withAnimation { expanded.toggle() } } label: {
+            Button {
+                withAnimation { expanded.toggle() }
+            } label: {
                 HStack(spacing: 2) {
                     Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 9))
                     Text(expanded ? "Less" : "Actions").font(.caption2)
@@ -506,12 +552,17 @@ struct TaskCardView: View {
     private let swipeThreshold: CGFloat = -80
 
     var body: some View {
-        if dismissed { EmptyView() } else {
+        if dismissed {
+            EmptyView()
+        } else {
             ZStack {
                 HStack(spacing: 0) {
                     Spacer()
                     Button {
-                        withAnimation(.spring(response: 0.3)) { confirmed = true; offsetX = 0 }
+                        withAnimation(.spring(response: 0.3)) {
+                            confirmed = true
+                            offsetX = 0
+                        }
                         let path = "tasks/\(data.taskID)"
                         onRunCommand?("echo '{\"status\":\"done\"}' > \(path)")
                     } label: {
@@ -560,7 +611,9 @@ struct TaskCardView: View {
                                     .frame(maxWidth: .infinity).padding(.vertical, 7)
                                     .background(.thinMaterial).clipShape(RoundedRectangle(cornerRadius: 8))
                             }.buttonStyle(.plain)
-                            Button { dismissed = true } label: {
+                            Button {
+                                dismissed = true
+                            } label: {
                                 Label("Cancel", systemImage: "xmark").font(.caption2)
                                     .frame(maxWidth: .infinity).padding(.vertical, 7)
                                     .background(.thinMaterial).clipShape(RoundedRectangle(cornerRadius: 8))
@@ -570,24 +623,24 @@ struct TaskCardView: View {
                 }
                 .padding(12).background(.regularMaterial).clipShape(RoundedRectangle(cornerRadius: 12))
                 .offset(x: offsetX)
-                .gesture(DragGesture()
-                    .onChanged { value in
-                        guard !confirmed else { return }
-                        let translation = value.translation.width
-                        if translation < 0 { offsetX = max(translation, -150) }
-                        else if offsetX < 0 { offsetX = min(translation + offsetX, 0) }
-                    }
-                    .onEnded { value in
-                        guard !confirmed else { return }
-                        let velocity = value.predictedEndTranslation.width - value.translation.width
-                        if offsetX < swipeThreshold || velocity < -200 {
-                            withAnimation(.spring(response: 0.3)) { offsetX = -140 }
-                            showActions = true
-                        } else {
-                            withAnimation(.spring(response: 0.3)) { offsetX = 0 }
-                            showActions = false
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in
+                            guard !confirmed else { return }
+                            let translation = value.translation.width
+                            if translation < 0 { offsetX = max(translation, -150) } else if offsetX < 0 { offsetX = min(translation + offsetX, 0) }
                         }
-                    }
+                        .onEnded { value in
+                            guard !confirmed else { return }
+                            let velocity = value.predictedEndTranslation.width - value.translation.width
+                            if offsetX < swipeThreshold || velocity < -200 {
+                                withAnimation(.spring(response: 0.3)) { offsetX = -140 }
+                                showActions = true
+                            } else {
+                                withAnimation(.spring(response: 0.3)) { offsetX = 0 }
+                                showActions = false
+                            }
+                        }
                 )
             }
         }
@@ -606,7 +659,7 @@ struct TaskCardView: View {
             Image(systemName: icon).font(.system(size: 8))
             Text(p.capitalized).font(.caption2)
         }.padding(.horizontal, 6).padding(.vertical, 2)
-        .background(color.opacity(0.12)).clipShape(Capsule()).foregroundStyle(color)
+            .background(color.opacity(0.12)).clipShape(Capsule()).foregroundStyle(color)
     }
 }
 
@@ -654,7 +707,10 @@ struct ItemCardView: View {
                         Text(data.type.capitalized).font(.caption2).foregroundStyle(.secondary)
                         Text("·").foregroundStyle(.tertiary)
                         Text(data.status.capitalized).font(.caption2).foregroundStyle(.secondary)
-                        if let dur = data.durationSeconds { Text("·").foregroundStyle(.tertiary); Text(formatDuration(dur)).font(.caption2).foregroundStyle(.secondary) }
+                        if let dur = data.durationSeconds {
+                            Text("·").foregroundStyle(.tertiary)
+                            Text(formatDuration(dur)).font(.caption2).foregroundStyle(.secondary)
+                        }
                     }
                 }
                 Spacer()
@@ -665,32 +721,46 @@ struct ItemCardView: View {
             }
             .padding(12).background(.regularMaterial).clipShape(RoundedRectangle(cornerRadius: 12))
             .offset(x: offsetX)
-            .gesture(DragGesture()
-                .onChanged { value in
-                    let translation = value.translation.width
-                    if translation < 0 { offsetX = max(translation, -150) }
-                    else if offsetX < 0 { offsetX = min(translation + offsetX, 0) }
-                }
-                .onEnded { value in
-                    let velocity = value.predictedEndTranslation.width - value.translation.width
-                    if offsetX < swipeThreshold || velocity < -200 {
-                        withAnimation(.spring(response: 0.3)) { offsetX = -140 }
-                        showActions = true
-                    } else {
-                        withAnimation(.spring(response: 0.3)) { offsetX = 0 }
-                        showActions = false
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        let translation = value.translation.width
+                        if translation < 0 { offsetX = max(translation, -150) } else if offsetX < 0 { offsetX = min(translation + offsetX, 0) }
                     }
-                }
+                    .onEnded { value in
+                        let velocity = value.predictedEndTranslation.width - value.translation.width
+                        if offsetX < swipeThreshold || velocity < -200 {
+                            withAnimation(.spring(response: 0.3)) { offsetX = -140 }
+                            showActions = true
+                        } else {
+                            withAnimation(.spring(response: 0.3)) { offsetX = 0 }
+                            showActions = false
+                        }
+                    }
             )
         }
     }
     private func typeIcon(_ t: String) -> String {
-        switch t { case "audio": "mic.fill"; case "note": "doc.text.fill"; case "image": "photo.fill"; default: "doc.fill" }
+        switch t {
+        case "audio": "mic.fill"
+        case "note": "doc.text.fill"
+        case "image": "photo.fill"
+        default: "doc.fill"
+        }
     }
     private func typeColor(_ t: String) -> Color {
-        switch t { case "audio": .red; case "note": .blue; case "image": .purple; default: .secondary }
+        switch t {
+        case "audio": .red
+        case "note": .blue
+        case "image": .purple
+        default: .secondary
+        }
     }
-    private func formatDuration(_ s: Double) -> String { let m = Int(s)/60; let sec = Int(s)%60; return "\(m):\(String(format:"%02d",sec))" }
+    private func formatDuration(_ s: Double) -> String {
+        let m = Int(s) / 60
+        let sec = Int(s) % 60
+        return "\(m):\(String(format:"%02d",sec))"
+    }
 }
 
 // MARK: - Search Results + Analysis + Choice + Confirmation
@@ -805,14 +875,16 @@ struct ConfirmationView: View {
             if !resolved {
                 HStack(spacing: 8) {
                     Button {
-                        resolved = true; onChooseOption?(data.confirmValue)
+                        resolved = true
+                        onChooseOption?(data.confirmValue)
                     } label: {
                         Label(data.confirmLabel, systemImage: "checkmark").font(.caption).fontWeight(.medium)
                             .frame(maxWidth: .infinity).padding(.vertical, 8)
                             .background(.thinMaterial).clipShape(RoundedRectangle(cornerRadius: 8))
                     }.buttonStyle(.plain)
                     Button {
-                        resolved = true; onChooseOption?(data.cancelValue)
+                        resolved = true
+                        onChooseOption?(data.cancelValue)
                     } label: {
                         Text(data.cancelLabel).font(.caption).frame(maxWidth: .infinity).padding(.vertical, 8)
                             .background(.thinMaterial).clipShape(RoundedRectangle(cornerRadius: 8))

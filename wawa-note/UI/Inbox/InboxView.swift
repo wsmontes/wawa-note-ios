@@ -1,7 +1,7 @@
-import SwiftUI
 import SwiftData
-// Related JIRA: KAN-10, KAN-49, KAN-105
+import SwiftUI
 
+// Related JIRA: KAN-10, KAN-49, KAN-105
 
 struct InboxView: View {
     @Environment(\.modelContext) private var modelContext
@@ -82,7 +82,9 @@ struct InboxView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     let count = TrashService(context: modelContext).emptyTrashItemCount()
                     if count > 0 {
-                        Button(role: .destructive) { showEmptyTrashConfirm = true } label: {
+                        Button(role: .destructive) {
+                            showEmptyTrashConfirm = true
+                        } label: {
                             Label("Empty Trash (\(count))", systemImage: "trash.slash")
                         }
                     }
@@ -106,10 +108,18 @@ struct InboxView: View {
             Text("This will permanently delete \(count) item(s). This action cannot be undone.")
         }
         .onChange(of: searchText) { _, newValue in
-            if newValue.isEmpty { matchingIDs = []; searchResults = [] }
-            else { performSearch() }
+            if newValue.isEmpty {
+                matchingIDs = []
+                searchResults = []
+            } else {
+                performSearch()
+            }
         }
-        .onAppear { chatState.context = .inbox; chatViewModel.pregenerateGreeting(for: .inbox); loadTrashFolder() }
+        .onAppear {
+            chatState.context = .inbox
+            chatViewModel.pregenerateGreeting(for: .inbox)
+            loadTrashFolder()
+        }
         .sheet(item: $showFolderPicker) { item in
             folderPickerSheet(for: item)
         }
@@ -165,17 +175,26 @@ struct InboxView: View {
                             inboxRow(item)
                         }
                         .contextMenu {
-                            Button { archiveItem(item) } label: {
+                            Button {
+                                archiveItem(item)
+                            } label: {
                                 Label("Remove from Inbox", systemImage: "checkmark.circle")
                             }
-                            Button { showFolderPicker = item } label: {
+                            Button {
+                                showFolderPicker = item
+                            } label: {
                                 Label("Move to Project", systemImage: "folder.badge.plus")
                             }
                             Divider()
-                            Button { shareItem(item) } label: {
+                            Button {
+                                shareItem(item)
+                            } label: {
                                 Label("Share", systemImage: "square.and.arrow.up")
                             }
-                            Button(role: .destructive) { itemToDelete = item; showDeleteConfirmation = true } label: {
+                            Button(role: .destructive) {
+                                itemToDelete = item
+                                showDeleteConfirmation = true
+                            } label: {
                                 Label("Trash", systemImage: "trash")
                             }
                         } preview: {
@@ -183,11 +202,15 @@ struct InboxView: View {
                         }
                         .swipeActions(edge: .leading) {
                             if filterMode == .trash {
-                                Button { try? TrashService(context: modelContext).restore(item) } label: {
+                                Button {
+                                    try? TrashService(context: modelContext).restore(item)
+                                } label: {
                                     Label("Restore", systemImage: "arrow.uturn.backward")
                                 }.tint(.green)
                             } else {
-                                Button { archiveItem(item) } label: {
+                                Button {
+                                    archiveItem(item)
+                                } label: {
                                     Label("Remove from Inbox", systemImage: "checkmark.circle")
                                 }.tint(.green)
                             }
@@ -200,10 +223,15 @@ struct InboxView: View {
                                     Label("Restore", systemImage: "arrow.uturn.backward")
                                 }.tint(.green)
                             } else {
-                                Button { showFolderPicker = item } label: {
+                                Button {
+                                    showFolderPicker = item
+                                } label: {
                                     Label("Move to Project", systemImage: "folder.badge.plus")
                                 }.tint(.blue)
-                                Button(role: .destructive) { itemToDelete = item; showDeleteConfirmation = true } label: {
+                                Button(role: .destructive) {
+                                    itemToDelete = item
+                                    showDeleteConfirmation = true
+                                } label: {
                                     Label("Trash", systemImage: "trash")
                                 }
                             }
@@ -398,8 +426,7 @@ struct InboxView: View {
 
         // Full-text search via SearchService
         if !searchText.isEmpty {
-            if matchingIDs.isEmpty { result = [] }
-            else { result = result.filter { matchingIDs.contains($0.id) } }
+            if matchingIDs.isEmpty { result = [] } else { result = result.filter { matchingIDs.contains($0.id) } }
         }
 
         switch filterMode {
@@ -511,7 +538,8 @@ struct InboxView: View {
         let text = item.bodyText ?? item.title
         let av = UIActivityViewController(activityItems: [text], applicationActivities: nil)
         if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let root = scene.windows.first?.rootViewController {
+            let root = scene.windows.first?.rootViewController
+        {
             root.present(av, animated: true)
         }
     }
@@ -553,7 +581,8 @@ struct InboxView: View {
                     if projects.isEmpty {
                         VStack(spacing: 8) {
                             Text("No projects yet").font(.headline)
-                            Text("Promote a knowledge item from the Explore tab to create your first project.").font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                            Text("Promote a knowledge item from the Explore tab to create your first project.").font(.subheadline).foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
                         }.padding(.vertical, 24)
                     }
                 }
@@ -614,7 +643,9 @@ struct UndoToastView: View {
                 .foregroundStyle(.blue)
                 .accessibilityLabel("Undo delete")
                 .accessibilityHint("Restores the most recently trashed item")
-            Button { onDismiss() } label: {
+            Button {
+                onDismiss()
+            } label: {
                 Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
             }
             .accessibilityLabel("Dismiss undo")

@@ -3,8 +3,8 @@ import Combine
 import OSLog
 import SwiftData
 import UIKit
-// Related JIRA: KAN-5, KAN-14, KAN-17, KAN-77
 
+// Related JIRA: KAN-5, KAN-14, KAN-17, KAN-77
 
 extension Notification.Name {
     /// Posted after crash-recovered orphaned recordings have been cleaned up

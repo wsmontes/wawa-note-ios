@@ -1,6 +1,6 @@
 import SwiftUI
-// Related JIRA: KAN-141
 
+// Related JIRA: KAN-141
 
 /// Routes a VFSNode to the appropriate editor view based on file type.
 @MainActor
@@ -15,7 +15,7 @@ enum FileEditorRouter {
         case .jsonFile:
             JSONEditorView(node: node, viewModel: viewModel)
         case .projectFile:
-            JSONEditorView(node: node, viewModel: viewModel) // project.json is JSON
+            JSONEditorView(node: node, viewModel: viewModel)  // project.json is JSON
         case .audioFile:
             audioPlayerView(node: node, viewModel: viewModel)
         case .imageFile:
@@ -34,7 +34,8 @@ enum FileEditorRouter {
         if let audioURL = viewModel.resolveAudioURL(for: node.path) {
             AudioPlayerView(
                 audioURL: audioURL,
-                title: node.name.replacingOccurrences(of: ".m4a", with: "").replacingOccurrences(of: ".mp3", with: "").replacingOccurrences(of: ".wav", with: "")
+                title: node.name.replacingOccurrences(of: ".m4a", with: "").replacingOccurrences(of: ".mp3", with: "").replacingOccurrences(
+                    of: ".wav", with: "")
             )
             .padding()
             .navigationTitle(node.name)
@@ -185,7 +186,14 @@ struct ZoomableImageView: View {
                 .gesture(
                     MagnificationGesture()
                         .onChanged { v in scale = lastScale * v }
-                        .onEnded { _ in lastScale = scale; if scale < 1 { scale = 1; lastScale = 1; offset = .zero } }
+                        .onEnded { _ in
+                            lastScale = scale
+                            if scale < 1 {
+                                scale = 1
+                                lastScale = 1
+                                offset = .zero
+                            }
+                        }
                 )
                 .gesture(
                     DragGesture()
@@ -196,7 +204,12 @@ struct ZoomableImageView: View {
                 .background(.black)
         }
         .onTapGesture(count: 2) {
-            withAnimation { scale = 1.0; lastScale = 1.0; offset = .zero; lastOffset = .zero }
+            withAnimation {
+                scale = 1.0
+                lastScale = 1.0
+                offset = .zero
+                lastOffset = .zero
+            }
         }
     }
 }

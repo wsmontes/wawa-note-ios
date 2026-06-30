@@ -1,5 +1,6 @@
 import SwiftData
 import XCTest
+
 @testable import Wawa_Note
 
 @MainActor
@@ -190,7 +191,7 @@ final class ProjectDerivedItemMigrationTests: XCTestCase {
         let schema = Schema([
             TaskItem.self,
             AgentSuggestion.self,
-            ProjectDerivedItem.self
+            ProjectDerivedItem.self,
         ])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: config)
@@ -241,7 +242,7 @@ final class ProjectDerivedItemMigrationTests: XCTestCase {
         let schema = Schema([
             TaskItem.self,
             AgentSuggestion.self,
-            ProjectDerivedItem.self
+            ProjectDerivedItem.self,
         ])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: config)

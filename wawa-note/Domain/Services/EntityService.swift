@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
-// Related JIRA: KAN-8, KAN-29
 
+// Related JIRA: KAN-8, KAN-29
 
 @MainActor
 final class EntityService {

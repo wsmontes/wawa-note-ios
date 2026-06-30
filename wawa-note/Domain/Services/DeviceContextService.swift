@@ -1,17 +1,17 @@
-import Foundation
-import EventKit
 import Contacts
 import CoreLocation
+import EventKit
+import Foundation
 import SwiftData
-// Related JIRA: KAN-151
 
+// Related JIRA: KAN-151
 
 // MARK: - Device Context Enrichment
 
 enum DeviceEnrichment {
     case calendarEvent(CalendarMatch)
     case contact(ContactMatch)
-    case location(String) // Location name
+    case location(String)  // Location name
 }
 
 struct CalendarMatch {
@@ -71,15 +71,15 @@ final class DeviceContextService {
         guard status == .fullAccess || status == .writeOnly else { return nil }
 
         let itemDate = item.createdAt
-        let windowStart = itemDate.addingTimeInterval(-3600) // 1h before
-        let windowEnd = itemDate.addingTimeInterval(3600)    // 1h after
+        let windowStart = itemDate.addingTimeInterval(-3600)  // 1h before
+        let windowEnd = itemDate.addingTimeInterval(3600)  // 1h after
 
         let predicate = eventStore.predicateForEvents(withStart: windowStart, end: windowEnd, calendars: nil)
         let events = eventStore.events(matching: predicate)
 
         // Find closest event by time proximity
         guard let closest = events.min(by: { abs($0.startDate.timeIntervalSince(itemDate)) < abs($1.startDate.timeIntervalSince(itemDate)) }),
-              abs(closest.startDate.timeIntervalSince(itemDate)) < 1800 // Within 30 min
+            abs(closest.startDate.timeIntervalSince(itemDate)) < 1800  // Within 30 min
         else { return nil }
 
         let attendees = (closest.attendees ?? []).compactMap { $0.name ?? $0.url.absoluteString }
@@ -120,7 +120,7 @@ final class DeviceContextService {
             CNContactEmailAddressesKey as CNKeyDescriptor,
             CNContactPhoneNumbersKey as CNKeyDescriptor,
             CNContactOrganizationNameKey as CNKeyDescriptor,
-            CNContactIdentifierKey as CNKeyDescriptor
+            CNContactIdentifierKey as CNKeyDescriptor,
         ]
 
         let request = CNContactFetchRequest(keysToFetch: keys)
@@ -131,17 +131,18 @@ final class DeviceContextService {
                 let fullName = "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces)
                 guard !fullName.isEmpty else { return }
                 // Check if contact name appears in item content
-                if searchText.localizedCaseInsensitiveContains(contact.givenName) ||
-                   searchText.localizedCaseInsensitiveContains(contact.familyName) ||
-                   searchText.localizedCaseInsensitiveContains(fullName) {
-                    matches.append(ContactMatch(
-                        contactID: contact.identifier,
-                        displayName: fullName,
-                        email: contact.emailAddresses.first?.value as String?,
-                        phone: contact.phoneNumbers.first?.value.stringValue,
-                        organization: contact.organizationName.isEmpty ? nil : contact.organizationName,
-                        hasRecentCalls: false // Call history requires CallKit, deferred
-                    ))
+                if searchText.localizedCaseInsensitiveContains(contact.givenName) || searchText.localizedCaseInsensitiveContains(contact.familyName)
+                    || searchText.localizedCaseInsensitiveContains(fullName)
+                {
+                    matches.append(
+                        ContactMatch(
+                            contactID: contact.identifier,
+                            displayName: fullName,
+                            email: contact.emailAddresses.first?.value as String?,
+                            phone: contact.phoneNumbers.first?.value.stringValue,
+                            organization: contact.organizationName.isEmpty ? nil : contact.organizationName,
+                            hasRecentCalls: false  // Call history requires CallKit, deferred
+                        ))
                 }
             }
         } catch {

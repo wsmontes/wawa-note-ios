@@ -1,9 +1,9 @@
 import AVFoundation
 import AudioToolbox
-import UniformTypeIdentifiers
 import OSLog
-// Related JIRA: KAN-12, KAN-62
+import UniformTypeIdentifiers
 
+// Related JIRA: KAN-12, KAN-62
 
 struct ImportMetadata {
     let duration: TimeInterval
@@ -19,7 +19,7 @@ final class AudioImportService: @unchecked Sendable {
 
     static let supportedUTTypes: [UTType] = [
         .mpeg4Audio, .mp3, .wav, .aiff,
-        .mpeg4Movie, .quickTimeMovie, .movie
+        .mpeg4Movie, .quickTimeMovie, .movie,
     ]
 
     func canRead(url: URL) -> Bool {
@@ -87,15 +87,18 @@ final class AudioImportService: @unchecked Sendable {
 
         let format = url.pathExtension.uppercased()
         let filename = url.deletingPathExtension().lastPathComponent
-        let sanitized = filename
+        let sanitized =
+            filename
             .replacingOccurrences(of: "PTT-\\d{8}-", with: "", options: .regularExpression)
             .replacingOccurrences(of: "WA\\d+", with: "", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "_- "))
         let title = sanitized.isEmpty ? filename : sanitized
 
         guard FileManager.default.fileExists(atPath: url.path) else {
-            throw ImportError.conversionFailed(NSError(domain: "import", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "File not found at path"]))
+            throw ImportError.conversionFailed(
+                NSError(
+                    domain: "import", code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "File not found at path"]))
         }
 
         // AVAsset is safe for duration on any format. AVAudioPlayer is used as
@@ -107,8 +110,10 @@ final class AudioImportService: @unchecked Sendable {
         let effectiveDuration = max(playerDuration, assetDuration)
 
         guard effectiveDuration > 0 else {
-            throw ImportError.conversionFailed(NSError(domain: "import", code: -2,
-                userInfo: [NSLocalizedDescriptionKey: "Cannot read audio duration"]))
+            throw ImportError.conversionFailed(
+                NSError(
+                    domain: "import", code: -2,
+                    userInfo: [NSLocalizedDescriptionKey: "Cannot read audio duration"]))
         }
 
         return ImportMetadata(
@@ -127,15 +132,19 @@ final class AudioImportService: @unchecked Sendable {
         try? FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
 
         guard FileManager.default.fileExists(atPath: inputURL.path) else {
-            throw ImportError.conversionFailed(NSError(domain: "import", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Source file not found"]))
+            throw ImportError.conversionFailed(
+                NSError(
+                    domain: "import", code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Source file not found"]))
         }
 
         var inputFile: ExtAudioFileRef?
         var status = ExtAudioFileOpenURL(inputURL as CFURL, &inputFile)
         guard status == noErr, let inputFile else {
-            throw ImportError.conversionFailed(NSError(domain: "import", code: -2,
-                userInfo: [NSLocalizedDescriptionKey: "Cannot open file (OSStatus \(status))"]))
+            throw ImportError.conversionFailed(
+                NSError(
+                    domain: "import", code: -2,
+                    userInfo: [NSLocalizedDescriptionKey: "Cannot open file (OSStatus \(status))"]))
         }
         defer { ExtAudioFileDispose(inputFile) }
 
@@ -143,8 +152,10 @@ final class AudioImportService: @unchecked Sendable {
         var propSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         status = ExtAudioFileGetProperty(inputFile, kExtAudioFileProperty_FileDataFormat, &propSize, &sourceFormat)
         guard status == noErr else {
-            throw ImportError.conversionFailed(NSError(domain: "import", code: -3,
-                userInfo: [NSLocalizedDescriptionKey: "Cannot read source format"]))
+            throw ImportError.conversionFailed(
+                NSError(
+                    domain: "import", code: -3,
+                    userInfo: [NSLocalizedDescriptionKey: "Cannot read source format"]))
         }
 
         let channels = sourceFormat.mChannelsPerFrame
@@ -163,8 +174,10 @@ final class AudioImportService: @unchecked Sendable {
         propSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         status = ExtAudioFileSetProperty(inputFile, kExtAudioFileProperty_ClientDataFormat, propSize, &clientFormat)
         guard status == noErr else {
-            throw ImportError.conversionFailed(NSError(domain: "import", code: -4,
-                userInfo: [NSLocalizedDescriptionKey: "Cannot set input client format (OSStatus \(status))"]))
+            throw ImportError.conversionFailed(
+                NSError(
+                    domain: "import", code: -4,
+                    userInfo: [NSLocalizedDescriptionKey: "Cannot set input client format (OSStatus \(status))"]))
         }
 
         var outputFormat = AudioStreamBasicDescription()
@@ -176,15 +189,19 @@ final class AudioImportService: @unchecked Sendable {
         var outputFile: ExtAudioFileRef?
         status = ExtAudioFileCreateWithURL(outputURL as CFURL, kAudioFileM4AType, &outputFormat, nil, AudioFileFlags.eraseFile.rawValue, &outputFile)
         guard status == noErr, let outputFile else {
-            throw ImportError.conversionFailed(NSError(domain: "import", code: -5,
-                userInfo: [NSLocalizedDescriptionKey: "Cannot create output file (OSStatus \(status))"]))
+            throw ImportError.conversionFailed(
+                NSError(
+                    domain: "import", code: -5,
+                    userInfo: [NSLocalizedDescriptionKey: "Cannot create output file (OSStatus \(status))"]))
         }
         defer { ExtAudioFileDispose(outputFile) }
 
         status = ExtAudioFileSetProperty(outputFile, kExtAudioFileProperty_ClientDataFormat, propSize, &clientFormat)
         guard status == noErr else {
-            throw ImportError.conversionFailed(NSError(domain: "import", code: -6,
-                userInfo: [NSLocalizedDescriptionKey: "Cannot set output client format (OSStatus \(status))"]))
+            throw ImportError.conversionFailed(
+                NSError(
+                    domain: "import", code: -6,
+                    userInfo: [NSLocalizedDescriptionKey: "Cannot set output client format (OSStatus \(status))"]))
         }
 
         let framesPerRead: UInt32 = 4096
@@ -215,8 +232,10 @@ final class AudioImportService: @unchecked Sendable {
 
             if readFrameCount == 0 { break }
             if writeErr != noErr {
-                throw ImportError.conversionFailed(NSError(domain: "import", code: -7,
-                    userInfo: [NSLocalizedDescriptionKey: "Write error (OSStatus \(writeErr))"]))
+                throw ImportError.conversionFailed(
+                    NSError(
+                        domain: "import", code: -7,
+                        userInfo: [NSLocalizedDescriptionKey: "Write error (OSStatus \(writeErr))"]))
             }
         }
 

@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
-// Related JIRA: KAN-143
 
+// Related JIRA: KAN-143
 
 @MainActor
 final class TrashService {

@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
-// Related JIRA: KAN-54, KAN-144
 
+// Related JIRA: KAN-54, KAN-144
 
 @MainActor
 final class OnThisDayService {
@@ -26,7 +26,8 @@ final class OnThisDayService {
             return []
         }
 
-        return allItems
+        return
+            allItems
             .filter { item in
                 let itemYear = cal.component(.year, from: item.createdAt)
                 let itemMonth = cal.component(.month, from: item.createdAt)

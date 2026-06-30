@@ -1,7 +1,7 @@
-import WatchConnectivity
 import OSLog
-// Related JIRA: KAN-153
+import WatchConnectivity
 
+// Related JIRA: KAN-153
 
 final class iOSWatchSessionManager: NSObject, WCSessionDelegate, @unchecked Sendable {
     private let coordinator: RecordingCoordinator
@@ -99,7 +99,7 @@ final class iOSWatchSessionManager: NSObject, WCSessionDelegate, @unchecked Send
                     WatchMessageKey.state: "error",
                     WatchMessageKey.elapsedTime: 0,
                     WatchMessageKey.audioLevel: 0,
-                    WatchMessageKey.isActive: false
+                    WatchMessageKey.isActive: false,
                 ])
                 return
             }
@@ -134,7 +134,8 @@ final class iOSWatchSessionManager: NSObject, WCSessionDelegate, @unchecked Send
         MainActor.assumeIsolated {
             switch command {
             case .startRecording:
-                _ = coordinator; coordinator.startRecording()
+                _ = coordinator
+                coordinator.startRecording()
             case .pauseRecording:
                 coordinator.pauseRecording()
             case .resumeRecording:

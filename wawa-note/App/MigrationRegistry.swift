@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
-// Related JIRA: KAN-58
 
+// Related JIRA: KAN-58
 
 /// Centralized registry for data migrations. Tracks which migrations have run
 /// via a plist file (not UserDefaults) with version, date, and success status.
@@ -10,8 +10,8 @@ final class MigrationRegistry {
 
     /// Single migration definition.
     struct Migration: Identifiable {
-        let id: String        // Unique key, e.g. "v1_meeting_to_audio"
-        let version: Int      // Ordering — lower runs first
+        let id: String  // Unique key, e.g. "v1_meeting_to_audio"
+        let version: Int  // Ordering — lower runs first
         let run: @MainActor (ModelContext) throws -> Void
     }
 
@@ -48,7 +48,8 @@ final class MigrationRegistry {
     static func runPendingMigrations(context: ModelContext) {
         let applied = loadRecords()
         let appliedIDs = Set(applied.map(\.id))
-        let pending = migrations
+        let pending =
+            migrations
             .filter { !appliedIDs.contains($0.id) }
             .sorted { $0.version < $1.version }
 
@@ -74,7 +75,7 @@ final class MigrationRegistry {
     /// Returns all migration records (for debugging / settings display).
     static func loadRecords() -> [Record] {
         guard let data = try? Data(contentsOf: plistURL),
-              let records = try? PropertyListDecoder().decode([Record].self, from: data)
+            let records = try? PropertyListDecoder().decode([Record].self, from: data)
         else { return migrateLegacyFlags() }
         return records
     }

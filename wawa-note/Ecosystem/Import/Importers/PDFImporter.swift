@@ -1,8 +1,8 @@
 import Foundation
-import UniformTypeIdentifiers
 import PDFKit
-// Related JIRA: KAN-12, KAN-62
+import UniformTypeIdentifiers
 
+// Related JIRA: KAN-12, KAN-62
 
 struct PDFImporter: FormatImporter {
     let formatIdentifier = "pdf"
@@ -24,7 +24,8 @@ struct PDFImporter: FormatImporter {
             }
         }
 
-        let title = pdf.documentAttributes?[PDFDocumentAttribute.titleAttribute] as? String
+        let title =
+            pdf.documentAttributes?[PDFDocumentAttribute.titleAttribute] as? String
             ?? url.deletingPathExtension().lastPathComponent
 
         let item = KnowledgeItem(

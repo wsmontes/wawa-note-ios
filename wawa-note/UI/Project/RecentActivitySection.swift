@@ -1,5 +1,5 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 struct RecentActivitySection: View {
     let projectID: UUID
@@ -49,13 +49,14 @@ struct RecentActivitySection: View {
     private func combinedEvents() -> [ActivityEvent] {
         var events: [ActivityEvent] = []
         for item in recentItems.prefix(5) {
-            events.append(ActivityEvent(
-                id: item.id.uuidString,
-                title: item.title,
-                time: item.updatedAt,
-                icon: item.type == .audio ? "recordingtape" : "doc.text",
-                color: .blue
-            ))
+            events.append(
+                ActivityEvent(
+                    id: item.id.uuidString,
+                    title: item.title,
+                    time: item.updatedAt,
+                    icon: item.type == .audio ? "recordingtape" : "doc.text",
+                    color: .blue
+                ))
         }
         for derived in recentDerived.prefix(5) {
             let (icon, color): (String, Color) = {
@@ -68,12 +69,13 @@ struct RecentActivitySection: View {
                 case .question: return ("questionmark.bubble.fill", .blue)
                 }
             }()
-            events.append(ActivityEvent(
-                id: derived.id.uuidString,
-                title: derived.title,
-                time: derived.updatedAt,
-                icon: icon, color: color
-            ))
+            events.append(
+                ActivityEvent(
+                    id: derived.id.uuidString,
+                    title: derived.title,
+                    time: derived.updatedAt,
+                    icon: icon, color: color
+                ))
         }
         return events.sorted(by: { $0.time > $1.time })
     }

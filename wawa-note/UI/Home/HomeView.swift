@@ -1,12 +1,12 @@
-import SwiftUI
-import SwiftData
-import UniformTypeIdentifiers
 import AVFoundation
+import PhotosUI
+import SwiftData
+import SwiftUI
+import UniformTypeIdentifiers
 import Vision
 import VisionKit
-import PhotosUI
-// Related JIRA: KAN-10, KAN-48
 
+// Related JIRA: KAN-10, KAN-48
 
 // MARK: - HomeViewModel
 
@@ -25,7 +25,7 @@ final class HomeViewModel: ObservableObject {
     let importRouter = ImportRouter(importers: [
         AudioImportService(), PlainTextImporter(), MarkdownImporter(),
         JSONImporter(), PDFImporter(), HTMLImporter(), RTFImporter(),
-        SRTImporter(), ICSImporter(), AnarlogImporter()
+        SRTImporter(), ICSImporter(), AnarlogImporter(),
     ])
 
     private var modelContext: ModelContext?
@@ -34,7 +34,10 @@ final class HomeViewModel: ObservableObject {
     private var processingQueue: ProcessingQueueService?
     var services: ServiceContainer?
 
-    func configure(modelContext: ModelContext, contentPipeline: ContentPipelineService, coordinator: RecordingCoordinator, processingQueue: ProcessingQueueService? = nil, services: ServiceContainer? = nil) {
+    func configure(
+        modelContext: ModelContext, contentPipeline: ContentPipelineService, coordinator: RecordingCoordinator, processingQueue: ProcessingQueueService? = nil,
+        services: ServiceContainer? = nil
+    ) {
         self.modelContext = modelContext
         self.contentPipeline = contentPipeline
         self.coordinator = coordinator
@@ -47,9 +50,11 @@ final class HomeViewModel: ObservableObject {
     func handleFilePick(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
-            guard !urls.isEmpty else { importError = "No file was selected."; return }
-            if urls.count == 1, let url = urls.first { stageSingleImport(url) }
-            else { Task { await importFiles(urls, deleteSource: false) } }
+            guard !urls.isEmpty else {
+                importError = "No file was selected."
+                return
+            }
+            if urls.count == 1, let url = urls.first { stageSingleImport(url) } else { Task { await importFiles(urls, deleteSource: false) } }
         case .failure(let e): importError = e.localizedDescription
         }
     }
@@ -66,7 +71,8 @@ final class HomeViewModel: ObservableObject {
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
         try? FileManager.default.removeItem(at: tempURL)
         do { try FileManager.default.copyItem(at: url, to: tempURL) } catch {
-            importError = error.localizedDescription; return
+            importError = error.localizedDescription
+            return
         }
 
         if importer.formatIdentifier == "audio" {
@@ -95,12 +101,14 @@ final class HomeViewModel: ObservableObject {
         if let handle = try? FileHandle(forReadingFrom: url) {
             defer { try? handle.close() }
             if let data = try? handle.read(upToCount: 4096),
-               let text = String(data: data, encoding: .utf8) {
+                let text = String(data: data, encoding: .utf8)
+            {
                 snippet = String(text.prefix(500))
             }
         }
-        return TextImportPreview(formatIdentifier: importer.formatIdentifier, displayName: importer.displayName,
-                                  suggestedTitle: filename, fileSize: fileSize, creationDate: creationDate, textSnippet: snippet)
+        return TextImportPreview(
+            formatIdentifier: importer.formatIdentifier, displayName: importer.displayName,
+            suggestedTitle: filename, fileSize: fileSize, creationDate: creationDate, textSnippet: snippet)
     }
 
     func scanSharedDirectoryAndImport() async {
@@ -116,7 +124,8 @@ final class HomeViewModel: ObservableObject {
 
     private func importFiles(_ urls: [URL], deleteSource: Bool) async {
         guard let ctx = modelContext, let pipeline = contentPipeline else { return }
-        let total = urls.count; var imported = 0
+        let total = urls.count
+        var imported = 0
         await MainActor.run { importProgress = "Importing 0/\(total)..." }
 
         for url in urls {
@@ -145,10 +154,15 @@ final class HomeViewModel: ObservableObject {
             await MainActor.run { importProgress = "Importing \(imported)/\(total)..." }
         }
 
-        await MainActor.run { importProgress = nil; targetProjectForImport = nil }
+        await MainActor.run {
+            importProgress = nil
+            targetProjectForImport = nil
+        }
     }
 
-    private func importAudioFile(_ url: URL, importer: any FormatImporter, deleteSource: Bool, modelContext: ModelContext, pipeline: ContentPipelineService) async {
+    private func importAudioFile(_ url: URL, importer: any FormatImporter, deleteSource: Bool, modelContext: ModelContext, pipeline: ContentPipelineService)
+        async
+    {
         guard let coord = coordinator else { return }
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("import_\(UUID().uuidString)_\(url.lastPathComponent)")
         // Ensure temp file is always cleaned up, regardless of exit path
@@ -185,7 +199,9 @@ final class HomeViewModel: ObservableObject {
         }
     }
 
-    private func importTextFile(_ url: URL, importer: any FormatImporter, deleteSource: Bool, modelContext: ModelContext, pipeline: ContentPipelineService) async {
+    private func importTextFile(_ url: URL, importer: any FormatImporter, deleteSource: Bool, modelContext: ModelContext, pipeline: ContentPipelineService)
+        async
+    {
         do {
             let result = try await importer.importFromURL(url)
             let item = result.knowledgeItem
@@ -220,7 +236,8 @@ final class HomeViewModel: ObservableObject {
         if ["jpg", "jpeg", "png", "heic", "heif", "webp", "gif", "tiff", "bmp"].contains(ext) { return ext }
         // Try UTI
         if let resourceValues = try? url.resourceValues(forKeys: [.typeIdentifierKey]),
-           let uti = resourceValues.typeIdentifier {
+            let uti = resourceValues.typeIdentifier
+        {
             if uti.hasPrefix("public.image") || uti.hasPrefix("public.jpeg") || uti.hasPrefix("public.png") { return "jpg" }
         }
         return nil
@@ -230,7 +247,10 @@ final class HomeViewModel: ObservableObject {
         guard let data = try? Data(contentsOf: url), let image = UIImage(data: data) else { return }
         let itemService = services?.items
         let title = url.lastPathComponent
-        guard let item = try? itemService?.createItem(type: KnowledgeItemType.image, title: title, bodyText: nil, folderID: nil, durationSeconds: nil, languageCode: nil, tags: [], inboxDate: Date()) else { return }
+        guard
+            let item = try? itemService?.createItem(
+                type: KnowledgeItemType.image, title: title, bodyText: nil, folderID: nil, durationSeconds: nil, languageCode: nil, tags: [], inboxDate: Date())
+        else { return }
         // Save image
         let dir = FileArtifactStore().itemDirectoryURL(for: item.id)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -299,7 +319,8 @@ struct HomeView: View {
                 defaultSurface
                     .onAppear {
                         if let itemId = captureVM.savedItemId,
-                           let item = try? services.items.fetchItem(id: itemId) {
+                            let item = try? services.items.fetchItem(id: itemId)
+                        {
                             navigateToItem = item
                         }
                         captureVM.finishCapture()
@@ -327,7 +348,9 @@ struct HomeView: View {
         }
         .navigationDestination(item: $navigateToItem) { KnowledgeDetailView(itemID: $0.id) }
         .navigationDestination(item: $navigateToProject) { ProjectDetailView(project: $0) }
-        .fileImporter(isPresented: $importVM.showFilePicker, allowedContentTypes: importVM.importRouter.allUTTypes(), allowsMultipleSelection: true) { importVM.handleFilePick($0) }
+        .fileImporter(isPresented: $importVM.showFilePicker, allowedContentTypes: importVM.importRouter.allUTTypes(), allowsMultipleSelection: true) {
+            importVM.handleFilePick($0)
+        }
         .sheet(item: $importVM.pendingImport) { imp in
             ImportFormView(sourceURL: imp.url, kind: imp.kind, textImporter: imp.textImporter, isFromShareExtension: imp.isFromShareExtension) { item in
                 if let t = importVM.targetProjectForImport {
@@ -340,11 +363,18 @@ struct HomeView: View {
             .environmentObject(coordinator)
         }
         .onOpenURL { if $0.scheme == "wawanote" { Task { await importVM.scanSharedDirectoryAndImport() } } }
-        .alert("Import Error", isPresented: Binding(get: { importVM.importError != nil }, set: { if !$0 { importVM.importError = nil } })) { Button("OK") { importVM.importError = nil } } message: { Text(importVM.importError ?? "") }
-        .alert("Recording Error", isPresented: Binding(
-            get: { captureVM.errorMessage != nil && captureVM.recordingState == .idle },
-            set: { if !$0 { captureVM.errorMessage = nil } }
-        )) {
+        .alert("Import Error", isPresented: Binding(get: { importVM.importError != nil }, set: { if !$0 { importVM.importError = nil } })) {
+            Button("OK") { importVM.importError = nil }
+        } message: {
+            Text(importVM.importError ?? "")
+        }
+        .alert(
+            "Recording Error",
+            isPresented: Binding(
+                get: { captureVM.errorMessage != nil && captureVM.recordingState == .idle },
+                set: { if !$0 { captureVM.errorMessage = nil } }
+            )
+        ) {
             Button("OK") { captureVM.errorMessage = nil }
         } message: {
             Text(captureVM.errorMessage ?? "Could not start recording.")
@@ -427,46 +457,46 @@ struct HomeView: View {
             if !projects.isEmpty || !inboxItems.isEmpty {
                 ScrollView {
                     LazyVStack(spacing: 0) {
-            if !projects.isEmpty {
-                let recentProjects = Array(projects.prefix(5))
-                Text("Projects").font(.caption).foregroundStyle(.secondary).textCase(.uppercase)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20).padding(.bottom, 6)
-                VStack(spacing: 0) {
-                    ForEach(recentProjects) { project in projectRow(project) }
-                        .padding(.horizontal, 16).padding(.vertical, 4)
-                    if projects.count > 5 {
-                        NavigationLink(value: "explore:projects") {
-                            Text("See all \(projects.count) projects →").font(.caption).foregroundStyle(.blue)
-                        }.padding(.horizontal, 16).padding(.vertical, 6)
-                    }
-                }
-                .background(Color(.systemBackground))
-            }
+                        if !projects.isEmpty {
+                            let recentProjects = Array(projects.prefix(5))
+                            Text("Projects").font(.caption).foregroundStyle(.secondary).textCase(.uppercase)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 20).padding(.bottom, 6)
+                            VStack(spacing: 0) {
+                                ForEach(recentProjects) { project in projectRow(project) }
+                                    .padding(.horizontal, 16).padding(.vertical, 4)
+                                if projects.count > 5 {
+                                    NavigationLink(value: "explore:projects") {
+                                        Text("See all \(projects.count) projects →").font(.caption).foregroundStyle(.blue)
+                                    }.padding(.horizontal, 16).padding(.vertical, 6)
+                                }
+                            }
+                            .background(Color(.systemBackground))
+                        }
 
-            if !inboxItems.isEmpty {
-                let recentInbox = Array(inboxItems.prefix(5))
-                Text("Inbox").font(.caption).foregroundStyle(.secondary).textCase(.uppercase)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20).padding(.bottom, 6).padding(.top, 16)
-                VStack(spacing: 0) {
-                    ForEach(recentInbox) { item in inboxRow(item) }
-                        .padding(.horizontal, 16).padding(.vertical, 4)
-                    if inboxItems.count > 5 {
-                        NavigationLink(value: "explore:inbox") {
-                            Text("See all \(inboxItems.count) inbox items →").font(.caption).foregroundStyle(.blue)
-                        }.padding(.horizontal, 16).padding(.vertical, 6)
-                    }
-                }
-                .background(Color(.systemBackground))
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .frame(minHeight: min(CGFloat(recentInbox.count) * 52, 260))
-            }
+                        if !inboxItems.isEmpty {
+                            let recentInbox = Array(inboxItems.prefix(5))
+                            Text("Inbox").font(.caption).foregroundStyle(.secondary).textCase(.uppercase)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 20).padding(.bottom, 6).padding(.top, 16)
+                            VStack(spacing: 0) {
+                                ForEach(recentInbox) { item in inboxRow(item) }
+                                    .padding(.horizontal, 16).padding(.vertical, 4)
+                                if inboxItems.count > 5 {
+                                    NavigationLink(value: "explore:inbox") {
+                                        Text("See all \(inboxItems.count) inbox items →").font(.caption).foregroundStyle(.blue)
+                                    }.padding(.horizontal, 16).padding(.vertical, 6)
+                                }
+                            }
+                            .background(Color(.systemBackground))
+                            .listStyle(.plain)
+                            .scrollContentBackground(.hidden)
+                            .frame(minHeight: min(CGFloat(recentInbox.count) * 52, 260))
+                        }
 
-            if projects.isEmpty && inboxItems.isEmpty { Spacer() }
-                    } // LazyVStack
-                } // ScrollView
+                        if projects.isEmpty && inboxItems.isEmpty { Spacer() }
+                    }  // LazyVStack
+                }  // ScrollView
             }
         }
         .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { expandedProjectIDs = [] } }
@@ -494,14 +524,14 @@ struct HomeView: View {
                                 Image(systemName: "doc.text.viewfinder").font(.subheadline)
                                 Text("Scan").font(.caption2)
                             }.foregroundStyle(.primary).frame(width: 60, height: 52)
-                            .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
+                                .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
                         }.accessibilityLabel("Scan Documents").accessibilityHint("Scan a document or QR code")
                         Button(action: { showPhotoSourceMenu = true }) {
                             VStack(spacing: 4) {
                                 Image(systemName: "photo").font(.subheadline)
                                 Text("Photo").font(.caption2)
                             }.foregroundStyle(.primary).frame(width: 60, height: 52)
-                            .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
+                                .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
                         }.accessibilityLabel("Take Photo").accessibilityHint("Take a photo or choose from gallery")
                         Button(action: {
                             // Dismiss any stale import sheet before opening the file picker.
@@ -513,14 +543,14 @@ struct HomeView: View {
                                 Image(systemName: "square.and.arrow.down").font(.subheadline)
                                 Text("Import").font(.caption2)
                             }.foregroundStyle(.primary).frame(width: 60, height: 52)
-                            .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
+                                .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
                         }.accessibilityLabel("Import File").accessibilityHint("Import a file from your device")
                         Button(action: { showCreationSheet = true }) {
                             VStack(spacing: 4) {
                                 Image(systemName: "plus.circle").font(.subheadline)
                                 Text("New").font(.caption2)
                             }.foregroundStyle(.primary).frame(width: 60, height: 52)
-                            .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
+                                .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
                         }.accessibilityLabel("Create New Item").accessibilityHint("Create a new note, task, or journal entry")
                     }
                     .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 6).background(.bar)
@@ -561,24 +591,32 @@ struct HomeView: View {
             .accessibilityHint("Opens project details")
             .onLongPressGesture(minimumDuration: 0.4) {
                 withAnimation(.easeInOut(duration: 0.2)) {
-                    if isExpanded { expandedProjectIDs.remove(project.id) }
-                    else { expandedProjectIDs.insert(project.id) }
+                    if isExpanded { expandedProjectIDs.remove(project.id) } else { expandedProjectIDs.insert(project.id) }
                 }
             }
             .background(Color(.systemBackground))
             .swipeActions(edge: .leading) {
-                Button { navigateToProject = project } label: {
+                Button {
+                    navigateToProject = project
+                } label: {
                     Label("Tasks", systemImage: "checklist")
                 }.tint(.green)
-                Button { navigateToProject = project } label: {
+                Button {
+                    navigateToProject = project
+                } label: {
                     Label("Timeline", systemImage: "calendar.day.timeline.leading")
                 }.tint(.orange)
             }
             .swipeActions(edge: .trailing) {
-                Button { startRecordingFor(project) } label: {
+                Button {
+                    startRecordingFor(project)
+                } label: {
                     Label("Record", systemImage: "record.circle")
                 }.tint(.red)
-                Button { importVM.targetProjectForImport = project; importVM.showFilePicker = true } label: {
+                Button {
+                    importVM.targetProjectForImport = project
+                    importVM.showFilePicker = true
+                } label: {
                     Label("Import", systemImage: "square.and.arrow.down")
                 }.tint(.blue)
             }
@@ -587,7 +625,9 @@ struct HomeView: View {
                 Divider().padding(.leading, 56)
                 VStack(spacing: 0) {
                     ForEach(projectItems.prefix(5)) { item in
-                        Button { navigateToItem = item } label: {
+                        Button {
+                            navigateToItem = item
+                        } label: {
                             HStack(spacing: 8) {
                                 Image(systemName: item.type.icon).font(.caption).foregroundStyle(item.type.color)
                                 Text(item.title.isEmpty ? "Untitled" : item.title)
@@ -599,7 +639,9 @@ struct HomeView: View {
                         }
                     }
                     if projectItems.count > 5 {
-                        Button { navigateToProject = project } label: {
+                        Button {
+                            navigateToProject = project
+                        } label: {
                             Text("+\(projectItems.count - 5) more items").font(.caption).foregroundStyle(.blue)
                                 .padding(.horizontal, 20).padding(.vertical, 6)
                         }
@@ -748,7 +790,10 @@ struct HomeView: View {
                                     .accessibilityLabel("Pause Recording")
                             }
                         }
-                        Button(action: { UINotificationFeedbackGenerator().notificationOccurred(.success); captureVM.stopRecording() }) {
+                        Button(action: {
+                            UINotificationFeedbackGenerator().notificationOccurred(.success)
+                            captureVM.stopRecording()
+                        }) {
                             Text("Finish").font(.headline).foregroundStyle(.primary)
                                 .frame(width: 80, height: 44)
                                 .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 22))
@@ -763,7 +808,10 @@ struct HomeView: View {
                                     .font(.system(size: buttonIconSize)).foregroundStyle(.white)
                             }
                         }
-                        Button(action: { UINotificationFeedbackGenerator().notificationOccurred(.success); captureVM.stopRecording() }) {
+                        Button(action: {
+                            UINotificationFeedbackGenerator().notificationOccurred(.success)
+                            captureVM.stopRecording()
+                        }) {
                             Text("Finish").font(.headline).foregroundStyle(.primary)
                                 .frame(width: 80, height: 44)
                                 .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 22))
@@ -781,13 +829,19 @@ struct HomeView: View {
                                 .font(.subheadline).frame(maxWidth: 200, minHeight: 36)
                         }
                         .buttonStyle(.bordered)
-                        Button(action: { UINotificationFeedbackGenerator().notificationOccurred(.success); captureVM.stopRecording() }) {
+                        Button(action: {
+                            UINotificationFeedbackGenerator().notificationOccurred(.success)
+                            captureVM.stopRecording()
+                        }) {
                             Text("Finish").font(.headline).foregroundStyle(.secondary)
                                 .frame(width: 80, height: 44)
                         }
                     }
                 } else if isSwitching {
-                    Button(action: { UINotificationFeedbackGenerator().notificationOccurred(.success); captureVM.stopRecording() }) {
+                    Button(action: {
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                        captureVM.stopRecording()
+                    }) {
                         Text("Finish").font(.headline).foregroundStyle(.primary)
                             .frame(width: 80, height: 44)
                             .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 22))
@@ -800,7 +854,11 @@ struct HomeView: View {
 
     private func processPhotoItem(_ image: UIImage) async -> [KnowledgeItem] {
         let itemService = services.items
-        guard let item = try? itemService.createItem(type: KnowledgeItemType.image, title: "Photo", bodyText: nil, folderID: nil, durationSeconds: nil, languageCode: nil, tags: [], inboxDate: Date()) else { return [] }
+        guard
+            let item = try? itemService.createItem(
+                type: KnowledgeItemType.image, title: "Photo", bodyText: nil, folderID: nil, durationSeconds: nil, languageCode: nil, tags: [],
+                inboxDate: Date())
+        else { return [] }
         let store = FileArtifactStore()
         let dir = store.itemDirectoryURL(for: item.id)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -850,31 +908,42 @@ struct HomeView: View {
 // MARK: - Waveform
 
 struct ScrollingWaveformView: View {
-    let level: Float; let isRunning: Bool
-    @State private var offset: CGFloat = 0; @State private var timer: Timer?
+    let level: Float
+    let isRunning: Bool
+    @State private var offset: CGFloat = 0
+    @State private var timer: Timer?
 
     @EnvironmentObject private var services: ServiceContainer
     var body: some View {
         TimelineView(.animation) { _ in
             Canvas { context, size in
-                let midY = size.height / 2; let amp = size.height / 2 - 4
-                var path = Path(); path.move(to: CGPoint(x: 0, y: midY))
+                let midY = size.height / 2
+                let amp = size.height / 2 - 4
+                var path = Path()
+                path.move(to: CGPoint(x: 0, y: midY))
                 for i in 0...60 {
                     let x = size.width * CGFloat(i) / 60
                     let v = isRunning ? CGFloat(level) : 0.08
                     let y = midY + CGFloat(sin(Double(i) * 0.5 + offset) * Double(amp) * Double(v) * 1.5)
                     path.addLine(to: CGPoint(x: x, y: y))
                 }
-                context.stroke(path, with: .color(isRunning ? .red : .orange.opacity(0.4)),
-                               style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                context.stroke(
+                    path, with: .color(isRunning ? .red : .orange.opacity(0.4)),
+                    style: StrokeStyle(lineWidth: 2, lineCap: .round))
             }
         }
         .onChange(of: isRunning) { _, r in r ? start() : stop() }
         .onAppear { if isRunning { start() } }
         .onDisappear { stop() }
     }
-    private func start() { stop(); timer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { _ in Task { @MainActor in offset += 0.15 } } }
-    private func stop() { timer?.invalidate(); timer = nil }
+    private func start() {
+        stop()
+        timer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { _ in Task { @MainActor in offset += 0.15 } }
+    }
+    private func stop() {
+        timer?.invalidate()
+        timer = nil
+    }
 }
 
 // MARK: - ImportPending
@@ -912,7 +981,7 @@ struct ScannerView: UIViewControllerRepresentable {
 
         func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan) {
             var images: [UIImage] = []
-            for i in 0 ..< scan.pageCount { images.append(scan.imageOfPage(at: i)) }
+            for i in 0..<scan.pageCount { images.append(scan.imageOfPage(at: i)) }
             parent.scannedImages = images
             parent.dismiss()
         }
@@ -944,11 +1013,13 @@ final class ScannerViewModel: ObservableObject {
         let itemService = KnowledgeItemService(context: context)
         let title = images.count > 1 ? "Scanned Document (\(images.count) pages)" : "Scanned Document"
 
-        guard let item = try? itemService.createItem(
-            type: .image,
-            title: title,
-            bodyText: nil
-        ) else { return [] }
+        guard
+            let item = try? itemService.createItem(
+                type: .image,
+                title: title,
+                bodyText: nil
+            )
+        else { return [] }
 
         let dir = fileStore.itemDirectoryURL(for: item.id)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -968,7 +1039,8 @@ final class ScannerViewModel: ObservableObject {
             let model = AIConfigService.shared.featureConfig(for: "analysis")?.model ?? ""
             let firstPageURL = dir.appendingPathComponent("scan_0.jpg")
             if let analysis = try? await ImageAnalysisService().analyzeImage(firstPageURL, llmProvider: provider, model: model),
-               !analysis.isEmpty {
+                !analysis.isEmpty
+            {
                 contentParts.append(analysis)
             }
         } else {
@@ -1124,7 +1196,10 @@ struct PhotoPickerView: UIViewControllerRepresentable {
         init(_ parent: PhotoPickerView) { self.parent = parent }
 
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
-            guard let result = results.first else { parent.dismiss(); return }
+            guard let result = results.first else {
+                parent.dismiss()
+                return
+            }
             result.itemProvider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
                 guard let data, let image = UIImage(data: data) else { return }
                 Task { @MainActor [weak self] in

@@ -1,5 +1,5 @@
-import Foundation
 import EventKit
+import Foundation
 
 enum TimelineEntrySource {
     case wawaNote(KnowledgeItem)
@@ -44,7 +44,8 @@ struct TimelineEntry: Identifiable {
         self.source = .iphoneCalendar(ekEvent)
         self.contentType = nil
         self.mood = nil
-        self.durationMinutes = ekEvent.endDate.timeIntervalSince(ekEvent.startDate) > 0
+        self.durationMinutes =
+            ekEvent.endDate.timeIntervalSince(ekEvent.startDate) > 0
             ? Int(ekEvent.endDate.timeIntervalSince(ekEvent.startDate) / 60)
             : nil
         self.isAllDay = ekEvent.isAllDay
@@ -76,6 +77,6 @@ struct TimelineEntry: Identifiable {
 
     static func extractMood(from tags: [String]) -> String? {
         tags.first { $0.hasPrefix("mood/") }
-            .map { String($0.dropFirst(5)) } // "mood/great" → "great"
+            .map { String($0.dropFirst(5)) }  // "mood/great" → "great"
     }
 }

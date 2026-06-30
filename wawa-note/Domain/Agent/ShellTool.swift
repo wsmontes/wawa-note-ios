@@ -1,6 +1,6 @@
 import Foundation
-// Related JIRA: KAN-9, KAN-43
 
+// Related JIRA: KAN-9, KAN-43
 
 /// The single agent tool — a virtual filesystem shell.
 /// Replaces 47 individual tools with one `run_command` that the LLM

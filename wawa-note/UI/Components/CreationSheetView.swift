@@ -1,6 +1,6 @@
 import SwiftUI
-// Related JIRA: KAN-10, KAN-137, KAN-138, KAN-139
 
+// Related JIRA: KAN-10, KAN-137, KAN-138, KAN-139
 
 struct CreationSheetView: View {
     @Environment(\.dismiss) private var dismiss
@@ -29,10 +29,12 @@ struct CreationSheetView: View {
                     .font(.headline)
                     .padding(.top, 24)
 
-                LazyVGrid(columns: [
-                    GridItem(.flexible()),
-                    GridItem(.flexible())
-                ], spacing: 16) {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible()),
+                        GridItem(.flexible()),
+                    ], spacing: 16
+                ) {
                     creationButton(
                         title: "Note",
                         icon: "note.text",
@@ -101,7 +103,10 @@ struct CreationSheetView: View {
                     .textInputAutocapitalization(.never)
                 TextField("Title (optional)", text: $bookmarkTitle)
                 Button("Save") { createBookmark() }
-                Button("Cancel", role: .cancel) { bookmarkURL = ""; bookmarkTitle = "" }
+                Button("Cancel", role: .cancel) {
+                    bookmarkURL = ""
+                    bookmarkTitle = ""
+                }
             } message: {
                 Text("Enter the URL to save as a bookmark.")
             }

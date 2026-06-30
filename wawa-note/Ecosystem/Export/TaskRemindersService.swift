@@ -1,8 +1,8 @@
-import Foundation
 import EventKit
+import Foundation
 import OSLog
-// Related JIRA: KAN-12, KAN-66
 
+// Related JIRA: KAN-12, KAN-66
 
 enum RemindersExportResult {
     case success(exported: Int)

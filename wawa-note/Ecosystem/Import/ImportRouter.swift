@@ -1,8 +1,8 @@
 import Foundation
 import OSLog
 import UniformTypeIdentifiers
-// Related JIRA: KAN-12, KAN-62
 
+// Related JIRA: KAN-12, KAN-62
 
 final class ImportRouter {
     private let importers: [any FormatImporter]

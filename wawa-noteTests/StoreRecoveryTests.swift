@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import Wawa_Note
 
 final class StoreBackupTests: XCTestCase {
@@ -37,7 +38,7 @@ final class StoreBackupTests: XCTestCase {
     func testBackupEntryLabelFormatsDate() {
         let entry = BackupEntry(
             url: testDir,
-            date: Date(timeIntervalSince1970: 1700000000),
+            date: Date(timeIntervalSince1970: 1_700_000_000),
             files: ["default.store"]
         )
         XCTAssertFalse(entry.label.isEmpty)

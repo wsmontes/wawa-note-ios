@@ -1,6 +1,6 @@
 import Foundation
-// Related JIRA: KAN-11, KAN-60
 
+// Related JIRA: KAN-11, KAN-60
 
 // MARK: - Ingestion models (Codable)
 
@@ -68,14 +68,16 @@ actor BackgroundWorker {
     func parseIngestionJSON(_ raw: String) -> IngestionResponse? {
         // Try direct decode first
         if let data = raw.data(using: .utf8),
-           let response = try? JSONDecoder().decode(IngestionResponse.self, from: data) {
+            let response = try? JSONDecoder().decode(IngestionResponse.self, from: data)
+        {
             return response
         }
 
         // Try extracting JSON from markdown code blocks
         let trimmed = extractJSONBlock(from: raw)
         if let data = trimmed.data(using: .utf8),
-           let response = try? JSONDecoder().decode(IngestionResponse.self, from: data) {
+            let response = try? JSONDecoder().decode(IngestionResponse.self, from: data)
+        {
             return response
         }
 
@@ -147,12 +149,14 @@ actor BackgroundWorker {
     private func extractJSONBlock(from text: String) -> String {
         // Try to find ```json ... ``` blocks
         if let jsonStart = text.range(of: "```json"),
-           let jsonEnd = text.range(of: "```", range: jsonStart.upperBound..<text.endIndex) {
+            let jsonEnd = text.range(of: "```", range: jsonStart.upperBound..<text.endIndex)
+        {
             return String(text[jsonStart.upperBound..<jsonEnd.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         // Try to find { ... } at top level
         if let firstBrace = text.firstIndex(of: "{"),
-           let lastBrace = text.lastIndex(of: "}") {
+            let lastBrace = text.lastIndex(of: "}")
+        {
             return String(text[firstBrace...lastBrace])
         }
         return text

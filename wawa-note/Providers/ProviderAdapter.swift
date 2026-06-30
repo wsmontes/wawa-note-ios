@@ -1,13 +1,13 @@
 import Foundation
-// Related JIRA: KAN-9, KAN-42
 
+// Related JIRA: KAN-9, KAN-42
 
 // MARK: - Response adapter
 
 enum ProviderTactic {
-    case nativeJSON       // Provider supports json_schema natively (OpenAI)
-    case promptedJSON     // Provider needs prompt engineering for JSON (Anthropic, DeepSeek)
-    case bestEffort       // Parse what we can, fall back to raw text
+    case nativeJSON  // Provider supports json_schema natively (OpenAI)
+    case promptedJSON  // Provider needs prompt engineering for JSON (Anthropic, DeepSeek)
+    case bestEffort  // Parse what we can, fall back to raw text
 }
 
 struct ProviderHint {
@@ -67,7 +67,8 @@ final class ProviderAdapter: @unchecked Sendable {
         // Anthropic/Generic: prompt engineering — inject format instructions into user prompt
         if hint.tactic == .promptedJSON || hint.tactic == .bestEffort {
             if let s = schema {
-                user = "\(user)\n\nIMPORTANT: Return ONLY a single JSON object. No markdown wrapping, no code fences, no explanatory text before or after the JSON. The JSON must have this structure:\n\(s)"
+                user =
+                    "\(user)\n\nIMPORTANT: Return ONLY a single JSON object. No markdown wrapping, no code fences, no explanatory text before or after the JSON. The JSON must have this structure:\n\(s)"
             } else {
                 user = "\(user)\n\nReturn your response as a single JSON object."
             }
@@ -84,8 +85,8 @@ final class ProviderAdapter: @unchecked Sendable {
             if let m = model, !m.isEmpty { return m }
             switch provider.providerType {
             case .anthropic: return "claude-sonnet-4-6"
-            case .gemini:     return "gemini-2.5-flash"
-            default:          return "gpt-5.5"
+            case .gemini: return "gemini-2.5-flash"
+            default: return "gpt-5.5"
             }
         }()
 
@@ -134,7 +135,8 @@ final class ProviderAdapter: @unchecked Sendable {
 
         // Already valid JSON?
         if let data = cleaned.data(using: .utf8),
-           (try? JSONSerialization.jsonObject(with: data)) != nil {
+            (try? JSONSerialization.jsonObject(with: data)) != nil
+        {
             return cleaned
         }
 
@@ -153,14 +155,16 @@ final class ProviderAdapter: @unchecked Sendable {
         let cleaned = stripMarkdownFences(text)
 
         if let data = cleaned.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        {
             return NormalizedResponse(text: cleaned, parsedJSON: json)
         }
 
         // Try extracting balanced JSON brace pair
         if let extracted = extractBalancedJSON(cleaned),
-           let data = extracted.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let data = extracted.data(using: .utf8),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        {
             return NormalizedResponse(text: extracted, parsedJSON: json)
         }
 
@@ -177,12 +181,25 @@ final class ProviderAdapter: @unchecked Sendable {
         var inString = false
         var escaped = false
         for (i, ch) in text[start...].enumerated() {
-            if escaped { escaped = false; continue }
-            if ch == "\\" { escaped = true; continue }
-            if ch == "\"" { inString.toggle(); continue }
+            if escaped {
+                escaped = false
+                continue
+            }
+            if ch == "\\" {
+                escaped = true
+                continue
+            }
+            if ch == "\"" {
+                inString.toggle()
+                continue
+            }
             if inString { continue }
-            if ch == "{" { depth += 1 }
-            else if ch == "}" { depth -= 1; if depth == 0 { return String(text[start...text.index(start, offsetBy: i)]) } }
+            if ch == "{" {
+                depth += 1
+            } else if ch == "}" {
+                depth -= 1
+                if depth == 0 { return String(text[start...text.index(start, offsetBy: i)]) }
+            }
         }
         return nil
     }

@@ -1,6 +1,6 @@
 import Foundation
-// Related JIRA: KAN-10, KAN-52
 
+// Related JIRA: KAN-10, KAN-52
 
 enum ProviderCategory: String, CaseIterable {
     case cloud

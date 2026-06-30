@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
-// Related JIRA: KAN-9, KAN-45
 
+// Related JIRA: KAN-9, KAN-45
 
 /// Mutable context passed to every tool execution.
 /// Reference type so that `cd` mutations persist across iterations of the agent loop.
@@ -47,13 +47,15 @@ final class ToolContext: @unchecked Sendable {
         projectColorHexes[projectID]
     }
 
-    init(modelContext: ModelContext, fileStore: FileArtifactStore = FileArtifactStore(),
-         services: ServiceContainer? = nil,
-         activeProjectID: UUID? = nil, activeProjectName: String? = nil,
-         activeProjectSlug: String? = nil,
-         activeItemID: UUID? = nil, contextKey: String? = nil, contextDisplayName: String? = nil,
-         activeProjectColorHex: String? = nil, projectColorHexes: [UUID: String] = [:],
-         sandboxedItemID: UUID? = nil, activeFramework: ProjectFramework? = nil) {
+    init(
+        modelContext: ModelContext, fileStore: FileArtifactStore = FileArtifactStore(),
+        services: ServiceContainer? = nil,
+        activeProjectID: UUID? = nil, activeProjectName: String? = nil,
+        activeProjectSlug: String? = nil,
+        activeItemID: UUID? = nil, contextKey: String? = nil, contextDisplayName: String? = nil,
+        activeProjectColorHex: String? = nil, projectColorHexes: [UUID: String] = [:],
+        sandboxedItemID: UUID? = nil, activeFramework: ProjectFramework? = nil
+    ) {
         self.modelContext = modelContext
         self.fileStore = fileStore
         self.services = services ?? ServiceContainer(context: modelContext)

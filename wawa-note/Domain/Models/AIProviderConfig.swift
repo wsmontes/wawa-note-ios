@@ -1,15 +1,15 @@
 import Foundation
-// Related JIRA: KAN-9, KAN-52
 
+// Related JIRA: KAN-9, KAN-52
 
 enum ProviderType: String, Codable, CaseIterable {
     case openAICompatible
     case openAI
     case anthropic
     case gemini
-    case localNetwork      // legacy — mapped to .local in routing
-    case appleLocal         // legacy — mapped to .local in routing
-    case local             // unified local type (replaces localNetwork + appleLocal)
+    case localNetwork  // legacy — mapped to .local in routing
+    case appleLocal  // legacy — mapped to .local in routing
+    case local  // unified local type (replaces localNetwork + appleLocal)
 
     /// Human-readable display name suitable for user-facing UI.
     var displayName: String {

@@ -1,5 +1,5 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 struct PendingSection: View {
     let projectID: UUID
@@ -13,9 +13,7 @@ struct PendingSection: View {
         let inProgressRaw = ProjectDerivedStatus.inProgress.rawValue
         _openTasks = Query(
             filter: #Predicate {
-                $0.projectID == pid &&
-                $0.typeRaw == "task" &&
-                ($0.statusRaw == todoRaw || $0.statusRaw == inProgressRaw)
+                $0.projectID == pid && $0.typeRaw == "task" && ($0.statusRaw == todoRaw || $0.statusRaw == inProgressRaw)
             },
             sort: \ProjectDerivedItem.dueAt, order: .forward
         )

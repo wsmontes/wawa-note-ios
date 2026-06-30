@@ -1,9 +1,9 @@
 import EventKit
-import SwiftData
-import OSLog
 import Foundation
-// Related JIRA: KAN-54, KAN-144
+import OSLog
+import SwiftData
 
+// Related JIRA: KAN-54, KAN-144
 
 extension EKEventStore {
     nonisolated(unsafe) static let shared = EKEventStore()
@@ -90,7 +90,8 @@ final class CalendarSyncService: ObservableObject {
     func eventDatesForMonth(containing date: Date, items: [KnowledgeItem]) -> Set<Date> {
         let cal = Calendar.current
         guard let firstOfMonth = cal.date(from: cal.dateComponents([.year, .month], from: date)),
-              let firstOfNext = cal.date(byAdding: DateComponents(month: 1), to: firstOfMonth) else {
+            let firstOfNext = cal.date(byAdding: DateComponents(month: 1), to: firstOfMonth)
+        else {
             return []
         }
 
@@ -148,7 +149,8 @@ final class CalendarSyncService: ObservableObject {
     private func isAlreadyRepresented(ekEvent: EKEvent, items: [KnowledgeItem]) -> Bool {
         // Match by calendarEventIdentifier
         if let calID = ekEvent.eventIdentifier,
-           items.contains(where: { $0.calendarEventIdentifier == calID }) {
+            items.contains(where: { $0.calendarEventIdentifier == calID })
+        {
             return true
         }
         // Fallback: match by scheduledDate + title

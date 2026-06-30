@@ -8,7 +8,7 @@ struct ColorPickerView: View {
         ("#007AFF", .blue), ("#FF3B30", .red), ("#34C759", .green),
         ("#FF9500", .orange), ("#FFCC00", .yellow), ("#AF52DE", .purple),
         ("#FF2D55", .pink), ("#00C7BE", .teal), ("#8E8E93", .gray),
-        ("#000000", .black), ("#FFFFFF", .white), ("#8B5A2B", .brown)
+        ("#000000", .black), ("#FFFFFF", .white), ("#8B5A2B", .brown),
     ]
 
     private let columns = Array(repeating: GridItem(.flexible()), count: 4)

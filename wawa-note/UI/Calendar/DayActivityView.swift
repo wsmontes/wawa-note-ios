@@ -1,7 +1,7 @@
-import SwiftUI
 import SwiftData
-// Related JIRA: KAN-54, KAN-144
+import SwiftUI
 
+// Related JIRA: KAN-54, KAN-144
 
 struct DayActivityView: View {
     let date: Date
@@ -45,10 +45,14 @@ struct DayActivityView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button { showNewNote = true } label: {
+                    Button {
+                        showNewNote = true
+                    } label: {
                         Label("New Note", systemImage: "square.and.pencil")
                     }
-                    Button { showNewJournal = true } label: {
+                    Button {
+                        showNewJournal = true
+                    } label: {
                         Label("New Journal", systemImage: "book")
                     }
                 } label: {

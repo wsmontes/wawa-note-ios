@@ -1,6 +1,6 @@
 import Foundation
-// Related JIRA: KAN-7, KAN-26
 
+// Related JIRA: KAN-7, KAN-26
 
 enum ActionItemStatus: String, Codable {
     case pending
@@ -230,7 +230,6 @@ struct MeetingAnalysis: Identifiable, Codable {
     // so standard decoding works correctly.
 }
 
-
 // MARK: - Dynamic Analysis (framework-driven, replaces MeetingAnalysis for non-meeting projects)
 
 /// Analysis result with a flexible schema defined by the project's framework.
@@ -242,8 +241,8 @@ struct DynamicAnalysis: Identifiable, Codable, Sendable {
     var createdAt: Date
     var providerId: String
     var model: String?
-    var schemaId: String           // which framework generated this
-    var results: AnalysisResults   // schema-free JSON blob
+    var schemaId: String  // which framework generated this
+    var results: AnalysisResults  // schema-free JSON blob
 
     init(
         id: UUID = UUID(),
@@ -311,29 +310,49 @@ struct AnyCodable: Codable, @unchecked Sendable {
         self.value = value
         self._encode = { encoder in
             var container = encoder.singleValueContainer()
-            if let v = value as? String { try container.encode(v) }
-            else if let v = value as? Int { try container.encode(v) }
-            else if let v = value as? Double { try container.encode(v) }
-            else if let v = value as? Float { try container.encode(Double(v)) }
-            else if let v = value as? Int64 { try container.encode(v) }
-            else if let v = value as? Bool { try container.encode(v) }
-            else if let v = value as? [AnyCodable] { try container.encode(v) }
-            else if let v = value as? [String: AnyCodable] { try container.encode(v) }
-            else { try container.encodeNil() }
+            if let v = value as? String {
+                try container.encode(v)
+            } else if let v = value as? Int {
+                try container.encode(v)
+            } else if let v = value as? Double {
+                try container.encode(v)
+            } else if let v = value as? Float {
+                try container.encode(Double(v))
+            } else if let v = value as? Int64 {
+                try container.encode(v)
+            } else if let v = value as? Bool {
+                try container.encode(v)
+            } else if let v = value as? [AnyCodable] {
+                try container.encode(v)
+            } else if let v = value as? [String: AnyCodable] {
+                try container.encode(v)
+            } else {
+                try container.encodeNil()
+            }
         }
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let v = try? container.decode(String.self) { self.init(v) }
-        else if let v = try? container.decode(Int.self) { self.init(v) }
-        else if let v = try? container.decode(Int64.self) { self.init(v) }
-        else if let v = try? container.decode(Double.self) { self.init(v) }
-        else if let v = try? container.decode(Float.self) { self.init(Double(v)) }
-        else if let v = try? container.decode(Bool.self) { self.init(v) }
-        else if let v = try? container.decode([AnyCodable].self) { self.init(v) }
-        else if let v = try? container.decode([String: AnyCodable].self) { self.init(v) }
-        else { self = AnyCodable("") }
+        if let v = try? container.decode(String.self) {
+            self.init(v)
+        } else if let v = try? container.decode(Int.self) {
+            self.init(v)
+        } else if let v = try? container.decode(Int64.self) {
+            self.init(v)
+        } else if let v = try? container.decode(Double.self) {
+            self.init(v)
+        } else if let v = try? container.decode(Float.self) {
+            self.init(Double(v))
+        } else if let v = try? container.decode(Bool.self) {
+            self.init(v)
+        } else if let v = try? container.decode([AnyCodable].self) {
+            self.init(v)
+        } else if let v = try? container.decode([String: AnyCodable].self) {
+            self.init(v)
+        } else {
+            self = AnyCodable("")
+        }
     }
 
     func encode(to encoder: Encoder) throws { try _encode(encoder) }

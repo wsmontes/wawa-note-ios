@@ -1,5 +1,5 @@
-import Foundation
 import EventKit
+import Foundation
 
 enum EventSource {
     case wawaNote(KnowledgeItem)
@@ -31,7 +31,8 @@ struct CalendarEvent: Identifiable {
         self.id = item.id.uuidString
         self.title = item.title.isEmpty ? "Untitled" : item.title
         self.startDate = item.scheduledDate ?? item.createdAt
-        self.endDate = item.scheduledDate.map { $0.addingTimeInterval(item.durationSeconds ?? 0) }
+        self.endDate =
+            item.scheduledDate.map { $0.addingTimeInterval(item.durationSeconds ?? 0) }
             ?? item.createdAt.addingTimeInterval(item.durationSeconds ?? 0)
         self.isAllDay = false
         self.source = .wawaNote(item)

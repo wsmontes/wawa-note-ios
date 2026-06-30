@@ -9,7 +9,7 @@ struct IconPickerView: View {
         "brain.head.profile", "lightbulb.fill", "hammer.fill", "wrench.fill",
         "gearshape.fill", "star.fill", "heart.fill", "flag.fill",
         "bookmark.fill", "tag.fill", "calendar", "clock.fill",
-        "person.3.fill", "building.2.fill", "globe", "trophy.fill"
+        "person.3.fill", "building.2.fill", "globe", "trophy.fill",
     ]
 
     private let columns = Array(repeating: GridItem(.flexible()), count: 4)

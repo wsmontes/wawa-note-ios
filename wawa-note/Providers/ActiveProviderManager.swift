@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
-// Related JIRA: KAN-9, KAN-42
 
+// Related JIRA: KAN-9, KAN-42
 
 extension Notification.Name {
     /// Posted when the active AI provider changes (connected, switched, or removed).
@@ -37,15 +37,17 @@ final class ActiveProviderManager: @unchecked Sendable {
 
     func getActiveProvider(context: ModelContext) -> AIProviderConfigModel? {
         guard let activeId = getActiveProviderID(),
-              let uuid = UUID(uuidString: activeId) else {
+            let uuid = UUID(uuidString: activeId)
+        else {
             let descriptor = FetchDescriptor<AIProviderConfigModel>()
             return try? context.fetch(descriptor).first
         }
         let descriptor = FetchDescriptor<AIProviderConfigModel>(predicate: #Predicate { $0.id == uuid })
-        return try? context.fetch(descriptor).first ?? {
-            let fallback = FetchDescriptor<AIProviderConfigModel>()
-            return try? context.fetch(fallback).first
-        }()
+        return try? context.fetch(descriptor).first
+            ?? {
+                let fallback = FetchDescriptor<AIProviderConfigModel>()
+                return try? context.fetch(fallback).first
+            }()
     }
 
     // MARK: - Task routing (multi-provider)
@@ -58,7 +60,8 @@ final class ActiveProviderManager: @unchecked Sendable {
 
     func getRoutingRules() -> RoutingRules {
         guard let data = defaults.data(forKey: routingKey),
-              let rules = try? JSONDecoder().decode(RoutingRules.self, from: data) else {
+            let rules = try? JSONDecoder().decode(RoutingRules.self, from: data)
+        else {
             return RoutingRules()
         }
         return rules
@@ -83,7 +86,8 @@ final class ActiveProviderManager: @unchecked Sendable {
     func getProviderFor(task: ProviderTaskType, context: ModelContext) -> AIProviderConfigModel? {
         let rules = getRoutingRules()
         if let providerID = rules.rules[task.rawValue],
-           let uuid = UUID(uuidString: providerID) {
+            let uuid = UUID(uuidString: providerID)
+        {
             let descriptor = FetchDescriptor<AIProviderConfigModel>(predicate: #Predicate { $0.id == uuid })
             if let match = try? context.fetch(descriptor).first {
                 return match

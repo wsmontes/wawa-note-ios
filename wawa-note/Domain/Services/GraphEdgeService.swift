@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
-// Related JIRA: KAN-8, KAN-35, KAN-90
 
+// Related JIRA: KAN-8, KAN-35, KAN-90
 
 @MainActor
 final class GraphEdgeService {
@@ -203,37 +203,43 @@ final class GraphIntelligenceService {
         let tasks = (try? taskSvc.tasks(for: projectID)) ?? []
         let edges = (try? edgeSvc.neighborhood(of: projectID, radius: 3)) ?? []
 
-        guard items.count >= 2 else { return [] } // Need at least 2 items for cross-item analysis
+        guard items.count >= 2 else { return [] }  // Need at least 2 items for cross-item analysis
 
         let graphDescription = buildGraphDescription(project: project, items: items, tasks: tasks, edges: edges)
         let model = AutomationSettings.shared.resolveAutoAnalysisModel(context: context) ?? AutomationSettings.shared.autoAnalysisModel
 
         let prompt = """
-        You are a graph intelligence analyst. Below is a project's knowledge graph: items, tasks, connections, and entities.
+            You are a graph intelligence analyst. Below is a project's knowledge graph: items, tasks, connections, and entities.
 
-        Your job: find what's HIDDEN in this data. Do not summarize what's obvious. Look for:
+            Your job: find what's HIDDEN in this data. Do not summarize what's obvious. Look for:
 
-        1. CONTRADICTIONS: decisions or action items that conflict across items
-        2. PATTERNS: recurring themes, people, risks, or types of decisions
-        3. GAPS: questions raised but never answered, decisions promised but not made, topics mentioned in one item but never followed up
-        4. EMERGING THEMES: topics that appear across multiple disconnected items — something the project is "about" that isn't explicitly stated
-        5. INFLUENCE: who or what drives decisions? Are there key people, recordings, or documents that shape outcomes?
+            1. CONTRADICTIONS: decisions or action items that conflict across items
+            2. PATTERNS: recurring themes, people, risks, or types of decisions
+            3. GAPS: questions raised but never answered, decisions promised but not made, topics mentioned in one item but never followed up
+            4. EMERGING THEMES: topics that appear across multiple disconnected items — something the project is "about" that isn't explicitly stated
+            5. INFLUENCE: who or what drives decisions? Are there key people, recordings, or documents that shape outcomes?
 
-        Return a JSON array. Each hypothesis has: type (contradiction|pattern|gap|theme|influence), text (one clear sentence), confidence (0.0-1.0).
+            Return a JSON array. Each hypothesis has: type (contradiction|pattern|gap|theme|influence), text (one clear sentence), confidence (0.0-1.0).
 
-        \(graphDescription)
+            \(graphDescription)
 
-        Return ONLY: [{"type": "...", "text": "...", "confidence": 0.8}, ...]
-        Max 6 hypotheses. If nothing interesting, return [].
-        """
+            Return ONLY: [{"type": "...", "text": "...", "confidence": 0.8}, ...]
+            Max 6 hypotheses. If nothing interesting, return [].
+            """
 
         let params = AIConfigService.shared.requestParams(for: "analysis", model: model)
 
         let request = AIRequest(
             model: model,
             messages: [
-                AIMessage(role: .system, content: [.text("You are a graph intelligence analyst. Return only valid JSON arrays. Never invent data — only report what you can infer from the provided graph.")]),
-                AIMessage(role: .user, content: [.text(prompt)])
+                AIMessage(
+                    role: .system,
+                    content: [
+                        .text(
+                            "You are a graph intelligence analyst. Return only valid JSON arrays. Never invent data — only report what you can infer from the provided graph."
+                        )
+                    ]),
+                AIMessage(role: .user, content: [.text(prompt)]),
             ],
             temperature: params.temperature,
             maxTokens: params.maxTokens,
@@ -317,16 +323,17 @@ final class GraphIntelligenceService {
             let raw = try JSONDecoder().decode([RawHypothesis].self, from: data)
             return raw.compactMap { h in
                 guard let typeStr = h.type, let text = h.text, !text.isEmpty,
-                      let type = HypothesisType(rawValue: typeStr.capitalized) ?? {
-                          switch typeStr.lowercased() {
-                          case "contradiction": return .contradiction
-                          case "pattern": return .pattern
-                          case "gap": return .gap
-                          case "theme", "emerging_theme": return .theme
-                          case "influence": return .influence
-                          default: return nil
-                          }
-                      }()
+                    let type = HypothesisType(rawValue: typeStr.capitalized)
+                        ?? {
+                            switch typeStr.lowercased() {
+                            case "contradiction": return .contradiction
+                            case "pattern": return .pattern
+                            case "gap": return .gap
+                            case "theme", "emerging_theme": return .theme
+                            case "influence": return .influence
+                            default: return nil
+                            }
+                        }()
                 else { return nil }
                 return GraphHypothesis(type: type, text: text, confidence: h.confidence ?? 0.5)
             }

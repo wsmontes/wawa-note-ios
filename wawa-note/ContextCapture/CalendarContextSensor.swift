@@ -1,17 +1,17 @@
-import Foundation
 import EventKit
+import Foundation
 import OSLog
-// Related JIRA: KAN-151
 
+// Related JIRA: KAN-151
 
 final class CalendarContextSensor: ContextSensor, @unchecked Sendable {
     let sensorName = "calendar_context"
 
     private let eventStore: EKEventStore
 
-    private static let contextWindowBefore: TimeInterval = -900    // 15 minutes
-    private static let contextWindowAfter: TimeInterval = 10800    // 3 hours
-    private static let proximityThreshold: TimeInterval = 300      // 5 minutes
+    private static let contextWindowBefore: TimeInterval = -900  // 15 minutes
+    private static let contextWindowAfter: TimeInterval = 10800  // 3 hours
+    private static let proximityThreshold: TimeInterval = 300  // 5 minutes
 
     init(eventStore: EKEventStore = .shared) {
         self.eventStore = eventStore

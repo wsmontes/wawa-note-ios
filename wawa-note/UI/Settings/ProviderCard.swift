@@ -1,6 +1,6 @@
 import SwiftUI
-// Related JIRA: KAN-10, KAN-52
 
+// Related JIRA: KAN-10, KAN-52
 
 struct ProviderCard: View {
     let template: ProviderTemplate

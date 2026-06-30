@@ -23,9 +23,7 @@ final class ProjectSuggestionService {
         let existing = try? context.fetch(
             FetchDescriptor<ProjectSuggestion>(
                 predicate: #Predicate {
-                    $0.projectID == projectID &&
-                    $0.suggestionTypeRaw == typeRaw &&
-                    $0.statusRaw == pendingRaw
+                    $0.projectID == projectID && $0.suggestionTypeRaw == typeRaw && $0.statusRaw == pendingRaw
                 }
             )
         )
@@ -45,8 +43,9 @@ final class ProjectSuggestionService {
     /// Accept a suggestion — apply its proposed fields and mark as accepted.
     func accept(_ suggestion: ProjectSuggestion) throws {
         if let json = suggestion.proposedFieldsJSON,
-           let data = json.data(using: .utf8),
-           let fields = try? JSONDecoder().decode(ProjectUpdateFields.self, from: data) {
+            let data = json.data(using: .utf8),
+            let fields = try? JSONDecoder().decode(ProjectUpdateFields.self, from: data)
+        {
             _ = try ProjectService(context: context).update(
                 id: suggestion.projectID,
                 fields: fields,
@@ -71,8 +70,7 @@ final class ProjectSuggestionService {
         let pendingRaw = SuggestionStatus.pending.rawValue
         let descriptor = FetchDescriptor<ProjectSuggestion>(
             predicate: #Predicate {
-                $0.projectID == projectID &&
-                $0.statusRaw == pendingRaw
+                $0.projectID == projectID && $0.statusRaw == pendingRaw
             },
             sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
         )
@@ -86,8 +84,7 @@ final class ProjectSuggestionService {
         let pendingRaw = SuggestionStatus.pending.rawValue
         let descriptor = FetchDescriptor<ProjectSuggestion>(
             predicate: #Predicate {
-                $0.statusRaw == pendingRaw &&
-                $0.createdAt < cutoff
+                $0.statusRaw == pendingRaw && $0.createdAt < cutoff
             }
         )
         guard let expired = try? context.fetch(descriptor) else { return }

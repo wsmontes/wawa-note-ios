@@ -1,5 +1,6 @@
-import XCTest
 import SwiftData
+import XCTest
+
 @testable import Wawa_Note
 
 @MainActor
@@ -10,7 +11,7 @@ final class ServiceContainerTests: XCTestCase {
             KnowledgeItem.self, Project.self, Person.self,
             GraphEdge.self, Entity.self, QueueEntry.self,
             ProjectFrame.self, ChangeRecord.self, ProjectSnapshot.self,
-            ProjectDerivedItem.self, AIProviderConfigModel.self, Folder.self, Annotation.self
+            ProjectDerivedItem.self, AIProviderConfigModel.self, Folder.self, Annotation.self,
         ])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: config)

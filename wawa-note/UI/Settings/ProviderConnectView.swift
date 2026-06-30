@@ -1,7 +1,7 @@
-import SwiftUI
 import SwiftData
-// Related JIRA: KAN-10, KAN-52
+import SwiftUI
 
+// Related JIRA: KAN-10, KAN-52
 
 // MARK: - View model
 
@@ -147,7 +147,8 @@ final class ProviderConnectViewModel: ObservableObject {
             let recommended = AIConfigService.shared.config.defaultModels
             let recSet = Set([recommended?.analysis, recommended?.chat, recommended?.transcription].compactMap { $0 })
             availableModels = Array(merged).sorted { a, b in
-                let aRec = recSet.contains(a); let bRec = recSet.contains(b)
+                let aRec = recSet.contains(a)
+                let bRec = recSet.contains(b)
                 if aRec != bRec { return aRec }
                 return a < b
             }

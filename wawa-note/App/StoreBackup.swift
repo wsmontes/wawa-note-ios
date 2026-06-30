@@ -1,6 +1,6 @@
 import Foundation
-// Related JIRA: KAN-57
 
+// Related JIRA: KAN-57
 
 /// Safely backs up SwiftData store files before destructive operations.
 /// Copies .store, .store-shm, .store-wal to a timestamped recovery directory.
@@ -57,7 +57,8 @@ struct StoreBackup {
         let fm = FileManager.default
         guard fm.fileExists(atPath: recoveryDirectory.path) else { return [] }
         let contents = (try? fm.contentsOfDirectory(at: recoveryDirectory, includingPropertiesForKeys: [.creationDateKey])) ?? []
-        return contents
+        return
+            contents
             .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
             .compactMap { url -> BackupEntry? in
                 let date = (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast

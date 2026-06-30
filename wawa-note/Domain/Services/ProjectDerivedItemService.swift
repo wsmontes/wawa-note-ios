@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
-// Related JIRA: KAN-8, KAN-38
 
+// Related JIRA: KAN-8, KAN-38
 
 @MainActor
 final class ProjectDerivedItemService {
@@ -27,9 +27,10 @@ final class ProjectDerivedItemService {
         // KAN-75: Dedup — skip if task with same title already exists in project
         let normalizedTitle = title.lowercased().trimmingCharacters(in: .whitespaces)
         let typeRaw = ProjectDerivedType.task.rawValue
-        let existing = try context.fetch(FetchDescriptor<ProjectDerivedItem>(
-            predicate: #Predicate { $0.projectID == projectID && $0.typeRaw == typeRaw }
-        ))
+        let existing = try context.fetch(
+            FetchDescriptor<ProjectDerivedItem>(
+                predicate: #Predicate { $0.projectID == projectID && $0.typeRaw == typeRaw }
+            ))
         if existing.contains(where: { $0.title.lowercased().trimmingCharacters(in: .whitespaces) == normalizedTitle }) {
             AppLog.general.info("ProjectDerivedItemService: dedup — task '\(title)' already exists in project")
             return existing.first { $0.title.lowercased().trimmingCharacters(in: .whitespaces) == normalizedTitle }!
@@ -67,9 +68,10 @@ final class ProjectDerivedItemService {
         // KAN-75: Dedup — skip if signal with same title already active in project
         let normalizedTitle = title.lowercased().trimmingCharacters(in: .whitespaces)
         let typeRaw = ProjectDerivedType.signal.rawValue
-        let existing = try context.fetch(FetchDescriptor<ProjectDerivedItem>(
-            predicate: #Predicate { $0.projectID == projectID && $0.typeRaw == typeRaw }
-        ))
+        let existing = try context.fetch(
+            FetchDescriptor<ProjectDerivedItem>(
+                predicate: #Predicate { $0.projectID == projectID && $0.typeRaw == typeRaw }
+            ))
         if let dup = existing.first(where: { $0.title.lowercased().trimmingCharacters(in: .whitespaces) == normalizedTitle }) {
             AppLog.general.info("ProjectDerivedItemService: dedup — signal '\(title)' already active in project")
             return dup
@@ -120,7 +122,7 @@ final class ProjectDerivedItemService {
 
         let item = ProjectDerivedItem(
             projectID: projectID,
-            sourceItemID: nil, // synthesis belongs to project, not any single item
+            sourceItemID: nil,  // synthesis belongs to project, not any single item
             type: .synthesis,
             title: "Project Synthesis",
             bodyJSON: bodyStr
@@ -190,8 +192,7 @@ final class ProjectDerivedItemService {
         let inProgressRaw = ProjectDerivedStatus.inProgress.rawValue
         var descriptor = FetchDescriptor<ProjectDerivedItem>(
             predicate: #Predicate {
-                $0.projectID == projectID && $0.typeRaw == typeRaw &&
-                ($0.statusRaw == todoRaw || $0.statusRaw == inProgressRaw)
+                $0.projectID == projectID && $0.typeRaw == typeRaw && ($0.statusRaw == todoRaw || $0.statusRaw == inProgressRaw)
             }
         )
         descriptor.sortBy = [SortDescriptor(\.dueAt, order: .forward)]
@@ -204,8 +205,7 @@ final class ProjectDerivedItemService {
         let ackRaw = ProjectDerivedStatus.acknowledged.rawValue
         var descriptor = FetchDescriptor<ProjectDerivedItem>(
             predicate: #Predicate {
-                $0.projectID == projectID && $0.typeRaw == typeRaw &&
-                ($0.statusRaw == visibleRaw || $0.statusRaw == ackRaw)
+                $0.projectID == projectID && $0.typeRaw == typeRaw && ($0.statusRaw == visibleRaw || $0.statusRaw == ackRaw)
             }
         )
         descriptor.sortBy = [SortDescriptor(\.createdAt, order: .reverse)]

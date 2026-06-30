@@ -1,7 +1,7 @@
 import Foundation
 import UniformTypeIdentifiers
-// Related JIRA: KAN-12, KAN-62
 
+// Related JIRA: KAN-12, KAN-62
 
 final class MarkdownImporter: FormatImporter, @unchecked Sendable {
     let formatIdentifier = "markdown"
@@ -49,7 +49,7 @@ final class MarkdownImporter: FormatImporter, @unchecked Sendable {
                     defer { i += 1 }
 
                     if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
-                    if !trimmed.first!.isLetter { continue } // skip non-key lines
+                    if !trimmed.first!.isLetter { continue }  // skip non-key lines
 
                     if let colonIdx = trimmed.firstIndex(of: ":") {
                         let key = String(trimmed[..<colonIdx]).trimmingCharacters(in: .whitespaces)
@@ -74,7 +74,9 @@ final class MarkdownImporter: FormatImporter, @unchecked Sendable {
                                 if next.first?.isWhitespace == true || next.isEmpty {
                                     blockLines.append(next.trimmingCharacters(in: .whitespaces))
                                     i += 1
-                                } else { break }
+                                } else {
+                                    break
+                                }
                             }
                             MarkdownImporter.applyFrontmatter(&title, &date, &durationSeconds, &type, &tags, key, blockLines.joined(separator: "\n"))
                             continue
@@ -98,7 +100,10 @@ final class MarkdownImporter: FormatImporter, @unchecked Sendable {
         var inFencedBlock = false
         for line in body.split(separator: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("```") { inFencedBlock.toggle(); continue }
+            if trimmed.hasPrefix("```") {
+                inFencedBlock.toggle()
+                continue
+            }
             if !inFencedBlock, trimmed.hasPrefix("# ") {
                 let extractedTitle = trimmed.replacingOccurrences(of: "# ", with: "").trimmingCharacters(in: .whitespaces)
                 if !extractedTitle.isEmpty { title = extractedTitle }
@@ -147,7 +152,9 @@ final class MarkdownImporter: FormatImporter, @unchecked Sendable {
                         .replacingOccurrences(of: "\"", with: "")
                         .replacingOccurrences(of: "'", with: "")
                 }
-            } else { tags.append(value) }
+            } else {
+                tags.append(value)
+            }
         default: break
         }
     }

@@ -1,6 +1,6 @@
 import SwiftUI
-// Related JIRA: KAN-141, KAN-137
 
+// Related JIRA: KAN-141, KAN-137
 
 /// Markdown file editor with Edit and Preview modes.
 struct MarkdownEditorView: View {
@@ -45,8 +45,10 @@ struct MarkdownEditorView: View {
                     }
             case .preview:
                 ScrollView {
-                    let md = (try? AttributedString(markdown: content,
-                        options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+                    let md =
+                        (try? AttributedString(
+                            markdown: content,
+                            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
                         ?? AttributedString(content)
                     Text(md)
                         .padding(12)

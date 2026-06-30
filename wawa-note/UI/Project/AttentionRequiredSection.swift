@@ -1,5 +1,5 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 struct AttentionRequiredSection: View {
     let projectID: UUID
@@ -20,11 +20,7 @@ struct AttentionRequiredSection: View {
 
         _overdueTasks = Query(
             filter: #Predicate {
-                $0.projectID == pid &&
-                $0.typeRaw == taskRaw &&
-                ($0.statusRaw == todoRaw || $0.statusRaw == inProgressRaw) &&
-                $0.dueAt != nil &&
-                $0.dueAt! < now
+                $0.projectID == pid && $0.typeRaw == taskRaw && ($0.statusRaw == todoRaw || $0.statusRaw == inProgressRaw) && $0.dueAt != nil && $0.dueAt! < now
             },
             sort: \ProjectDerivedItem.dueAt, order: .forward
         )
@@ -70,36 +66,39 @@ struct AttentionRequiredSection: View {
         var cards: [AttentionCardData] = []
 
         for task in overdueTasks.prefix(2) {
-            cards.append(AttentionCardData(
-                id: "overdue-\(task.id)",
-                title: task.title,
-                subtitle: task.dueAt.map { "Overdue: \($0.formatted(.relative(presentation: .numeric)))" } ?? "Overdue",
-                icon: "clock.badge.exclamationmark.fill",
-                color: .red,
-                priority: 0
-            ))
+            cards.append(
+                AttentionCardData(
+                    id: "overdue-\(task.id)",
+                    title: task.title,
+                    subtitle: task.dueAt.map { "Overdue: \($0.formatted(.relative(presentation: .numeric)))" } ?? "Overdue",
+                    icon: "clock.badge.exclamationmark.fill",
+                    color: .red,
+                    priority: 0
+                ))
         }
 
         for decision in pendingDecisions.prefix(2) {
-            cards.append(AttentionCardData(
-                id: "decision-\(decision.id)",
-                title: decision.title,
-                subtitle: "Decision pending · \(decision.createdAt.formatted(.relative(presentation: .numeric)))",
-                icon: "hammer.fill",
-                color: .orange,
-                priority: 1
-            ))
+            cards.append(
+                AttentionCardData(
+                    id: "decision-\(decision.id)",
+                    title: decision.title,
+                    subtitle: "Decision pending · \(decision.createdAt.formatted(.relative(presentation: .numeric)))",
+                    icon: "hammer.fill",
+                    color: .orange,
+                    priority: 1
+                ))
         }
 
         for risk in newRisks.prefix(1) {
-            cards.append(AttentionCardData(
-                id: "risk-\(risk.id)",
-                title: risk.title,
-                subtitle: "Risk detected · \(risk.createdAt.formatted(.relative(presentation: .numeric)))",
-                icon: "exclamationmark.triangle.fill",
-                color: .yellow,
-                priority: 2
-            ))
+            cards.append(
+                AttentionCardData(
+                    id: "risk-\(risk.id)",
+                    title: risk.title,
+                    subtitle: "Risk detected · \(risk.createdAt.formatted(.relative(presentation: .numeric)))",
+                    icon: "exclamationmark.triangle.fill",
+                    color: .yellow,
+                    priority: 2
+                ))
         }
 
         return cards.sorted { $0.priority < $1.priority }

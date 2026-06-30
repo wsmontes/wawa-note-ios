@@ -1,7 +1,7 @@
-import SwiftUI
 import SwiftData
-// Related JIRA: KAN-8, KAN-36
+import SwiftUI
 
+// Related JIRA: KAN-8, KAN-36
 
 struct TaskEditorView: View {
     @Environment(\.dismiss) private var dismiss
@@ -71,10 +71,12 @@ struct TaskEditorView: View {
 
                     Toggle("Due date", isOn: $hasDueDate)
                     if hasDueDate {
-                        DatePicker("Due", selection: Binding(
-                            get: { dueAt ?? Date() },
-                            set: { dueAt = $0 }
-                        ), displayedComponents: .date)
+                        DatePicker(
+                            "Due",
+                            selection: Binding(
+                                get: { dueAt ?? Date() },
+                                set: { dueAt = $0 }
+                            ), displayedComponents: .date)
                     }
                 }
 

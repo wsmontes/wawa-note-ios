@@ -1,12 +1,12 @@
 import Foundation
-// Related JIRA: KAN-9, KAN-32
 
+// Related JIRA: KAN-9, KAN-32
 
 final class ContextWindowManager {
     let modelContextLimit: Int
     private let charsPerToken = 4
-    private let codeCharsPerToken = 3   // JSON/code: many special chars → ~3 chars/token
-    private let cjkCharsPerToken = 2    // CJK: 1-2 chars/token in most tokenizers
+    private let codeCharsPerToken = 3  // JSON/code: many special chars → ~3 chars/token
+    private let cjkCharsPerToken = 2  // CJK: 1-2 chars/token in most tokenizers
 
     init(modelContextLimit: Int) {
         self.modelContextLimit = modelContextLimit
@@ -44,7 +44,8 @@ final class ContextWindowManager {
         var total = 0
         for tool in tools {
             if let data = try? JSONEncoder().encode(tool),
-               let json = String(data: data, encoding: .utf8) {
+                let json = String(data: data, encoding: .utf8)
+            {
                 total += estimateTokens(json)
             }
         }

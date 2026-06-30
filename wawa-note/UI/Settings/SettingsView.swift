@@ -1,9 +1,9 @@
-import SwiftUI
-import SwiftData
 import OSLog
 import Speech
-// Related JIRA: KAN-10, KAN-52
+import SwiftData
+import SwiftUI
 
+// Related JIRA: KAN-10, KAN-52
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
@@ -155,12 +155,16 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Voice Processing enhances speech clarity and reduces background noise. Disable for raw audio capture (music, ambient sound).")
                         if speakerphoneMode {
-                            Text("Speakerphone Mode uses the front microphone array with far-field beamforming — ideal when the iPhone is on a table during meetings.")
-                                .foregroundStyle(.secondary)
+                            Text(
+                                "Speakerphone Mode uses the front microphone array with far-field beamforming — ideal when the iPhone is on a table during meetings."
+                            )
+                            .foregroundStyle(.secondary)
                         }
                         if preferBuiltInMic {
-                            Text("The iPhone microphone (48 kHz with beamforming) will be preferred over Bluetooth headsets (8 kHz call quality). Enable for maximum transcription accuracy.")
-                                .foregroundStyle(.secondary)
+                            Text(
+                                "The iPhone microphone (48 kHz with beamforming) will be preferred over Bluetooth headsets (8 kHz call quality). Enable for maximum transcription accuracy."
+                            )
+                            .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -198,7 +202,8 @@ struct SettingsView: View {
                 // Data Export
                 Section {
                     if let jsonData = try? InstanceExportService().exportComplete(context: modelContext, includeHistory: false),
-                       let jsonStr = String(data: jsonData, encoding: .utf8) {
+                        let jsonStr = String(data: jsonData, encoding: .utf8)
+                    {
                         let stats = InstanceExportService().exportStatistics(context: modelContext)
                         ShareLink(item: jsonStr, preview: SharePreview("Wawa Note Export", image: Image(systemName: "doc.text"))) {
                             HStack {
@@ -260,9 +265,10 @@ struct SettingsView: View {
                     Text("Developer")
                 } footer: {
                     let crashed = FileLogService.shared.previousSessionCrashed
-                    Text(crashed
-                         ? "⚠️ Previous session crashed. Logs may contain crash information."
-                         : "Developer Mode shows raw LLM responses in knowledge detail views.")
+                    Text(
+                        crashed
+                            ? "⚠️ Previous session crashed. Logs may contain crash information."
+                            : "Developer Mode shows raw LLM responses in knowledge detail views.")
                 }
 
                 // Advanced
@@ -325,212 +331,222 @@ struct SettingsView: View {
         }
     }
 
-// MARK: - Debug Log Viewer
+    // MARK: - Debug Log Viewer
 
-struct DebugLogView: View {
-    @State private var logs: String = ""
-    @State private var isLoading = true
+    struct DebugLogView: View {
+        @State private var logs: String = ""
+        @State private var isLoading = true
 
-    var body: some View {
-        Group {
-            if isLoading {
-                ProgressView("Loading logs...")
-            } else if logs.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "terminal").font(.largeTitle).foregroundStyle(.secondary)
-                    Text("No logs yet").font(.headline)
-                    Text("Logs will appear here as the app runs.").font(.subheadline).foregroundStyle(.secondary)
-                }
-            } else {
-                ScrollView {
-                    Text(logs)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(8)
+        var body: some View {
+            Group {
+                if isLoading {
+                    ProgressView("Loading logs...")
+                } else if logs.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "terminal").font(.largeTitle).foregroundStyle(.secondary)
+                        Text("No logs yet").font(.headline)
+                        Text("Logs will appear here as the app runs.").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                } else {
+                    ScrollView {
+                        Text(logs)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                    }
                 }
             }
-        }
-        .navigationTitle("Debug Logs")
-        .safeAreaInset(edge: .top) {
-            Text("⚠️ Logs may contain personal data (transcripts, file paths, metadata). API keys are automatically redacted. Review before sharing.")
-                .font(.caption2)
-                .foregroundStyle(.orange)
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
-                .padding(.horizontal, 8)
-        }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 16) {
-                    Button {
-                        isLoading = true
-                        logs = FileLogService.shared.retrieveLogs()
-                            + "\n\n=== OSLOG (audio) ===\n"
-                            + (DebugLogView.retrieveOSLogs() ?? "OSLog not available")
-                        isLoading = false
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    Button {
-                        FileLogService.shared.clearLogs()
-                        logs = ""
-                    } label: {
-                        Image(systemName: "trash")
-                    }
-                    if let url = FileLogService.shared.exportLogs() {
-                        ShareLink(item: url) {
-                            Image(systemName: "square.and.arrow.up")
+            .navigationTitle("Debug Logs")
+            .safeAreaInset(edge: .top) {
+                Text("⚠️ Logs may contain personal data (transcripts, file paths, metadata). API keys are automatically redacted. Review before sharing.")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+                    .padding(.horizontal, 8)
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 16) {
+                        Button {
+                            isLoading = true
+                            logs =
+                                FileLogService.shared.retrieveLogs()
+                                + "\n\n=== OSLOG (audio) ===\n"
+                                + (DebugLogView.retrieveOSLogs() ?? "OSLog not available")
+                            isLoading = false
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        Button {
+                            FileLogService.shared.clearLogs()
+                            logs = ""
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        if let url = FileLogService.shared.exportLogs() {
+                            ShareLink(item: url) {
+                                Image(systemName: "square.and.arrow.up")
+                            }
                         }
                     }
                 }
             }
+            .onAppear {
+                logs =
+                    FileLogService.shared.retrieveLogs()
+                    + "\n\n=== OSLOG (audio) ===\n"
+                    + (DebugLogView.retrieveOSLogs() ?? "OSLog not available")
+                isLoading = false
+            }
+            .refreshable {
+                logs =
+                    FileLogService.shared.retrieveLogs()
+                    + "\n\n=== OSLOG (audio) ===\n"
+                    + (DebugLogView.retrieveOSLogs() ?? "OSLog not available")
+            }
         }
-        .onAppear {
-            logs = FileLogService.shared.retrieveLogs()
-                + "\n\n=== OSLOG (audio) ===\n"
-                + (DebugLogView.retrieveOSLogs() ?? "OSLog not available")
-            isLoading = false
-        }
-        .refreshable {
-            logs = FileLogService.shared.retrieveLogs()
-                + "\n\n=== OSLOG (audio) ===\n"
-                + (DebugLogView.retrieveOSLogs() ?? "OSLog not available")
-        }
-    }
 
-    static func retrieveOSLogs() -> String? {
-        guard let store = try? OSLogStore(scope: .currentProcessIdentifier) else { return nil }
-        let position = store.position(date: Date().addingTimeInterval(-3600))
-        var lines: [String] = []
-        for entry in (try? store.getEntries(at: position)) ?? AnySequence([]) {
-            guard let logEntry = entry as? OSLogEntryLog else { continue }
-            let msg = logEntry.composedMessage
-            guard msg.contains("audio") || msg.contains("Audio") || msg.contains("recording") || msg.contains("Recording") || msg.contains("route") || msg.contains("Route")
-                || msg.contains("engine") || msg.contains("Engine") || msg.contains("session") || msg.contains("Session")
-                || msg.contains("segment") || msg.contains("Segment")
+        static func retrieveOSLogs() -> String? {
+            guard let store = try? OSLogStore(scope: .currentProcessIdentifier) else { return nil }
+            let position = store.position(date: Date().addingTimeInterval(-3600))
+            var lines: [String] = []
+            for entry in (try? store.getEntries(at: position)) ?? AnySequence([]) {
+                guard let logEntry = entry as? OSLogEntryLog else { continue }
+                let msg = logEntry.composedMessage
+                guard
+                    msg.contains("audio") || msg.contains("Audio") || msg.contains("recording") || msg.contains("Recording") || msg.contains("route")
+                        || msg.contains("Route")
+                        || msg.contains("engine") || msg.contains("Engine") || msg.contains("session") || msg.contains("Session")
+                        || msg.contains("segment") || msg.contains("Segment")
                 else { continue }
-            lines.append("[\(logEntry.date.formatted(.iso8601))] [\(logEntry.level)] \(msg)")
+                lines.append("[\(logEntry.date.formatted(.iso8601))] [\(logEntry.level)] \(msg)")
+            }
+            return lines.isEmpty ? nil : lines.joined(separator: "\n")
         }
-        return lines.isEmpty ? nil : lines.joined(separator: "\n")
-    }
-}
-
-// MARK: - AI Lenses Settings
-
-struct LensesSettingsView: View {
-    private var lensEntries: [(key: String, lens: AIConfig.LensJSON)] {
-        guard let lenses = AIConfigService.shared.config.lenses else { return [] }
-        return lenses.map { ($0.key, $0.value) }.sorted { $0.0 < $1.0 }
     }
 
-    var body: some View {
-        List {
-            if lensEntries.isEmpty {
-                ContentUnavailableView(
-                    "No Lenses Configured",
-                    systemImage: "eye.slash",
-                    description: Text("AI lenses are defined in ai_config.json. Add lenses to enable different analysis perspectives.")
-                )
-            } else {
-                ForEach(lensEntries, id: \.key) { entry in
-                    Section {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Image(systemName: entry.lens.icon ?? "sparkles")
-                                    .font(.title3)
-                                    .foregroundStyle(.tint)
-                                Text(entry.lens.name ?? entry.key)
-                                    .font(.headline)
-                            }
-                            if let desc = entry.lens.description {
-                                Text(desc)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if let model = entry.lens.model {
-                                LabeledContent("Default Model", value: model)
-                            }
-                            if let temp = entry.lens.temperature {
-                                LabeledContent("Temperature", value: String(format: "%.1f", temp))
-                            }
-                            if let prompt = entry.lens.systemPrompt {
-                                DisclosureGroup("System Prompt") {
-                                    Text(prompt)
-                                        .font(.system(size: 11, design: .monospaced))
+    // MARK: - AI Lenses Settings
+
+    struct LensesSettingsView: View {
+        private var lensEntries: [(key: String, lens: AIConfig.LensJSON)] {
+            guard let lenses = AIConfigService.shared.config.lenses else { return [] }
+            return lenses.map { ($0.key, $0.value) }.sorted { $0.0 < $1.0 }
+        }
+
+        var body: some View {
+            List {
+                if lensEntries.isEmpty {
+                    ContentUnavailableView(
+                        "No Lenses Configured",
+                        systemImage: "eye.slash",
+                        description: Text("AI lenses are defined in ai_config.json. Add lenses to enable different analysis perspectives.")
+                    )
+                } else {
+                    ForEach(lensEntries, id: \.key) { entry in
+                        Section {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Image(systemName: entry.lens.icon ?? "sparkles")
+                                        .font(.title3)
+                                        .foregroundStyle(.tint)
+                                    Text(entry.lens.name ?? entry.key)
+                                        .font(.headline)
+                                }
+                                if let desc = entry.lens.description {
+                                    Text(desc)
+                                        .font(.subheadline)
                                         .foregroundStyle(.secondary)
                                 }
+                                if let model = entry.lens.model {
+                                    LabeledContent("Default Model", value: model)
+                                }
+                                if let temp = entry.lens.temperature {
+                                    LabeledContent("Temperature", value: String(format: "%.1f", temp))
+                                }
+                                if let prompt = entry.lens.systemPrompt {
+                                    DisclosureGroup("System Prompt") {
+                                        Text(prompt)
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
                             }
+                            .padding(.vertical, 4)
                         }
-                        .padding(.vertical, 4)
                     }
                 }
             }
+            .navigationTitle("AI Lenses")
         }
-        .navigationTitle("AI Lenses")
     }
-}
 
-// MARK: - Model Resolver Settings
+    // MARK: - Model Resolver Settings
 
-struct ModelResolverSettingsView: View { var body: some View { EmptyView() } }
-// MARK: - Summary Cache Management
+    struct ModelResolverSettingsView: View { var body: some View { EmptyView() } }
+    // MARK: - Summary Cache Management
 
-struct SummaryCacheManagementView: View { var body: some View { EmptyView() } }
+    struct SummaryCacheManagementView: View { var body: some View { EmptyView() } }
 
-// MARK: - Analysis Schema Settings
+    // MARK: - Analysis Schema Settings
 
-struct AnalysisSchemaSettingsView: View {
-    var body: some View {
-        List {
-            Section {
-                Text("Choose which fields the AI should include when analyzing content.")
-                    .font(.subheadline).foregroundStyle(.secondary)
-            }
+    struct AnalysisSchemaSettingsView: View {
+        var body: some View {
+            List {
+                Section {
+                    Text("Choose which fields the AI should include when analyzing content.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
 
-            Section {
-                ForEach(AnalysisFieldSettings.allFields, id: \.self) { field in
-                    HStack {
-                        Image(systemName: AnalysisFieldSettings.icon(for: field))
-                            .foregroundStyle(.tint)
-                            .frame(width: 28)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(AnalysisFieldSettings.displayName(for: field))
-                                .font(.subheadline)
-                            Text("Include in analysis output")
-                                .font(.caption).foregroundStyle(.secondary)
+                Section {
+                    ForEach(AnalysisFieldSettings.allFields, id: \.self) { field in
+                        HStack {
+                            Image(systemName: AnalysisFieldSettings.icon(for: field))
+                                .foregroundStyle(.tint)
+                                .frame(width: 28)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(AnalysisFieldSettings.displayName(for: field))
+                                    .font(.subheadline)
+                                Text("Include in analysis output")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Toggle(
+                                "",
+                                isOn: Binding(
+                                    get: { AnalysisFieldSettings.isEnabled(field) },
+                                    set: { AnalysisFieldSettings.setEnabled(field, enabled: $0) }
+                                )
+                            )
+                            .labelsHidden()
                         }
-                        Spacer()
-                        Toggle("", isOn: Binding(
-                            get: { AnalysisFieldSettings.isEnabled(field) },
-                            set: { AnalysisFieldSettings.setEnabled(field, enabled: $0) }
-                        ))
-                        .labelsHidden()
+                    }
+                } header: {
+                    Text("Enabled Fields")
+                } footer: {
+                    let enabled = AnalysisFieldSettings.allFields.filter { AnalysisFieldSettings.isEnabled($0) }
+                    let disabled = AnalysisFieldSettings.allFields.filter { !AnalysisFieldSettings.isEnabled($0) }
+                    if !disabled.isEmpty {
+                        Text(
+                            "\(enabled.count) of \(AnalysisFieldSettings.allFields.count) fields enabled. Disabled fields will be excluded from AI analysis instructions."
+                        )
+                    } else {
+                        Text("All fields enabled. The AI will include whatever fields are relevant to the content.")
                     }
                 }
-            } header: {
-                Text("Enabled Fields")
-            } footer: {
-                let enabled = AnalysisFieldSettings.allFields.filter { AnalysisFieldSettings.isEnabled($0) }
-                let disabled = AnalysisFieldSettings.allFields.filter { !AnalysisFieldSettings.isEnabled($0) }
-                if !disabled.isEmpty {
-                    Text("\(enabled.count) of \(AnalysisFieldSettings.allFields.count) fields enabled. Disabled fields will be excluded from AI analysis instructions.")
-                } else {
-                    Text("All fields enabled. The AI will include whatever fields are relevant to the content.")
-                }
             }
+            .navigationTitle("Analysis Fields")
         }
-        .navigationTitle("Analysis Fields")
     }
-}
-
 
     private var hasWhisperProvider: Bool {
         guard let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext),
-              let keyId = config.apiKeyKeychainIdentifier,
-              let apiKey = try? SecureKeyStore().loadAPIKey(for: keyId),
-              !apiKey.isEmpty else {
+            let keyId = config.apiKeyKeychainIdentifier,
+            let apiKey = try? SecureKeyStore().loadAPIKey(for: keyId),
+            !apiKey.isEmpty
+        else {
             return false
         }
         return config.type == .openAI || config.type == .openAICompatible

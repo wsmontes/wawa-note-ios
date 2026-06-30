@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
-// Related JIRA: KAN-9, KAN-42
 
+// Related JIRA: KAN-9, KAN-42
 
 // MARK: - ProviderResolver Protocol
 

@@ -1,6 +1,6 @@
 import SwiftUI
-// Related JIRA: KAN-54, KAN-144
 
+// Related JIRA: KAN-54, KAN-144
 
 struct DayCellView: View {
     let day: DayInfo

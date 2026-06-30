@@ -1,6 +1,6 @@
 import SwiftUI
-// Related JIRA: KAN-54, KAN-144
 
+// Related JIRA: KAN-54, KAN-144
 
 struct MonthGridView: View {
     let month: Date
@@ -24,10 +24,14 @@ struct MonthGridView: View {
                         .buttonStyle(.plain)
                         .contextMenu {
                             if let onLongPress = onDayLongPress {
-                                Button { onLongPress(dayInfo.date) } label: {
+                                Button {
+                                    onLongPress(dayInfo.date)
+                                } label: {
                                     Label("New Note", systemImage: "square.and.pencil")
                                 }
-                                Button { onLongPress(dayInfo.date) } label: {
+                                Button {
+                                    onLongPress(dayInfo.date)
+                                } label: {
                                     Label("New Journal", systemImage: "book")
                                 }
                             }
@@ -46,7 +50,7 @@ struct MonthGridView: View {
             return []
         }
         let firstWeekday = cal.firstWeekday
-        let weekday = cal.component(.weekday, from: firstOfMonth) // 1=Sun, 7=Sat
+        let weekday = cal.component(.weekday, from: firstOfMonth)  // 1=Sun, 7=Sat
         let leadingEmpty = (weekday - firstWeekday + 7) % 7
 
         let daysInMonth = cal.range(of: .day, in: .month, for: firstOfMonth)?.count ?? 30

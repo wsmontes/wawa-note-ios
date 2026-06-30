@@ -1,7 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
-// Related JIRA: KAN-12, KAN-67
 
+// Related JIRA: KAN-12, KAN-67
 
 /// Settings view for anarlog folder sync configuration.
 ///
@@ -53,7 +53,9 @@ struct AnarlogSyncSettingsView: View {
             } header: {
                 Text("Shared Folder")
             } footer: {
-                Text("Choose the folder where anarlog stores its session notes. On desktop, this is typically ~/Documents/anarlog/. Sync this folder via iCloud Drive or Dropbox to access notes on both devices.")
+                Text(
+                    "Choose the folder where anarlog stores its session notes. On desktop, this is typically ~/Documents/anarlog/. Sync this folder via iCloud Drive or Dropbox to access notes on both devices."
+                )
             }
 
             // MARK: - Sync Status
@@ -153,7 +155,9 @@ struct AnarlogSyncSettingsView: View {
         .alert("Anarlog Templates", isPresented: $showingTemplateInfo) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("Template import will be available when the anarlog shared folder is configured. Place .jinja template files in the templates/ subfolder of your anarlog directory.")
+            Text(
+                "Template import will be available when the anarlog shared folder is configured. Place .jinja template files in the templates/ subfolder of your anarlog directory."
+            )
         }
     }
 

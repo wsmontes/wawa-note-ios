@@ -43,7 +43,8 @@ struct AnalysisOutputParser {
         let itemDir = fileStore.itemDirectoryURL(for: item.id)
         let analysisURL = itemDir.appendingPathComponent("analysis.json")
         guard let data = try? Data(contentsOf: analysisURL),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
             return nil
         }
 

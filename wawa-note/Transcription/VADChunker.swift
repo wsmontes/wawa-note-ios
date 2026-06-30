@@ -1,8 +1,8 @@
-import Foundation
 import AVFoundation
+import Foundation
 import OSLog
-// Related JIRA: KAN-6, KAN-23
 
+// Related JIRA: KAN-6, KAN-23
 
 /// Splits audio into speech-only segments using VoiceActivityDetector.
 ///
@@ -119,7 +119,8 @@ struct VADChunker: @unchecked Sendable {
     }
 
     /// Write a range of audio frames from source to a new file.
-    private func writeChunk(from sourceURL: URL, startFrame: AVAudioFramePosition, frameCount: AVAudioFrameCount, format: AVAudioFormat, to destURL: URL) throws {
+    private func writeChunk(from sourceURL: URL, startFrame: AVAudioFramePosition, frameCount: AVAudioFrameCount, format: AVAudioFormat, to destURL: URL) throws
+    {
         let sourceFile = try AVAudioFile(forReading: sourceURL)
         sourceFile.framePosition = startFrame
 
@@ -136,7 +137,7 @@ struct VADChunker: @unchecked Sendable {
             AVNumberOfChannelsKey: 1,
             AVLinearPCMBitDepthKey: 16,
             AVLinearPCMIsFloatKey: false,
-            AVLinearPCMIsBigEndianKey: false
+            AVLinearPCMIsBigEndianKey: false,
         ]
 
         let destFile = try AVAudioFile(forWriting: destURL, settings: settings, commonFormat: .pcmFormatInt16, interleaved: false)

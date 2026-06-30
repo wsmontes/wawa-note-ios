@@ -1,7 +1,7 @@
-import SwiftUI
 import SwiftData
-// Related JIRA: KAN-12, KAN-64
+import SwiftUI
 
+// Related JIRA: KAN-12, KAN-64
 
 @MainActor struct ProjectExportActions {
     let project: Project
@@ -26,16 +26,23 @@ import SwiftData
         let md = exporter.exportMarkdown(project: project, items: items, tasks: taskRows, edges: edges)
         let vc = UIActivityViewController(activityItems: [md], applicationActivities: nil)
         if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let root = scene.windows.first?.rootViewController { root.present(vc, animated: true) }
+            let root = scene.windows.first?.rootViewController
+        {
+            root.present(vc, animated: true)
+        }
     }
 
     func exportJSON() {
         let svc = InstanceExportService()
         let export = svc.exportSingleProject(project, context: modelContext)
         guard let data = try? JSONEncoder().encode(export),
-              let json = String(data: data, encoding: .utf8) else { return }
+            let json = String(data: data, encoding: .utf8)
+        else { return }
         let vc = UIActivityViewController(activityItems: [json], applicationActivities: nil)
         if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let root = scene.windows.first?.rootViewController { root.present(vc, animated: true) }
+            let root = scene.windows.first?.rootViewController
+        {
+            root.present(vc, animated: true)
+        }
     }
 }

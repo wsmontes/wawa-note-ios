@@ -1,8 +1,8 @@
-import SwiftUI
-import SwiftData
 import Combine
-// Related JIRA: KAN-10
+import SwiftData
+import SwiftUI
 
+// Related JIRA: KAN-10
 
 @MainActor
 final class ChatOverlayState: ObservableObject {
@@ -35,7 +35,9 @@ struct ContentView: View {
                     HomeView()
                         .toolbar {
                             ToolbarItem(placement: .topBarTrailing) {
-                                Button { showQueue = true } label: {
+                                Button {
+                                    showQueue = true
+                                } label: {
                                     ZStack(alignment: .topTrailing) {
                                         Image(systemName: "list.bullet.rectangle").accessibilityLabel("Queue")
                                         let count = processingQueue.entries.filter { $0.status == .queued || $0.status == .processing }.count
@@ -51,7 +53,9 @@ struct ContentView: View {
                                 }
                             }
                             ToolbarItem(placement: .topBarTrailing) {
-                                Button { showSettings = true } label: {
+                                Button {
+                                    showSettings = true
+                                } label: {
                                     Image(systemName: "gearshape").accessibilityLabel("Settings")
                                 }
                             }
@@ -93,7 +97,8 @@ struct ContentView: View {
             autoProcessPendingItems()
             // Capture safe area bottom for keyboard positioning
             if let window = UIApplication.shared.connectedScenes
-                .compactMap({ $0 as? UIWindowScene }).first?.windows.first {
+                .compactMap({ $0 as? UIWindowScene }).first?.windows.first
+            {
                 safeAreaBottom = window.safeAreaInsets.bottom
             }
         }
@@ -176,7 +181,8 @@ struct ProcessingQueueSheet: View {
                         VStack(spacing: 12) {
                             Image(systemName: "tray").font(.largeTitle).foregroundStyle(.secondary)
                             Text("No items in queue").font(.headline)
-                            Text("Items will appear here when they are queued for processing.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                            Text("Items will appear here when they are queued for processing.").font(.caption).foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
                         }
                         .frame(maxWidth: .infinity).padding(.vertical, 24)
                     }
@@ -209,8 +215,7 @@ struct ProcessingQueueSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(processingQueue.isPaused ? "Resume" : "Pause") {
-                        if processingQueue.isPaused { processingQueue.resumeQueue() }
-                        else { processingQueue.pauseQueue() }
+                        if processingQueue.isPaused { processingQueue.resumeQueue() } else { processingQueue.pauseQueue() }
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -226,8 +231,13 @@ private struct QueueEntryRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: entry.status == .processing ? "gearshape.2.fill" : entry.status == .done ? "checkmark.circle.fill" : entry.status == .failed ? "xmark.circle.fill" : "circle")
-                .foregroundStyle(entry.status == .processing ? .blue : entry.status == .done ? .green : entry.status == .failed ? .red : entry.status == .cancelled ? .gray : .orange)
+            Image(
+                systemName: entry.status == .processing
+                    ? "gearshape.2.fill" : entry.status == .done ? "checkmark.circle.fill" : entry.status == .failed ? "xmark.circle.fill" : "circle"
+            )
+            .foregroundStyle(
+                entry.status == .processing
+                    ? .blue : entry.status == .done ? .green : entry.status == .failed ? .red : entry.status == .cancelled ? .gray : .orange)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Item \(entry.itemID.uuidString.prefix(8))...").font(.caption).lineLimit(1)
                 Text(statusText).font(.caption2).foregroundStyle(.secondary)

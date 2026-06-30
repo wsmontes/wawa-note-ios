@@ -1,6 +1,6 @@
-import SwiftUI
 import Combine
 import SwiftData
+import SwiftUI
 
 @MainActor
 final class CaptureViewModel: ObservableObject {
@@ -44,7 +44,8 @@ final class CaptureViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] note in
                 guard let self, let savedId = self.savedItemId,
-                      note.object as? String == savedId.uuidString else { return }
+                    note.object as? String == savedId.uuidString
+                else { return }
                 if let stage = note.userInfo?["stage"] as? String {
                     self.pipelineStage = stage.lowercased().contains("transcrib") ? .transcribing : .analyzing
                 }
@@ -58,7 +59,8 @@ final class CaptureViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] note in
                 guard let self, let savedId = self.savedItemId,
-                      note.object as? String == savedId.uuidString else { return }
+                    note.object as? String == savedId.uuidString
+                else { return }
                 self.pipelineStage = nil
             }
             .store(in: &cancellables)

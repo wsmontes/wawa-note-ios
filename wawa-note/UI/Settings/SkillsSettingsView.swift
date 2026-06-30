@@ -1,6 +1,6 @@
 import SwiftUI
-// Related JIRA: KAN-10, KAN-33
 
+// Related JIRA: KAN-10, KAN-33
 
 /// Manage analysis skills — view, edit prompts, change templates.
 ///

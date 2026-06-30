@@ -1,10 +1,10 @@
-import SwiftUI
-import SwiftData
-import EventKit
 import Contacts
+import EventKit
+import SwiftData
+import SwiftUI
 import UniformTypeIdentifiers
-// Related JIRA: KAN-8, KAN-34
 
+// Related JIRA: KAN-8, KAN-34
 
 // MARK: - Send To Action
 
@@ -29,7 +29,9 @@ struct SendToMenu: View {
     var body: some View {
         Menu {
             ForEach(availableDestinations, id: \.rawValue) { dest in
-                Button { execute(dest) } label: {
+                Button {
+                    execute(dest)
+                } label: {
                     Label(dest.rawValue, systemImage: icon(for: dest))
                 }
             }
@@ -158,8 +160,9 @@ struct SendToMenu: View {
             let store = FileArtifactStore()
             let analysisURL = store.meetingDirectoryURL(for: ki.id).appendingPathComponent("analysis.json")
             if FileManager.default.fileExists(atPath: analysisURL.path),
-               let data = try? Data(contentsOf: analysisURL),
-               let analysisStr = String(data: data, encoding: .utf8) {
+                let data = try? Data(contentsOf: analysisURL),
+                let analysisStr = String(data: data, encoding: .utf8)
+            {
                 md += "\n## Analysis\n\n```json\n\(analysisStr)\n```\n"
             }
         case .derived(let di):
@@ -214,7 +217,8 @@ struct SendToMenu: View {
 
         let activityVC = UIActivityViewController(activityItems: [fileURL], applicationActivities: nil)
         if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let root = scene.windows.first?.rootViewController {
+            let root = scene.windows.first?.rootViewController
+        {
             root.present(activityVC, animated: true)
         }
     }

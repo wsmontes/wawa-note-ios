@@ -1,7 +1,7 @@
 import Foundation
 import UniformTypeIdentifiers
-// Related JIRA: KAN-12, KAN-62
 
+// Related JIRA: KAN-12, KAN-62
 
 final class ICSImporter: FormatImporter, @unchecked Sendable {
     let formatIdentifier = "ics"
@@ -87,9 +87,9 @@ final class ICSImporter: FormatImporter, @unchecked Sendable {
         let cleaned = str.trimmingCharacters(in: .whitespaces)
         // Try multiple ICS date formats: UTC (Z suffix), local, date-only
         let formats = [
-            "yyyyMMdd'T'HHmmss'Z'",     // 20240101T120000Z
-            "yyyyMMdd'T'HHmmss",         // 20240101T120000
-            "yyyyMMdd",                   // 20240101 (date-only)
+            "yyyyMMdd'T'HHmmss'Z'",  // 20240101T120000Z
+            "yyyyMMdd'T'HHmmss",  // 20240101T120000
+            "yyyyMMdd",  // 20240101 (date-only)
         ]
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")

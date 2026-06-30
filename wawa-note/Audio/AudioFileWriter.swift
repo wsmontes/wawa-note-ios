@@ -1,7 +1,7 @@
 import AVFoundation
 import OSLog
-// Related JIRA: KAN-5, KAN-14, KAN-73
 
+// Related JIRA: KAN-5, KAN-14, KAN-73
 
 enum AudioFileWriterError: Error {
     case fileCreationFailed
@@ -221,7 +221,7 @@ final class AudioFileWriter: @unchecked Sendable {
     /// Check if a crash recovery checkpoint exists from a previous session.
     /// Returns (meetingId, segmentIndex, sampleRate) if found, nil otherwise.
     /// Recovers checkpoints less than 24 hours old (covers overnight scenarios).
-    private static let maxCheckpointAge: TimeInterval = 86400 // 24 hours
+    private static let maxCheckpointAge: TimeInterval = 86400  // 24 hours
 
     static func loadCrashCheckpoint(fileStore: FileArtifactStore = FileArtifactStore()) -> (UUID, Int, Double)? {
         let url = fileStore.configsDirectoryURL().appendingPathComponent("recording_checkpoint.json")

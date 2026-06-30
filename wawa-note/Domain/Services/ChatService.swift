@@ -1,7 +1,7 @@
 import Foundation
 import os
-// Related JIRA: KAN-9, KAN-47
 
+// Related JIRA: KAN-9, KAN-47
 
 @MainActor
 final class ChatService {
@@ -32,7 +32,8 @@ final class ChatService {
 
     func findConversation(for contextKey: String) throws -> ChatConversation? {
         let all = try fetchConversations()
-        return all
+        return
+            all
             .filter { $0.contextKey == contextKey }
             .max(by: { $0.updatedAt < $1.updatedAt })
     }
@@ -43,11 +44,11 @@ final class ChatService {
         }
         let defaultTitle: String = {
             switch context {
-            case .global:          return "General Chat"
-            case .inbox:           return "Inbox Chat"
-            case .item:            return "Item Chat"
+            case .global: return "General Chat"
+            case .inbox: return "Inbox Chat"
+            case .item: return "Item Chat"
             case .exploreProjects: return "Projects Chat"
-            case .project:         return "Project Chat"
+            case .project: return "Project Chat"
             }
         }()
         return try createConversation(title: defaultTitle, contextKey: context.key)
@@ -113,8 +114,9 @@ final class ChatService {
             let idString = fileURL.deletingPathExtension().lastPathComponent
             guard let convId = UUID(uuidString: idString) else { continue }
             guard let data = try? Data(contentsOf: fileURL),
-                  let messages = try? JSONDecoder().decode([ChatMessage].self, from: data),
-                  !messages.isEmpty else { continue }
+                let messages = try? JSONDecoder().decode([ChatMessage].self, from: data),
+                !messages.isEmpty
+            else { continue }
 
             let title: String = {
                 if let firstUser = messages.first(where: { $0.role == .user }) {
@@ -135,7 +137,7 @@ final class ChatService {
                 model: nil,
                 messageCount: messages.count,
                 lastMessagePreview: lastPreview,
-                contextKey: nil // Cannot recover contextKey from messages alone
+                contextKey: nil  // Cannot recover contextKey from messages alone
             )
             conversations.append(conversation)
         }

@@ -17,9 +17,8 @@ struct ProjectUpdateFields: Codable, Sendable {
 
     /// Returns true if at least one field is non-nil.
     var hasChanges: Bool {
-        name != nil || summary != nil || intention != nil ||
-        customInstructions != nil || colorHex != nil || iconName != nil ||
-        status != nil || frameworkId != nil || holdIngestionForDoubts != nil
+        name != nil || summary != nil || intention != nil || customInstructions != nil || colorHex != nil || iconName != nil || status != nil
+            || frameworkId != nil || holdIngestionForDoubts != nil
     }
 }
 
