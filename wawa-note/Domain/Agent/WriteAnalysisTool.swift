@@ -57,6 +57,7 @@ final class AnalysisSchemaStore {
         "decisions_actions", "Decisions & Actions",
         "Meeting-like: decisions, tasks, risks, open questions", "meeting",
         [
+          "suggested_title": ["type": "string"],
           "short_summary": ["type": "string"],
           "decisions": [
             "type": "array",
@@ -89,6 +90,7 @@ final class AnalysisSchemaStore {
             ],
           ],
           "open_questions": ["type": "array", "items": ["type": "string"]],
+          "suggested_tags": ["type": "array", "items": ["type": "string"]],
           "key_points": ["type": "array", "items": ["type": "string"]],
         ]
       ),
@@ -96,6 +98,7 @@ final class AnalysisSchemaStore {
         "thematic_analysis", "Thematic Analysis",
         "Themes, patterns, contradictions, and insights across content", "analysis",
         [
+          "suggested_title": ["type": "string"],
           "short_summary": ["type": "string"],
           "themes": [
             "type": "array",
@@ -119,6 +122,7 @@ final class AnalysisSchemaStore {
             ],
           ],
           "people_mentioned": ["type": "array", "items": ["type": "string"]],
+          "suggested_tags": ["type": "array", "items": ["type": "string"]],
           "entities": [
             "type": "array",
             "items": [
