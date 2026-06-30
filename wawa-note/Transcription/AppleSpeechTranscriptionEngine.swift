@@ -253,7 +253,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         AppLog.transcription.info("Starting on-device transcription: \(String(format: "%.0f", duration))s, locale=\(recognizer.locale.identifier)")
 
         if duration <= Self.maxLocalDuration {
-            return try await transcribeDirect(url: audioFileURL, recognizer: recognizer, meetingId: meetingId)
+            return try await transcribeWithConversionRetry(url: audioFileURL, recognizer: recognizer, meetingId: meetingId)
         }
 
         // Chunking for long files (>50s).
@@ -273,7 +273,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             AppLog.transcription.warning(
                 "VAD coverage too low (\(String(format: "%.0f", coverageRatio * 100))% of \(String(format: "%.0f", duration))s) — falling back to full-file transcription"
             )
-            return try await transcribeDirect(url: audioFileURL, recognizer: recognizer, meetingId: meetingId)
+            return try await transcribeWithConversionRetry(url: audioFileURL, recognizer: recognizer, meetingId: meetingId)
         }
 
         // Resume from checkpoint if the app was killed mid-transcription.
@@ -313,7 +313,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             onProgress?(.transcribing(chunk: i + 1, totalChunks: chunks.count))
             AppLog.transcription.info("On-device chunk \(i+1)/\(chunks.count)")
 
-            let transcript = try await transcribeDirect(url: chunk.url, recognizer: recognizer, meetingId: meetingId)
+            let transcript = try await transcribeWithConversionRetry(url: chunk.url, recognizer: recognizer, meetingId: meetingId)
             languageCode = transcript.languageCode ?? languageCode
 
             let chunkText = transcript.segments.map(\.text).joined(separator: " ")
@@ -377,11 +377,39 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
     // MARK: - Direct transcription (guaranteed on-device)
 
+    /// Wraps transcribeDirect with a retry on error 1110 (unsupported audio format).
+    /// The first attempt uses AAC→PCM conversion. If SFSpeechRecognizer rejects the
+    /// converted WAV with error 1110, the second attempt passes the original file
+    /// directly — SFSpeechRecognizer supports M4A/AAC natively, and some imported
+    /// files have codec variants that AVAudioConverter mishandles.
+    private func transcribeWithConversionRetry(url: URL, recognizer: SFSpeechRecognizer, meetingId: UUID) async throws -> Transcript {
+        do {
+            return try await transcribeDirect(url: url, recognizer: recognizer, meetingId: meetingId)
+        } catch {
+            let nsError = error as NSError
+            if nsError.domain.contains("AssistantError") && nsError.code == 1110 {
+                AppLog.transcription.warning(
+                    "Converted audio rejected (error 1110) — retrying with original file: \(url.lastPathComponent)"
+                )
+                return try await transcribeDirect(url: url, recognizer: recognizer, meetingId: meetingId, skipConversion: true)
+            }
+            throw error
+        }
+    }
+
     /// Transcribe a single audio URL with guaranteed on-device processing.
     /// Guideline: "No fallback com SFSpeechRecognizer, sempre setar requiresOnDeviceRecognition = true."
-    private func transcribeDirect(url: URL, recognizer: SFSpeechRecognizer, meetingId: UUID) async throws -> Transcript {
+    private func transcribeDirect(url: URL, recognizer: SFSpeechRecognizer, meetingId: UUID, skipConversion: Bool = false) async throws -> Transcript {
         // Decode AAC/M4A → PCM WAV. AAC bitstream causes recognizer to skip first seconds.
-        let recognitionURL = try prepareForRecognition(url)
+        // When skipConversion is true (retry after 1110 error), pass the original file —
+        // SFSpeechRecognizer supports M4A/AAC natively, and some imported files have
+        // codec variants that AVAudioConverter mishandles.
+        let recognitionURL: URL
+        if skipConversion {
+            recognitionURL = url
+        } else {
+            recognitionURL = try prepareForRecognition(url)
+        }
         let request = SFSpeechURLRecognitionRequest(url: recognitionURL)
         request.shouldReportPartialResults = true
         request.addsPunctuation = true
