@@ -331,10 +331,6 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
         write("Content-Disposition: form-data; name=\"model\"\(lb)\(lb)")
         write("\(model)\(lb)")
 
-        write("--\(boundary)\(lb)")
-        write("Content-Disposition: form-data; name=\"response_format\"\(lb)\(lb)")
-        write("verbose_json\(lb)")
-
         if let prompt, !prompt.isEmpty {
             write("--\(boundary)\(lb)")
             write("Content-Disposition: form-data; name=\"prompt\"\(lb)\(lb)")

@@ -198,20 +198,33 @@ final class ContentPipelineService: ObservableObject {
                     if let transcribedText = await extractionSvc.extractTextFromAudio(item) {
                         AppLog.provider.info("ContentPipeline: pre-transcription complete for item \(itemID) — \(transcribedText.count) chars")
                         // Set pendingReview so user can verify transcription before analysis
-                        if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+                        do {
+                            guard let fresh = try KnowledgeItemService(context: modelContext).fetchItem(id: itemID) else { return }
+                            fresh.transitionStatus(to: .transcribed, reason: "Pre-transcription complete")
                             fresh.transitionStatus(to: .pendingReview, reason: "Pre-transcription complete, awaiting user verification")
-                            do { try modelContext.save() } catch {
-                                AppLog.provider.error("ContentPipeline: save failed (transcribe→pendingReview): \(error.localizedDescription)")
-                            }
+                            try modelContext.save()
+                        } catch {
+                            AppLog.provider.error("ContentPipeline: save failed (transcribe→pendingReview): \(error.localizedDescription)")
                         }
+                        NotificationCenter.default.post(
+                            name: .contentPipelineStageChanged, object: itemID.uuidString,
+                            userInfo: ["stage": "Review transcription"])
+                        return
                     } else {
                         let reason = extractionSvc.extractionError?.errorDescription ?? "unknown error"
                         AppLog.provider.warning("ContentPipeline: pre-transcription failed for item \(itemID) — \(reason)")
-                        if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+                        do {
+                            guard let fresh = try KnowledgeItemService(context: modelContext).fetchItem(id: itemID) else { return }
                             fresh.transitionStatus(to: .failed, reason: "Pre-transcription failed: \(reason)")
                             fresh.transcriptionEngineId = nil  // clear stale engine ID on failure
-                            try? modelContext.save()
+                            try modelContext.save()
+                        } catch {
+                            AppLog.provider.error("ContentPipeline: save failed (transcription failure): \(error.localizedDescription)")
                         }
+                        NotificationCenter.default.post(
+                            name: .contentPipelineStageChanged, object: itemID.uuidString,
+                            userInfo: ["stage": "Transcription failed", "error": reason])
+                        return
                     }
                 }
                 if item.type == .image, item.bodyText == nil {
@@ -232,18 +245,28 @@ final class ContentPipelineService: ObservableObject {
                             name: .contentPipelineStageChanged, object: itemID.uuidString,
                             userInfo: ["stage": "OCR done (\(ocrText.count) chars" + (hasVision ? " + vision)" : ")")])
                         // Set pendingReview so user can verify extraction before analysis
-                        if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+                        do {
+                            guard let fresh = try KnowledgeItemService(context: modelContext).fetchItem(id: itemID) else { return }
+                            fresh.transitionStatus(to: .transcribed, reason: "OCR extraction complete")
                             fresh.transitionStatus(to: .pendingReview, reason: "OCR complete — awaiting user verification")
-                            do { try modelContext.save() } catch {
-                                AppLog.provider.error("ContentPipeline: save failed (OCR→pendingReview): \(error.localizedDescription)")
-                            }
+                            try modelContext.save()
+                        } catch {
+                            AppLog.provider.error("ContentPipeline: save failed (OCR→pendingReview): \(error.localizedDescription)")
                         }
+                        return
                     } else {
                         AppLog.provider.warning("ContentPipeline: OCR failed for item \(itemID) — marking as failed")
-                        if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
+                        do {
+                            guard let fresh = try KnowledgeItemService(context: modelContext).fetchItem(id: itemID) else { return }
                             fresh.transitionStatus(to: .failed, reason: "OCR extraction failed")
-                            try? modelContext.save()
+                            try modelContext.save()
+                        } catch {
+                            AppLog.provider.error("ContentPipeline: save failed (OCR failure): \(error.localizedDescription)")
                         }
+                        NotificationCenter.default.post(
+                            name: .contentPipelineStageChanged, object: itemID.uuidString,
+                            userInfo: ["stage": "Extraction failed", "error": "OCR extraction failed"])
+                        return
                     }
                 }
                 if item.type == .webBookmark, item.bodyText == nil {
@@ -591,9 +614,9 @@ final class ContentPipelineService: ObservableObject {
     }
 
     /// Process a queue entry with async completion gate.
-    func processEntry(itemID: UUID, projectID: UUID? = nil, using modelContext: ModelContext? = nil) async {
+    func processEntry(itemID: UUID, projectID: UUID? = nil, using modelContext: ModelContext? = nil) async -> String? {
         let ctx = modelContext ?? ModelContext(modelContainer)
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
             var resumed = false
             var token: NSObjectProtocol?
             token = NotificationCenter.default.addObserver(forName: .pipelineCompleted, object: nil, queue: .main) { note in
@@ -601,7 +624,7 @@ final class ContentPipelineService: ObservableObject {
                 guard !resumed else { return }
                 if let t = token { NotificationCenter.default.removeObserver(t) }
                 resumed = true
-                continuation.resume()
+                continuation.resume(returning: self.processingFailureReason(itemID: itemID))
             }
             // Start processing AFTER observer is registered to avoid race:
             // if process() completes synchronously (e.g. item already analyzed),
@@ -622,8 +645,19 @@ final class ContentPipelineService: ObservableObject {
                 // or .analyzing) and can be retried manually.
                 activeJobs[itemID]?.cancel()
                 activeJobs[itemID] = nil
-                continuation.resume()
+                continuation.resume(returning: "Pipeline timed out after 600s")
             }
+        }
+    }
+
+    private func processingFailureReason(itemID: UUID) -> String? {
+        let ctx = ModelContext(modelContainer)
+        do {
+            guard let item = try KnowledgeItemService(context: ctx).fetchItem(id: itemID) else { return "Item not found after processing" }
+            return item.status == .failed ? "Item processing ended in failed status" : nil
+        } catch {
+            AppLog.provider.error("ContentPipeline: completed item \(itemID) could not be fetched: \(error.localizedDescription)")
+            return "Item could not be fetched after processing"
         }
     }
 
@@ -3086,12 +3120,12 @@ final class ProcessingQueueService: ObservableObject {
         let task = Task { [weak self] in
             do {
                 try Task.checkCancellation()
-                await pipeline.processEntry(
+                let processingError = await pipeline.processEntry(
                     itemID: itemID,
                     projectID: next.projectID
                 )
                 await MainActor.run { [weak self] in
-                    self?.finishJob(entryID, failed: false, error: nil)
+                    self?.finishJob(entryID, failed: processingError != nil, error: processingError)
                 }
             } catch {
                 await MainActor.run { [weak self] in

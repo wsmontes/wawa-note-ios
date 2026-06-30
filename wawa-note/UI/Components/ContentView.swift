@@ -176,7 +176,7 @@ struct ProcessingQueueSheet: View {
         NavigationStack {
             List {
                 let active = processingQueue.entries.filter { $0.status == .queued || $0.status == .processing }
-                if active.isEmpty {
+                if processingQueue.entries.isEmpty {
                     Section {
                         VStack(spacing: 12) {
                             Image(systemName: "tray").font(.largeTitle).foregroundStyle(.secondary)

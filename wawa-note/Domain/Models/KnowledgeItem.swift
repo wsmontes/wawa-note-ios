@@ -48,7 +48,7 @@ enum ItemStatus: String, Codable, CaseIterable {
         case .transcribed:
             [.pendingReview, .analyzing, .failed]
         case .pendingReview:
-            [.analyzing, .failed]
+            [.transcribed, .analyzing, .failed]
         case .analyzing:
             [.analyzed, .failed]
         case .analyzed:

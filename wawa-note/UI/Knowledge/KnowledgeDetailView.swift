@@ -444,15 +444,7 @@ struct KnowledgeDetailView: View {
                         await resolveAudioAsset()
                         loadRawAnalysisJSON()
                         loadData()
-                        // If analysis ran but produced no visible results, surface a message
-                        if item.status == .analyzed || item.status == .failed,
-                            analysis == nil, rawAnalysisJSON.isEmpty
-                        {
-                            analysisError =
-                                "Analysis completed but no results were generated. The AI may have encountered an issue processing this item. Check Files for raw output."
-                        } else {
-                            analysisError = nil
-                        }
+                        updateFailureMessages()
                     }
                 }
             }
@@ -476,11 +468,24 @@ struct KnowledgeDetailView: View {
                 if let thinking = n.userInfo?["thinking"] as? Bool {
                     isAgentThinking = thinking
                 }
+                if let error = n.userInfo?["error"] as? String {
+                    if item.type == .audio {
+                        transcriptionError = error
+                    } else {
+                        analysisError = error
+                    }
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: .transcriptReady)) { n in
                 guard n.object as? String == item.id.uuidString else { return }
                 Task { @MainActor in
-                    transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id)
+                    do {
+                        transcript = try fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id)
+                        transcriptionError = nil
+                    } catch {
+                        AppLog.error("transcription", "KnowledgeDetailView: transcriptReady read failed for \(item.id): \(error.localizedDescription)")
+                        transcriptionError = "Transcript was created but could not be loaded. Try re-transcribing."
+                    }
                     isTranscribing = false
                     transcriptionProgress = nil
                 }
@@ -816,8 +821,10 @@ struct KnowledgeDetailView: View {
 
                 HStack(spacing: 8) {
                     Button {
-                        item.transitionStatus(to: .draft, reason: "User approved transcription — re-queuing for analysis")
-                        try? modelContext.save()
+                        item.transitionStatus(to: .transcribed, reason: "User approved transcription — re-queuing for analysis")
+                        do { try modelContext.save() } catch {
+                            AppLog.error("transcription", "KnowledgeDetailView: save failed after approving extraction: \(error.localizedDescription)")
+                        }
                         // Re-queue for analysis now that user approved
                         processingQueue.enqueue(itemID: item.id, projectID: item.projectID, trigger: .directUserAction)
                     } label: {
@@ -831,7 +838,9 @@ struct KnowledgeDetailView: View {
                         let dir = fileStore.itemDirectoryURL(for: item.id)
                         try? FileManager.default.removeItem(at: dir.appendingPathComponent("transcript.json"))
                         item.transitionStatus(to: .recorded, reason: "User requested re-extraction — resetting transcript")
-                        try? modelContext.save()
+                        do { try modelContext.save() } catch {
+                            AppLog.error("transcription", "KnowledgeDetailView: save failed after requesting re-extraction: \(error.localizedDescription)")
+                        }
                         processingQueue.enqueue(itemID: item.id, projectID: item.projectID, trigger: .newCapture)
                     } label: {
                         Label("Re-extract", systemImage: "arrow.counterclockwise")
@@ -1835,12 +1844,20 @@ struct KnowledgeDetailView: View {
         // Delegate to canonical transcription service (handles manifest + legacy).
         // Pass selectedLocale so the user's language choice is honoured.
         let extractionSvc = ContentExtractionService(modelContext: modelContext, fileStore: fileStore, preferredLocale: selectedLocale)
-        if let text = await extractionSvc.extractTextFromAudio(item) {
-            transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id)
+        if await extractionSvc.extractTextFromAudio(item) != nil {
+            do {
+                transcript = try fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id)
+            } catch {
+                AppLog.error(
+                    "transcription", "KnowledgeDetailView: transcript read failed after direct transcription for \(item.id): \(error.localizedDescription)")
+                transcriptionError = "Transcript was created but could not be loaded. Try re-transcribing."
+            }
             isTranscribing = false
             transcriptionProgress = nil
             item.transitionStatus(to: .transcribed, reason: "Transcription complete — ready for analysis")
-            try? modelContext.save()
+            do { try modelContext.save() } catch {
+                AppLog.error("transcription", "KnowledgeDetailView: save failed after direct transcription: \(error.localizedDescription)")
+            }
 
             // Auto-run pipeline (agent-based) after transcription
             if (try? ProviderRouter.resolveActive(context: modelContext)) != nil {
@@ -1911,7 +1928,15 @@ struct KnowledgeDetailView: View {
         if selectedModel.isEmpty {
             selectedModel = ActiveModelPicker.effectiveModel(context: modelContext, feature: "analysis")
         }
-        transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id)
+        do {
+            transcript = try fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id)
+        } catch FileArtifactStoreError.fileNotFound {
+            transcript = nil
+        } catch {
+            transcript = nil
+            AppLog.error("transcription", "KnowledgeDetailView: failed to load transcript for \(item.id): \(error.localizedDescription)")
+            transcriptionError = "Transcript could not be loaded. Try re-transcribing."
+        }
         analysis = try? fileStore.readArtifact(MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id)
         if analysis == nil { loadRawAnalysisJSON() }
 
@@ -1925,6 +1950,22 @@ struct KnowledgeDetailView: View {
         }
 
         loadBacklinks()
+        updateFailureMessages()
+    }
+
+    private func updateFailureMessages() {
+        guard item.status == .failed else {
+            if transcript != nil { transcriptionError = nil }
+            if analysis != nil || !rawAnalysisJSON.isEmpty { analysisError = nil }
+            return
+        }
+        if item.type == .audio, transcript == nil {
+            transcriptionError = transcriptionError ?? "Transcription failed. Try again or choose a different transcription engine from Reprocess."
+            analysisError = nil
+        } else if analysis == nil, rawAnalysisJSON.isEmpty {
+            analysisError =
+                "Analysis failed or produced no visible results. Try re-analyzing this item."
+        }
     }
 
     // MARK: - Editing
@@ -2025,7 +2066,9 @@ struct KnowledgeDetailView: View {
         }
         // Prevent autoProcessPendingItems from double-processing.
         item.inboxDate = nil
-        try? modelContext.save()
+        do { try modelContext.save() } catch {
+            AppLog.error("transcription", "KnowledgeDetailView: save failed before reprocess: \(error.localizedDescription)")
+        }
 
         // ── Run ────────────────────────────────────────────────────
         if doTranscribe && !doAnalyze {
@@ -2034,9 +2077,38 @@ struct KnowledgeDetailView: View {
             isTranscribing = true
             let extractionSvc = ContentExtractionService(modelContext: modelContext, fileStore: fileStore)
             if item.type == .audio {
-                _ = await extractionSvc.extractTextFromAudio(item)
+                if await extractionSvc.extractTextFromAudio(item) != nil {
+                    do {
+                        transcript = try fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id)
+                    } catch {
+                        AppLog.error(
+                            "transcription", "KnowledgeDetailView: transcript read failed after re-transcription for \(item.id): \(error.localizedDescription)")
+                        transcriptionError = "Transcript was created but could not be loaded. Try re-transcribing."
+                    }
+                    item.transitionStatus(to: .transcribed, reason: "Manual re-transcription complete")
+                    do { try modelContext.save() } catch {
+                        AppLog.error("transcription", "KnowledgeDetailView: save failed after re-transcription: \(error.localizedDescription)")
+                    }
+                    if transcript != nil {
+                        transcriptionError = nil
+                    }
+                } else {
+                    let reason = extractionSvc.extractionError?.errorDescription ?? "Transcription failed. Please try again."
+                    AppLog.error("transcription", "KnowledgeDetailView: manual re-transcription failed for \(item.id): \(reason)")
+                    transcriptionError = reason
+                    item.transitionStatus(to: .failed, reason: "Manual re-transcription failed: \(reason)")
+                    do { try modelContext.save() } catch {
+                        AppLog.error("transcription", "KnowledgeDetailView: save failed after re-transcription failure: \(error.localizedDescription)")
+                    }
+                }
             } else if item.type == .image {
-                _ = await extractionSvc.extractTextFromImage(item)
+                if await extractionSvc.extractTextFromImage(item) == nil {
+                    analysisError = "Text extraction failed. Try a clearer image."
+                    item.transitionStatus(to: .failed, reason: "Manual OCR extraction failed")
+                    do { try modelContext.save() } catch {
+                        AppLog.error("transcription", "KnowledgeDetailView: save failed after OCR failure: \(error.localizedDescription)")
+                    }
+                }
             }
             isTranscribing = false
             let fetchedItem = try? services.items.fetchItem(id: item.id)
@@ -2134,9 +2206,14 @@ struct KnowledgeDetailView: View {
 
     /// Get the first available extracted text for review (transcript, body, raw body).
     private func extractionPreview() -> String? {
-        if let transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id) {
-            let text = transcript.segments.map(\.text).joined(separator: " ")
-            if !text.trimmingCharacters(in: .whitespaces).isEmpty { return text }
+        if fileStore.artifactExists(fileName: "transcript.json", meetingId: item.id) {
+            do {
+                let transcript = try fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id)
+                let text = transcript.segments.map(\.text).joined(separator: " ")
+                if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return text }
+            } catch {
+                AppLog.error("transcription", "KnowledgeDetailView: extraction preview could not read transcript for \(item.id): \(error.localizedDescription)")
+            }
         }
         if let body = item.bodyText, !body.trimmingCharacters(in: .whitespaces).isEmpty {
             return body

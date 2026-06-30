@@ -183,7 +183,16 @@ final class ContentExtractionService {
         if canUseRemoteWhisper, let config, let baseURL = config.baseURL {
             var apiKey = ""
             if let keyId = config.apiKeyKeychainIdentifier {
-                apiKey = (try? SecureKeyStore().loadAPIKey(for: keyId)) ?? ""
+                do {
+                    apiKey = try SecureKeyStore().loadAPIKey(for: keyId)
+                } catch {
+                    AppLog.error(
+                        "transcription",
+                        "Remote transcription API key unavailable for provider \(config.name): \(error.localizedDescription)"
+                    )
+                }
+            } else if config.type.requiresAPIKey {
+                AppLog.error("transcription", "Remote transcription selected but provider \(config.name) has no API key reference")
             }
             return RemoteTranscriptionEngine(baseURL: baseURL, apiKey: apiKey)
         }
@@ -214,14 +223,24 @@ final class ContentExtractionService {
         let engine = resolveTranscriptionEngine(preferredLocale: item.languageCode)
         guard let engine else {
             extractionError = .engineFailed("No transcription engine available. Check provider configuration in Settings.")
+            AppLog.error("transcription", "ContentExtraction: no transcription engine available for item \(item.id)")
             return nil
         }
 
         do {
-            var result = try await engine.transcribeFile(audioURL, meetingId: item.id)
+            let result = try await engine.transcribeFile(audioURL, meetingId: item.id)
+            let transcriptText = result.segments.map(\.text).joined(separator: "\n")
+            guard !transcriptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                AppLog.error(
+                    "transcription",
+                    "ContentExtraction: transcription returned no speech for item \(item.id) — engine=\(self.resolvedEngineId(engine)) segments=\(result.segments.count)"
+                )
+                extractionError = .noSpeechDetected
+                return nil
+            }
 
             // ── Post-transcription diagnostics ────────────────────
-            let transcriptChars = result.segments.map(\.text).joined(separator: " ").count
+            let transcriptChars = transcriptText.count
             let langCode = result.languageCode ?? "nil"
             AppLog.audio.info(
                 """
@@ -242,7 +261,7 @@ final class ContentExtractionService {
             NotificationCenter.default.post(name: .transcriptReady, object: item.id.uuidString)
 
             AppLog.provider.info("ContentExtraction: transcription complete (\(result.segments.count) segments)")
-            return result.segments.map(\.text).joined(separator: "\n")
+            return transcriptText
         } catch {
             let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             AppLog.provider.error("ContentExtraction: transcription failed for item \(item.id): \(msg)")
@@ -256,10 +275,17 @@ final class ContentExtractionService {
 
     /// Reads transcript text from an already-saved transcript.json, if it exists.
     private func loadExistingTranscriptText(for itemID: UUID) -> String? {
-        guard let transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: itemID),
-            !transcript.segments.isEmpty
-        else { return nil }
-        return transcript.segments.map(\.text).joined(separator: "\n")
+        guard fileStore.artifactExists(fileName: "transcript.json", meetingId: itemID) else { return nil }
+        let transcript: Transcript
+        do {
+            transcript = try fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: itemID)
+        } catch {
+            AppLog.error("transcription", "ContentExtraction: failed to read existing transcript for item \(itemID): \(error.localizedDescription)")
+            return nil
+        }
+        let text = transcript.segments.map(\.text).joined(separator: "\n")
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return text
     }
 
     /// Returns true when the item needs transcription: either no transcript exists,

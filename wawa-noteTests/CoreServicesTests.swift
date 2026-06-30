@@ -1,3 +1,5 @@
+import AVFoundation
+import SwiftData
 import XCTest
 
 @testable import Wawa_Note
@@ -877,6 +879,11 @@ final class ItemStatusStateMachineTests: XCTestCase {
         XCTAssertTrue(ItemStatus.failed.canTransition(to: .recorded))
     }
 
+    /// Reviewed extraction can return to transcribed so the queue can start analysis.
+    func testPendingReviewCanReturnToTranscribedForApproval() {
+        XCTAssertTrue(ItemStatus.pendingReview.canTransition(to: .transcribed))
+    }
+
     /// Terminal states should not transition further.
     func testArchivedIsTerminal() {
         XCTAssertTrue(ItemStatus.archived.validNextStatuses.isEmpty)
@@ -1012,6 +1019,98 @@ final class ContentExtractionValidationTests: XCTestCase {
         XCTAssertTrue(
             url.path.hasSuffix("audio.m4a"),
             "Audio URL should be audio.m4a")
+    }
+
+    /// Short real M4A files should fail visibly before the speech engine is invoked.
+    func testExtractTextFromShortM4AFailsWithSpecificError() async throws {
+        let schema = Schema([AIProviderConfigModel.self, KnowledgeItem.self])
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: config)
+        let context = ModelContext(container)
+
+        let store = FileArtifactStore()
+        let itemID = UUID()
+        defer { try? store.deleteMeetingDirectory(for: itemID) }
+
+        try store.createMeetingDirectory(for: itemID)
+        try Self.writeSilentM4A(to: store.audioFileURL(for: itemID), duration: 0.8)
+
+        let item = KnowledgeItem(
+            id: itemID,
+            type: .audio,
+            title: "Short M4A",
+            status: .recorded,
+            durationSeconds: 0.8
+        )
+        item.audioFileRelativePath = AppFileConstants.audioFileName
+        context.insert(item)
+        try context.save()
+
+        let service = ContentExtractionService(modelContext: context, fileStore: store)
+        let text = await service.extractTextFromAudio(item)
+
+        XCTAssertNil(text)
+        guard case .audioTooShort(let duration)? = service.extractionError else {
+            XCTFail("Expected audioTooShort, got \(String(describing: service.extractionError))")
+            return
+        }
+        XCTAssertLessThan(duration, 1.0)
+    }
+
+    /// Pipeline processing should not overwrite a transcription failure with a later analysis state.
+    func testPipelineShortM4ARemainsFailed() async throws {
+        let schema = Schema([AIProviderConfigModel.self, KnowledgeItem.self])
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: config)
+        let context = ModelContext(container)
+
+        let store = FileArtifactStore()
+        let itemID = UUID()
+        defer { try? store.deleteMeetingDirectory(for: itemID) }
+
+        try store.createMeetingDirectory(for: itemID)
+        try Self.writeSilentM4A(to: store.audioFileURL(for: itemID), duration: 0.8)
+
+        let item = KnowledgeItem(
+            id: itemID,
+            type: .audio,
+            title: "Pipeline Short M4A",
+            status: .recorded,
+            durationSeconds: 0.8
+        )
+        item.audioFileRelativePath = AppFileConstants.audioFileName
+        context.insert(item)
+        try context.save()
+
+        let pipeline = ContentPipelineService(
+            ingestionState: ProjectIngestionState(),
+            modelContainer: container
+        )
+        let processingError = await pipeline.processEntry(itemID: itemID, using: context)
+        let fetched = try XCTUnwrap(KnowledgeItemService(context: context).fetchItem(id: itemID))
+
+        XCTAssertNotNil(processingError)
+        XCTAssertEqual(fetched.status, .failed)
+        XCTAssertNil(fetched.transcriptionEngineId)
+        XCTAssertFalse(store.artifactExists(fileName: "transcript.json", meetingId: itemID))
+    }
+
+    private static func writeSilentM4A(to url: URL, duration: TimeInterval) throws {
+        let sampleRate: Double = 44_100
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: sampleRate,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderBitRateKey: 64_000,
+        ]
+        let file = try AVAudioFile(forWriting: url, settings: settings)
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1),
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(sampleRate * duration))
+        else {
+            throw NSError(domain: "ContentExtractionValidationTests", code: -1)
+        }
+        buffer.frameLength = buffer.frameCapacity
+        try file.write(from: buffer)
     }
 
     /// Recording manifest writes and reads correctly.
