@@ -433,6 +433,10 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                             cloudHasResumed = true
                             cloudTimeout.cancel()
                             self.usedCloudFallback = true
+                            NotificationCenter.default.post(
+                                name: .transcriptEngineDidChange,
+                                object: nil,
+                                userInfo: ["engineId": "apple-cloud", "label": "Apple Cloud"])
                             let transcript = self.buildTranscript(from: cloudResult, recognizer: recognizer, meetingId: meetingId)
                             AppLog.transcription.info("Cloud fallback succeeded: \(transcript.segments.count) segments")
                             continuation.resume(returning: transcript)

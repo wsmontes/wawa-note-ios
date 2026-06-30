@@ -215,6 +215,10 @@ final class ContentExtractionService {
         } catch {
             let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             AppLog.provider.error("ContentExtraction: transcription failed for item \(item.id): \(msg)")
+            // Post error details so KnowledgeDetailView can show them
+            NotificationCenter.default.post(
+                name: .transcriptionFailed, object: item.id.uuidString,
+                userInfo: ["error": msg])
             if let fallback = loadExistingTranscriptText(for: item.id) {
                 return fallback
             }
