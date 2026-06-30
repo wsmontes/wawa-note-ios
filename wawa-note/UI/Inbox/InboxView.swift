@@ -240,13 +240,6 @@ struct InboxView: View {
     .refreshable { refreshID = UUID() }
   }
 
-  private func transcriptionLabel(_ engineId: String) -> String {
-    if engineId.contains("whisper") { return "Whisper" }
-    if engineId.contains("apple-cloud") { return "Apple Cloud" }
-    if engineId.contains("apple-speech") { return "On-Device" }
-    return "Transcribed"
-  }
-
   private func inboxRow(_ item: KnowledgeItem) -> some View {
     HStack(spacing: 10) {
       Image(systemName: item.type.icon)
@@ -261,6 +254,9 @@ struct InboxView: View {
             (item.inboxDate != nil && item.analysisProviderId == nil) ? .primary : .secondary)
 
         HStack(spacing: 6) {
+          // Unified status badge — uses ItemStatus.label, same as KnowledgeDetailView
+          statusBadge(item.status)
+
           Text(item.type.label)
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -271,36 +267,6 @@ struct InboxView: View {
               .font(.caption).foregroundStyle(.secondary)
           }
 
-          if item.inboxDate != nil && item.analysisProviderId == nil {
-            Text("·").font(.caption).foregroundStyle(.secondary)
-            Text("Unprocessed")
-              .font(.caption2)
-              .foregroundStyle(.orange)
-              .padding(.horizontal, 4)
-              .padding(.vertical, 1)
-              .background(Color.orange.opacity(0.1))
-              .clipShape(Capsule())
-          }
-          if let engineId = item.transcriptionEngineId {
-            Text("·").font(.caption).foregroundStyle(.secondary)
-            Text(transcriptionLabel(engineId))
-              .font(.caption2)
-              .foregroundStyle(.green)
-              .padding(.horizontal, 4)
-              .padding(.vertical, 1)
-              .background(Color.green.opacity(0.1))
-              .clipShape(Capsule())
-          }
-          if item.analysisProviderId != nil {
-            Text("·").font(.caption).foregroundStyle(.secondary)
-            Text("Analyzed")
-              .font(.caption2)
-              .foregroundStyle(.indigo)
-              .padding(.horizontal, 4)
-              .padding(.vertical, 1)
-              .background(Color.indigo.opacity(0.1))
-              .clipShape(Capsule())
-          }
           if item.audioFileRelativePath == nil && item.bodyText == nil
             && item.transcriptionEngineId == nil
           {
