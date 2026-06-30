@@ -106,7 +106,11 @@ final class ShareViewController: UIViewController {
                 self.hasErrors = true
             } else {
                 let shared = UserDefaults(suiteName: appGroupIdentifier)
-                shared?.set(saved, forKey: pendingImportFilesKey)
+                // Merge with existing queue — set() would overwrite files from a
+                // concurrent or previous share that hasn't been picked up yet.
+                var queue = shared?.stringArray(forKey: pendingImportFilesKey) ?? []
+                queue.append(contentsOf: saved)
+                shared?.set(queue, forKey: pendingImportFilesKey)
                 logger.info(" Saved \(saved.count) files (errors: \(errorCount)): \(saved)")
                 // Open the main app to trigger import
                 if let url = URL(string: "wawanote://import") {
@@ -132,7 +136,9 @@ final class ShareViewController: UIViewController {
             self.savedFiles = saved
             if !saved.isEmpty {
                 let shared = UserDefaults(suiteName: appGroupIdentifier)
-                shared?.set(saved, forKey: pendingImportFilesKey)
+                var queue = shared?.stringArray(forKey: pendingImportFilesKey) ?? []
+                queue.append(contentsOf: saved)
+                shared?.set(queue, forKey: pendingImportFilesKey)
                 // Open the main app to trigger import
                 if let url = URL(string: "wawanote://import") {
                     self.extensionContext?.open(url)

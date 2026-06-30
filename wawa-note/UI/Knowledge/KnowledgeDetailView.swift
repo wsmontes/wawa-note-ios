@@ -816,7 +816,7 @@ struct KnowledgeDetailView: View {
 
                 HStack(spacing: 8) {
                     Button {
-                        item.status = .draft
+                        item.transitionStatus(to: .draft, reason: "User approved transcription — re-queuing for analysis")
                         try? modelContext.save()
                         // Re-queue for analysis now that user approved
                         processingQueue.enqueue(itemID: item.id, projectID: item.projectID, trigger: .directUserAction)
@@ -830,7 +830,7 @@ struct KnowledgeDetailView: View {
                         // Re-extract: delete transcript, retry
                         let dir = fileStore.itemDirectoryURL(for: item.id)
                         try? FileManager.default.removeItem(at: dir.appendingPathComponent("transcript.json"))
-                        item.status = .recorded
+                        item.transitionStatus(to: .recorded, reason: "User requested re-extraction — resetting transcript")
                         try? modelContext.save()
                         processingQueue.enqueue(itemID: item.id, projectID: item.projectID, trigger: .newCapture)
                     } label: {
@@ -1839,7 +1839,7 @@ struct KnowledgeDetailView: View {
             transcript = try? fileStore.readArtifact(Transcript.self, fileName: "transcript.json", meetingId: item.id)
             isTranscribing = false
             transcriptionProgress = nil
-            item.status = .transcribed
+            item.transitionStatus(to: .transcribed, reason: "Transcription complete — ready for analysis")
             try? modelContext.save()
 
             // Auto-run pipeline (agent-based) after transcription
@@ -2007,12 +2007,12 @@ struct KnowledgeDetailView: View {
         if doTranscribe {
             if item.type == .audio {
                 item.transcriptionEngineId = nil
-                item.status = .recorded
+                item.transitionStatus(to: .recorded, reason: "User requested reprocess — clearing transcription")
                 try? FileManager.default.removeItem(at: dir.appendingPathComponent("transcript.json"))
                 transcript = nil
             } else if item.type == .image {
                 item.bodyText = nil
-                item.status = .recorded
+                item.transitionStatus(to: .recorded, reason: "User requested reprocess — clearing OCR text")
             }
         }
         if doAnalyze {

@@ -503,7 +503,7 @@ final class RecordingCoordinator: ObservableObject {
 
                     guard concatOK else {
                         AppLog.audio.error("RecordingCoordinator: concatenation failed — marking item as failed")
-                        updateItemStatus(itemId: itemId, to: .failed)
+                        updateItemStatus(itemId: itemId, to: .failed, reason: "Audio concatenation failed after recording stop")
                         return
                     }
 
@@ -511,7 +511,7 @@ final class RecordingCoordinator: ObservableObject {
                     AudioFileWriter.clearCrashCheckpoint()
 
                     // 5. Mark as queued so the detail view shows the right status
-                    updateItemStatus(itemId: itemId, to: .queuedForTranscription)
+                    updateItemStatus(itemId: itemId, to: .queuedForTranscription, reason: "Recording completed successfully, queued for transcription")
 
                     // 6. Route through ProcessingQueue when available
                     if let queue = processingQueue {
@@ -728,7 +728,7 @@ final class RecordingCoordinator: ObservableObject {
                 )
             }
         )
-        item.status = .recorded
+        item.transitionStatus(to: .recorded, reason: "Crash checkpoint recovered")
         item.audioFileRelativePath = AppFileConstants.audioFileName
         let store = FileArtifactStore()
         saveManifest(manifest, meetingId: meetingId)
@@ -738,7 +738,7 @@ final class RecordingCoordinator: ObservableObject {
             let concatOK = await AudioSegmentConcatenator.concatenate(manifest: manifest, meetingId: meetingId)
             if concatOK {
                 AppLog.audio.info("Crash recovery: concatenation succeeded for \(meetingId.uuidString.prefix(8))")
-                item.status = .recorded
+                item.transitionStatus(to: .recorded, reason: "Crash recovery: concatenation complete")
                 try? bgContext.save()
             } else {
                 AppLog.audio.warning("Crash recovery: concatenation failed — segments are still available as WAV")
@@ -780,10 +780,10 @@ final class RecordingCoordinator: ObservableObject {
             var recoveredIds: [UUID] = []
             for item in orphans {
                 AppLog.audio.info("Recovering interrupted recording: \(item.id)")
-                item.status = .recorded
+                item.transitionStatus(to: .recorded, reason: "Recovering interrupted recording")
                 let store = FileArtifactStore()
                 guard store.audioFileExists(for: item.id) || store.recordingManifestExists(for: item.id) else {
-                    item.status = .failed
+                    item.transitionStatus(to: .failed, reason: "Orphaned recording: no audio data found")
                     continue
                 }
                 item.audioFileRelativePath = AppFileConstants.audioFileName
@@ -835,7 +835,7 @@ final class RecordingCoordinator: ObservableObject {
             let stuckItems = (try? bgContext.fetch(transcribingDescriptor)) ?? []
             for item in stuckItems {
                 AppLog.audio.info("Recovering stuck transcription: \(item.id.uuidString.prefix(8)) — re-enqueuing")
-                item.status = .queuedForTranscription
+                item.transitionStatus(to: .queuedForTranscription, reason: "Recovering stuck transcription — re-enqueuing")
                 recoveredIds.append(item.id)
             }
 
@@ -1066,10 +1066,10 @@ final class RecordingCoordinator: ObservableObject {
         return false
     }
 
-    private func updateItemStatus(itemId: UUID, to status: ItemStatus) {
+    private func updateItemStatus(itemId: UUID, to status: ItemStatus, reason: String? = nil) {
         let descriptor = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.id == itemId })
         guard let item = try? modelContext.fetch(descriptor).first else { return }
-        item.status = status
+        item.transitionStatus(to: status, reason: reason ?? "updateItemStatus: \(status.rawValue)")
         try? modelContext.save()
     }
 
@@ -1088,7 +1088,7 @@ final class RecordingCoordinator: ObservableObject {
         let hasAudio = hasValidAudioData(meetingId: itemId)
 
         if hasAudio {
-            item.status = .preparingAudio
+            item.transitionStatus(to: .preparingAudio, reason: "Recording stopped — preparing audio for processing")
             item.durationSeconds = effectiveDuration
             item.audioFileRelativePath = AppFileConstants.audioFileName
             // Persist audio capture metadata for UI display and diagnostics
@@ -1099,7 +1099,7 @@ final class RecordingCoordinator: ObservableObject {
             AppLog.audio.info("Item finalized: \(item.id) hasAudio=true duration=\(effectiveDuration)s sampleRate=\(Int(sampleRate))Hz input=\(inputPortType)")
         } else {
             // No valid audio data found — mark as failed, don't pretend it was recorded
-            item.status = .failed
+            item.transitionStatus(to: .failed, reason: "Recording stopped but no valid audio data found")
             AppLog.audio.warning("Item finalized: \(item.id) hasAudio=false — marking as failed")
         }
 

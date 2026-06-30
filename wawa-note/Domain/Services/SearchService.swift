@@ -64,6 +64,19 @@ final class SearchService {
             }
         }
 
+        // Also search dynamic analysis (framework-driven, schema-free JSON output).
+        // DynamicAnalysis lives in analysis.dynamic.json and was previously invisible
+        // to search — items analyzed through non-meeting frameworks were undiscoverable.
+        if let dynamic = try? fileStore.readArtifact(DynamicAnalysis.self, fileName: "analysis.dynamic.json", meetingId: item.id) {
+            let dynamicText: String = dynamic.results.allKeys.compactMap { key in
+                guard let stringValue = dynamic.results.stringField(key) else { return nil }
+                return "\(key): \(stringValue)"
+            }.joined(separator: " ")
+            if !dynamicText.isEmpty, let snippet = match(in: dynamicText, query: query, maxLength: 120) {
+                results.append(SearchResult(itemID: item.id, matchedField: .analysis, snippet: snippet))
+            }
+        }
+
         return results
     }
 

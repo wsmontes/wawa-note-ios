@@ -470,7 +470,7 @@ final class ContentExtractionService {
 
             try fileStore.createMeetingDirectory(for: item.id)
             try fileStore.writeArtifact(result, fileName: "analysis.json", meetingId: item.id)
-            item.status = .analyzed
+            item.transitionStatus(to: .analyzed, reason: "MeetingAnalysis complete via builtin framework")
             item.analysisProviderId = model
             try modelContext.save()
 
@@ -498,7 +498,7 @@ final class ContentExtractionService {
                 transcript: transcript, using: provider, model: model, meetingId: item.id, sourceContext: sourceCtx)
             try fileStore.createMeetingDirectory(for: item.id)
             try fileStore.writeArtifact(result, fileName: "analysis.json", meetingId: item.id)
-            item.status = .analyzed
+            item.transitionStatus(to: .analyzed, reason: "MeetingAnalysis complete via structured analysis path")
             item.analysisProviderId = model
             try modelContext.save()
             AppLog.provider.info("ContentExtraction.analyze: done — \(result.shortSummary.prefix(80))")
@@ -535,7 +535,7 @@ final class ContentExtractionService {
             let resultData = try JSONEncoder().encode(result)
             try resultData.write(to: fileStore.itemDirectoryURL(for: item.id).appendingPathComponent("analysis.dynamic.json"))
 
-            item.status = .analyzed
+            item.transitionStatus(to: .analyzed, reason: "DynamicAnalysis complete via framework \(framework.id)")
             item.analysisProviderId = model
             try modelContext.save()
 

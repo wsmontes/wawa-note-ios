@@ -1272,7 +1272,7 @@ enum VFSService {
 
         // Status & flags
         if let v = json["isFlagged"] as? Bool { item.isFlagged = v }
-        if let v = json["status"] as? String, let st = ItemStatus(rawValue: v) { item.status = st }
+        if let v = json["status"] as? String, let st = ItemStatus(rawValue: v) { item.transitionStatus(to: st, reason: "VFS echo: user set status via shell") }
 
         // Assignment
         if let v = json["projectID"] as? String, let pid = UUID(uuidString: v) { item.projectID = pid }

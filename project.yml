@@ -50,7 +50,11 @@ targets:
       - appGroups:
           - group.com.wawa-note
     dependencies:
-      - target: wawa-note-watch
+      # ⚠️ wawa-note-watch target only exists in project.yml — NOT in the actual
+      # Xcode project (pbxproj). If regenerating from project.yml via XcodeGen,
+      # remove the watch dependency first. Watch source files exist but the
+      # target was never added to the Xcode project.
+      # - target: wawa-note-watch
       - target: wawa-note-share
       - package: Yams
     settings:

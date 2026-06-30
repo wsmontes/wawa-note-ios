@@ -188,7 +188,7 @@ final class ContentPipelineService: ObservableObject {
                         currentTool: nil, toolSummary: nil, toolLog: [], events: [], thinkingActive: false)
                     // Update item status so KnowledgeDetailView can show the right indicator
                     // without guessing. This is the authoritative state transition.
-                    item.status = .transcribing
+                    item.transitionStatus(to: .transcribing, reason: "Starting transcription phase")
                     do { try modelContext.save() } catch {
                         AppLog.provider.error("ContentPipeline: save failed (→transcribing): \(error.localizedDescription)")
                     }
@@ -199,7 +199,7 @@ final class ContentPipelineService: ObservableObject {
                         AppLog.provider.info("ContentPipeline: pre-transcription complete for item \(itemID) — \(transcribedText.count) chars")
                         // Set pendingReview so user can verify transcription before analysis
                         if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
-                            fresh.status = .pendingReview
+                            fresh.transitionStatus(to: .pendingReview, reason: "Pre-transcription complete, awaiting user verification")
                             do { try modelContext.save() } catch {
                                 AppLog.provider.error("ContentPipeline: save failed (transcribe→pendingReview): \(error.localizedDescription)")
                             }
@@ -208,7 +208,7 @@ final class ContentPipelineService: ObservableObject {
                         let reason = extractionSvc.extractionError?.errorDescription ?? "unknown error"
                         AppLog.provider.warning("ContentPipeline: pre-transcription failed for item \(itemID) — \(reason)")
                         if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
-                            fresh.status = .failed
+                            fresh.transitionStatus(to: .failed, reason: "Pre-transcription failed: \(reason)")
                             fresh.transcriptionEngineId = nil  // clear stale engine ID on failure
                             try? modelContext.save()
                         }
@@ -216,7 +216,7 @@ final class ContentPipelineService: ObservableObject {
                 }
                 if item.type == .image, item.bodyText == nil {
                     let pageCount = item.imagePageCount ?? 1
-                    item.status = .transcribing
+                    item.transitionStatus(to: .transcribing, reason: "Starting OCR text recognition phase")
                     try? modelContext.save()
                     pipelineStatus = PipelineProgress(
                         itemId: itemID, itemTitle: item.title,
@@ -233,7 +233,7 @@ final class ContentPipelineService: ObservableObject {
                             userInfo: ["stage": "OCR done (\(ocrText.count) chars" + (hasVision ? " + vision)" : ")")])
                         // Set pendingReview so user can verify extraction before analysis
                         if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
-                            fresh.status = .pendingReview
+                            fresh.transitionStatus(to: .pendingReview, reason: "OCR complete — awaiting user verification")
                             do { try modelContext.save() } catch {
                                 AppLog.provider.error("ContentPipeline: save failed (OCR→pendingReview): \(error.localizedDescription)")
                             }
@@ -241,7 +241,7 @@ final class ContentPipelineService: ObservableObject {
                     } else {
                         AppLog.provider.warning("ContentPipeline: OCR failed for item \(itemID) — marking as failed")
                         if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
-                            fresh.status = .failed
+                            fresh.transitionStatus(to: .failed, reason: "OCR extraction failed")
                             try? modelContext.save()
                         }
                     }
@@ -265,7 +265,8 @@ final class ContentPipelineService: ObservableObject {
             guard let provider = try? ProviderRouter.resolveActive(context: modelContext) else {
                 AppLog.provider.error("ContentPipeline: no active provider configured — transcription-only mode")
                 if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
-                    fresh.status = fresh.transcriptionEngineId != nil ? .transcribed : .recorded
+                    let targetStatus = fresh.transcriptionEngineId != nil ? ItemStatus.transcribed : .recorded
+                    fresh.transitionStatus(to: targetStatus, reason: "No provider configured — transcription-only, cannot analyze")
                     do { try modelContext.save() } catch {
                         AppLog.provider.error("ContentPipeline: critical save failed (transcription-only): \(error.localizedDescription)")
                     }
@@ -314,7 +315,7 @@ final class ContentPipelineService: ObservableObject {
             guard !executorModel.isEmpty, !advisorModel.isEmpty else {
                 AppLog.provider.error("ContentPipeline: no available model for analysis — skipping")
                 if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
-                    fresh.status = .transcribed
+                    fresh.transitionStatus(to: .transcribed, reason: "No AI model available — stopping at transcription")
                     try? modelContext.save()
                 }
                 return
@@ -329,7 +330,7 @@ final class ContentPipelineService: ObservableObject {
             // Set status to .analyzing so the UI shows what's happening
             // (not stuck at .pendingReview while the agent runs).
             if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
-                fresh.status = .analyzing
+                fresh.transitionStatus(to: .analyzing, reason: "Agent loop starting — analysis in progress")
                 try? modelContext.save()
             }
 
@@ -531,7 +532,7 @@ final class ContentPipelineService: ObservableObject {
                         if !failed {
                             // Mark item as analyzed now that we have valid analysis
                             if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
-                                fresh.status = .analyzed
+                                fresh.transitionStatus(to: .analyzed, reason: "Agent analysis complete — DynamicAnalysis saved")
                                 fresh.analysisProviderId = executorModel
                                 try? modelContext.save()
                             }
@@ -567,7 +568,8 @@ final class ContentPipelineService: ObservableObject {
             // Unprocessed badge disappears — item is fully analyzed, no review needed.
             if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
                 fresh.analysisProviderId = provider.id
-                fresh.status = lastError == nil ? .analyzed : .failed
+                let targetStatus: ItemStatus = lastError == nil ? .analyzed : .failed
+                fresh.transitionStatus(to: targetStatus, reason: lastError == nil ? "Pipeline analysis complete" : "Pipeline analysis failed")
                 if lastError == nil { fresh.inboxDate = nil }
                 do { try modelContext.save() } catch {
                     AppLog.provider.error("ContentPipeline: critical save failed (analysis status): \(error.localizedDescription)")

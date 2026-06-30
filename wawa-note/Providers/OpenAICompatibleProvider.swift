@@ -338,11 +338,14 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
                     var urlRequest = URLRequest(url: url)
                     urlRequest.httpMethod = "POST"
                     urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                    urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+                    if !apiKey.isEmpty {
+                        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+                    }
                     urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
                     urlRequest.timeoutInterval = 300
+                    applyOpenRouterHeaders(&urlRequest)
 
-                    let (bytes, _) = try await URLSession.shared.bytes(for: urlRequest)
+                    let (bytes, _) = try await session.bytes(for: urlRequest)
                     var fullText = ""
                     var toolCalls: [String: (id: String, name: String, args: String)] = [:]
 
@@ -417,11 +420,46 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
             case .jsonObject: body["response_format"] = ["type": "json_object"]
             case .jsonSchema(let name, let schemaJSON):
                 if let schemaData = schemaJSON.data(using: .utf8), let schema = try? JSONSerialization.jsonObject(with: schemaData) {
-                    body["response_format"] = ["type": "json_schema", "json_schema": ["name": name, "schema": schema]]
+                    body["response_format"] = ["type": "json_schema", "json_schema": ["name": name, "strict": true, "schema": schema]]
                 }
             }
         }
         if let stop = request.stop, !stop.isEmpty { body["stop"] = stop }
+
+        // Thinking budget tokens (Claude, DeepSeek)
+        if let thinkingBudget = request.thinkingBudgetTokens {
+            body["thinking"] = ["type": "enabled", "budget_tokens": thinkingBudget]
+        } else if preset?.explicitlyDisableThinking == true {
+            body["thinking"] = ["type": "disabled"]
+        }
+
+        // Tools (function calling) — KAN-347: was missing from buildRequestBody,
+        // causing sendStreaming to never include tools in streaming requests.
+        if let tools = request.tools, !tools.isEmpty {
+            body["tools"] = tools.map { tool -> [String: Any] in
+                var parameters: [String: Any] = [
+                    "type": tool.parameters.type,
+                    "properties": tool.parameters.properties.mapValues { prop -> [String: Any] in
+                        var p: [String: Any] = ["type": prop.type, "description": prop.description]
+                        if let en = prop.enum { p["enum"] = en }
+                        return p
+                    },
+                ]
+                if !tool.parameters.required.isEmpty {
+                    parameters["required"] = tool.parameters.required
+                }
+                return [
+                    "type": "function",
+                    "function": [
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": parameters,
+                    ],
+                ]
+            }
+            if let tc = request.toolChoice { body["tool_choice"] = tc }
+        }
+
         return body
     }
 
