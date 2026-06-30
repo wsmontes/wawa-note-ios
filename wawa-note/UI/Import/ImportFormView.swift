@@ -244,7 +244,8 @@ struct ImportFormView: View {
       let item = coordinator.createItemFromImport(
         title: title,
         date: date,
-        duration: meta.duration
+        duration: meta.duration,
+        languageCode: selectedLocale
       )
     else {
       errorMessage = "Could not create item."
@@ -252,13 +253,10 @@ struct ImportFormView: View {
       return
     }
 
-    // Persist the user's language choice so the transcription engine picks it up
-    item.languageCode = selectedLocale
-    try? modelContext.save()
-
     let itemId = item.id
     AppLog.transcription.info(
-      "🔤 ImportFormView: set languageCode=\(selectedLocale) on item \(itemId.uuidString.prefix(8))")
+      "🔤 ImportFormView: created item \(itemId.uuidString.prefix(8)) with languageCode=\(selectedLocale)"
+    )
 
     Task { @MainActor in
       do {

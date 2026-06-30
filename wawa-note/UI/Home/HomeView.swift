@@ -203,12 +203,8 @@ final class HomeViewModel: ObservableObject {
 
     let itemId = await MainActor.run {
       let item = coord.createItemFromImport(
-        title: meta.suggestedTitle, date: meta.creationDate ?? Date(), duration: meta.duration)
-      if let item {
-        // Best-guess locale when importing without the form UI
-        item.languageCode = TranscriptionLocaleProvider.bestGuessLocale
-        try? modelContext.save()
-      }
+        title: meta.suggestedTitle, date: meta.creationDate ?? Date(), duration: meta.duration,
+        languageCode: TranscriptionLocaleProvider.bestGuessLocale)
       if let target = targetProjectForImport, let item {
         try? ProjectService(context: modelContext).addItem(item.id, to: target.id)
       }
