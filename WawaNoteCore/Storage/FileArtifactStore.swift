@@ -1,7 +1,7 @@
 import Foundation
 import OSLog
 
-enum FileArtifactStoreError: Error {
+public enum FileArtifactStoreError: Error {
   case fileNotFound
   case writeFailed(Error)
   case readFailed(Error)
@@ -12,43 +12,43 @@ enum FileArtifactStoreError: Error {
   case sentinelWriteFailed(Error)
 }
 
-enum AppFileConstants {
-  static let audioFileName = "audio.m4a"
-  static let transcriptFileName = "transcript.json"
-  static let analysisFileName = "analysis.json"
-  static let dynamicAnalysisFileName = "analysis.dynamic.json"
-  static let partialTranscriptFileName = "transcript_partial.json"
-  static let manifestFileName = "recording.manifest.json"
-  static let segmentsDirectoryName = "segments"
-  static let checkpointFileName = "checkpoint.json"
-  static let embeddingFileName = "embedding.json"
-  static let scanFileName = "scan"
-  static let scanFilePattern = "scan_%d.jpg"
+public enum AppFileConstants {
+  public static let audioFileName = "audio.m4a"
+  public static let transcriptFileName = "transcript.json"
+  public static let analysisFileName = "analysis.json"
+  public static let dynamicAnalysisFileName = "analysis.dynamic.json"
+  public static let partialTranscriptFileName = "transcript_partial.json"
+  public static let manifestFileName = "recording.manifest.json"
+  public static let segmentsDirectoryName = "segments"
+  public static let checkpointFileName = "checkpoint.json"
+  public static let embeddingFileName = "embedding.json"
+  public static let scanFileName = "scan"
+  public static let scanFilePattern = "scan_%d.jpg"
   /// File size threshold below which a manifest is considered invalid (0-byte or truncated).
-  static let minimumValidFileSize: Int64 = 1
+  public static let minimumValidFileSize: Int64 = 1
 }
 
 // MARK: - Standard directory names (single source of truth)
 
-enum AppDirectoryNames {
-  static let items = "items"
-  static let configs = "configs"
-  static let chat = "Chat"
-  static let media = "media"
-  static let exports = "exports"
-  static let base = "Meetings"
+public enum AppDirectoryNames {
+  public static let items = "items"
+  public static let configs = "configs"
+  public static let chat = "Chat"
+  public static let media = "media"
+  public static let exports = "exports"
+  public static let base = "Meetings"
   /// Sentinel file written during init to validate write access to the base directory.
-  static let sentinelFileName = ".wawa-store-check"
+  public static let sentinelFileName = ".wawa-store-check"
   /// UserDefaults key that records which directory the store is using (applicationSupport or caches).
-  static let storeLocationKey = "FileArtifactStore.baseURLCategory"
+  public static let storeLocationKey = "FileArtifactStore.baseURLCategory"
 }
 
-final class FileArtifactStore: @unchecked Sendable {
+public final class FileArtifactStore: @unchecked Sendable {
   private let fileManager: FileManager
   private let baseURL: URL
   private let logger = Logger(subsystem: "com.wawa-note.core", category: "FileArtifactStore")
 
-  init(fileManager: FileManager = .default) {
+  public init(fileManager: FileManager = .default) {
     self.fileManager = fileManager
 
     // Resolve base URL with validated fallback.

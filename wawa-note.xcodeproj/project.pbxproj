@@ -60,6 +60,7 @@
 		3BA9BC1980992BA5A6E7055A /* SearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39C0DADE3DE0137822778C6E /* SearchService.swift */; };
 		3CA08F106929D0D8624217B5 /* interview_extractor.json in Resources */ = {isa = PBXBuildFile; fileRef = 3F047F796B4132DC6C6DD31E /* interview_extractor.json */; };
 		3FB8F75B00C1B83D0D49C7F5 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = CB78C00685952F40F9C50636 /* PrivacyInfo.xcprivacy */; };
+		418047C51C7E56007C2DADD9 /* AudioImportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B16ABC5ED8210FA145DCE1E6 /* AudioImportService.swift */; };
 		4242E7B12D30287B44D5381A /* meeting_analysis.json in Resources */ = {isa = PBXBuildFile; fileRef = 5E9C47490FC4429993D76C31 /* meeting_analysis.json */; };
 		429AE22F042435A69E94BA2B /* BatterySensor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71A66EC5D577923E40459AA /* BatterySensor.swift */; };
 		42B3C9BAF05BC38AC336FDB4 /* ICSImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11C8CE46BF74688C5E0005B5 /* ICSImporter.swift */; };
@@ -99,7 +100,6 @@
 		685A77A5B5C02C1DF5BAE719 /* AgentToolRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C5CFF77734BAB68BD0C4635 /* AgentToolRegistry.swift */; };
 		693018BAAC14E3EB2EAF03F5 /* DeviceContextService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2AB7A55355C419C1BA41F79 /* DeviceContextService.swift */; };
 		6937ADE0444B44780AC496E0 /* ProviderDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C8AD49FECBF457374518062 /* ProviderDetailView.swift */; };
-		698CA1FD0A1FAB80F98E2397 /* AudioImportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E92A52D1149AE9A148C7C40 /* AudioImportService.swift */; };
 		69B8E6420F6946E9F47AB07E /* ProviderEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FBC638670FCD8FCA5F3A216 /* ProviderEditorView.swift */; };
 		69C9758C13FBA079F10F7511 /* WawaNoteCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B3E2AA3AB2891185C7EF683A /* WawaNoteCore.framework */; };
 		69FF97950B26D628EA7B5955 /* SRTImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2E235775424B9F80195CBF0 /* SRTImporter.swift */; };
@@ -381,7 +381,6 @@
 		2CF0F37BF2684ED2F9B58CC3 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		2D5A8A1355F07C453B05CC1C /* JSONValue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONValue.swift; sourceTree = "<group>"; };
 		2E62DE4F0922FA4A09CC5F2F /* wawa-note-watch-widget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "wawa-note-watch-widget.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
-		2E92A52D1149AE9A148C7C40 /* AudioImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioImportService.swift; sourceTree = "<group>"; };
 		2FAE0D61BF2F51C95ED12561 /* SpeakerLabeler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerLabeler.swift; sourceTree = "<group>"; };
 		3005E6C8295F492EE55FD5DB /* LiveOCRView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveOCRView.swift; sourceTree = "<group>"; };
 		3198D949FAAC64CA3EF7148B /* EntityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntityService.swift; sourceTree = "<group>"; };
@@ -500,6 +499,7 @@
 		AE77559C2BAB19B43170AAE6 /* PersonService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonService.swift; sourceTree = "<group>"; };
 		AF2E9B1DB94FD16591074B4C /* VADChunker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VADChunker.swift; sourceTree = "<group>"; };
 		B064EAE9431784B8F0A21303 /* AnarlogExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnarlogExporter.swift; sourceTree = "<group>"; };
+		B16ABC5ED8210FA145DCE1E6 /* AudioImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioImportService.swift; sourceTree = "<group>"; };
 		B1BC0FF333C9CE8F153C4CE4 /* ChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModel.swift; sourceTree = "<group>"; };
 		B28F479A9DE183987045E936 /* daily_standup.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = daily_standup.json; sourceTree = "<group>"; };
 		B2AB7A55355C419C1BA41F79 /* DeviceContextService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceContextService.swift; sourceTree = "<group>"; };
@@ -1209,7 +1209,6 @@
 				7F4893D25F2C66F6F4400180 /* AnalysisSkillStore.swift */,
 				53709EAC396B7E6E5BEABDDF /* AnnotationService.swift */,
 				A3717108BA8C113096F6FE11 /* AudioChunker.swift */,
-				2E92A52D1149AE9A148C7C40 /* AudioImportService.swift */,
 				0D9F7E055720496033CD5B39 /* AutomationSettings.swift */,
 				59B28514DF0915986DB29C28 /* ChatService.swift */,
 				91863F18655F6D2D447F3EB6 /* ConfigProjectService.swift */,
@@ -1250,6 +1249,7 @@
 		F50F02AF31A45722EE80472A /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				B16ABC5ED8210FA145DCE1E6 /* AudioImportService.swift */,
 				BD07DEA5E61F2411FA6A4782 /* FormatImporter.swift */,
 				618C288A251235F1FECFC4D1 /* ImportRouter.swift */,
 			);
@@ -1494,6 +1494,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				418047C51C7E56007C2DADD9 /* AudioImportService.swift in Sources */,
 				6A40664B6E951A6B3CD014B6 /* ChatModels.swift in Sources */,
 				2183180689561C9639DF8970 /* FileArtifactStore.swift in Sources */,
 				0E87636828D07596A95E031C /* FormatImporter.swift in Sources */,
@@ -1548,7 +1549,6 @@
 				C1F71CC87AC3D40E25379AD2 /* AudioCaptureService.swift in Sources */,
 				6D7D80BCECFE6BAEAE5FEFE8 /* AudioChunker.swift in Sources */,
 				4C9AAD69BD289F535AFC2AB1 /* AudioFileWriter.swift in Sources */,
-				698CA1FD0A1FAB80F98E2397 /* AudioImportService.swift in Sources */,
 				54628D8C5394C85795435F45 /* AudioPlaybackService.swift in Sources */,
 				B508BA3066A43670A666FF0F /* AudioPlayerView.swift in Sources */,
 				9AAD0596D5EC2ACA9245908B /* AudioRouteSensor.swift in Sources */,

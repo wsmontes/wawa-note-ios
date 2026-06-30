@@ -2,26 +2,41 @@ import AVFoundation
 import AudioToolbox
 import OSLog
 import UniformTypeIdentifiers
-import WawaNoteCore
 
-struct ImportMetadata {
-  let duration: TimeInterval
-  let format: String
-  let suggestedTitle: String
-  let fileSize: Int64
-  let creationDate: Date?
+public struct ImportMetadata {
+  public let duration: TimeInterval
+  public let format: String
+  public let suggestedTitle: String
+  public let fileSize: Int64
+  public let creationDate: Date?
+
+  public init(
+    duration: TimeInterval,
+    format: String,
+    suggestedTitle: String,
+    fileSize: Int64,
+    creationDate: Date?
+  ) {
+    self.duration = duration
+    self.format = format
+    self.suggestedTitle = suggestedTitle
+    self.fileSize = fileSize
+    self.creationDate = creationDate
+  }
 }
 
-final class AudioImportService: @unchecked Sendable {
+public final class AudioImportService: @unchecked Sendable {
+
+  public init() {}
 
   // MARK: - Format support
 
-  static let supportedUTTypes: [UTType] = [
+  public static let supportedUTTypes: [UTType] = [
     .mpeg4Audio, .mp3, .wav, .aiff,
     .mpeg4Movie, .quickTimeMovie, .movie,
   ]
 
-  func canRead(url: URL) -> Bool {
+  public func canRead(url: URL) -> Bool {
     // Try AVAudioPlayer first (covers m4a, mp3, wav, aiff)
     if (try? AVAudioPlayer(contentsOf: url)) != nil {
       return true
@@ -41,7 +56,7 @@ final class AudioImportService: @unchecked Sendable {
     return false
   }
 
-  func isNativeM4ACompatible(_ url: URL) -> Bool {
+  public func isNativeM4ACompatible(_ url: URL) -> Bool {
     let ext = url.pathExtension.lowercased()
     guard ext == "m4a" || ext == "aac" || ext == "mp4" else { return false }
     return (try? AVAudioPlayer(contentsOf: url)) != nil
@@ -49,7 +64,8 @@ final class AudioImportService: @unchecked Sendable {
 
   /// Copies or converts audio into the meeting artifact directory.
   /// Handles both native M4A/AAC (direct copy) and other formats (ExtAudioFile conversion).
-  func storeAudio(sourceURL: URL, itemID: UUID, using artifactStore: FileArtifactStore) async throws
+  public func storeAudio(sourceURL: URL, itemID: UUID, using artifactStore: FileArtifactStore)
+    async throws
   {
     let destURL = artifactStore.audioFileURL(for: itemID)
     if isNativeM4ACompatible(sourceURL) {
@@ -61,7 +77,7 @@ final class AudioImportService: @unchecked Sendable {
 
   // MARK: - Metadata extraction
 
-  func extractMetadata(url: URL) async throws -> ImportMetadata {
+  public func extractMetadata(url: URL) async throws -> ImportMetadata {
     let resourceValues = try? url.resourceValues(forKeys: [
       .fileSizeKey, .contentModificationDateKey, .creationDateKey,
     ])
@@ -106,7 +122,7 @@ final class AudioImportService: @unchecked Sendable {
 
   // MARK: - AAC conversion
 
-  func convertToAAC(inputURL: URL, outputURL: URL) async throws {
+  public func convertToAAC(inputURL: URL, outputURL: URL) async throws {
     let outputDir = outputURL.deletingLastPathComponent()
     try? FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
 
@@ -228,12 +244,13 @@ final class AudioImportService: @unchecked Sendable {
       }
     }
 
-    AppLog.audio.info("Converted via ExtAudioFile: \(outputURL.path)")
+    let logger = Logger(subsystem: "com.wawa-note.core", category: "audio")
+    logger.info("Converted via ExtAudioFile: \(outputURL.path)")
   }
 
   // MARK: - Preview player
 
-  func previewPlayer(for url: URL) -> AVAudioPlayer? {
+  public func previewPlayer(for url: URL) -> AVAudioPlayer? {
     try? AVAudioPlayer(contentsOf: url)
   }
 }
@@ -271,14 +288,14 @@ extension AudioImportService: FormatImporter {
 
 // MARK: - Errors
 
-enum ImportError: LocalizedError {
+public enum ImportError: LocalizedError {
   case unreadableFormat
   case noAudioTrack
   case readerCreationFailed
   case writerCreationFailed
   case conversionFailed(Error)
 
-  var errorDescription: String? {
+  public var errorDescription: String? {
     switch self {
     case .unreadableFormat:
       return "This audio format is not supported. Try converting to MP3 or M4A first."
