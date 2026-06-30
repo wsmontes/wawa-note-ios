@@ -1,0 +1,11 @@
+{
+  "indentation": {
+    "spaces": 4
+  },
+  "lineLength": 160,
+  "tabWidth": 4,
+  "respectsExistingLineBreaks": true,
+  "blankLineBetweenMembers": {
+    "ignoreSingleLineProperties": true
+  }
+}

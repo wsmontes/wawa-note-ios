@@ -119,30 +119,63 @@ struct VADChunker: @unchecked Sendable {
         return merged
     }
 
-    /// Write a range of audio frames from source to a new file.
+    /// Write a range of audio frames from source to a new file, converting to
+    /// 16kHz 16-bit mono PCM WAV via explicit AVAudioConverter. SFSpeechRecognizer
+    /// requires this format; implicit conversion in AVAudioFile.write(from:) is
+    /// not guaranteed across iOS versions.
     private func writeChunk(from sourceURL: URL, startFrame: AVAudioFramePosition, frameCount: AVAudioFrameCount, format: AVAudioFormat, to destURL: URL) throws
     {
         let sourceFile = try AVAudioFile(forReading: sourceURL)
         sourceFile.framePosition = startFrame
 
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+        guard let sourceBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
             throw ChunkError.bufferAllocation
         }
-        try sourceFile.read(into: buffer, frameCount: frameCount)
+        try sourceFile.read(into: sourceBuffer, frameCount: frameCount)
+        sourceBuffer.frameLength = frameCount
 
-        // KAN-514: Force 16kHz mono for SFSpeechRecognizer compatibility.
-        // AVAudioFile handles format conversion internally when settings differ from source.
-        let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: 16000,
-            AVNumberOfChannelsKey: 1,
-            AVLinearPCMBitDepthKey: 16,
-            AVLinearPCMIsFloatKey: false,
-            AVLinearPCMIsBigEndianKey: false,
-        ]
+        guard
+            let outputFormat = AVAudioFormat(
+                commonFormat: .pcmFormatInt16,
+                sampleRate: 16_000,
+                channels: 1,
+                interleaved: false
+            )
+        else {
+            throw ChunkError.bufferAllocation
+        }
 
-        let destFile = try AVAudioFile(forWriting: destURL, settings: settings, commonFormat: .pcmFormatInt16, interleaved: false)
-        try destFile.write(from: buffer)
+        guard let converter = AVAudioConverter(from: format, to: outputFormat) else {
+            throw ChunkError.bufferAllocation
+        }
+
+        let ratio = outputFormat.sampleRate / format.sampleRate
+        let outputCapacity = AVAudioFrameCount(Double(frameCount) * ratio)
+        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputCapacity) else {
+            throw ChunkError.bufferAllocation
+        }
+
+        var convertError: NSError?
+        var provided = false
+        converter.convert(to: outputBuffer, error: &convertError) { _, outStatus in
+            if !provided {
+                provided = true
+                outStatus.pointee = .haveData
+                return sourceBuffer
+            }
+            outStatus.pointee = .noDataNow
+            return nil
+        }
+
+        if let convertError { throw convertError }
+
+        let destinationFile = try AVAudioFile(
+            forWriting: destURL,
+            settings: outputFormat.settings,
+            commonFormat: .pcmFormatInt16,
+            interleaved: false
+        )
+        try destinationFile.write(from: outputBuffer)
     }
 
     enum ChunkError: Error, LocalizedError {
