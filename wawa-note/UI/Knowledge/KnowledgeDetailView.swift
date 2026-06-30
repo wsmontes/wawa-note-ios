@@ -978,21 +978,24 @@ struct KnowledgeDetailView: View {
         Text("This recording has audio but hasn't been transcribed.")
           .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
 
-        // Locale picker
-        Button {
-          showLocalePicker.toggle()
-        } label: {
-          HStack {
-            Text("Language: \(localeName(selectedLocale))")
-              .font(.subheadline)
-            Image(systemName: "chevron.down")
-              .font(.caption)
+        // Locale picker — only for on-device transcription.
+        // Whisper auto-detects language, so the picker is irrelevant.
+        if !TranscriptionSettings.shared.useRemoteWhisper {
+          Button {
+            showLocalePicker.toggle()
+          } label: {
+            HStack {
+              Text("Language: \(localeName(selectedLocale))")
+                .font(.subheadline)
+              Image(systemName: "chevron.down")
+                .font(.caption)
+            }
+            .foregroundStyle(.blue)
           }
-          .foregroundStyle(.blue)
-        }
 
-        if showLocalePicker {
-          localePickerView
+          if showLocalePicker {
+            localePickerView
+          }
         }
 
         Button("Transcribe Now") {

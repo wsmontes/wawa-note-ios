@@ -88,7 +88,7 @@ struct ImportFormView: View {
         Section {
           TextField("Title", text: $title)
           DatePicker("Date", selection: $date)
-          if isAudio {
+          if isAudio && !TranscriptionSettings.shared.useRemoteWhisper {
             Picker("Language", selection: $selectedLocale) {
               ForEach(availableLocales, id: \.id) { locale in
                 Text(locale.name).tag(locale.id)
