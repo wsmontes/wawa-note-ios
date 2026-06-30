@@ -430,7 +430,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                     // Retry once with cloud recognition if it was forced on-device.
                     if nsError.domain.contains("AssistantError") && forceOnDevice {
                         // Respect user's cloud transcription preference (KAN-476)
-                        guard UserDefaults.standard.bool(forKey: "transcription_allow_cloud") else {
+                        guard TranscriptionSettings.shared.allowCloud else {
                             AppLog.transcription.warning("Cloud fallback blocked by user preference — marking as failed")
                             continuation.resume(throwing: TranscriptionError.recognitionFailed("Cloud fallback blocked by user preference"))
                             return
