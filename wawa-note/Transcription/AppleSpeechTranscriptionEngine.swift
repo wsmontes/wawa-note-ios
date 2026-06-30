@@ -377,11 +377,11 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
     // MARK: - Direct transcription (guaranteed on-device)
 
-    /// Transcribe a single audio URL. Device-first: SFSpeechRecognizer handles
-    /// M4A natively. Conversion is only for the AAC sync-loss edge case.
+    /// Transcribe a single audio URL.
+    /// SFSpeechRecognizer uses AVFoundation internally — it decodes M4A, CAF,
+    /// WAV, MP3, and any other format AVAsset can read. No pre-conversion needed.
     private func transcribeDirect(url: URL, recognizer: SFSpeechRecognizer, meetingId: UUID) async throws -> Transcript {
-        let recognitionURL = try prepareForRecognition(url)
-        let request = SFSpeechURLRecognitionRequest(url: recognitionURL)
+        let request = SFSpeechURLRecognitionRequest(url: url)
         request.shouldReportPartialResults = true
         request.addsPunctuation = true
 
@@ -451,7 +451,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                         }
                         hasResumed = true
                         AppLog.transcription.warning("Local recognizer rejected audio, falling back to cloud recognition — audio will be sent to Apple servers")
-                        let cloudRequest = SFSpeechURLRecognitionRequest(url: recognitionURL)
+                        let cloudRequest = SFSpeechURLRecognitionRequest(url: url)
                         cloudRequest.shouldReportPartialResults = false
                         cloudRequest.addsPunctuation = true
                         cloudRequest.requiresOnDeviceRecognition = false
@@ -626,80 +626,6 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             segments: transcriptSegments,
             sourceEngineId: "apple-speech"
         )
-    }
-
-    /// Decodes AAC/M4A to 16kHz 16-bit mono PCM WAV for SFSpeechRecognizer.
-    /// SFSpeechRecognizer requires PCM input — AAC bitstream causes sync loss.
-    /// WAV and other uncompressed formats pass through unchanged.
-    private func prepareForRecognition(_ url: URL) throws -> URL {
-        let ext = url.pathExtension.lowercased()
-        guard ext == "m4a" || ext == "mp4" else { return url }
-
-        AppLog.transcription.info("Decoding AAC to PCM: \(url.lastPathComponent)")
-
-        let inputFile = try AVAudioFile(forReading: url)
-        let inputFormat = inputFile.processingFormat
-
-        // Target: 16kHz 16-bit mono PCM
-        guard
-            let outputFormat = AVAudioFormat(
-                commonFormat: .pcmFormatInt16,
-                sampleRate: 16_000,
-                channels: 1,
-                interleaved: false)
-        else {
-            throw TranscriptionError.recognitionFailed("Cannot create output format")
-        }
-
-        let tempURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("pcm_\(UUID().uuidString).wav")
-        let outputFile = try AVAudioFile(
-            forWriting: tempURL,
-            settings: outputFormat.settings,
-            commonFormat: .pcmFormatInt16,
-            interleaved: false)
-
-        guard let converter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
-            throw TranscriptionError.recognitionFailed("Cannot create converter")
-        }
-
-        // Read the entire input file into a single buffer.
-        // AVAudioFile handles AAC decoding internally.
-        inputFile.framePosition = 0
-        let inputLength = AVAudioFrameCount(inputFile.length)
-        guard let inputBuf = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: inputLength) else {
-            throw TranscriptionError.recognitionFailed("Cannot allocate input buffer")
-        }
-        try inputFile.read(into: inputBuf)
-
-        // Allocate output buffer. Sample rate ratio determines frame count.
-        let ratio = outputFormat.sampleRate / inputFormat.sampleRate
-        let outputCapacity = AVAudioFrameCount(Double(inputBuf.frameLength) * ratio)
-        guard let outputBuf = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputCapacity) else {
-            throw TranscriptionError.recognitionFailed("Cannot allocate output buffer")
-        }
-
-        // Convert. The callback provides the input buffer once, then nil.
-        var provided = false
-        var convertError: NSError?
-        converter.convert(to: outputBuf, error: &convertError) { _, outStatus in
-            if !provided {
-                provided = true
-                outStatus.pointee = .haveData
-                return inputBuf
-            }
-            outStatus.pointee = .noDataNow
-            return nil
-        }
-
-        if let convertError { throw convertError }
-        guard outputBuf.frameLength > 0 else {
-            throw TranscriptionError.recognitionFailed("Decode produced empty output")
-        }
-
-        try outputFile.write(from: outputBuf)
-        AppLog.transcription.info("PCM decode complete: \(outputBuf.frameLength) frames @ \(Int(outputFormat.sampleRate))Hz → \(tempURL.lastPathComponent)")
-        return tempURL
     }
 
     // MARK: - Live Transcription
