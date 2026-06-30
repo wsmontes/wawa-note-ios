@@ -667,15 +667,45 @@ final class RecordingCoordinator: ObservableObject {
     /// Attempt to recover from audio interruptions when the app returns to the foreground.
     func onAppForeground() {
         guard state == .paused, !wasUserPaused else { return }
-        AppLog.event("audio", "App returned to foreground — attempting recovery from system interruption")
-        try? captureService.resumeRecording()
-        if captureService.state == .recording {
-            state = .recording
-            startObservation()
-            notifyStatusChange()
-        } else if captureService.state == .paused {
-            state = .paused
-            notifyStatusChange()
+        // Double-check: don't attempt resume if the audio session is likely stuck.
+        // After a phone call, the hardware may take seconds to release. Calling
+        // engine?.start() synchronously here blocks the main thread.
+        guard captureService.state == .paused else {
+            AppLog.event("audio", "App foreground — capture service state is \(String(describing: captureService.state)), not paused. Skipping recovery.")
+            return
+        }
+        AppLog.event("audio", "App returned to foreground — attempting async recovery from system interruption")
+        // Offload resume to a detached task with a 3s timeout.
+        // After a phone call, audio hardware can take seconds to release.
+        // Running engine?.start() on the main actor blocks the UI.
+        let captureSvc = self.captureService
+        Task.detached(priority: .userInitiated) {
+            let didResume = await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
+                let workItem = DispatchWorkItem {
+                    _ = c.resume(returning: false)  // timeout
+                }
+                DispatchQueue.global().asyncAfter(deadline: .now() + 3, execute: workItem)
+                DispatchQueue.global().async {
+                    do {
+                        try captureSvc.resumeRecording()
+                        workItem.cancel()
+                        c.resume(returning: true)
+                    } catch {
+                        workItem.cancel()
+                        c.resume(returning: false)
+                    }
+                }
+            }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                if didResume {
+                    self.state = .recording
+                    self.startObservation()
+                } else {
+                    AppLog.event("audio", "Foreground recovery failed or timed out — audio hardware may still be in use")
+                }
+                self.notifyStatusChange()
+            }
         }
     }
 

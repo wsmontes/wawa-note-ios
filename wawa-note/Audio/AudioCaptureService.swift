@@ -85,6 +85,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     private var timerTask: Task<Void, Never>?
     private var recordingStartTime: Date?
     private var interruptionBeganAt: Date?  // Tracks when the current interruption started
+    private var isRecoveringFromInterruption = false  // Suppress route changes during recovery
     private var currentMeetingId: UUID?
     private var observers: [NSObjectProtocol] = []
     private var levelSmoothTask: Task<Void, Never>?
@@ -431,6 +432,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
             engine?.pause()
             state = .paused
             interruptionBeganAt = Date()
+            isRecoveringFromInterruption = true
             stopTimer()
         case .ended:
             guard state == .paused else { return }
@@ -450,8 +452,12 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
                 // Retry engine start asynchronously — audio hardware (modem,
                 // Bluetooth SCO link) may need hundreds of ms to release after
                 // a phone call ends. A single try? is often insufficient.
+                // Suppress route-change rebuilds during recovery to prevent
+                // conflicting engine restarts.
                 Task { @MainActor [weak self] in
                     guard let self else { return }
+                    self.isRecoveringFromInterruption = true
+                    defer { self.isRecoveringFromInterruption = false }
                     for attempt in 0..<3 {
                         do {
                             try self.engine?.start()
