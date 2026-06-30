@@ -1,6 +1,5 @@
 import Foundation
 import UniformTypeIdentifiers
-import WawaNoteCore
 
 struct RTFImporter: FormatImporter {
   let formatIdentifier = "rtf"

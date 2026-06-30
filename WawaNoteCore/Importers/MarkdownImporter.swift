@@ -1,6 +1,5 @@
 import Foundation
 import UniformTypeIdentifiers
-import WawaNoteCore
 
 final class MarkdownImporter: FormatImporter, @unchecked Sendable {
   let formatIdentifier = "markdown"

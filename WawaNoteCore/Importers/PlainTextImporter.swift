@@ -1,6 +1,5 @@
 import Foundation
 import UniformTypeIdentifiers
-import WawaNoteCore
 
 struct PlainTextImporter: FormatImporter {
   let formatIdentifier = "txt"

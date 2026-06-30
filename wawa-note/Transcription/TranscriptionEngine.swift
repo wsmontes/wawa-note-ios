@@ -10,16 +10,6 @@ enum TranscriptionProgress: Sendable {
   case downloadingModel(String)
 }
 
-// MARK: - Checkpoint
-
-struct TranscriptionCheckpoint: Codable, Sendable {
-  let completedChunks: Int
-  let segments: [TranscriptSegment]
-  let languageCode: String?
-  let sourceEngineId: String
-  let savedAt: Date
-}
-
 // MARK: - Engine Capabilities
 
 /// Declares what a transcription engine can do.

@@ -1,6 +1,5 @@
 import Foundation
 import OSLog
-import WawaNoteCore
 
 enum FileArtifactStoreError: Error {
   case fileNotFound
@@ -47,6 +46,7 @@ enum AppDirectoryNames {
 final class FileArtifactStore: @unchecked Sendable {
   private let fileManager: FileManager
   private let baseURL: URL
+  private let logger = Logger(subsystem: "com.wawa-note.core", category: "FileArtifactStore")
 
   init(fileManager: FileManager = .default) {
     self.fileManager = fileManager
@@ -59,10 +59,10 @@ final class FileArtifactStore: @unchecked Sendable {
       .first
     {
       self.baseURL = appSupport.appendingPathComponent(AppDirectoryNames.base, isDirectory: true)
-      AppLog.storage.info(
+      logger.info(
         "FileArtifactStore: using applicationSupportDirectory — \(self.baseURL.path)")
     } else {
-      AppLog.storage.error(
+      logger.error(
         "FileArtifactStore: applicationSupportDirectory unavailable, using caches fallback")
       self.baseURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
         .appendingPathComponent(AppDirectoryNames.base, isDirectory: true)
@@ -73,7 +73,7 @@ final class FileArtifactStore: @unchecked Sendable {
     let locationCategory = baseURL.path.contains("Caches") ? "caches" : "applicationSupport"
     UserDefaults.standard.set(locationCategory, forKey: AppDirectoryNames.storeLocationKey)
     if locationCategory == "caches" {
-      AppLog.config.warning(
+      logger.warning(
         "Config data stored in cachesDirectory — may be purged by system. Consider freeing device storage."
       )
     }
@@ -112,7 +112,7 @@ final class FileArtifactStore: @unchecked Sendable {
       var base = baseURL
       try base.setResourceValues(resourceValues)
     } catch {
-      AppLog.storage.error(
+      logger.error(
         "FileArtifactStore: applyBaseProtection failed — \(error.localizedDescription)")
     }
   }
@@ -125,9 +125,9 @@ final class FileArtifactStore: @unchecked Sendable {
     let testData = Data("wawa-store-ok".utf8)
     do {
       try testData.write(to: sentinel, options: .atomic)
-      AppLog.storage.debug("FileArtifactStore: write access validated — sentinel OK")
+      logger.debug("FileArtifactStore: write access validated — sentinel OK")
     } catch {
-      AppLog.storage.critical(
+      logger.critical(
         "FileArtifactStore: write access validation FAILED — store may be read-only: \(error.localizedDescription)"
       )
     }
@@ -179,13 +179,13 @@ final class FileArtifactStore: @unchecked Sendable {
         var mutableURL = url
         try mutableURL.setResourceValues(values)
       } catch {
-        AppLog.storage.error(
+        logger.error(
           "FileArtifactStore: failed to configure \(name)/ directory — \(error.localizedDescription)"
         )
       }
     }
 
-    AppLog.storage.debug("FileArtifactStore: standard directories ensured")
+    logger.debug("FileArtifactStore: standard directories ensured")
   }
 
   // MARK: - Disk space
@@ -276,7 +276,7 @@ final class FileArtifactStore: @unchecked Sendable {
     var mutableFile = destURL
     try? mutableFile.setResourceValues(fileValues)
 
-    AppLog.storage.info(
+    logger.info(
       "Preserved imported file: \(originalFileName) for item \(itemId.uuidString.prefix(8))")
     return destURL
   }
@@ -296,7 +296,7 @@ final class FileArtifactStore: @unchecked Sendable {
     do {
       try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
     } catch {
-      AppLog.storage.error(
+      logger.error(
         "FileArtifactStore: createMeetingDirectory failed — \(url.path): \(error.localizedDescription)"
       )
       throw FileArtifactStoreError.directoryCreationFailed(error)
@@ -309,7 +309,7 @@ final class FileArtifactStore: @unchecked Sendable {
         ofItemAtPath: url.path
       )
     } catch {
-      AppLog.storage.error(
+      logger.error(
         "FileArtifactStore: meeting directory protection failed — \(url.path): \(error.localizedDescription)"
       )
     }
@@ -321,7 +321,7 @@ final class FileArtifactStore: @unchecked Sendable {
       var mutableURL = url
       try mutableURL.setResourceValues(values)
     } catch {
-      AppLog.storage.warning(
+      logger.warning(
         "FileArtifactStore: meeting directory backup exclusion failed — \(url.path): \(error.localizedDescription)"
       )
     }
@@ -341,7 +341,7 @@ final class FileArtifactStore: @unchecked Sendable {
       var mutableURL = url
       try mutableURL.setResourceValues(values)
     } catch {
-      AppLog.storage.error(
+      logger.error(
         "FileArtifactStore: createConfigsDirectory failed — \(error.localizedDescription)")
       throw FileArtifactStoreError.directoryCreationFailed(error)
     }
@@ -361,7 +361,7 @@ final class FileArtifactStore: @unchecked Sendable {
       var mutableURL = url
       try mutableURL.setResourceValues(values)
     } catch {
-      AppLog.storage.error(
+      logger.error(
         "FileArtifactStore: createChatDirectory failed — \(error.localizedDescription)")
       throw FileArtifactStoreError.directoryCreationFailed(error)
     }
@@ -377,7 +377,7 @@ final class FileArtifactStore: @unchecked Sendable {
       var mutableURL = url
       try mutableURL.setResourceValues(values)
     } catch {
-      AppLog.storage.error(
+      logger.error(
         "FileArtifactStore: createMediaDirectory failed — \(error.localizedDescription)")
       throw FileArtifactStoreError.directoryCreationFailed(error)
     }
@@ -389,7 +389,7 @@ final class FileArtifactStore: @unchecked Sendable {
     do {
       try fileManager.removeItem(at: url)
     } catch {
-      AppLog.storage.error(
+      logger.error(
         "FileArtifactStore: deleteMeetingDirectory failed — \(url.path): \(error.localizedDescription)"
       )
       throw error
@@ -450,7 +450,7 @@ final class FileArtifactStore: @unchecked Sendable {
 
     // Validate the encoded JSON is deserializable before writing
     guard (try? JSONSerialization.jsonObject(with: data)) != nil else {
-      AppLog.storage.error("FileArtifactStore: manifest JSON validation failed — refusing to write")
+      logger.error("FileArtifactStore: manifest JSON validation failed — refusing to write")
       throw FileArtifactStoreError.encodingFailed
     }
 
@@ -468,7 +468,7 @@ final class FileArtifactStore: @unchecked Sendable {
       if size > 0, let manifest = try? decodeManifest(from: url) {
         return manifest
       }
-      AppLog.storage.warning(
+      logger.warning(
         "FileArtifactStore: manifest parse failed (size=\(size)) — trying backup")
     }
 
@@ -476,7 +476,7 @@ final class FileArtifactStore: @unchecked Sendable {
     if fileManager.fileExists(atPath: bakURL.path) {
       let size = (try? fileManager.attributesOfItem(atPath: bakURL.path)[.size] as? Int64) ?? 0
       if size > 0, let manifest = try? decodeManifest(from: bakURL) {
-        AppLog.storage.info("FileArtifactStore: recovered manifest from backup")
+        logger.info("FileArtifactStore: recovered manifest from backup")
         // Restore the primary from the backup
         if let bakData = try? Data(contentsOf: bakURL) {
           try? bakData.write(to: url, options: .atomic)
@@ -584,7 +584,7 @@ final class FileArtifactStore: @unchecked Sendable {
     } catch is EncodingError {
       throw FileArtifactStoreError.encodingFailed
     } catch {
-      AppLog.storage.error(
+      logger.error(
         "FileArtifactStore: writeArtifact failed — \(fileName): \(error.localizedDescription)")
       throw FileArtifactStoreError.writeFailed(error)
     }
@@ -628,7 +628,7 @@ final class FileArtifactStore: @unchecked Sendable {
     do {
       try data.write(to: newURL, options: .atomic)
     } catch {
-      AppLog.storage.error(
+      logger.error(
         "FileArtifactStore: atomicWriteWithBackup .NEW write failed — \(url.path): \(error.localizedDescription)"
       )
       throw FileArtifactStoreError.writeFailed(error)
@@ -646,7 +646,7 @@ final class FileArtifactStore: @unchecked Sendable {
       do {
         try fileManager.moveItem(at: url, to: bakURL)
       } catch {
-        AppLog.storage.error(
+        logger.error(
           "FileArtifactStore: atomicWriteWithBackup .BAK rotation failed — \(error.localizedDescription)"
         )
         try? fileManager.removeItem(at: newURL)
@@ -659,7 +659,7 @@ final class FileArtifactStore: @unchecked Sendable {
       try fileManager.moveItem(at: newURL, to: url)
     } catch {
       // Attempt to restore from .BAK
-      AppLog.storage.error(
+      logger.error(
         "FileArtifactStore: atomicWriteWithBackup rename .NEW→final failed — \(error.localizedDescription)"
       )
       if fileManager.fileExists(atPath: bakURL.path) {
@@ -726,7 +726,7 @@ final class FileArtifactStore: @unchecked Sendable {
       do {
         try fileManager.removeItem(at: finalURL)
       } catch {
-        AppLog.storage.error(
+        logger.error(
           "FileArtifactStore: commitPartialTranscript — cannot remove old final transcript: \(error.localizedDescription)"
         )
         throw error
@@ -743,7 +743,7 @@ final class FileArtifactStore: @unchecked Sendable {
       do {
         try fileManager.removeItem(at: pURL)
       } catch {
-        AppLog.storage.error(
+        logger.error(
           "FileArtifactStore: deletePartialTranscript failed — \(pURL.path): \(error.localizedDescription)"
         )
       }
@@ -753,7 +753,7 @@ final class FileArtifactStore: @unchecked Sendable {
       do {
         try fileManager.removeItem(at: cURL)
       } catch {
-        AppLog.storage.error(
+        logger.error(
           "FileArtifactStore: deletePartialCheckpoint failed — \(cURL.path): \(error.localizedDescription)"
         )
       }
@@ -794,9 +794,9 @@ final class FileArtifactStore: @unchecked Sendable {
         do {
           try fileManager.removeItem(at: url)
           removed += 1
-          AppLog.storage.info("Swept orphaned directory: \(id.uuidString) (\(totalBytes) bytes)")
+          logger.info("Swept orphaned directory: \(id.uuidString) (\(totalBytes) bytes)")
         } catch {
-          AppLog.storage.error(
+          logger.error(
             "Sweep failed to remove orphan: \(id.uuidString) — \(error.localizedDescription)")
         }
       }

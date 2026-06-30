@@ -1,7 +1,6 @@
 import Foundation
 import PDFKit
 import UniformTypeIdentifiers
-import WawaNoteCore
 
 struct PDFImporter: FormatImporter {
   let formatIdentifier = "pdf"

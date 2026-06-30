@@ -1,6 +1,5 @@
 import Foundation
 import UniformTypeIdentifiers
-import WawaNoteCore
 
 struct ImportResult {
   let knowledgeItem: KnowledgeItem

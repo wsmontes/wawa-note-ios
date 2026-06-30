@@ -3,6 +3,7 @@ import OSLog
 import UniformTypeIdentifiers
 
 final class ImportRouter {
+  private let logger = Logger(subsystem: "com.wawa-note.core", category: "ImportRouter")
   private let importers: [any FormatImporter]
 
   init(importers: [any FormatImporter]) {
@@ -11,7 +12,7 @@ final class ImportRouter {
 
   func importer(for url: URL) -> (any FormatImporter)? {
     guard let importer = importers.first(where: { $0.canRead(url: url) }) else {
-      AppLog.general.debug(
+      logger.debug(
         "No importer found for URL: \(url) (pathExtension: \(url.pathExtension))")
       return nil
     }
@@ -20,7 +21,7 @@ final class ImportRouter {
 
   func importer(for data: Data) -> (any FormatImporter)? {
     guard let importer = importers.first(where: { $0.canRead(data: data) }) else {
-      AppLog.general.debug("No importer found for data (\(data.count) bytes)")
+      logger.debug("No importer found for data (\(data.count) bytes)")
       return nil
     }
     return importer

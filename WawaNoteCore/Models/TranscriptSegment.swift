@@ -1,5 +1,4 @@
 import Foundation
-import WawaNoteCore
 
 struct TranscriptSegment: Identifiable, Codable {
   let id: UUID

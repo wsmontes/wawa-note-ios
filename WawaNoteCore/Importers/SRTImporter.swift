@@ -1,6 +1,5 @@
 import Foundation
 import UniformTypeIdentifiers
-import WawaNoteCore
 
 final class SRTImporter: FormatImporter, @unchecked Sendable {
   let formatIdentifier = "srt"
@@ -77,7 +76,7 @@ final class SRTImporter: FormatImporter, @unchecked Sendable {
     }
 
     // Body text from segments for analysis pipeline
-    item.bodyText = segments.map(\.text).joined(separator: " ")
+    item.bodyText = segments.map { $0.text }.joined(separator: " ")
 
     let transcriptURL = fileStore.itemDirectoryURL(for: item.id).appendingPathComponent(
       "transcript.json")
