@@ -1,6 +1,6 @@
+import OSLog
 import UIKit
 import UniformTypeIdentifiers
-import OSLog
 
 private let logger = Logger(subsystem: "com.wawa-note.share", category: "share-extension")
 private let appGroupIdentifier = "group.com.wawa-note"
@@ -9,173 +9,179 @@ private let pendingImportFilesKey = "pendingImportFiles"
 
 final class ShareViewController: UIViewController {
 
-    private var savedFiles: [String] = []
-    private var processingDone = false
-    private var hasErrors = false
+  private var savedFiles: [String] = []
+  private var processingDone = false
+  private var hasErrors = false
 
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = .clear
-        processAttachments()
+  override func viewDidLoad() {
+    super.viewDidLoad()
+    view.backgroundColor = .clear
+    processAttachments()
+  }
+
+  override func viewDidAppear(_ animated: Bool) {
+    super.viewDidAppear(animated)
+    if processingDone {
+      complete()
+    }
+  }
+
+  // MARK: - Attachment processing
+
+  private func processAttachments() {
+    guard
+      let containerURL = FileManager.default
+        .containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)
+    else {
+      logger.info(" App Group container not available — cannot import")
+      processingDone = true
+      hasErrors = true
+      return
     }
 
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        if processingDone {
-            complete()
-        }
+    guard let extensionItems = extensionContext?.inputItems as? [NSExtensionItem] else {
+      processingDone = true
+      return
     }
 
-    // MARK: - Attachment processing
+    let allProviders: [NSItemProvider] = extensionItems.compactMap { $0.attachments }.flatMap { $0 }
 
-    private func processAttachments() {
-        guard let containerURL = FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) else {
-            logger.info(" App Group container not available — cannot import")
-            processingDone = true
-            hasErrors = true
-            return
-        }
+    guard !allProviders.isEmpty else {
+      processingDone = true
+      return
+    }
 
-        guard let extensionItems = extensionContext?.inputItems as? [NSExtensionItem] else {
-            processingDone = true
-            return
-        }
+    let group = DispatchGroup()
+    var saved: [String] = []
+    var errorCount = 0
+    let lock = NSLock()
 
-        let allProviders: [NSItemProvider] = extensionItems.compactMap { $0.attachments }.flatMap { $0 }
+    // Timeout after 25 seconds to stay within system's ~30s limit
+    let deadline = DispatchTime.now() + .seconds(25)
 
-        guard !allProviders.isEmpty else {
-            processingDone = true
-            return
-        }
+    for provider in allProviders {
+      let types: [String] = [
+        UTType.audio.identifier,
+        UTType.movie.identifier,
+        UTType.fileURL.identifier,
+        UTType.data.identifier,
+      ]
 
-        let group = DispatchGroup()
-        var saved: [String] = []
-        var errorCount = 0
-        let lock = NSLock()
-
-        // Timeout after 25 seconds to stay within system's ~30s limit
-        let deadline = DispatchTime.now() + .seconds(25)
-
-        for provider in allProviders {
-            let types: [String] = [
-                UTType.audio.identifier,
-                UTType.movie.identifier,
-                UTType.fileURL.identifier,
-                UTType.data.identifier
-            ]
-
-            var matched = false
-            for typeID in types {
-                if provider.hasItemConformingToTypeIdentifier(typeID) {
-                    group.enter()
-                    loadFile(from: provider, typeIdentifier: typeID, containerURL: containerURL) { filename in
-                        lock.lock()
-                        if let name = filename {
-                            saved.append(name)
-                        } else {
-                            errorCount += 1
-                        }
-                        lock.unlock()
-                        group.leave()
-                    }
-                    matched = true
-                    break
-                }
-            }
-            if !matched {
-                logger.info(" No supported type for: \(provider.registeredTypeIdentifiers)")
-            }
-        }
-
-        group.notify(queue: .main) { [weak self] in
-            self?.savedFiles = saved
-            if saved.isEmpty {
-                logger.info(" No files saved (errors: \(errorCount))")
-                self?.hasErrors = true
+      var matched = false
+      for typeID in types {
+        if provider.hasItemConformingToTypeIdentifier(typeID) {
+          group.enter()
+          loadFile(from: provider, typeIdentifier: typeID, containerURL: containerURL) { filename in
+            lock.lock()
+            if let name = filename {
+              saved.append(name)
             } else {
-                let shared = UserDefaults(suiteName: appGroupIdentifier)
-                shared?.set(saved, forKey: pendingImportFilesKey)
-                logger.info(" Saved \(saved.count) files (errors: \(errorCount)): \(saved)")
-                // Open the main app to trigger import
-                if let url = URL(string: "wawanote://import") {
-                    self?.extensionContext?.open(url)
-                }
+              errorCount += 1
             }
-            self?.processingDone = true
-            if self?.isViewLoaded == true, self?.view.window != nil {
-                self?.complete()
-            }
+            lock.unlock()
+            group.leave()
+          }
+          matched = true
+          break
         }
+      }
+      if !matched {
+        logger.info(" No supported type for: \(provider.registeredTypeIdentifiers)")
+      }
+    }
 
-        // Safety timeout: complete anyway after deadline
-        DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
-            guard let self, !self.processingDone else { return }
-            logger.info(" Timed out waiting for attachments — completing with \(saved.count) files saved")
-            self.savedFiles = saved
-            if !saved.isEmpty {
-                let shared = UserDefaults(suiteName: appGroupIdentifier)
-                shared?.set(saved, forKey: pendingImportFilesKey)
-                // Open the main app to trigger import
-                if let url = URL(string: "wawanote://import") {
-                    self.extensionContext?.open(url)
-                }
-            }
-            self.processingDone = true
-            if self.isViewLoaded, self.view.window != nil {
-                self.complete()
-            }
+    group.notify(queue: .main) { [weak self] in
+      self?.savedFiles = saved
+      if saved.isEmpty {
+        logger.info(" No files saved (errors: \(errorCount))")
+        self?.hasErrors = true
+      } else {
+        let shared = UserDefaults(suiteName: appGroupIdentifier)
+        shared?.set(saved, forKey: pendingImportFilesKey)
+        logger.info(" Saved \(saved.count) files (errors: \(errorCount)): \(saved)")
+        // Open the main app to trigger import
+        if let url = URL(string: "wawanote://import") {
+          self?.extensionContext?.open(url)
         }
+      }
+      self?.processingDone = true
+      if self?.isViewLoaded == true, self?.view.window != nil {
+        self?.complete()
+      }
     }
 
-    // MARK: - File copy
-
-    private func loadFile(from provider: NSItemProvider, typeIdentifier: String, containerURL: URL, completion: @escaping (String?) -> Void) {
-        provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, error in
-            if let error {
-                logger.info(" loadFileRepresentation error: \(error.localizedDescription)")
-                completion(nil)
-                return
-            }
-
-            guard let url = url else {
-                completion(nil)
-                return
-            }
-
-            defer {
-                // Clean up system-provided temp file
-                try? FileManager.default.removeItem(at: url)
-            }
-
-            let originalName = provider.suggestedName ?? url.lastPathComponent
-            let safeName = Self.safeImportFilename(original: originalName)
-            logger.info(" Received: \(originalName) -> \(safeName)")
-
-            let sharedDir = containerURL.appendingPathComponent(sharedDirectoryName, isDirectory: true)
-            do {
-                try FileManager.default.createDirectory(at: sharedDir, withIntermediateDirectories: true)
-                let destURL = sharedDir.appendingPathComponent(safeName)
-                try? FileManager.default.removeItem(at: destURL)
-                try FileManager.default.copyItem(at: url, to: destURL)
-                logger.info(" Copied to: \(destURL.path)")
-                completion(safeName)
-            } catch {
-                logger.info(" Copy error: \(error.localizedDescription)")
-                completion(nil)
-            }
+    // Safety timeout: complete anyway after deadline
+    DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
+      guard let self, !self.processingDone else { return }
+      logger.info(" Timed out waiting for attachments — completing with \(saved.count) files saved")
+      self.savedFiles = saved
+      if !saved.isEmpty {
+        let shared = UserDefaults(suiteName: appGroupIdentifier)
+        shared?.set(saved, forKey: pendingImportFilesKey)
+        // Open the main app to trigger import
+        if let url = URL(string: "wawanote://import") {
+          self.extensionContext?.open(url)
         }
+      }
+      self.processingDone = true
+      if self.isViewLoaded, self.view.window != nil {
+        self.complete()
+      }
     }
+  }
 
-    private static func safeImportFilename(original: String) -> String {
-        let sanitized = original
-            .replacingOccurrences(of: "[^a-zA-Z0-9._-]", with: "_", options: .regularExpression)
-        return "\(UUID().uuidString)-\(sanitized)"
+  // MARK: - File copy
+
+  private func loadFile(
+    from provider: NSItemProvider, typeIdentifier: String, containerURL: URL,
+    completion: @escaping (String?) -> Void
+  ) {
+    provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, error in
+      if let error {
+        logger.info(" loadFileRepresentation error: \(error.localizedDescription)")
+        completion(nil)
+        return
+      }
+
+      guard let url = url else {
+        completion(nil)
+        return
+      }
+
+      defer {
+        // Clean up system-provided temp file
+        try? FileManager.default.removeItem(at: url)
+      }
+
+      let originalName = provider.suggestedName ?? url.lastPathComponent
+      let safeName = Self.safeImportFilename(original: originalName)
+      logger.info(" Received: \(originalName) -> \(safeName)")
+
+      let sharedDir = containerURL.appendingPathComponent(sharedDirectoryName, isDirectory: true)
+      do {
+        try FileManager.default.createDirectory(at: sharedDir, withIntermediateDirectories: true)
+        let destURL = sharedDir.appendingPathComponent(safeName)
+        try? FileManager.default.removeItem(at: destURL)
+        try FileManager.default.copyItem(at: url, to: destURL)
+        logger.info(" Copied to: \(destURL.path)")
+        completion(safeName)
+      } catch {
+        logger.info(" Copy error: \(error.localizedDescription)")
+        completion(nil)
+      }
     }
+  }
 
-    // MARK: - Complete
+  private static func safeImportFilename(original: String) -> String {
+    let sanitized =
+      original
+      .replacingOccurrences(of: "[^a-zA-Z0-9._-]", with: "_", options: .regularExpression)
+    return "\(UUID().uuidString)-\(sanitized)"
+  }
 
-    private func complete() {
-        extensionContext?.completeRequest(returningItems: nil)
-    }
+  // MARK: - Complete
+
+  private func complete() {
+    extensionContext?.completeRequest(returningItems: nil)
+  }
 }

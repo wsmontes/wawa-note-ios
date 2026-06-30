@@ -2,247 +2,253 @@ import Foundation
 import SwiftData
 
 enum ItemStatus: String, Codable, CaseIterable {
-    case draft
-    case recording
-    /// Audio segments written. Concatenation to audio.m4a is in progress.
-    case preparingAudio
-    /// audio.m4a is ready. Item is in the processing queue, waiting for its turn.
-    case queuedForTranscription
-    /// Legacy: used for items recorded before explicit queue statuses were added.
-    case recorded
-    case transcribing
-    case transcribed
-    /// Extraction/transcription is complete but user hasn't reviewed yet.
-    /// Pipeline pauses here — user must approve before analysis proceeds.
-    case pendingReview
-    case analyzing
-    case analyzed
-    case failed
-    case archived
+  case draft
+  case recording
+  /// Audio segments written. Concatenation to audio.m4a is in progress.
+  case preparingAudio
+  /// audio.m4a is ready. Item is in the processing queue, waiting for its turn.
+  case queuedForTranscription
+  /// Legacy: used for items recorded before explicit queue statuses were added.
+  case recorded
+  case transcribing
+  case transcribed
+  /// Extraction/transcription is complete but user hasn't reviewed yet.
+  /// Pipeline pauses here — user must approve before analysis proceeds.
+  case pendingReview
+  case analyzing
+  case analyzed
+  case failed
+  case archived
 
-    /// State machine: valid transitions for each status.
-    /// Transitions not listed here are illegal and indicate a bug.
-    ///
-    /// Flow:
-    ///   draft → recording → preparingAudio → queuedForTranscription → transcribing → transcribed
-    ///                                                                                     ↓
-    ///                                                                             pendingReview → analyzing → analyzed
-    ///   Any active state → failed (terminal)
-    ///   Any state → archived (terminal, manual only)
-    var validNextStatuses: Set<ItemStatus> {
-        switch self {
-        case .draft:
-            [.recording]
-        case .recording:
-            [.preparingAudio, .recorded, .failed]
-        case .preparingAudio:
-            [.queuedForTranscription, .failed]
-        case .queuedForTranscription:
-            [.transcribing, .failed]
-        case .recorded:
-            [.transcribing, .queuedForTranscription, .failed]
-        case .transcribing:
-            [.transcribed, .failed]
-        case .transcribed:
-            [.pendingReview, .analyzing, .failed]
-        case .pendingReview:
-            [.analyzing, .failed]
-        case .analyzing:
-            [.analyzed, .failed]
-        case .analyzed:
-            [.failed] // re-analysis allowed
-        case .failed:
-            [.queuedForTranscription, .recorded] // retry
-        case .archived:
-            [] // terminal
-        }
+  /// State machine: valid transitions for each status.
+  /// Transitions not listed here are illegal and indicate a bug.
+  ///
+  /// Flow:
+  ///   draft → recording → preparingAudio → queuedForTranscription → transcribing → transcribed
+  ///                                                                                     ↓
+  ///                                                                             pendingReview → analyzing → analyzed
+  ///   Any active state → failed (terminal)
+  ///   Any state → archived (terminal, manual only)
+  var validNextStatuses: Set<ItemStatus> {
+    switch self {
+    case .draft:
+      [.recording]
+    case .recording:
+      [.preparingAudio, .recorded, .failed]
+    case .preparingAudio:
+      [.queuedForTranscription, .failed]
+    case .queuedForTranscription:
+      [.transcribing, .failed]
+    case .recorded:
+      [.transcribing, .queuedForTranscription, .failed]
+    case .transcribing:
+      [.transcribed, .failed]
+    case .transcribed:
+      [.pendingReview, .analyzing, .failed]
+    case .pendingReview:
+      [.analyzing, .failed]
+    case .analyzing:
+      [.analyzed, .failed]
+    case .analyzed:
+      [.failed]  // re-analysis allowed
+    case .failed:
+      [.queuedForTranscription, .recorded]  // retry
+    case .archived:
+      []  // terminal
     }
+  }
 
-    /// Returns true if transitioning to `next` is allowed by the state machine.
-    func canTransition(to next: ItemStatus) -> Bool {
-        validNextStatuses.contains(next)
-    }
+  /// Returns true if transitioning to `next` is allowed by the state machine.
+  func canTransition(to next: ItemStatus) -> Bool {
+    validNextStatuses.contains(next)
+  }
 }
 
 enum KnowledgeItemType: String, Codable, CaseIterable, Hashable {
-    case audio = "audio"
-    case note
-    case journalEntry
-    case webBookmark
-    case image
+  case audio = "audio"
+  case note
+  case journalEntry
+  case webBookmark
+  case image
 }
 
 // MARK: - Display helpers
 
 extension KnowledgeItemType {
-    var icon: String {
-        switch self {
-        case .audio: "recordingtape"
-        case .note: "note.text"
-        case .journalEntry: "book"
-        case .webBookmark: "bookmark"
-        case .image: "photo"
-        }
+  var icon: String {
+    switch self {
+    case .audio: "recordingtape"
+    case .note: "note.text"
+    case .journalEntry: "book"
+    case .webBookmark: "bookmark"
+    case .image: "photo"
     }
+  }
 
-    var label: String { rawValue.capitalized }
+  var label: String { rawValue.capitalized }
 }
 
 @Model
 final class KnowledgeItem {
-    @Attribute(.unique) var id: UUID
-    var typeRaw: String
-    var title: String
-    /// Preserved original title (filename, recording date, etc.) before AI rename.
-    var originalTitle: String?
-    var createdAt: Date
-    var updatedAt: Date
-    var statusRaw: String
-    // [String] is NOT supported as a direct SwiftData attribute — CoreData
-    // cannot materialize "Array<String>" (crash: "Could not materialize
-    // Objective-C class named 'Array'"). Store as JSON string instead.
-    private var _tagsJSON: String = "[]"
-    @Transient
-    var tags: [String] {
-        get {
-            guard let data = _tagsJSON.data(using: .utf8),
-                  let result = try? JSONDecoder().decode([String].self, from: data) else {
-                return []
-            }
-            return result
-        }
-        set {
-            if let data = try? JSONEncoder().encode(newValue),
-               let json = String(data: data, encoding: .utf8) {
-                _tagsJSON = json
-            } else {
-                _tagsJSON = "[]"
-            }
-        }
+  @Attribute(.unique) var id: UUID
+  var typeRaw: String
+  var title: String
+  /// Preserved original title (filename, recording date, etc.) before AI rename.
+  var originalTitle: String?
+  var createdAt: Date
+  var updatedAt: Date
+  var statusRaw: String
+  // [String] is NOT supported as a direct SwiftData attribute — CoreData
+  // cannot materialize "Array<String>" (crash: "Could not materialize
+  // Objective-C class named 'Array'"). Store as JSON string instead.
+  private var _tagsJSON: String = "[]"
+  @Transient
+  var tags: [String] {
+    get {
+      guard let data = _tagsJSON.data(using: .utf8),
+        let result = try? JSONDecoder().decode([String].self, from: data)
+      else {
+        return []
+      }
+      return result
     }
-
-    // Cross-type queryable columns
-    var durationSeconds: Double?
-    var languageCode: String?
-    var folderID: UUID?
-    var projectID: UUID?
-    var isFlagged: Bool
-
-    // Content body (Markdown for notes, journal entries)
-    var bodyText: String?
-
-    // Inbox — non-nil means item is waiting to be processed
-    var inboxDate: Date?
-
-    // Context columns
-    var contextCalendarEventTitle: String?
-    var contextAudioRoute: String?
-    var contextPlaceName: String?
-    var contextLatitude: Double?
-    var contextLongitude: Double?
-    var contextFocusActive: Bool?
-    var contextMotionActivity: String?
-    var contextBatteryLevel: Double?
-
-    // Legacy meeting fields
-    var audioFileRelativePath: String?
-    /// Sample rate of the captured audio (e.g., 44100 for built-in mic, 8000 for Bluetooth HFP).
-    var audioSampleRate: Double?
-    /// Number of audio channels (1 = mono).
-    var audioChannelCount: Int?
-    /// Input port type used for capture (e.g., "builtInMic", "bluetoothHFP", "usbAudio").
-    var audioInputPortType: String?
-    /// Human-readable input port name (e.g., "iPhone", "AirPods Pro").
-    var audioInputPortName: String?
-    var imageFileRelativePath: String?
-    var imagePageCount: Int?
-    var transcriptionEngineId: String?
-    var analysisProviderId: String?
-    var calendarEventIdentifier: String?
-    var scheduledDate: Date?
-    var isImported: Bool = false
-    var importSourceURL: String?
-    // Field authority
-    var fieldProvenanceJSON: String?
-    // Anarlog compatibility: preserves original YAML frontmatter for round-trip fidelity
-    var anarlogFrontmatterJSON: String?
-    var needsProjectReprocessing: Bool = false
-    var projectReprocessContext: String?
-
-    var type: KnowledgeItemType {
-        get {
-            // Migration: "meeting" was renamed to "audio"
-            if typeRaw == "meeting" { return .audio }
-            return KnowledgeItemType(rawValue: typeRaw) ?? .audio
-        }
-        set { typeRaw = newValue.rawValue }
+    set {
+      if let data = try? JSONEncoder().encode(newValue),
+        let json = String(data: data, encoding: .utf8)
+      {
+        _tagsJSON = json
+      } else {
+        _tagsJSON = "[]"
+      }
     }
+  }
 
-    var status: ItemStatus {
-        get { ItemStatus(rawValue: statusRaw) ?? .draft }
-        set { statusRaw = newValue.rawValue }
-    }
+  // Cross-type queryable columns
+  var durationSeconds: Double?
+  var languageCode: String?
+  var folderID: UUID?
+  var projectID: UUID?
+  var isFlagged: Bool
 
-    /// Transition to a new status with validation. Logs a warning if the
-    /// transition is illegal per the state machine, but still allows it
-    /// for backwards compatibility. Prefer this over direct `status = ...`.
-    func transitionStatus(to next: ItemStatus, reason: String) {
-        let current = self.status
-        guard current.canTransition(to: next) else {
-            AppLog.warn("status", "⚠️ Illegal state transition: \(current.rawValue) → \(next.rawValue) — \(reason). Fix the call site.")
-            self.status = next
-            return
-        }
-        self.status = next
-    }
+  // Content body (Markdown for notes, journal entries)
+  var bodyText: String?
 
-    init(
-        id: UUID = UUID(),
-        type: KnowledgeItemType = .audio,
-        title: String = "",
-        createdAt: Date = Date(),
-        updatedAt: Date = Date(),
-        status: ItemStatus = .draft,
-        tags: [String] = [],
-        folderID: UUID? = nil,
-        isFlagged: Bool = false,
-        bodyText: String? = nil,
-        durationSeconds: Double? = nil,
-        languageCode: String? = nil,
-        inboxDate: Date? = Date()
-    ) {
-        self.id = id
-        self.typeRaw = type.rawValue
-        self.title = title
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
-        self.statusRaw = status.rawValue
-        if let data = try? JSONEncoder().encode(tags),
-           let json = String(data: data, encoding: .utf8) {
-            self._tagsJSON = json
-        }
-        self.folderID = folderID
-        self.projectID = nil
-        self.isFlagged = isFlagged
-        self.bodyText = bodyText
-        self.durationSeconds = durationSeconds
-        self.languageCode = languageCode
-        self.inboxDate = inboxDate
-        self.fieldProvenanceJSON = nil
-        self.needsProjectReprocessing = false
-        self.projectReprocessContext = nil
+  // Inbox — non-nil means item is waiting to be processed
+  var inboxDate: Date?
+
+  // Context columns
+  var contextCalendarEventTitle: String?
+  var contextAudioRoute: String?
+  var contextPlaceName: String?
+  var contextLatitude: Double?
+  var contextLongitude: Double?
+  var contextFocusActive: Bool?
+  var contextMotionActivity: String?
+  var contextBatteryLevel: Double?
+
+  // Legacy meeting fields
+  var audioFileRelativePath: String?
+  /// Sample rate of the captured audio (e.g., 44100 for built-in mic, 8000 for Bluetooth HFP).
+  var audioSampleRate: Double?
+  /// Number of audio channels (1 = mono).
+  var audioChannelCount: Int?
+  /// Input port type used for capture (e.g., "builtInMic", "bluetoothHFP", "usbAudio").
+  var audioInputPortType: String?
+  /// Human-readable input port name (e.g., "iPhone", "AirPods Pro").
+  var audioInputPortName: String?
+  var imageFileRelativePath: String?
+  var imagePageCount: Int?
+  var transcriptionEngineId: String?
+  var analysisProviderId: String?
+  var calendarEventIdentifier: String?
+  var scheduledDate: Date?
+  var isImported: Bool = false
+  var importSourceURL: String?
+  // Field authority
+  var fieldProvenanceJSON: String?
+  // Anarlog compatibility: preserves original YAML frontmatter for round-trip fidelity
+  var anarlogFrontmatterJSON: String?
+  var needsProjectReprocessing: Bool = false
+  var projectReprocessContext: String?
+
+  var type: KnowledgeItemType {
+    get {
+      // Migration: "meeting" was renamed to "audio"
+      if typeRaw == "meeting" { return .audio }
+      return KnowledgeItemType(rawValue: typeRaw) ?? .audio
     }
+    set { typeRaw = newValue.rawValue }
+  }
+
+  var status: ItemStatus {
+    get { ItemStatus(rawValue: statusRaw) ?? .draft }
+    set { statusRaw = newValue.rawValue }
+  }
+
+  /// Transition to a new status with validation. Logs a warning if the
+  /// transition is illegal per the state machine, but still allows it
+  /// for backwards compatibility. Prefer this over direct `status = ...`.
+  func transitionStatus(to next: ItemStatus, reason: String) {
+    let current = self.status
+    guard current.canTransition(to: next) else {
+      AppLog.warn(
+        "status",
+        "⚠️ Illegal state transition: \(current.rawValue) → \(next.rawValue) — \(reason). Fix the call site."
+      )
+      self.status = next
+      return
+    }
+    self.status = next
+  }
+
+  init(
+    id: UUID = UUID(),
+    type: KnowledgeItemType = .audio,
+    title: String = "",
+    createdAt: Date = Date(),
+    updatedAt: Date = Date(),
+    status: ItemStatus = .draft,
+    tags: [String] = [],
+    folderID: UUID? = nil,
+    isFlagged: Bool = false,
+    bodyText: String? = nil,
+    durationSeconds: Double? = nil,
+    languageCode: String? = nil,
+    inboxDate: Date? = Date()
+  ) {
+    self.id = id
+    self.typeRaw = type.rawValue
+    self.title = title
+    self.createdAt = createdAt
+    self.updatedAt = updatedAt
+    self.statusRaw = status.rawValue
+    if let data = try? JSONEncoder().encode(tags),
+      let json = String(data: data, encoding: .utf8)
+    {
+      self._tagsJSON = json
+    }
+    self.folderID = folderID
+    self.projectID = nil
+    self.isFlagged = isFlagged
+    self.bodyText = bodyText
+    self.durationSeconds = durationSeconds
+    self.languageCode = languageCode
+    self.inboxDate = inboxDate
+    self.fieldProvenanceJSON = nil
+    self.needsProjectReprocessing = false
+    self.projectReprocessContext = nil
+  }
 }
 
 // MARK: - KnowledgeItem + FieldProvidence
 
 extension KnowledgeItem: FieldProvidence {
-    var provenance: FieldProvenance {
-        get { FieldProvenance.decode(from: fieldProvenanceJSON) }
-        set { fieldProvenanceJSON = newValue.encode() }
-    }
+  var provenance: FieldProvenance {
+    get { FieldProvenance.decode(from: fieldProvenanceJSON) }
+    set { fieldProvenanceJSON = newValue.encode() }
+  }
 
-    func writeProvenance() {
-        fieldProvenanceJSON = provenance.encode()
-    }
+  func writeProvenance() {
+    fieldProvenanceJSON = provenance.encode()
+  }
 }
