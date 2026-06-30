@@ -44,14 +44,9 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
 
     // MARK: - Duration
 
+    // Shared in TranscriptionEngine.swift as transcriptionGetDuration(_:)
     private func getDuration(_ url: URL) -> Float64 {
-        var fileID: AudioFileID?
-        guard AudioFileOpenURL(url as CFURL, .readPermission, 0, &fileID) == noErr, let fileID else { return 0 }
-        defer { AudioFileClose(fileID) }
-        var duration: Float64 = 0
-        var size = UInt32(MemoryLayout<Float64>.size)
-        AudioFileGetProperty(fileID, kAudioFilePropertyEstimatedDuration, &size, &duration)
-        return duration
+        transcriptionGetDuration(url)
     }
 
     private func fileSizeMB(_ url: URL) -> Double {
@@ -432,19 +427,8 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
 
     // MARK: - Dedup
 
+    // Shared in TranscriptionEngine.swift as transcriptionDeduplicateStart(_:against:)
     private func deduplicateStart(_ text: String, against previous: String) -> String {
-        let prevWords = previous.lowercased().split(separator: " ")
-        let currWords = text.lowercased().split(separator: " ")
-        let original = text.split(separator: " ").map(String.init)
-        guard !prevWords.isEmpty, !currWords.isEmpty else { return text }
-
-        var maxMatch = 0
-        for j in 1...min(10, prevWords.count, currWords.count) {
-            if prevWords.suffix(j) == currWords.prefix(j) { maxMatch = j }
-        }
-        if maxMatch > 0, maxMatch < original.count {
-            return original.dropFirst(maxMatch).joined(separator: " ")
-        }
-        return text
+        transcriptionDeduplicateStart(text, against: previous)
     }
 }

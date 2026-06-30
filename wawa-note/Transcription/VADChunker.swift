@@ -105,18 +105,16 @@ struct VADChunker: @unchecked Sendable {
                     confidence: max(current.confidence, next.confidence)
                 )
             } else {
-                // Can't merge: save current, start new
-                if current.endTime - current.startTime > 0.5 {
-                    merged.append(current)
-                }
+                // Can't merge: save current, start new.
+                // VAD already filtered by minSpeechDuration (0.2s) — don't
+                // second-guess it here or we lose short words ("yes","no","ok").
+                merged.append(current)
                 current = next
             }
         }
 
         // Don't forget the last one
-        if current.endTime - current.startTime > 0.5 {
-            merged.append(current)
-        }
+        merged.append(current)
 
         return merged
     }
