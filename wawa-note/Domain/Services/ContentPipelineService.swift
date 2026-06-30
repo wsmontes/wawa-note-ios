@@ -227,6 +227,9 @@ final class ContentPipelineService: ObservableObject {
       // Phase 0: Pre-extraction — transcribe audio, OCR images, fetch bookmarks.
       // These operations don't require an AI provider and run before analysis.
       let preferredLocale = item.languageCode  // user-selected locale hint from import form
+      AppLog.transcription.info(
+        "🔤 ContentPipeline: item.languageCode=\(preferredLocale ?? "nil") for item \(itemID.uuidString.prefix(8))"
+      )
       let extractionSvc = ContentExtractionService(
         modelContext: modelContext, fileStore: fileStore, preferredLocale: preferredLocale)
 

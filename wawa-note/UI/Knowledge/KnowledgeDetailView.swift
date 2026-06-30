@@ -34,7 +34,7 @@ struct KnowledgeDetailView: View {
   @State private var isAnalyzing = false
   @State private var analysisError: String?
   @State private var selectedModel: String = ""
-  @State private var selectedLocale = "pt-BR"
+  @State private var selectedLocale = TranscriptionLocaleProvider.bestGuessLocale
   @State private var showLocalePicker = false
   @State private var isEditing = false
   @State private var editedTitle = ""

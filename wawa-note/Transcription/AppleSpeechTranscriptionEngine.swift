@@ -146,7 +146,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
     let bestLabel = locales.first?.identifier ?? "unknown"
     self.chunker = AudioChunker(chunkDuration: Self.maxLocalDuration, overlap: Self.chunkOverlap)
     AppLog.transcription.info(
-      "AppleSpeech ready — best=\(bestLabel) locales=\(locales.map(\.identifier).prefix(5).joined(separator: ", "))"
+      "🔤 AppleSpeech init: preferredLocale=\(preferredLocale ?? "nil") best=\(bestLabel) locales=\(locales.map(\.identifier).prefix(5).joined(separator: ", "))"
     )
   }
 

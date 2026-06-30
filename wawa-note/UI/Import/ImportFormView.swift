@@ -257,6 +257,8 @@ struct ImportFormView: View {
     try? modelContext.save()
 
     let itemId = item.id
+    AppLog.transcription.info(
+      "🔤 ImportFormView: set languageCode=\(selectedLocale) on item \(itemId.uuidString.prefix(8))")
 
     Task { @MainActor in
       do {
