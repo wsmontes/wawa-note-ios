@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import WawaNoteCore
 
 // MARK: - Graph Node
 

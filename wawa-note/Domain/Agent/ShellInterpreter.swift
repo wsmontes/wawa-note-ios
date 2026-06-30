@@ -2,6 +2,7 @@ import Contacts
 import EventKit
 import Foundation
 import SwiftData
+import WawaNoteCore
 
 // MARK: - Shell Command
 

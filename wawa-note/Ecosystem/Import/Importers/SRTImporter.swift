@@ -1,5 +1,6 @@
 import Foundation
 import UniformTypeIdentifiers
+import WawaNoteCore
 
 final class SRTImporter: FormatImporter, @unchecked Sendable {
   let formatIdentifier = "srt"

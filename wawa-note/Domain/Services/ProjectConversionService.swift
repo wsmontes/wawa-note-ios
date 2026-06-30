@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import WawaNoteCore
 
 struct ConversionPreview: Codable, Sendable {
   let projectName: String

@@ -1,4 +1,5 @@
 import Foundation
+import WawaNoteCore
 
 enum TemplateActivation: String, Codable, Sendable {
   case manual  // User explicitly invokes

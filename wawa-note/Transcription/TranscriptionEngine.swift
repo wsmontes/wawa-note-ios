@@ -1,5 +1,6 @@
 import Foundation
 import Speech
+import WawaNoteCore
 
 // MARK: - Progress
 

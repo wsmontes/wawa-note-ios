@@ -1,4 +1,5 @@
 import Foundation
+import WawaNoteCore
 
 struct MarkdownExporter: Sendable {
 

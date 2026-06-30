@@ -1,4 +1,5 @@
 import Foundation
+import WawaNoteCore
 
 enum ProviderType: String, Codable, CaseIterable {
   case openAICompatible

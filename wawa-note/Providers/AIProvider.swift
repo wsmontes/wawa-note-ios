@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import WawaNoteCore
 
 // MARK: - Provider protocol
 

@@ -1,5 +1,8 @@
 import Foundation
+import OSLog
 import SwiftData
+
+private let log = Logger(subsystem: "com.wawa-note.core", category: "models")
 
 enum ItemStatus: String, Codable, CaseIterable {
   case draft
@@ -240,8 +243,7 @@ final class KnowledgeItem {
   func transitionStatus(to next: ItemStatus, reason: String) {
     let current = self.status
     guard current.canTransition(to: next) else {
-      AppLog.warn(
-        "status",
+      log.warning(
         "⚠️ Illegal state transition: \(current.rawValue) → \(next.rawValue) — \(reason). Fix the call site."
       )
       self.status = next

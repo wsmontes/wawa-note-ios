@@ -2,6 +2,7 @@ import AVFoundation
 import PDFKit
 import SwiftData
 import SwiftUI
+import WawaNoteCore
 
 // MARK: - Import kind
 

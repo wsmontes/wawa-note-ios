@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import WawaNoteCore
 
 enum ProjectSortOrder: CaseIterable { case recent, name, created }
 

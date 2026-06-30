@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import WawaNoteCore
 
 struct DaySummary {
   let date: Date

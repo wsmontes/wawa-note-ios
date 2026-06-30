@@ -2,6 +2,7 @@ import EventKit
 import Foundation
 import OSLog
 import SwiftData
+import WawaNoteCore
 
 extension EKEventStore {
   nonisolated(unsafe) static let shared = EKEventStore()

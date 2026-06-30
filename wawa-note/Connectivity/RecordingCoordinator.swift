@@ -3,6 +3,7 @@ import Combine
 import OSLog
 import SwiftData
 import UIKit
+import WawaNoteCore
 
 extension Notification.Name {
   /// Posted after crash-recovered orphaned recordings have been cleaned up

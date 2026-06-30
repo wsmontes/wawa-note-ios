@@ -3,6 +3,7 @@ import LocalAuthentication
 import SwiftData
 import SwiftUI
 import UserNotifications
+import WawaNoteCore
 
 @main
 struct WawaNoteApp: App {

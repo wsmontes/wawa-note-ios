@@ -1,4 +1,5 @@
 import Foundation
+import WawaNoteCore
 
 final class ContextWindowManager {
   let modelContextLimit: Int

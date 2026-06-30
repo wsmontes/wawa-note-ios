@@ -3,6 +3,7 @@ import CoreLocation
 import EventKit
 import Foundation
 import SwiftData
+import WawaNoteCore
 
 // MARK: - Device Context Enrichment
 

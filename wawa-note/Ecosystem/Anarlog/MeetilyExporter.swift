@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+import WawaNoteCore
 
 /// Exports Wawa Note KnowledgeItem records as Meetily-compatible JSON.
 ///

@@ -1,6 +1,7 @@
 import Foundation
 import OSLog
 import UniformTypeIdentifiers
+import WawaNoteCore
 
 /// Imports anarlog `.md` session notes as KnowledgeItem records.
 ///

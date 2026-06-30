@@ -1,5 +1,6 @@
 import CoreSpotlight
 import Foundation
+import WawaNoteCore
 
 struct SearchResult: Identifiable {
   let id = UUID()

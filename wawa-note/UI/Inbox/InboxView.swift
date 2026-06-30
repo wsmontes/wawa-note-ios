@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import WawaNoteCore
 
 struct InboxView: View {
   @Environment(\.modelContext) private var modelContext

@@ -2,6 +2,7 @@ import OSLog
 import Speech
 import SwiftData
 import SwiftUI
+import WawaNoteCore
 
 struct SettingsView: View {
   @Environment(\.modelContext) private var modelContext

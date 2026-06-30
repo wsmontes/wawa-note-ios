@@ -1,6 +1,7 @@
 import Foundation
 import OSLog
 import SwiftData
+import WawaNoteCore
 
 @MainActor
 final class EntityExtractionService {

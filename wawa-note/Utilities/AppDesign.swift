@@ -1,4 +1,5 @@
 import SwiftUI
+import WawaNoteCore
 
 // MARK: - Color from Hex
 

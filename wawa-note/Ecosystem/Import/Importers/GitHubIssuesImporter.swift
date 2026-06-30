@@ -1,6 +1,7 @@
 import Foundation
 import OSLog
 import UniformTypeIdentifiers
+import WawaNoteCore
 
 struct GitHubIssuesImporter: FormatImporter {
   let formatIdentifier = "github-issues"

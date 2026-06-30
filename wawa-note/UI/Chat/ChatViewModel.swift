@@ -1,6 +1,7 @@
 import Combine
 import SwiftData
 import SwiftUI
+import WawaNoteCore
 
 @MainActor
 final class ChatViewModel: ObservableObject {

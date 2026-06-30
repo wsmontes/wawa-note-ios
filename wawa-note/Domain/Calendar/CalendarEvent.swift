@@ -1,5 +1,6 @@
 import EventKit
 import Foundation
+import WawaNoteCore
 
 enum EventSource {
   case wawaNote(KnowledgeItem)

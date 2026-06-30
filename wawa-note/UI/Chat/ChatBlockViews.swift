@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import WawaNoteCore
 
 // MARK: - Block Rendering Views
 /// Extracted from ChatView.swift for file size management.

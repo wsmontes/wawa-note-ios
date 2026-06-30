@@ -1,5 +1,6 @@
 import AVFoundation
 import OSLog
+import WawaNoteCore
 
 enum AudioFileWriterError: Error {
   case fileCreationFailed

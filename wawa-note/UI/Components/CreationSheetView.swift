@@ -1,4 +1,5 @@
 import SwiftUI
+import WawaNoteCore
 
 struct CreationSheetView: View {
   @Environment(\.dismiss) private var dismiss

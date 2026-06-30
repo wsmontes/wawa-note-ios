@@ -1,6 +1,7 @@
 import Foundation
 import OSLog
 import SwiftData
+import WawaNoteCore
 
 /// Manages bidirectional sync between a watched folder and Wawa Note's SwiftData store.
 ///

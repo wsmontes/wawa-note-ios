@@ -2,6 +2,7 @@ import AVFoundation
 import Speech
 import SwiftData
 import SwiftUI
+import WawaNoteCore
 
 struct ChatView: View {
   @ObservedObject var viewModel: ChatViewModel

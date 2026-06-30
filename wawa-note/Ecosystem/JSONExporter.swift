@@ -1,4 +1,5 @@
 import Foundation
+import WawaNoteCore
 
 /// Exports a single KnowledgeItem as complete JSON using ItemExportFull from InstanceExportService.
 @MainActor

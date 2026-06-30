@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import WawaNoteCore
 
 /// Mutable context passed to every tool execution.
 /// Reference type so that `cd` mutations persist across iterations of the agent loop.

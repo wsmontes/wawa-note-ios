@@ -5,6 +5,7 @@ import ImageIO
 import SwiftData
 import UIKit
 import Vision
+import WawaNoteCore
 
 // MARK: - Text extraction from any content type
 

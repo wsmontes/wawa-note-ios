@@ -5,6 +5,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import Vision
 import VisionKit
+import WawaNoteCore
 
 // MARK: - HomeViewModel
 

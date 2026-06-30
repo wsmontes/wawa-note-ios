@@ -2,6 +2,7 @@ import AVFoundation
 import AudioToolbox
 import OSLog
 import UniformTypeIdentifiers
+import WawaNoteCore
 
 struct ImportMetadata {
   let duration: TimeInterval

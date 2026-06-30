@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import WawaNoteCore
 
 struct TimelineExplorerView: View {
   @EnvironmentObject private var calendarSync: CalendarSyncService

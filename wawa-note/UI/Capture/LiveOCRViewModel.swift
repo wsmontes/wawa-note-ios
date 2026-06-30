@@ -3,6 +3,7 @@ import CoreMotion
 import SwiftData
 import SwiftUI
 import Vision
+import WawaNoteCore
 
 // MARK: - Motion State
 

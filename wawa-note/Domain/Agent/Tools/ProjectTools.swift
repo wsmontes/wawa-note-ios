@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import WawaNoteCore
 
 /// Tools available to the Project Agent during synthesis.
 enum ProjectTools {

@@ -1,5 +1,6 @@
 import Foundation
 import UniformTypeIdentifiers
+import WawaNoteCore
 
 final class JSONImporter: FormatImporter, @unchecked Sendable {
   let formatIdentifier = "json"

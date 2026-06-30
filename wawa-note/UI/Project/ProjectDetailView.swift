@@ -1,6 +1,7 @@
 import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
+import WawaNoteCore
 
 // MARK: - Shared Signal Helpers
 

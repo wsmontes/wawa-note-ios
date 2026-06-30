@@ -1,4 +1,5 @@
 import Foundation
+import WawaNoteCore
 
 enum ActionItemStatus: String, Codable {
   case pending

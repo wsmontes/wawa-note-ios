@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import WawaNoteCore
 
 /// What kind of audio is available for playback/export.
 enum AudioAssetState: Equatable, Sendable {

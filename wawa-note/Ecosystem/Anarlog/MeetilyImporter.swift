@@ -1,6 +1,7 @@
 import Foundation
 import OSLog
 import UniformTypeIdentifiers
+import WawaNoteCore
 
 /// Imports Meetily meeting data as KnowledgeItem records.
 ///

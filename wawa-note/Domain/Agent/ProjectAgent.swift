@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import WawaNoteCore
 
 /// ProjectAgent — runs AgentLoop scoped to a project's items.
 /// Generates synthesis, emits signals, creates connections.

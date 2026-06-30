@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import WawaNoteCore
 
 struct TaskEditorView: View {
   @Environment(\.dismiss) private var dismiss

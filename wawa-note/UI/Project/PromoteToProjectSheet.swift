@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import WawaNoteCore
 
 struct PromoteToProjectSheet: View {
   let item: KnowledgeItem

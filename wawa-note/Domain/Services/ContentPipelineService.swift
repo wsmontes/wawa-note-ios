@@ -4,6 +4,7 @@ import Network
 import PDFKit
 import SwiftData
 import UIKit
+import WawaNoteCore
 
 // MARK: - Pipeline Agent Templates
 

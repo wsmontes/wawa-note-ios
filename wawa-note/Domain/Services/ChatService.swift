@@ -1,4 +1,5 @@
 import Foundation
+import WawaNoteCore
 import os
 
 @MainActor

@@ -1,3 +1,4 @@
+import WawaNoteCore
 import XCTest
 
 @testable import Wawa_Note

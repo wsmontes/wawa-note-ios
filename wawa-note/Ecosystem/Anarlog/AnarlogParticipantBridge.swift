@@ -3,6 +3,7 @@ import EventKit
 import Foundation
 import OSLog
 import SwiftData
+import WawaNoteCore
 
 /// Bridges participants between Wawa Note's iOS ecosystem (Contacts, Calendar)
 /// and anarlog's participant format.

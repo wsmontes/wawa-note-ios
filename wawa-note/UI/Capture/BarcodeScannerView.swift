@@ -1,5 +1,6 @@
 import AVFoundation
 import SwiftUI
+import WawaNoteCore
 
 // MARK: - Barcode Scanner View
 
