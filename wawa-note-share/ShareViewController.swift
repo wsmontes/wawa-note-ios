@@ -195,8 +195,6 @@ final class ShareViewController: UIViewController {
     // MARK: - Complete
 
     private func complete() {
-        guard !hasCompleted else { return }
-        hasCompleted = true
         extensionContext?.completeRequest(returningItems: nil)
     }
 }
