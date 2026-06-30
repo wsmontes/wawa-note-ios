@@ -114,7 +114,8 @@ enum AudioSegmentConcatenator {
         if uniqueRates.count > 1 {
             let ratesDesc = uniqueRates.sorted().map { "\($0) Hz" }.joined(separator: ", ")
             AppLog.audio.warning(
-                "SegmentConcatenator: mixed sample rates [\(ratesDesc)] across \(urls.count) segments — AVFoundation will resample silently; quality may degrade (route change during BT HFP?)")
+                "SegmentConcatenator: mixed sample rates [\(ratesDesc)] across \(urls.count) segments — AVFoundation will resample silently; quality may degrade (route change during BT HFP?)"
+            )
         }
 
         guard skippedCount < urls.count else {

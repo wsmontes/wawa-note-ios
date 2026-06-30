@@ -2,8 +2,8 @@ import AVFoundation
 import Foundation
 import NaturalLanguage
 import OSLog
-// Related JIRA: KAN-6, KAN-21, KAN-73
 import Speech
+import UIKit
 
 // MARK: - Transcription States
 
@@ -264,13 +264,39 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         let chunks = try await chunker.chunkAudio(url: audioFileURL)
         defer { chunker.cleanup(chunks: chunks) }
 
-        var previousText = ""
+        // Resume from checkpoint if the app was killed mid-transcription.
+        // Avoids re-transcribing chunks that were already completed.
         var allSegments: [TranscriptSegment] = []
         var languageCode: String?
+        var startIndex = 0
+        if let cp = loadTranscriptionCheckpoint(meetingId: meetingId),
+            cp.lastChunkIndex < chunks.count,
+            cp.totalChunks == chunks.count
+        {
+            allSegments = cp.segments
+            languageCode = cp.languageCode
+            startIndex = cp.lastChunkIndex + 1
+            AppLog.transcription.info("Resuming transcription from chunk \(startIndex)/\(chunks.count) — \(allSegments.count) segments from checkpoint")
+        }
 
-        for (i, chunk) in chunks.enumerated() {
+        var previousText = allSegments.map(\.text).joined(separator: " ")
+
+        for (i, chunk) in chunks.enumerated() where i >= startIndex {
             try Task.checkCancellation()
             if isCancelled { throw TranscriptionError.cancelled }
+
+            // Per-chunk background task: tells iOS we're still working.
+            // Without this, iOS kills the process after ~30s of background CPU.
+            let chunkBgID = await withCheckedContinuation { (c: CheckedContinuation<UIBackgroundTaskIdentifier, Never>) in
+                Task { @MainActor in
+                    c.resume(
+                        returning: UIApplication.shared.beginBackgroundTask(
+                            withName: "WawaTranscribe-\(meetingId.uuidString.prefix(8))-\(i)"))
+                }
+            }
+            defer {
+                Task { @MainActor in UIApplication.shared.endBackgroundTask(chunkBgID) }
+            }
 
             onProgress?(.transcribing(chunk: i + 1, totalChunks: chunks.count))
             AppLog.transcription.info("On-device chunk \(i+1)/\(chunks.count)")
@@ -301,7 +327,9 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             }
             previousText = chunkText
 
-            // Checkpoint after each chunk (crash recovery)
+            // Checkpoint after each chunk — persisted to disk for crash recovery.
+            // If the app is killed mid-transcription, the next launch resumes
+            // from the last saved chunk instead of restarting from scratch.
             let partial = Transcript(
                 meetingId: allSegments.first?.meetingId,
                 languageCode: languageCode,
@@ -309,9 +337,19 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                 sourceEngineId: id
             )
             onCheckpoint?(partial, i + 1)
+            saveTranscriptionCheckpoint(
+                meetingId: meetingId,
+                lastChunkIndex: i,
+                totalChunks: chunks.count,
+                segments: allSegments,
+                languageCode: languageCode
+            )
         }
 
         allSegments = allSegments.filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
+
+        // Success — clear the checkpoint so next launch doesn't resume a completed job.
+        clearTranscriptionCheckpoint(meetingId: meetingId)
 
         AppLog.transcription.info("On-device transcription complete: \(allSegments.count) segments")
         return Transcript(
@@ -741,7 +779,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
     // MARK: - Private helpers
 
-    private func firstAvailableRecognizer() -> SFSpeechRecognizer? {
+    func firstAvailableRecognizer() -> SFSpeechRecognizer? {
         for locale in candidateLocales {
             guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.isAvailable else {
                 continue
@@ -776,7 +814,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         return language.rawValue
     }
 
-    private func deduplicateStart(_ text: String, against previous: String) -> String {
+    func deduplicateStart(_ text: String, against previous: String) -> String {
         let prevWords = previous.lowercased().split(separator: " ")
         let currWords = text.lowercased().split(separator: " ")
         let original = text.split(separator: " ").map(String.init)
@@ -790,5 +828,48 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             return original.dropFirst(maxMatch).joined(separator: " ")
         }
         return text
+    }
+
+    // MARK: - Transcription checkpoint (long-form resilience)
+
+    struct TranscriptionCheckpoint: Codable {
+        let lastChunkIndex: Int
+        let totalChunks: Int
+        let segments: [TranscriptSegment]
+        let languageCode: String?
+    }
+
+    private func saveTranscriptionCheckpoint(
+        meetingId: UUID, lastChunkIndex: Int, totalChunks: Int,
+        segments: [TranscriptSegment], languageCode: String?
+    ) {
+        guard
+            let data = try? JSONEncoder().encode(
+                TranscriptionCheckpoint(
+                    lastChunkIndex: lastChunkIndex, totalChunks: totalChunks,
+                    segments: segments, languageCode: languageCode))
+        else { return }
+        let url = fileStore.audioFileURL(for: meetingId)
+            .deletingLastPathComponent()
+            .appendingPathComponent("transcription_checkpoint.json")
+        try? data.write(to: url, options: .atomic)
+    }
+
+    func loadTranscriptionCheckpoint(meetingId: UUID) -> TranscriptionCheckpoint? {
+        let url = fileStore.audioFileURL(for: meetingId)
+            .deletingLastPathComponent()
+            .appendingPathComponent("transcription_checkpoint.json")
+        guard FileManager.default.fileExists(atPath: url.path),
+            let data = try? Data(contentsOf: url),
+            let cp = try? JSONDecoder().decode(TranscriptionCheckpoint.self, from: data)
+        else { return nil }
+        return cp
+    }
+
+    private func clearTranscriptionCheckpoint(meetingId: UUID) {
+        let url = fileStore.audioFileURL(for: meetingId)
+            .deletingLastPathComponent()
+            .appendingPathComponent("transcription_checkpoint.json")
+        try? FileManager.default.removeItem(at: url)
     }
 }

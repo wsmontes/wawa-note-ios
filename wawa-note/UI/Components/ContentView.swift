@@ -251,6 +251,11 @@ private struct QueueEntryRow: View {
     private var statusText: String {
         switch entry.status {
         case .queued: return "Waiting (priority: \(entry.priority))"
+        case .transcribing:
+            if entry.progressTotal > 0 {
+                return "Transcribing chunk \(entry.progressCurrent)/\(entry.progressTotal)"
+            }
+            return "Transcribing..."
         case .processing: return "Processing..."
         case .paused: return "Paused"
         case .done: return "Completed"

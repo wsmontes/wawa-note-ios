@@ -809,6 +809,7 @@ final class QueueEntry {
     var itemID: UUID
     var projectID: UUID?
     var statusRaw: String
+    var modeRaw: String
     var priority: Int
     var queuedAt: Date
     var startedAt: Date?
@@ -817,10 +818,19 @@ final class QueueEntry {
     var maxRetries: Int
     var lastError: String?
     var position: Int
+    /// Chunk progress for long-form transcription (current, total).
+    /// Resets to (0, 0) when not transcribing. Negative total = indeterminate.
+    var progressCurrent: Int
+    var progressTotal: Int
 
     var status: QueueStatus {
         get { QueueStatus(rawValue: statusRaw) ?? .queued }
         set { statusRaw = newValue.rawValue }
+    }
+
+    var mode: QueueMode {
+        get { QueueMode(rawValue: modeRaw) ?? .full }
+        set { modeRaw = newValue.rawValue }
     }
 
     init(
@@ -828,6 +838,7 @@ final class QueueEntry {
         itemID: UUID,
         projectID: UUID? = nil,
         status: QueueStatus = .queued,
+        mode: QueueMode = .full,
         priority: Int = 50,
         queuedAt: Date = Date(),
         startedAt: Date? = nil,
@@ -835,12 +846,15 @@ final class QueueEntry {
         retryCount: Int = 0,
         maxRetries: Int = 2,
         lastError: String? = nil,
-        position: Int = 0
+        position: Int = 0,
+        progressCurrent: Int = 0,
+        progressTotal: Int = 0
     ) {
         self.id = id
         self.itemID = itemID
         self.projectID = projectID
         self.statusRaw = status.rawValue
+        self.modeRaw = mode.rawValue
         self.priority = priority
         self.queuedAt = queuedAt
         self.startedAt = startedAt
@@ -849,17 +863,26 @@ final class QueueEntry {
         self.maxRetries = maxRetries
         self.lastError = lastError
         self.position = position
+        self.progressCurrent = progressCurrent
+        self.progressTotal = progressTotal
     }
 }
 
 enum QueueStatus: String, Codable, CaseIterable, Sendable {
     case queued
+    case transcribing  // Long-form transcription in progress, chunk-by-chunk
     case processing
     case paused
     case done
     case failed
     case cancelled
     case waitingForUser = "waiting_for_user"
+}
+
+enum QueueMode: String, Codable, Sendable {
+    case full  // Transcribe + analyze (default)
+    case transcribeOnly  // Transcribe only, auto-enqueue analyzeOnly after
+    case analyzeOnly  // Skip transcription, analyze directly
 }
 
 // MARK: - ProjectDerivedItem

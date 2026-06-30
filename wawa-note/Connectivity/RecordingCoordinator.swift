@@ -827,8 +827,22 @@ final class RecordingCoordinator: ObservableObject {
                 }
             }
 
+            // Recover items stuck in .transcribing — the app was killed mid-transcription.
+            // The engine checkpoint (transcription_checkpoint.json) allows resuming
+            // from the last completed chunk instead of restarting from scratch.
+            let transcribingDescriptor = FetchDescriptor<KnowledgeItem>(
+                predicate: #Predicate { $0.statusRaw == "transcribing" })
+            let stuckItems = (try? bgContext.fetch(transcribingDescriptor)) ?? []
+            for item in stuckItems {
+                AppLog.audio.info("Recovering stuck transcription: \(item.id.uuidString.prefix(8)) — re-enqueuing")
+                item.status = .queuedForTranscription
+                recoveredIds.append(item.id)
+            }
+
             try bgContext.save()
-            AppLog.audio.info("Recovered \(recoveredIds.count)/\(orphans.count) interrupted recording(s), repaired \(repairedIds.count) broken M4A(s)")
+            AppLog.audio.info(
+                "Recovered \(recoveredIds.count)/\(orphans.count) interrupted recording(s), repaired \(repairedIds.count) broken M4A(s), recovered \(stuckItems.count) stuck transcription(s)"
+            )
 
             // Trigger pipeline for successfully recovered items so they get
             // transcribed and analyzed. Without this, crash-recovered items

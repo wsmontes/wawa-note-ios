@@ -169,7 +169,7 @@ final class ContentExtractionService {
 
     /// Resolve which transcription engine to use based on settings and provider config.
     /// - Parameter preferredLocale: BCP-47 locale identifier for SFSpeechRecognizer, e.g. "en-US".
-    private func resolveTranscriptionEngine(preferredLocale: String? = nil) -> (any TranscriptionEngine)? {
+    func resolveTranscriptionEngine(preferredLocale: String? = nil) -> (any TranscriptionEngine)? {
         let settings = TranscriptionSettings.shared
         let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext)
 

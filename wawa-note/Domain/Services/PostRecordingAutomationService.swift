@@ -15,6 +15,10 @@ extension Notification.Name {
     static let processingStageChanged = Notification.Name("PostRecordingStageChanged")
     static let pipelineCompleted = Notification.Name("WawaPipelineCompleted")
     static let contentPipelineStageChanged = Notification.Name("ContentPipelineStageChanged")
+    /// Fired per chunk during long-form transcription: userInfo["current"] Int, ["total"] Int
+    static let transcriptionProgressUpdated = Notification.Name("TranscriptionProgressUpdated")
+    /// Fired when a transcription job completes: userInfo["success"] Bool
+    static let transcriptionJobCompleted = Notification.Name("TranscriptionJobCompleted")
 }
 
 // MARK: - Project ingestion state
