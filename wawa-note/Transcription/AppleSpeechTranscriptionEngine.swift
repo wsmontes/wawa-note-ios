@@ -295,40 +295,13 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             var hasResumed = false
             var recognitionTask: SFSpeechRecognitionTask?
 
-            // iOS 17/18 on-device bug: SFSpeechRecognizer discards previous
-            // transcription after pauses (~1.5-2s), treating pause boundaries as
-            // utterance resets. The final result only contains the LAST utterance.
-            // Workaround: hybrid approach — shrink detection catches resets
-            // (committing accumulated segments), index-based tracking handles
-            // normal growth within an utterance.
-            var accumulatedSegments: [SFTranscriptionSegment] = []
-            var committedSegments: [SFTranscriptionSegment] = []  // saved across resets
-            var lastSeenSegmentCount = 0
-            var previousResult: SFSpeechRecognitionResult?
-
-            // Timeout: SFSpeechRecognizer may never call the completion handler
-            // (known iOS behavior with certain audio formats or durations > 5 min).
-            // If we have accumulated segments from partial results, return them
-            // as a partial transcript instead of throwing — the workaround above
-            // may have already saved valid text that would be lost otherwise.
-            let timeoutWorkItem = DispatchWorkItem { [weak self] in
+            // Timeout protection: if SFSpeechRecognizer never finishes, resume
+            // with an error after 120s.
+            let timeoutWorkItem = DispatchWorkItem {
                 guard !hasResumed else { return }
                 hasResumed = true
                 recognitionTask?.cancel()
-
-                let saved = committedSegments + accumulatedSegments
-                if saved.isEmpty {
-                    continuation.resume(throwing: TranscriptionError.recognitionFailed("Recognition timed out after 120s"))
-                    return
-                }
-
-                AppLog.transcription.warning(
-                    "Recognition timed out — returning \(saved.count) partial segments from accumulated results"
-                )
-                let transcript =
-                    self?.buildTranscript(from: saved, recognizer: recognizer, meetingId: meetingId)
-                    ?? Transcript(meetingId: meetingId, languageCode: nil, segments: [], sourceEngineId: "apple-speech")
-                continuation.resume(returning: transcript)
+                continuation.resume(throwing: TranscriptionError.recognitionFailed("Recognition timed out after 120s"))
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 120, execute: timeoutWorkItem)
 
@@ -339,17 +312,15 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                     let nsError = error as NSError
                     AppLog.transcription.error("On-device recognition failed: \(nsError.domain)/\(nsError.code) — \(error.localizedDescription)")
 
-                    // kAFAssistantErrorDomain Code=1101 = local recognizer rejected audio format.
-                    // Retry once with cloud recognition if it was forced on-device.
+                    // kAFAssistantErrorDomain Code=1101: local recognizer rejected audio format.
+                    // Retry once with cloud if user allows it.
                     if nsError.domain.contains("AssistantError") && forceOnDevice {
-                        // Respect user's cloud transcription preference (KAN-476)
                         guard TranscriptionSettings.shared.allowCloud else {
-                            AppLog.transcription.warning("Cloud fallback blocked by user preference — marking as failed")
                             continuation.resume(throwing: TranscriptionError.recognitionFailed("Cloud fallback blocked by user preference"))
                             return
                         }
                         hasResumed = true
-                        AppLog.transcription.warning("Local recognizer rejected audio, falling back to cloud recognition — audio will be sent to Apple servers")
+                        AppLog.transcription.warning("Local recognizer rejected audio, falling back to cloud")
                         let cloudRequest = SFSpeechURLRecognitionRequest(url: url)
                         cloudRequest.shouldReportPartialResults = false
                         cloudRequest.addsPunctuation = true
@@ -392,54 +363,17 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                         return
                     }
 
-                    // Other errors: surface to user
                     hasResumed = true
                     continuation.resume(throwing: TranscriptionError.recognitionFailed("\(nsError.domain)/\(nsError.code): \(error.localizedDescription)"))
                     return
                 }
 
-                guard let result = result else { return }
-
-                let currentSegments = result.bestTranscription.segments
-
-                // ── Hybrid reset detection for iOS 17/18 bug ──────
-                // SFSpeechRecognizer discards prior utterances at pause boundaries.
-                //
-                // Reset detection: when formattedString shrinks vs the previous
-                // result, the recognizer has reset. Commit accumulated segments
-                // before they're lost, then restart tracking for the new utterance.
-                //
-                // Index-based accumulation: within a single utterance, append
-                // genuinely new segments by tracking the highest seen index.
-                if let prev = previousResult,
-                    result.bestTranscription.formattedString.count < prev.bestTranscription.formattedString.count
-                {
-                    committedSegments.append(contentsOf: accumulatedSegments)
-                    accumulatedSegments = []
-                    lastSeenSegmentCount = 0
-                }
-
-                if currentSegments.count > lastSeenSegmentCount {
-                    let newSegments = currentSegments[lastSeenSegmentCount...]
-                    accumulatedSegments.append(contentsOf: newSegments)
-                    lastSeenSegmentCount = currentSegments.count
-                }
-
-                previousResult = result
-
-                guard result.isFinal else { return }
-
-                var allSegments = committedSegments + accumulatedSegments
-                if allSegments.isEmpty {
-                    allSegments = currentSegments
-                }
-
+                guard let result = result, result.isFinal else { return }
                 hasResumed = true
                 timeoutWorkItem.cancel()
-                let transcript = self.buildTranscript(from: allSegments, recognizer: recognizer, meetingId: meetingId)
+                let transcript = self.buildTranscript(from: result, recognizer: recognizer, meetingId: meetingId)
                 AppLog.transcription.info(
-                    "On-device complete: \(transcript.segments.count) segments, lang=\(transcript.languageCode ?? recognizer.locale.identifier), locale=\(recognizer.locale.identifier)"
-                )
+                    "On-device complete: \(transcript.segments.count) segments, lang=\(transcript.languageCode ?? recognizer.locale.identifier)")
                 continuation.resume(returning: transcript)
             }
             self.activeRecognitionTask = recognitionTask
