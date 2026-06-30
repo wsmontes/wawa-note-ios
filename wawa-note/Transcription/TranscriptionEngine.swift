@@ -144,15 +144,13 @@ func transcriptionGetDuration(_ url: URL) -> Float64 {
     return duration
 }
 
-/// Removes word overlap between consecutive chunks. When chunk N ends with
-/// "the cat sat" and chunk N+1 starts with "sat on the mat", returns
-/// "on the mat" (dropping the shared prefix).
+/// Removes word overlap between consecutive transcription chunks.
+/// Used by RemoteTranscriptionEngine (fixed-duration chunking with overlap).
 func transcriptionDeduplicateStart(_ text: String, against previous: String) -> String {
     let prevWords = previous.lowercased().split(separator: " ")
     let currWords = text.lowercased().split(separator: " ")
     let original = text.split(separator: " ").map(String.init)
     guard !prevWords.isEmpty, !currWords.isEmpty else { return text }
-
     var maxMatch = 0
     for j in 1...min(10, prevWords.count, currWords.count) {
         if prevWords.suffix(j) == currWords.prefix(j) { maxMatch = j }

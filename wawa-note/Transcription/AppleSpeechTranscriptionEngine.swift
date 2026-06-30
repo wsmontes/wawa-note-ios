@@ -77,7 +77,6 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
     static let maxFileDuration: TimeInterval = 3600  // 1 hour max
 
     private let candidateLocales: [Locale]
-    // chunker removed — direct transcription, no chunking needed for typical files
     private var activeRecognitionTask: SFSpeechRecognitionTask?
     private let fileStore = FileArtifactStore()
     /// Cached cloud-allowed flag — read once at init to avoid
@@ -373,11 +372,69 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
     // MARK: - Direct transcription (guaranteed on-device)
 
-    /// Transcribe a single audio URL.
-    /// SFSpeechRecognizer uses AVFoundation internally — it decodes M4A, CAF,
-    /// WAV, MP3, and any other format AVAsset can read. No pre-conversion needed.
+    /// Convert compressed audio to 16kHz mono PCM WAV for SFSpeechRecognizer.
+    /// Apple requires: 16-bit PCM, 16kHz sample rate, mono channel.
+    /// Compressed formats (AAC/MP3) must be decoded before recognition.
+    private func prepareForRecognition(_ url: URL) throws -> URL {
+        let ext = url.pathExtension.lowercased()
+        // Already uncompressed PCM — pass through
+        if ext == "wav" || ext == "wave" || ext == "caf" { return url }
+
+        let inputFile = try AVAudioFile(forReading: url)
+        let inputFormat = inputFile.processingFormat
+
+        guard
+            let outputFormat = AVAudioFormat(
+                commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 1, interleaved: false
+            )
+        else {
+            throw TranscriptionError.recognitionFailed("Cannot create 16kHz mono format")
+        }
+        guard let converter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
+            throw TranscriptionError.recognitionFailed("Cannot create audio converter")
+        }
+
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pcm_\(UUID().uuidString).wav")
+        let outputFile = try AVAudioFile(
+            forWriting: tempURL, settings: outputFormat.settings,
+            commonFormat: .pcmFormatInt16, interleaved: false
+        )
+
+        inputFile.framePosition = 0
+        let inputLength = AVAudioFrameCount(inputFile.length)
+        guard let inputBuf = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: inputLength) else {
+            throw TranscriptionError.recognitionFailed("Cannot allocate input buffer")
+        }
+        try inputFile.read(into: inputBuf)
+
+        let ratio = outputFormat.sampleRate / inputFormat.sampleRate
+        let outputCapacity = AVAudioFrameCount(Double(inputBuf.frameLength) * ratio)
+        guard let outputBuf = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputCapacity) else {
+            throw TranscriptionError.recognitionFailed("Cannot allocate output buffer")
+        }
+
+        var convertError: NSError?
+        var provided = false
+        converter.convert(to: outputBuf, error: &convertError) { _, outStatus in
+            if !provided {
+                provided = true
+                outStatus.pointee = .haveData
+                return inputBuf
+            }
+            outStatus.pointee = .noDataNow
+            return nil
+        }
+        if let convertError { throw convertError }
+
+        try outputFile.write(from: outputBuf)
+        return tempURL
+    }
+
+    /// Transcribe a single audio URL, converting to 16kHz mono PCM first.
     private func transcribeDirect(url: URL, recognizer: SFSpeechRecognizer, meetingId: UUID) async throws -> Transcript {
-        let request = SFSpeechURLRecognitionRequest(url: url)
+        let recognitionURL = try prepareForRecognition(url)
+        let request = SFSpeechURLRecognitionRequest(url: recognitionURL)
         request.shouldReportPartialResults = true
         request.addsPunctuation = true
 
@@ -696,9 +753,6 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         return nil
     }
 
-    // getDuration and deduplicateStart are shared in TranscriptionEngine.swift
-    // as transcriptionGetDuration(_:) and transcriptionDeduplicateStart(_:against:).
-
     private func getDuration(_ url: URL) -> Float64 {
         transcriptionGetDuration(url)
     }
@@ -712,14 +766,8 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         guard let language = recognizer.dominantLanguage,
             let confidence = recognizer.languageHypotheses(withMaximum: 1)[language],
             confidence > Self.languageConfidenceThreshold
-        else {
-            return nil
-        }
+        else { return nil }
         return language.rawValue
-    }
-
-    func deduplicateStart(_ text: String, against previous: String) -> String {
-        transcriptionDeduplicateStart(text, against: previous)
     }
 
     // MARK: - Transcription checkpoint (long-form resilience)
