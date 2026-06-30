@@ -606,16 +606,31 @@ final class ContentPipelineService: ObservableObject {
               {
                 fresh.status = .analyzed
                 fresh.analysisProviderId = executorModel
-                // Apply AI-suggested tags (normalized)
+                // Read analysis for AI-suggested metadata
                 if let analysis = try? store.readArtifact(
-                  MeetingAnalysis.self, fileName: "analysis.json", meetingId: itemID),
-                  let suggested = analysis.suggestedTags, !suggested.isEmpty
+                  MeetingAnalysis.self, fileName: "analysis.json", meetingId: itemID)
                 {
-                  fresh.tags = TagNormalizer.merge(
-                    existing: fresh.tags, suggested: suggested)
-                  AppLog.provider.info(
-                    "Pipeline: applied \(suggested.count) AI-suggested tags to item \(itemID.uuidString.prefix(8))"
-                  )
+                  // Rename item with AI-suggested title
+                  if let title = analysis.suggestedTitle,
+                    !title.trimmingCharacters(in: .whitespaces).isEmpty,
+                    title != fresh.title
+                  {
+                    // Preserve original title before overwriting
+                    if fresh.originalTitle == nil {
+                      fresh.originalTitle = fresh.title
+                    }
+                    fresh.title = title.trimmingCharacters(in: .whitespaces)
+                    AppLog.provider.info(
+                      "Pipeline: renamed item \(itemID.uuidString.prefix(8)) to \"\(title)\"")
+                  }
+                  // Apply AI-suggested tags (normalized)
+                  if let suggested = analysis.suggestedTags, !suggested.isEmpty {
+                    fresh.tags = TagNormalizer.merge(
+                      existing: fresh.tags, suggested: suggested)
+                    AppLog.provider.info(
+                      "Pipeline: applied \(suggested.count) AI-suggested tags to item \(itemID.uuidString.prefix(8))"
+                    )
+                  }
                 }
                 try? modelContext.save()
               }

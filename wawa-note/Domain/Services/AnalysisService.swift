@@ -17,9 +17,11 @@ private struct AnalysisResponse: Decodable {
   let mentionedRepositories: [String]?
   let mentionedLocations: [String]?
   let suggestedTags: [String]?
+  let suggestedTitle: String?
   let followUpEmailDraft: String?
 
   enum CodingKeys: String, CodingKey {
+    case suggestedTitle = "suggested_title"
     case shortSummary = "short_summary"
     case detailedSummary = "detailed_summary"
     case decisions
@@ -545,6 +547,7 @@ final class AnalysisService: @unchecked Sendable {
         locations: parsed.mentionedLocations
       ),
       topicTimeline: [],
+      suggestedTitle: parsed.suggestedTitle,
       suggestedTags: parsed.suggestedTags
     )
   }

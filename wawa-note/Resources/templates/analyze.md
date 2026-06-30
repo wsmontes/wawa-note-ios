@@ -20,6 +20,7 @@ Content:
 {content}
 
 Return a single JSON object with:
+- "suggested_title": string — a concise, descriptive title for this content (max 80 chars). Use the most important topic, decision, or theme. Do NOT use generic titles like "Meeting" or "Note".
 - "short_summary": string — 2-3 sentences capturing the essence
 - "detailed_summary": string — a thorough summary covering all key points
 - "decisions": array of objects with "title" (string), "details" (string), "confidence" (number 0-1)
@@ -35,4 +36,4 @@ Use null for empty arrays, not [].
 Every extracted item MUST be traceable to the source content. Do not fabricate decisions, actions, or risks.
 
 # Response Schema
-{"short_summary": "...", "detailed_summary": "...", "decisions": [...], "action_items": [...], "risks": [...], "open_questions": [...], "mentioned_people": [...], "mentioned_systems": [...], "suggested_tags": [...], "follow_up": "..."}
+{"suggested_title": "...", "short_summary": "...", "detailed_summary": "...", "decisions": [...], "action_items": [...], "risks": [...], "open_questions": [...], "mentioned_people": [...], "mentioned_systems": [...], "suggested_tags": [...], "follow_up": "..."}
