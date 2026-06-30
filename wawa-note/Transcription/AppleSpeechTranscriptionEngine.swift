@@ -261,20 +261,26 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         // is determined by actual speech segments, not a fixed duration window.
         onProgress?(.chunking(completed: 0, total: 1))
 
-        let chunks = try await chunker.chunkAudio(url: audioFileURL)
+        var chunks = try await chunker.chunkAudio(url: audioFileURL)
         defer { chunker.cleanup(chunks: chunks) }
 
         // Defensive check: if VAD removed too much audio, fall back to
-        // full-file transcription. VAD is an optimization for long recordings;
-        // it must not discard audible speech.
+        // fixed-duration chunks. Never pass a long file directly to
+        // transcribeDirect — the 120s timeout can't handle it.
         let totalChunkDuration = chunks.reduce(0) { $0 + $1.duration }
         let coverageRatio = duration > 0 ? totalChunkDuration / duration : 0
+        var fixedFallbackCleanup: (() -> Void)?
         if chunks.isEmpty || coverageRatio < 0.7 {
             AppLog.transcription.warning(
-                "VAD coverage too low (\(String(format: "%.0f", coverageRatio * 100))% of \(String(format: "%.0f", duration))s) — falling back to full-file transcription"
+                "VAD coverage too low (\(String(format: "%.0f", coverageRatio * 100))% of \(String(format: "%.0f", duration))s) — falling back to fixed \(Int(Self.maxLocalDuration))s chunks"
             )
-            return try await transcribeDirect(url: audioFileURL, recognizer: recognizer, meetingId: meetingId)
+            let fixedChunks = try buildFixedChunks(url: audioFileURL, chunkDuration: Self.maxLocalDuration)
+            if let dir = fixedChunks.first?.url.deletingLastPathComponent() {
+                fixedFallbackCleanup = { try? FileManager.default.removeItem(at: dir) }
+            }
+            chunks = fixedChunks
         }
+        defer { fixedFallbackCleanup?() }
 
         // Resume from checkpoint if the app was killed mid-transcription.
         // Avoids re-transcribing chunks that were already completed.
@@ -377,6 +383,56 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
     // MARK: - Direct transcription (guaranteed on-device)
 
+    /// Split an audio file into fixed-duration chunks without voice detection.
+    /// Used as fallback when VAD coverage is too low. Each chunk is written as
+    /// a CAF file — SFSpeechRecognizer handles this natively.
+    private func buildFixedChunks(url: URL, chunkDuration: TimeInterval) throws -> [VADAudioChunk] {
+        let audioFile = try AVAudioFile(forReading: url)
+        let format = audioFile.processingFormat
+        let sampleRate = format.sampleRate
+        let totalFrames = AVAudioFrameCount(audioFile.length)
+        let framesPerChunk = AVAudioFrameCount(chunkDuration * sampleRate)
+
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("fixed_chunks_\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        var chunks: [VADAudioChunk] = []
+        var offset: AVAudioFramePosition = 0
+        var index = 0
+
+        while offset < totalFrames {
+            let remaining = AVAudioFrameCount(Int64(totalFrames) - offset)
+            let frameCount = min(framesPerChunk, remaining)
+
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+                throw TranscriptionError.recognitionFailed("Cannot allocate chunk buffer")
+            }
+            audioFile.framePosition = offset
+            try audioFile.read(into: buffer)
+            buffer.frameLength = frameCount
+
+            let chunkURL = tempDir.appendingPathComponent("chunk_\(index).caf")
+            let destFile = try AVAudioFile(
+                forWriting: chunkURL,
+                settings: format.settings,
+                commonFormat: format.commonFormat,
+                interleaved: format.isInterleaved
+            )
+            try destFile.write(from: buffer)
+
+            let startTime = Double(offset) / sampleRate
+            let dur = Double(frameCount) / sampleRate
+            chunks.append(VADAudioChunk(url: chunkURL, startTime: startTime, duration: dur))
+
+            offset += AVAudioFramePosition(frameCount)
+            index += 1
+        }
+
+        AppLog.transcription.info("Fixed chunking: \(chunks.count) chunks from \(String(format: "%.0f", Double(totalFrames) / sampleRate))s audio")
+        return chunks
+    }
+
     /// Transcribe a single audio URL.
     /// SFSpeechRecognizer uses AVFoundation internally — it decodes M4A, CAF,
     /// WAV, MP3, and any other format AVAsset can read. No pre-conversion needed.
@@ -423,13 +479,27 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
             // Timeout: SFSpeechRecognizer may never call the completion handler
             // (known iOS behavior with certain audio formats or durations > 5 min).
-            // Using DispatchWorkItem for timeout to avoid Sendable issues with
-            // non-Sendable CheckedContinuation in unstructured Tasks.
-            let timeoutWorkItem = DispatchWorkItem {
+            // If we have accumulated segments from partial results, return them
+            // as a partial transcript instead of throwing — the workaround above
+            // may have already saved valid text that would be lost otherwise.
+            let timeoutWorkItem = DispatchWorkItem { [weak self] in
                 guard !hasResumed else { return }
                 hasResumed = true
                 recognitionTask?.cancel()
-                continuation.resume(throwing: TranscriptionError.recognitionFailed("Recognition timed out after 120s"))
+
+                let saved = committedSegments + accumulatedSegments
+                if saved.isEmpty {
+                    continuation.resume(throwing: TranscriptionError.recognitionFailed("Recognition timed out after 120s"))
+                    return
+                }
+
+                AppLog.transcription.warning(
+                    "Recognition timed out — returning \(saved.count) partial segments from accumulated results"
+                )
+                let transcript =
+                    self?.buildTranscript(from: saved, recognizer: recognizer, meetingId: meetingId)
+                    ?? Transcript(meetingId: meetingId, languageCode: nil, segments: [], sourceEngineId: "apple-speech")
+                continuation.resume(returning: transcript)
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 120, execute: timeoutWorkItem)
 
