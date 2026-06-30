@@ -323,30 +323,18 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         )
     }
 
-    /// Split audio into fixed-duration chunks with overlap. Ensures the last
-    /// chunk is at least `minLastDuration` seconds — if shorter, it borrows
-    /// from the previous chunk. Output is 16kHz mono PCM WAV.
+    /// Split audio into fixed-duration chunks, preserving the original format.
+    /// SFSpeechRecognizer decodes M4A/MP3/WAV natively via AVFoundation.
     private func buildSimpleChunks(
         url: URL, chunkDuration: TimeInterval, overlap: TimeInterval, minLastDuration: TimeInterval
     ) throws -> [VADAudioChunk] {
         let audioFile = try AVAudioFile(forReading: url)
-        let sourceFormat = audioFile.processingFormat
-        let sampleRate = sourceFormat.sampleRate
+        let fmt = audioFile.processingFormat
+        let sampleRate = fmt.sampleRate
+        guard sampleRate > 0 else { throw TranscriptionError.recognitionFailed("Invalid audio: zero sample rate") }
         let totalFrames = Double(audioFile.length)
         let totalDuration = totalFrames / sampleRate
 
-        guard
-            let outputFormat = AVAudioFormat(
-                commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 1, interleaved: false
-            )
-        else {
-            throw TranscriptionError.recognitionFailed("Cannot create output format")
-        }
-        guard let converter = AVAudioConverter(from: sourceFormat, to: outputFormat) else {
-            throw TranscriptionError.recognitionFailed("Cannot create converter")
-        }
-
-        // Calculate chunk boundaries in seconds
         var boundaries: [(start: TimeInterval, end: TimeInterval)] = []
         var cursor: TimeInterval = 0
         while cursor < totalDuration {
@@ -354,19 +342,15 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             boundaries.append((cursor, end))
             cursor = end - overlap
         }
-
-        // Ensure last chunk is at least minLastDuration
         if boundaries.count >= 2 {
             let last = boundaries[boundaries.count - 1]
-            let lastDur = last.end - last.start
-            if lastDur < minLastDuration {
-                let prev = boundaries[boundaries.count - 2]
-                // Extend previous chunk to cover the last one
-                boundaries[boundaries.count - 2] = (prev.start, last.end)
+            if last.end - last.start < minLastDuration {
+                boundaries[boundaries.count - 2].end = last.end
                 boundaries.removeLast()
             }
         }
 
+        let ext = url.pathExtension
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("chunks_\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -377,44 +361,20 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             let endFrame = AVAudioFramePosition(bound.end * sampleRate)
             let frameCount = AVAudioFrameCount(endFrame - startFrame)
 
-            guard let sourceBuffer = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: frameCount) else {
+            guard let buf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: frameCount) else {
                 throw TranscriptionError.recognitionFailed("Cannot allocate chunk buffer")
             }
             audioFile.framePosition = startFrame
-            try audioFile.read(into: sourceBuffer)
-            sourceBuffer.frameLength = frameCount
+            try audioFile.read(into: buf)
+            buf.frameLength = frameCount
 
-            let ratio = outputFormat.sampleRate / sampleRate
-            let outputCapacity = AVAudioFrameCount(Double(frameCount) * ratio)
-            guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputCapacity) else {
-                throw TranscriptionError.recognitionFailed("Cannot allocate output buffer")
-            }
+            let chunkURL = tempDir.appendingPathComponent("chunk_\(i).\(ext)")
+            let out = try AVAudioFile(forWriting: chunkURL, settings: fmt.settings, commonFormat: fmt.commonFormat, interleaved: fmt.isInterleaved)
+            try out.write(from: buf)
 
-            var convertError: NSError?
-            var provided = false
-            converter.convert(to: outputBuffer, error: &convertError) { _, outStatus in
-                if !provided {
-                    provided = true
-                    outStatus.pointee = .haveData
-                    return sourceBuffer
-                }
-                outStatus.pointee = .noDataNow
-                return nil
-            }
-            if let convertError { throw convertError }
-
-            let chunkURL = tempDir.appendingPathComponent("chunk_\(i).wav")
-            let destFile = try AVAudioFile(
-                forWriting: chunkURL, settings: outputFormat.settings,
-                commonFormat: .pcmFormatInt16, interleaved: false
-            )
-            try destFile.write(from: outputBuffer)
-
-            let dur = Double(frameCount) / sampleRate
-            chunks.append(VADAudioChunk(url: chunkURL, startTime: bound.start, duration: dur))
+            chunks.append(VADAudioChunk(url: chunkURL, startTime: bound.start, duration: bound.end - bound.start))
         }
-
-        AppLog.transcription.info("Simple chunking: \(chunks.count) chunks from \(String(format: "%.0f", totalDuration))s")
+        AppLog.transcription.info("Chunked: \(chunks.count) chunks from \(String(format: "%.0f", totalDuration))s")
         return chunks
     }
 
