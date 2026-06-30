@@ -19,7 +19,7 @@ struct SettingsView: View {
     @State private var useVoiceProcessing: Bool = AudioSessionManager.useVoiceProcessing
     @State private var speakerphoneMode: Bool = AudioSessionManager.speakerphoneMode
     @State private var preferBuiltInMic: Bool = AudioSessionManager.preferBuiltInMicOverBluetooth
-    @State private var allowCloudTranscription: Bool = TranscriptionSettings.shared.allowCloud
+    @State private var allowCloudTranscription: Bool = UserDefaults.standard.bool(forKey: "transcription_allow_cloud")
     @State private var developerModeEnabled: Bool = UserDefaults.standard.bool(forKey: "developer_mode_enabled")
 
     /// All available models for the auto-analysis picker, sourced exclusively
