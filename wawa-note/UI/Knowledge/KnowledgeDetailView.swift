@@ -15,6 +15,21 @@ private enum ReprocessMode: CustomStringConvertible {
   }
 }
 
+/// User-selected transcription engine override for reprocess actions.
+enum TranscriptionOverride: String {
+  case appleOnDevice = "Apple On-Device"
+  case appleCloud = "Apple + Cloud"
+  case whisper = "Whisper"
+
+  var icon: String {
+    switch self {
+    case .appleOnDevice: "iphone.and.arrow.forward"
+    case .appleCloud: "icloud.and.arrow.up"
+    case .whisper: "network"
+    }
+  }
+}
+
 struct KnowledgeDetailView: View {
   let item: KnowledgeItem
   @Environment(\.modelContext) private var modelContext
@@ -59,8 +74,10 @@ struct KnowledgeDetailView: View {
   private let assetResolver = AudioAssetResolver()
   @State private var isReprocessing = false
   @State private var showReprocessWarning = false
+  @State private var showWhisperKeyAlert = false
   @State private var refreshID = UUID()  // bumped on pipeline complete to force re-render
   @State private var pendingReprocessMode: ReprocessMode = .analyzeOnly
+  @State private var pendingReprocessEngine: TranscriptionOverride?
   @State private var agentEvents: [PipelineAgentEvent] = []
   @State private var isAgentThinking = false
   @State private var rawAnalysisJSON: [String: Any] = [:]
@@ -270,20 +287,28 @@ struct KnowledgeDetailView: View {
             Menu {
               if item.type == .audio {
                 let already = item.transcriptionEngineId != nil
-                Section {
+                let prefix = already ? "Re-transcribe" : "Transcribe"
+                Section("Transcription Engine") {
                   Button {
-                    Task { await reprocessItem(mode: .transcribeOnly, forceAppleOnDevice: true) }
+                    Task { await reprocessItem(mode: .transcribeOnly, engine: .appleOnDevice) }
                   } label: {
                     Label(
-                      already ? "Re-transcribe (Apple)" : "Transcribe (Apple)",
-                      systemImage: "iphone.gen3")
+                      "\(prefix) (On-Device)",
+                      systemImage: TranscriptionOverride.appleOnDevice.icon)
                   }
                   Button {
-                    Task { await reprocessItem(mode: .transcribeOnly, forceAppleOnDevice: false) }
+                    Task { await reprocessItem(mode: .transcribeOnly, engine: .appleCloud) }
                   } label: {
                     Label(
-                      already ? "Re-transcribe (Whisper)" : "Transcribe (Whisper)",
-                      systemImage: "cloud")
+                      "\(prefix) (Cloud Fallback)",
+                      systemImage: TranscriptionOverride.appleCloud.icon)
+                  }
+                  Button {
+                    Task { await reprocessItem(mode: .transcribeOnly, engine: .whisper) }
+                  } label: {
+                    Label(
+                      "\(prefix) (Whisper API)",
+                      systemImage: TranscriptionOverride.whisper.icon)
                   }
                 }
               }
@@ -378,11 +403,24 @@ struct KnowledgeDetailView: View {
     .alert("Re-process Item", isPresented: $showReprocessWarning) {
       Button("Cancel", role: .cancel) {}
       Button("Continue") {
-        Task { await reprocessItem(mode: pendingReprocessMode, confirmed: true) }
+        Task {
+          await reprocessItem(
+            mode: pendingReprocessMode, confirmed: true, engine: pendingReprocessEngine)
+        }
       }
     } message: {
       Text(
         "You have manually edited this item's content. Re-processing will re-analyze it. Your edits will be protected and AI may suggest changes for your review instead of overwriting them."
+      )
+    }
+    .alert("Whisper Requires Configuration", isPresented: $showWhisperKeyAlert) {
+      Button("Open Settings") {
+        // Navigate to settings tab
+      }
+      Button("OK", role: .cancel) {}
+    } message: {
+      Text(
+        "Whisper transcription needs an OpenAI-compatible provider configured with a Base URL and API key. Go to Settings → AI Services to add one."
       )
     }
     .onAppear {
@@ -1944,18 +1982,22 @@ struct KnowledgeDetailView: View {
   private func reprocessItem(
     mode: ReprocessMode = .analyzeOnly,
     confirmed: Bool = false,
-    forceAppleOnDevice: Bool = false
+    engine: TranscriptionOverride? = nil
   ) async {
-    // Guard against double-tap or race conditions
-    guard !isReprocessing else { return }
-    // Whisper path needs an AI provider; Apple on-device does not.
-    if mode == .transcribeOnly, !forceAppleOnDevice {
-      if !AIConfigService.shared.isAnalysisAvailable(context: modelContext) {
-        analysisError =
-          "No AI provider configured. Use Apple on-device or add a provider in Settings."
+    // Whisper requires an OpenAI-compatible provider. Check before we clear state.
+    if engine == .whisper {
+      let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext)
+      let canWhisper = config != nil && config?.baseURL != nil
+      if !canWhisper {
+        await MainActor.run { showWhisperKeyAlert = true }
         return
       }
     }
+
+    // Guard against double-tap or race conditions
+    guard !isReprocessing else { return }
+    // Whisper needs a provider with base URL; checked above via showWhisperKeyAlert.
+    // Apple on-device and Cloud fallback don't require an external provider.
     // Re-analysis modes always need an AI provider.
     if mode != .transcribeOnly,
       !AIConfigService.shared.isAnalysisAvailable(context: modelContext)
@@ -1969,6 +2011,7 @@ struct KnowledgeDetailView: View {
       if !userOwned.isEmpty {
         showReprocessWarning = true
         pendingReprocessMode = mode
+        pendingReprocessEngine = engine
         return
       }
     }
@@ -1978,8 +2021,17 @@ struct KnowledgeDetailView: View {
     defer { isReprocessing = false }
 
     // Override engine preference based on explicit user choice.
-    if mode == .transcribeOnly || mode == .full {
-      TranscriptionSettings.shared.mode = forceAppleOnDevice ? .apple : .whisper
+    if mode == .transcribeOnly || mode == .full, let engine {
+      switch engine {
+      case .appleOnDevice:
+        TranscriptionSettings.shared.mode = .apple
+        UserDefaults.standard.set(false, forKey: "transcription_allow_cloud")
+      case .appleCloud:
+        TranscriptionSettings.shared.mode = .apple
+        UserDefaults.standard.set(true, forKey: "transcription_allow_cloud")
+      case .whisper:
+        TranscriptionSettings.shared.mode = .whisper
+      }
     }
 
     let dir = fileStore.itemDirectoryURL(for: item.id)
