@@ -1,0 +1,28 @@
+// WawaNoteCore/Extensions/UTType+ShareHelpers.swift
+import UniformTypeIdentifiers
+
+extension UTType {
+  /// Types supported by the Share Extension, in detection priority order.
+  static let shareableTypes: [UTType] = [
+    .audio,
+    .movie,
+    .image,
+    .fileURL,
+    .url,
+    .plainText,
+  ]
+
+  /// Maps a UTType to the corresponding KnowledgeItemType.
+  var knowledgeItemType: KnowledgeItemType? {
+    if conforms(to: .audio) { return .audio }
+    if conforms(to: .movie) { return .audio }  // movies treated as audio items (transcription)
+    if conforms(to: .image) { return .image }
+    if conforms(to: .url) { return .webBookmark }
+    if conforms(to: .plainText) { return .note }
+    if conforms(to: .fileURL) || conforms(to: .data) || conforms(to: .content) {
+      // Generic file — needs ImportRouter to determine specific type
+      return nil
+    }
+    return nil
+  }
+}
