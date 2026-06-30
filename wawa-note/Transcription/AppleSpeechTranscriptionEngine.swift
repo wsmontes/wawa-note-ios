@@ -97,7 +97,9 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         TranscriptionCapabilities(
             supportsLive: true,
             supportsFile: true,
-            isOnDevice: true,
+            // Honest: this engine may use Apple's cloud servers when the user
+            // allows it. isOnDevice reflects the effective privacy guarantee.
+            isOnDevice: !TranscriptionSettings.shared.allowCloud,
             maxDuration: Self.maxFileDuration,
             supportedLocales: candidateLocales,
             hasModelDownload: true
@@ -804,10 +806,18 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
     // MARK: - Private helpers
 
+    /// Returns the first recognizer that satisfies the current transcription mode.
+    /// Must match checkAvailability() logic: when cloud is not allowed, the recognizer
+    /// must support on-device recognition. Otherwise checkAvailability() says "available"
+    /// but transcribeFile() picks a different locale that fails.
     func firstAvailableRecognizer() -> SFSpeechRecognizer? {
+        let requireOnDevice = !TranscriptionSettings.shared.allowCloud
         for locale in candidateLocales {
             guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.isAvailable else {
                 continue
+            }
+            if requireOnDevice, !recognizer.supportsOnDeviceRecognition {
+                continue  // must support on-device
             }
             return recognizer
         }
