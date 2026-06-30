@@ -264,7 +264,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             return try await transcribeDirect(url: audioFileURL, recognizer: recognizer, meetingId: meetingId)
         }
 
-        let chunks = try buildSimpleChunks(
+        let chunks = try await buildSimpleChunks(
             url: audioFileURL,
             chunkDuration: chunkDuration,
             overlap: overlap,
@@ -323,17 +323,14 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         )
     }
 
-    /// Split audio into fixed-duration chunks, preserving the original format.
-    /// SFSpeechRecognizer decodes M4A/MP3/WAV natively via AVFoundation.
+    /// Split audio into fixed-duration M4A chunks using AVAssetExportSession.
+    /// Each chunk is independently playable with proper AAC encoding.
     private func buildSimpleChunks(
         url: URL, chunkDuration: TimeInterval, overlap: TimeInterval, minLastDuration: TimeInterval
-    ) throws -> [VADAudioChunk] {
-        let audioFile = try AVAudioFile(forReading: url)
-        let fmt = audioFile.processingFormat
-        let sampleRate = fmt.sampleRate
-        guard sampleRate > 0 else { throw TranscriptionError.recognitionFailed("Invalid audio: zero sample rate") }
-        let totalFrames = Double(audioFile.length)
-        let totalDuration = totalFrames / sampleRate
+    ) async throws -> [VADAudioChunk] {
+        let asset = AVURLAsset(url: url)
+        let totalDuration = CMTimeGetSeconds(asset.duration)
+        guard totalDuration > 0 else { throw TranscriptionError.recognitionFailed("Invalid audio: zero duration") }
 
         var boundaries: [(start: TimeInterval, end: TimeInterval)] = []
         var cursor: TimeInterval = 0
@@ -354,29 +351,33 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             .appendingPathComponent("chunks_\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
 
-        // Write chunks as CAF. CAF is Apple's native PCM container — no encoder
-        // needed. Unlike M4A (which requires AAC encoding), CAF accepts raw PCM
-        // buffers directly. SFSpeechRecognizer supports CAF natively.
         var chunks: [VADAudioChunk] = []
         for (i, bound) in boundaries.enumerated() {
-            let startFrame = AVAudioFramePosition(bound.start * sampleRate)
-            let endFrame = AVAudioFramePosition(bound.end * sampleRate)
-            let frameCount = AVAudioFrameCount(endFrame - startFrame)
+            let chunkURL = tempDir.appendingPathComponent("chunk_\(i).m4a")
 
-            guard let buf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: frameCount) else {
-                throw TranscriptionError.recognitionFailed("Cannot allocate chunk buffer")
+            guard let exporter = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+                throw TranscriptionError.recognitionFailed("Cannot create export session")
             }
-            audioFile.framePosition = startFrame
-            try audioFile.read(into: buf)
-            buf.frameLength = frameCount
+            exporter.outputURL = chunkURL
+            exporter.outputFileType = .m4a
+            exporter.timeRange = CMTimeRange(
+                start: CMTime(seconds: bound.start, preferredTimescale: 600),
+                duration: CMTime(seconds: bound.end - bound.start, preferredTimescale: 600)
+            )
 
-            let chunkURL = tempDir.appendingPathComponent("chunk_\(i).caf")
-            let out = try AVAudioFile(forWriting: chunkURL, settings: fmt.settings, commonFormat: fmt.commonFormat, interleaved: fmt.isInterleaved)
-            try out.write(from: buf)
-
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                exporter.exportAsynchronously {
+                    switch exporter.status {
+                    case .completed: continuation.resume()
+                    case .failed: continuation.resume(throwing: exporter.error ?? TranscriptionError.recognitionFailed("Export failed"))
+                    case .cancelled: continuation.resume(throwing: TranscriptionError.cancelled)
+                    default: continuation.resume(throwing: TranscriptionError.recognitionFailed("Export status \(exporter.status.rawValue)"))
+                    }
+                }
+            }
             chunks.append(VADAudioChunk(url: chunkURL, startTime: bound.start, duration: bound.end - bound.start))
         }
-        AppLog.transcription.info("Chunked: \(chunks.count) chunks from \(String(format: "%.0f", totalDuration))s")
+        AppLog.transcription.info("Chunked: \(chunks.count) M4A chunks from \(String(format: "%.0f", totalDuration))s")
         return chunks
     }
 
