@@ -383,6 +383,11 @@ final class AgentLoop: @unchecked Sendable {
   ///   - model: The model to use (e.g. "llama-3.2-1b" for summarization)
   ///   - maxIterations: Max tool-calling iterations (default 3 — keep it focused)
   /// - Returns: The final text output from the sub-agent
+  ///
+  /// FIXME: No structured output contract. Sub-agent returns concatenated text
+  /// deltas that the parent must parse as free text. A future iteration should
+  /// accept a JSON Schema for the sub-agent's output and validate it, or use
+  /// the existing tool system to let the sub-agent call a "submit_result" tool.
   func spawnSubAgent(
     task: String,
     provider: any AIProvider,
