@@ -308,6 +308,7 @@ struct ProjectGraphView: View {
   }
 
   private func handleTap(_ location: CGPoint) {
+    guard scale > 0 else { return }  // prevent division by zero during pinch gesture
     let adjusted = CGPoint(
       x: (location.x - offset.width) / scale, y: (location.y - offset.height) / scale)
     if let tapped = nodes.first(where: {

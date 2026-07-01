@@ -575,7 +575,21 @@ struct KnowledgeDetailView: View {
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(spacing: 6) {
             ForEach(badges, id: \.title) { badge in
-              AppStatusBadge(title: badge.title, systemImage: badge.icon, tone: badge.tone)
+              let isProjectBadge = badge.title == projectName && item.projectID != nil
+              let view = AppStatusBadge(
+                title: badge.title, systemImage: badge.icon, tone: badge.tone)
+              if isProjectBadge, let pid = item.projectID,
+                let project = try? ProjectService(context: modelContext).fetch(id: pid)
+              {
+                NavigationLink {
+                  ProjectDetailView(project: project)
+                } label: {
+                  view
+                }
+                .buttonStyle(.plain)
+              } else {
+                view
+              }
             }
           }
         }
