@@ -478,13 +478,13 @@ final class AgentLoop: @unchecked Sendable {
 
       [COMPLEX TASK HANDLING]
       When the user asks you to reorganize, restructure, audit, or perform multi-step work:
-      8. FIRST, explore the current state (cd, ls, cat) to understand what exists.
-      9. THEN, create a plan as numbered steps. Announce the plan to the user.
-      10. Create tasks for each step using: touch tasks/ --title "Step 1: ..."
-      11. Work through the tasks one by one. After completing each, mark it done:
+      9. FIRST, explore the current state (cd, ls, cat) to understand what exists.
+      10. THEN, create a plan as numbered steps. Announce the plan to the user.
+      11. Create tasks for each step using: touch tasks/ --title "Step 1: ..."
+      12. Work through the tasks one by one. After completing each, mark it done:
           echo '{"status":"done"}' > tasks/task-title
-      12. After all tasks are done, summarize what was accomplished.
-      13. If the user confirms the plan, proceed immediately without asking again.
+      13. After all tasks are done, summarize what was accomplished.
+      14. If the user confirms the plan, proceed immediately without asking again.
 
       [INTERACTION RULES]
       14. You CAN write text AND call a tool in the same response. The text is shown
