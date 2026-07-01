@@ -74,15 +74,15 @@ public enum AIRole: String, Codable {
 
 public struct ChatConversation: Identifiable, Codable {
   public let id: UUID
-  var title: String
-  var createdAt: Date
-  var updatedAt: Date
-  var providerId: UUID?
-  var model: String?
-  var messageCount: Int
-  var pinnedAt: Date?
-  var lastMessagePreview: String?
-  var contextKey: String?
+  public var title: String
+  public var createdAt: Date
+  public var updatedAt: Date
+  public var providerId: UUID?
+  public var model: String?
+  public var messageCount: Int
+  public var pinnedAt: Date?
+  public var lastMessagePreview: String?
+  public var contextKey: String?
 
   init(
     id: UUID = UUID(),
