@@ -54,7 +54,7 @@ public enum ChatContext: Equatable, Hashable, Codable {
   }
 }
 
-public enum AIRole: String, Codable {
+public enum AIRole: String, Codable, Sendable {
   case system
   case user
   case assistant
@@ -198,7 +198,7 @@ public struct PersistedToolCall: Codable {
   }
 }
 
-public enum ToolCallStatus: String, Codable {
+public enum ToolCallStatus: String, Codable, Sendable {
   case pending
   case running
   case completed
@@ -207,7 +207,7 @@ public enum ToolCallStatus: String, Codable {
 
 // MARK: - Citation
 
-public struct ChatCitation: Codable {
+public struct ChatCitation: Codable, Sendable {
   public let itemId: UUID
   public let title: String
   public let snippet: String
