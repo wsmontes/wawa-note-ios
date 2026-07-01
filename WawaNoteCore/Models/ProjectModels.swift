@@ -1943,7 +1943,7 @@ public struct SignalBody: Codable, Sendable {
 
 /// Structured body for task-type derived items.
 
-struct TaskBody: Codable, Sendable {
+public struct TaskBody: Codable, Sendable {
 
   public var description: String?
 
@@ -1957,7 +1957,7 @@ struct TaskBody: Codable, Sendable {
 
 /// Structured body for synthesis-type derived items.
 
-struct SynthesisBody: Codable, Sendable {
+public struct SynthesisBody: Codable, Sendable {
 
   public var markdown: String  // Full synthesis in markdown
 
