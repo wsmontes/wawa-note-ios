@@ -523,9 +523,3 @@ final class AnthropicProvider: AIProvider, @unchecked Sendable {
     return decoded.modelIDs.sorted()
   }
 }
-
-extension String {
-  fileprivate var nilIfEmpty: String? {
-    isEmpty ? nil : self
-  }
-}

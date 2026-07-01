@@ -485,9 +485,3 @@ final class GeminiProvider: AIProvider, @unchecked Sendable {
     return decoded.modelIDs.sorted()
   }
 }
-
-extension String {
-  fileprivate var nilIfEmpty: String? {
-    isEmpty ? nil : self
-  }
-}
