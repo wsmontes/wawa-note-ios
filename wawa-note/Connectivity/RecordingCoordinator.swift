@@ -43,6 +43,7 @@ final class RecordingCoordinator: ObservableObject {
   private var pausedDuration: TimeInterval = 0
   private var wasUserPaused = false  // true when pauseRecording() was called by the user
   private var pauseStartDate: Date?
+  private var pauseTimeoutTimer: Timer?
   private var recordingTitle: String = ""
   private var observationTimer: Timer?
   private var nowPlayingTimer: Timer?
@@ -378,6 +379,14 @@ final class RecordingCoordinator: ObservableObject {
     pauseStartDate = Date()
     observationTimer?.invalidate()
     nowPlayingTimer?.invalidate()
+    // Auto-stop after 5 minutes of inactivity to release the mic hardware
+    pauseTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: false) {
+      [weak self] _ in
+      guard let self, self.state == .paused else { return }
+      AppLog.audio.info("Pause timeout — auto-stopping recording after 5 min of inactivity")
+      self.errorMessage = "Recording was paused too long and was stopped automatically."
+      self.stopRecording()
+    }
     nowPlayingController.update(
       title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: false)
     notifyStatusChange()
@@ -427,6 +436,7 @@ final class RecordingCoordinator: ObservableObject {
     observationTimer = nil
     nowPlayingTimer?.invalidate()
     nowPlayingTimer = nil
+    pauseTimeoutTimer?.invalidate()
 
     // Finalize manifest — capture a copy so the pipeline closure below
     // can still access it after the if-var scope closes.
@@ -529,6 +539,7 @@ final class RecordingCoordinator: ObservableObject {
     if let ps = pauseStartDate {
       pausedDuration += Date().timeIntervalSince(ps)
       pauseStartDate = nil
+      pauseTimeoutTimer?.invalidate()
     }
     state = .recording
     startObservation()
