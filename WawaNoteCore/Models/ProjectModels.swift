@@ -37,9 +37,12 @@ public struct FieldProvenance: Codable, Sendable {
 
   public struct Entry: Codable, Sendable {
 
-    public let origin: FieldOrigin
-    public let modifiedAt: Date
-    public var scopeRaw: String?
+    let origin: FieldOrigin
+
+    let modifiedAt: Date
+
+    var scopeRaw: String?
+
     var scope: CorrectionScope? {
 
       get { scopeRaw.flatMap(CorrectionScope.init(rawValue:)) }
@@ -104,8 +107,10 @@ public struct FieldProvenance: Codable, Sendable {
 
 public protocol FieldProvidence: AnyObject {
 
-  public var provenance: FieldProvenance { get set }
-  public func writeProvenance()
+  var provenance: FieldProvenance { get set }
+
+  func writeProvenance()
+
 }
 
 // MARK: - Project

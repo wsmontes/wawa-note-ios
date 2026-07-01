@@ -121,7 +121,8 @@ public struct ChatMessage: Identifiable, Codable {
   public var toolCallId: String?
   public var citations: [ChatCitation]?
   public var isThinking: Bool?
-  public var projectColorHex: String?  public var blocksJSON: String?
+  var projectColorHex: String?
+  public var blocksJSON: String?
   /// When true, this message is invisible in the chat UI but still sent to the agent.
   /// Used for UI-triggered decisions (ChoicePrompt, swipe actions) that shouldn't
   /// appear as user-typed bubbles.
@@ -178,7 +179,8 @@ public struct PersistedToolCall: Codable {
   public let name: String
   public let arguments: String
   public var resultPreview: String?
-  public var statusRaw: String
+  var statusRaw: String
+
   var status: ToolCallStatus {
     get { ToolCallStatus(rawValue: statusRaw) ?? .pending }
     set { statusRaw = newValue.rawValue }
@@ -206,7 +208,13 @@ public enum ToolCallStatus: String, Codable, Sendable {
 // MARK: - Citation
 
 public struct ChatCitation: Codable, Sendable {
-  public let itemId: UUID  public let title: String  public let snippet: String  public let itemType: KnowledgeItemType  public var projectID: UUID?  public var projectColorHex: String?}
+  let itemId: UUID
+  let title: String
+  let snippet: String
+  let itemType: KnowledgeItemType
+  var projectID: UUID?
+  var projectColorHex: String?
+}
 
 // MARK: - Interactive Chat Blocks
 
@@ -244,13 +252,27 @@ public enum ChatBlock: Codable, Sendable {
 // MARK: - Block Data Types
 
 public struct TableData: Codable, Sendable {
-  public let title: String?  public let headers: [String]  public let rows: [[String]]}
+  let title: String?
+  let headers: [String]
+  let rows: [[String]]
+}
 
 public struct CodeData: Codable, Sendable {
-  public let code: String  public let language: String?  public let caption: String?}
+  let code: String
+  let language: String?
+  let caption: String?
+}
 
 public struct ProjectContextData: Codable, Sendable {
-  public let projectName: String  public let slug: String  public let status: String  public let taskCount: Int  public let itemCount: Int  public let signalCount: Int  public let healthStatus: String?  public let summary: String?}
+  let projectName: String
+  let slug: String
+  let status: String
+  let taskCount: Int
+  let itemCount: Int
+  let signalCount: Int
+  let healthStatus: String?
+  let summary: String?
+}
 
 public struct TaskCardData: Codable, Sendable {
   public let taskID: String
@@ -300,16 +322,28 @@ public struct ItemCardData: Codable, Sendable {
 }
 
 public struct SearchResultsData: Codable, Sendable {
-  public let query: String  public let results: [SearchResultItem]}
+  let query: String
+  let results: [SearchResultItem]
+}
 
 public struct SearchResultItem: Codable, Sendable {
-  public let itemID: String  public let title: String  public let snippet: String  public let type: String  public let projectSlug: String?}
+  let itemID: String
+  let title: String
+  let snippet: String
+  let type: String
+  let projectSlug: String?
+}
 
 public struct AnalysisData: Codable, Sendable {
-  public let itemID: String  public let sections: [AnalysisSection]}
+  let itemID: String
+  let sections: [AnalysisSection]
+}
 
 public struct AnalysisSection: Codable, Sendable {
-  public let title: String  public let count: Int  public let items: [String]}
+  let title: String
+  let count: Int
+  let items: [String]
+}
 
 public struct ChoicePromptData: Codable, Sendable {
   public let question: String
