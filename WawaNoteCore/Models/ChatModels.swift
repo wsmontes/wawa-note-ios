@@ -121,7 +121,7 @@ public struct ChatMessage: Identifiable, Codable {
   public var toolCallId: String?
   public var citations: [ChatCitation]?
   public var isThinking: Bool?
-  public var projectColorHex: String?
+  var projectColorHex: String?
   public var blocksJSON: String?
   /// When true, this message is invisible in the chat UI but still sent to the agent.
   /// Used for UI-triggered decisions (ChoicePrompt, swipe actions) that shouldn't
@@ -179,7 +179,7 @@ public struct PersistedToolCall: Codable {
   public let name: String
   public let arguments: String
   public var resultPreview: String?
-  public var statusRaw: String
+  var statusRaw: String
 
   var status: ToolCallStatus {
     get { ToolCallStatus(rawValue: statusRaw) ?? .pending }
