@@ -1,4 +1,5 @@
 import EventKit
+import WawaNoteCore
 import Foundation
 import OSLog
 
