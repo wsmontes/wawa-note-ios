@@ -1,4 +1,5 @@
 import AVFoundation
+import OSLog
 import PhotosUI
 import SwiftData
 import SwiftUI
@@ -31,6 +32,7 @@ final class HomeViewModel: ObservableObject {
   private var contentPipeline: ContentPipelineService?
   private var coordinator: RecordingCoordinator?
   private var processingQueue: ProcessingQueueService?
+  private let logger = Logger(subsystem: "com.wawa-note", category: "home-view")
 
   func configure(
     modelContext: ModelContext, contentPipeline: ContentPipelineService,
@@ -118,21 +120,32 @@ final class HomeViewModel: ObservableObject {
     )
   }
 
-  func scanSharedDirectoryAndImport() async {
-    guard let ctx = modelContext else { return }
-    guard
-      let c = FileManager.default.containerURL(
-        forSecurityApplicationGroupIdentifier: "group.com.wawa-note")
-    else { return }
-    let d = c.appendingPathComponent("shared", isDirectory: true)
-    guard FileManager.default.fileExists(atPath: d.path) else { return }
-    guard
-      let files = try? FileManager.default.contentsOfDirectory(
-        at: d, includingPropertiesForKeys: nil)
-    else { return }
-    let pending = files.filter { !$0.lastPathComponent.hasPrefix(".") }
-    guard !pending.isEmpty else { return }
-    await importFiles(pending, deleteSource: true)
+  func discoverImportedItems() async {
+    guard let ctx = modelContext, let queue = processingQueue else { return }
+
+    let draftPredicate = #Predicate<KnowledgeItem> {
+      $0.isImported == true && $0.statusRaw == ItemStatus.draft.rawValue
+    }
+    let descriptor = FetchDescriptor<KnowledgeItem>(predicate: draftPredicate)
+
+    guard let items = try? ctx.fetch(descriptor), !items.isEmpty else { return }
+
+    logger.info("Discovered \(items.count) imported items to process")
+
+    for item in items {
+      // Mark as queued to prevent double-enqueue
+      item.statusRaw = ItemStatus.queuedForTranscription.rawValue
+
+      // Handle incomplete items
+      if item.isIncomplete {
+        logger.warning("Item \(item.id) was incomplete — will re-extract metadata")
+        // The pipeline will handle missing metadata
+      }
+
+      queue.enqueue(itemID: item.id, trigger: .newCapture)
+    }
+
+    try? ctx.save()
   }
 
   private func importFiles(_ urls: [URL], deleteSource: Bool) async {
@@ -382,7 +395,14 @@ struct HomeView: View {
     }
     .task {
       await importVM.backfillEmbeddingsIfNeeded(items: allItems)
-      await importVM.scanSharedDirectoryAndImport()
+      await importVM.discoverImportedItems()
+    }
+    .onReceive(
+      NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
+    ) { _ in
+      Task {
+        await importVM.discoverImportedItems()
+      }
     }
     .navigationDestination(item: $navigateToItem) { KnowledgeDetailView(item: $0) }
     .navigationDestination(item: $navigateToProject) { ProjectDetailView(project: $0) }
@@ -404,9 +424,6 @@ struct HomeView: View {
         importVM.pendingImport = nil
       }
       .environmentObject(coordinator)
-    }
-    .onOpenURL {
-      if $0.scheme == "wawanote" { Task { await importVM.scanSharedDirectoryAndImport() } }
     }
     .alert(
       "Import Error",
