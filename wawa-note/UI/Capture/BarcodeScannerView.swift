@@ -31,6 +31,24 @@ struct BarcodeScannerView: View {
         scannedCodePanel
         bottomBar
       }
+
+      // Permission denied / error overlay
+      if let error = viewModel.error {
+        Color.black.opacity(0.8).ignoresSafeArea()
+        VStack(spacing: 16) {
+          Image(systemName: "camera.fill").font(.system(size: 40)).foregroundStyle(.secondary)
+          Text(error).font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
+          Button("Open Settings") {
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+              UIApplication.shared.open(url)
+            }
+          }
+          .buttonStyle(.bordered)
+          Button("Dismiss") { dismiss() }
+            .foregroundStyle(.secondary)
+        }
+        .padding(32)
+      }
     }
     .statusBarHidden()
     .task {

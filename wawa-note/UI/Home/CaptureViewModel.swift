@@ -10,7 +10,12 @@ final class CaptureViewModel: ObservableObject {
   @Published var isAutoPaused: Bool = false
   @Published var silenceDetected: Bool = false
   @Published var errorMessage: String?
+  @Published var scannerError: String?
   @Published var savedItemId: UUID?
+  // TODO-DISCUSS: pipelineStage and launchPipeline() are dead code.
+  // The coordinator triggers pipeline internally after concatenation;
+  // CaptureViewModel never sets pipelineStage to .transcribing/.analyzing.
+  // Either wire these up or remove them to avoid confusion.
   @Published var pipelineStage: PipelineStage?
   @Published var currentInputPortName: String = ""
   @Published var currentInputIcon: String = "mic.fill"

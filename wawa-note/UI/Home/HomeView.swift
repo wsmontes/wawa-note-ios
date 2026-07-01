@@ -8,6 +8,10 @@ import Vision
 import VisionKit
 import WawaNoteCore
 
+extension Notification.Name {
+  static let scannerDidFail = Notification.Name("ScannerDidFail")
+}
+
 // MARK: - HomeViewModel
 
 @MainActor
@@ -407,6 +411,9 @@ struct HomeView: View {
         await importVM.discoverImportedItems()
       }
     }
+    .onReceive(NotificationCenter.default.publisher(for: .scannerDidFail)) { notification in
+      captureVM.scannerError = notification.object as? String ?? "Document scanner failed."
+    }
     .navigationDestination(item: $navigateToItem) { KnowledgeDetailView(item: $0) }
     .navigationDestination(item: $navigateToProject) { ProjectDetailView(project: $0) }
     .fileImporter(
@@ -447,6 +454,17 @@ struct HomeView: View {
       Button("OK") { captureVM.errorMessage = nil }
     } message: {
       Text(captureVM.errorMessage ?? "Could not start recording.")
+    }
+    .alert(
+      "Scanner Error",
+      isPresented: Binding(
+        get: { captureVM.scannerError != nil },
+        set: { if !$0 { captureVM.scannerError = nil } }
+      )
+    ) {
+      Button("OK") { captureVM.scannerError = nil }
+    } message: {
+      Text(captureVM.scannerError ?? "Document scanner failed to start.")
     }
     .sheet(isPresented: $showCreationSheet) {
       CreationSheetView().presentationDragIndicator(.visible)
@@ -1076,6 +1094,9 @@ struct ScannerView: UIViewControllerRepresentable {
     func documentCameraViewController(
       _ controller: VNDocumentCameraViewController, didFailWithError error: Error
     ) {
+      NotificationCenter.default.post(
+        name: .scannerDidFail,
+        object: error.localizedDescription)
       parent.dismiss()
     }
   }
