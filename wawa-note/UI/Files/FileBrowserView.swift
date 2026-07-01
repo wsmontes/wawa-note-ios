@@ -301,8 +301,9 @@ struct FileBrowserView: View {
   private func duplicateNode(_ node: VFSNode) {
     guard let content = viewModel.readFileContent(node.path) else { return }
     let newName = "copy-\(node.name)"
-    let parentPath = node.path.split(separator: "/").dropLast().joined(separator: "/")
-    let newPath = "/\(parentPath)/\(newName)"
+    let parts = node.path.split(separator: "/").dropLast()
+    let parentPath = parts.isEmpty ? "" : "/\(parts.joined(separator: "/"))"
+    let newPath = parentPath.isEmpty ? "/\(newName)" : "\(parentPath)/\(newName)"
     _ = viewModel.writeFileContent(newPath, content: content)
   }
 

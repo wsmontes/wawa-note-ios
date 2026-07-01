@@ -112,9 +112,14 @@ final class FileBrowserViewModel: ObservableObject {
       let id = node.metadata.swiftDataID
     {
       let json = "{\"title\":\"\(newName.replacingOccurrences(of: "\"", with: "\\\""))\"}"
-      try? VFSService.writeItemFile(
-        node.path.replacingOccurrences(of: node.name, with: "metadata.json"), content: json,
-        context: ctx)
+      do {
+        try VFSService.writeItemFile(
+          node.path.replacingOccurrences(of: node.name, with: "metadata.json"), content: json,
+          context: ctx)
+      } catch {
+        self.error = "Could not rename: \(error.localizedDescription)"
+        return
+      }
     }
     refresh()
   }
