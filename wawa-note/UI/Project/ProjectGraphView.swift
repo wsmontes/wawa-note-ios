@@ -2,6 +2,10 @@ import SwiftData
 import SwiftUI
 import WawaNoteCore
 
+/// Unchecked Sendable wrapper for passing edges across actor boundaries in force layout.
+/// GraphEdge is a @Model class (non-Sendable); this wrapper isolates the captured value.
+struct SendableEdges: @unchecked Sendable { var edges: [GraphEdge] }
+
 // MARK: - Graph Node
 
 enum NodeKind: String, CaseIterable { case project, task, item, person, entity, related }
@@ -282,11 +286,11 @@ struct ProjectGraphView: View {
       .onAppear {
         canvasSize = geo.size
         let capturedNodes = nodes
-        let capturedEdges = edges
         let gSize = geo.size
+        let captured = SendableEdges(edges: edges)
         Task { @GraphLayoutActor in
           var mutable = capturedNodes
-          ForceLayout.compute(nodes: &mutable, edges: capturedEdges, size: gSize)
+          ForceLayout.compute(nodes: &mutable, edges: captured.edges, size: gSize)
           await MainActor.run { nodes = mutable }
         }
       }
