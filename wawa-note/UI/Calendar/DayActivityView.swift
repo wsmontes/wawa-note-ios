@@ -83,14 +83,16 @@ struct DayActivityView: View {
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(spacing: 10) {
             ForEach(onThisDayEntries) { entry in
-              NavigationLink {
-                if let item = entry.wawaItem {
+              if let item = entry.wawaItem {
+                NavigationLink {
                   KnowledgeDetailView(item: item)
+                } label: {
+                  onThisDayCard(entry)
                 }
-              } label: {
+                .buttonStyle(.plain)
+              } else {
                 onThisDayCard(entry)
               }
-              .buttonStyle(.plain)
             }
           }
           .padding(.horizontal, 16)

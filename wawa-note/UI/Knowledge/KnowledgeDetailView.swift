@@ -434,7 +434,7 @@ struct KnowledgeDetailView: View {
     }
     .alert("Whisper Requires Configuration", isPresented: $showWhisperKeyAlert) {
       Button("Open Settings") {
-        // Navigate to settings tab
+        NotificationCenter.default.post(name: .openSettings, object: nil)
       }
       Button("OK", role: .cancel) {}
     } message: {

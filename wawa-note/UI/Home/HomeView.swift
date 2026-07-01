@@ -534,7 +534,9 @@ struct HomeView: View {
             .listRowBackground(Color(.systemBackground))
             .listRowSeparator(.hidden)
           if projects.count > 5 {
-            NavigationLink(value: "explore:projects") {
+            Button {
+              NotificationCenter.default.post(name: .switchToExploreTab, object: nil)
+            } label: {
               Text("See all \(projects.count) projects →").font(.caption).foregroundStyle(.blue)
             }
             .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
@@ -557,7 +559,9 @@ struct HomeView: View {
             .listRowBackground(Color(.systemBackground))
             .listRowSeparator(.hidden)
           if inboxItems.count > 5 {
-            NavigationLink(value: "explore:inbox") {
+            Button {
+              NotificationCenter.default.post(name: .switchToInboxTab, object: nil)
+            } label: {
               Text("See all \(inboxItems.count) inbox items →").font(.caption).foregroundStyle(
                 .blue)
             }

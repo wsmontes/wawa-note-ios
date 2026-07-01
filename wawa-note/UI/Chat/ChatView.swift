@@ -145,6 +145,11 @@ struct ChatView: View {
       }
       if !compact || !viewModel.messages.isEmpty || !viewModel.streamingText.isEmpty {
         messageList
+          // TODO-DISCUSS: These navigation destinations are unreachable in compact mode
+          // because ChatView is presented as a ZStack overlay (not inside a NavigationStack).
+          // Citation links and file cards in chat messages silently fail to navigate.
+          // Fix requires either wrapping the overlay in a NavigationStack or using a
+          // different presentation (sheet/fullScreenCover) when navigating from chat.
           .navigationDestination(for: UUID.self) { itemID in
             KnowledgeItemNavigationView(itemID: itemID)
           }

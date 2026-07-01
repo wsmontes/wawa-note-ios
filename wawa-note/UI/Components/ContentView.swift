@@ -3,6 +3,12 @@ import SwiftData
 import SwiftUI
 import WawaNoteCore
 
+extension Notification.Name {
+  static let switchToInboxTab = Notification.Name("SwitchToInboxTab")
+  static let switchToExploreTab = Notification.Name("SwitchToExploreTab")
+  static let openSettings = Notification.Name("OpenSettings")
+}
+
 @MainActor
 final class ChatOverlayState: ObservableObject {
   @Published var isActive = false
@@ -138,6 +144,15 @@ struct ContentView: View {
     .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification))
     { _ in
       WawaNoteApp.updateAppBadge(modelContext: modelContext)
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .switchToInboxTab)) { _ in
+      selectedTab = 1
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .switchToExploreTab)) { _ in
+      selectedTab = 2
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
+      showSettings = true
     }
     .onAppear {
       chatViewModel.setup(modelContext: modelContext)
