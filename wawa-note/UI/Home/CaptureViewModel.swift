@@ -12,19 +12,9 @@ final class CaptureViewModel: ObservableObject {
   @Published var errorMessage: String?
   @Published var scannerError: String?
   @Published var savedItemId: UUID?
-  // TODO-DISCUSS: pipelineStage and launchPipeline() are dead code.
-  // The coordinator triggers pipeline internally after concatenation;
-  // CaptureViewModel never sets pipelineStage to .transcribing/.analyzing.
-  // Either wire these up or remove them to avoid confusion.
-  @Published var pipelineStage: PipelineStage?
   @Published var currentInputPortName: String = ""
   @Published var currentInputIcon: String = "mic.fill"
   @Published var sampleRateBadge: String = ""
-
-  enum PipelineStage: String {
-    case transcribing = "Transcribing..."
-    case analyzing = "Analyzing..."
-  }
 
   var modelContext: ModelContext?
   var contentPipeline: ContentPipelineService?
@@ -100,7 +90,6 @@ final class CaptureViewModel: ObservableObject {
   }
 
   func startRecording(title: String? = nil, projectID: UUID? = nil) {
-    pipelineStage = nil
     coordinator?.startRecording(title: title, projectID: projectID)
   }
 
@@ -115,26 +104,8 @@ final class CaptureViewModel: ObservableObject {
   }
 
   func finishCapture() {
-    pipelineStage = nil
     savedItemId = nil
     errorMessage = nil
     coordinator?.returnToIdle()
-  }
-
-  // MARK: - Pipeline
-
-  private func launchPipeline() {
-    guard let itemId = savedItemId ?? coordinator?.savedItemId else {
-      errorMessage = "Could not start processing. Try again."
-      AppLog.error("pipeline", "launchPipeline: savedItemId is nil — pipeline not started")
-      return
-    }
-    guard let queue = processingQueue else {
-      errorMessage = "Processing service unavailable. Restart the app."
-      AppLog.error("pipeline", "launchPipeline: processingQueue is nil")
-      return
-    }
-    _ = queue.enqueue(itemID: itemId, trigger: .newCapture)
-    AppLog.event("pipeline", "Item enqueued: \(itemId.uuidString.prefix(8))")
   }
 }
