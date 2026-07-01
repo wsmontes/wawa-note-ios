@@ -1597,7 +1597,7 @@ public final class AgentSuggestion {
 
   /// Whether this signal is in an active (unresolved) state.
 
-  var isActive: Bool {
+  public var isActive: Bool {
 
     ["visible", "seen", "acknowledged"].contains(status)
 
