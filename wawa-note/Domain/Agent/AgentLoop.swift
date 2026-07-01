@@ -727,6 +727,19 @@ final class AgentLoop: @unchecked Sendable {
         result[k] = b
       } else if let a = v as? [String] {
         result[k] = a
+      } else if let a = v as? [Int] {
+        result[k] = a
+      } else if let a = v as? [Double] {
+        result[k] = a
+      } else if let a = v as? [Bool] {
+        result[k] = a
+      } else if let nested = v as? [String: Any] {
+        result[k] = nested as Any
+      } else if let nestedArray = v as? [[String: Any]] {
+        result[k] = nestedArray as Any
+      } else if let anyArray = v as? [Any] {
+        // Generic fallback for mixed-type arrays
+        result[k] = anyArray
       }
     }
     return result
