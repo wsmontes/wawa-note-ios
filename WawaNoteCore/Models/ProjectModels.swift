@@ -2030,6 +2030,10 @@ public struct SynthesisSection: Codable, Sendable {
   public var renderType: String  // "markdown", "cards", "table", "metrics", "timeline"
   public var content: String  // Markdown or JSON depending on renderType
   public var order: Int
+
+  public init(title: String = "", body: String? = nil) {
+    self.title = title; self.body = body
+  }
 }
 
 
@@ -2042,4 +2046,8 @@ public struct SynthesisMetric: Codable, Sendable {
   public var format: String  // "number", "percentage", "days", "score"
   public var status: String  // "healthy", "warning", "critical", "neutral"
   public var icon: String?
+
+  public init(label: String = "", value: Double = 0, format: String = "", status: String = "", icon: String? = nil) {
+    self.label = label; self.value = value; self.format = format; self.status = status; self.icon = icon
+  }
 }
