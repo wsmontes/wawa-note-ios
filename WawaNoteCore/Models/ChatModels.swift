@@ -214,6 +214,9 @@ public struct ChatCitation: Codable, Sendable {
   public let itemType: KnowledgeItemType
   public var projectID: UUID?
   public var projectColorHex: String?
+  public init(itemId: UUID, title: String = "", snippet: String = "", itemType: KnowledgeItemType, projectID: UUID? = nil, projectColorHex: String? = nil) {
+    self.itemId = itemId; self.title = title; self.snippet = snippet; self.itemType = itemType; self.projectID = projectID; self.projectColorHex = projectColorHex
+  }
 }
 
 // MARK: - Interactive Chat Blocks
@@ -255,12 +258,18 @@ public struct TableData: Codable, Sendable {
   public let title: String?
   public let headers: [String]
   public let rows: [[String]]
+  public init(title: String? = nil, headers: [String], rows: [[String]]) {
+    self.title = title; self.headers = headers; self.rows = rows
+  }
 }
 
 public struct CodeData: Codable, Sendable {
   public let code: String
   public let language: String?
   public let caption: String?
+  public init(code: String = "", language: String? = nil, caption: String? = nil) {
+    self.code = code; self.language = language; self.caption = caption
+  }
 }
 
 public struct ProjectContextData: Codable, Sendable {
@@ -295,12 +304,15 @@ public struct ItemCardData: Codable, Sendable {
   public let projectSlug: String?
   public let hasTranscript: Bool
   public let hasAnalysis: Bool
-  public init(itemID: String, title: String, type: String, status: String? = nil, date: String? = nil, summary: String? = nil, projectID: String? = nil, tags: [String] = []) { self.itemID = itemID; self.title = title; self.type = type; self.status = status; self.date = date; self.summary = summary; self.projectID = projectID; self.tags = tags }
+  public init(itemID: String, title: String, type: String, status: String? = nil, durationSeconds: Double? = nil, projectSlug: String? = nil, hasTranscript: Bool = false, hasAnalysis: Bool = false) { self.itemID = itemID; self.title = title; self.type = type; self.status = status; self.durationSeconds = durationSeconds; self.projectSlug = projectSlug; self.hasTranscript = hasTranscript; self.hasAnalysis = hasAnalysis }
 }
 
 public struct SearchResultsData: Codable, Sendable {
   public let query: String
   public let results: [SearchResultItem]
+  public init(query: String = "", results: [SearchResultItem]) {
+    self.query = query; self.results = results
+  }
 }
 
 public struct SearchResultItem: Codable, Sendable {
@@ -309,17 +321,26 @@ public struct SearchResultItem: Codable, Sendable {
   public let snippet: String
   public let type: String
   public let projectSlug: String?
+  public init(itemID: String = "", title: String = "", snippet: String = "", type: String = "", projectSlug: String? = nil) {
+    self.itemID = itemID; self.title = title; self.snippet = snippet; self.type = type; self.projectSlug = projectSlug
+  }
 }
 
 public struct AnalysisData: Codable, Sendable {
   public let itemID: String
   public let sections: [AnalysisSection]
+  public init(itemID: String = "", sections: [AnalysisSection]) {
+    self.itemID = itemID; self.sections = sections
+  }
 }
 
 public struct AnalysisSection: Codable, Sendable {
   public let title: String
   public let count: Int
   public let items: [String]
+  public init(title: String = "", count: Int = 0, items: [String]) {
+    self.title = title; self.count = count; self.items = items
+  }
 }
 
 public struct ChoicePromptData: Codable, Sendable {
