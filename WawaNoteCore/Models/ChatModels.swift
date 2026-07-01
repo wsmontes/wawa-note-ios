@@ -106,6 +106,9 @@ public struct ChatConversation: Identifiable, Codable {
     self.lastMessagePreview = lastMessagePreview
     self.contextKey = contextKey
   }
+  public init(id: UUID, title: String = "", createdAt: Date, updatedAt: Date, providerId: UUID? = nil, model: String? = nil, messageCount: Int = 0, pinnedAt: Date? = nil, lastMessagePreview: String? = nil, contextKey: String? = nil) {
+    self.id = id; self.title = title; self.createdAt = createdAt; self.updatedAt = updatedAt; self.providerId = providerId; self.model = model; self.messageCount = messageCount; self.pinnedAt = pinnedAt; self.lastMessagePreview = lastMessagePreview; self.contextKey = contextKey
+  }
 }
 
 // MARK: - Message
@@ -168,6 +171,9 @@ public struct ChatMessage: Identifiable, Codable {
     self.isInternal = isInternal
     self.blocks = blocks
   }
+  public init(id: UUID, conversationId: UUID, role: AIRole, content: String = "", createdAt: Date, toolCalls: [PersistedToolCall]? = nil, toolCallId: String? = nil, citations: [ChatCitation]? = nil, isThinking: Bool? = nil, projectColorHex: String? = nil, blocksJSON: String? = nil, isInternal: Bool = false) {
+    self.id = id; self.conversationId = conversationId; self.role = role; self.content = content; self.createdAt = createdAt; self.toolCalls = toolCalls; self.toolCallId = toolCallId; self.citations = citations; self.isThinking = isThinking; self.projectColorHex = projectColorHex; self.blocksJSON = blocksJSON; self.isInternal = isInternal
+  }
 }
 
 // MARK: - Tool call persistence
@@ -192,6 +198,9 @@ public struct PersistedToolCall: Codable {
     self.arguments = arguments
     self.resultPreview = resultPreview
     self.statusRaw = status.rawValue
+  }
+  public init(id: String = "", name: String = "", arguments: String = "", resultPreview: String? = nil, statusRaw: String = "") {
+    self.id = id; self.name = name; self.arguments = arguments; self.resultPreview = resultPreview; self.statusRaw = statusRaw
   }
 }
 
@@ -350,6 +359,9 @@ public struct SearchResultsData: Codable, Sendable {
   public let query: String
   public let results: [SearchResultItem]
     self.query = query; self.results = results
+  public init(query: String = "", results: [SearchResultItem]) {
+    self.query = query; self.results = results
+  }
   }
 
   public init(query: String = "", results: [SearchResultItem]) {
@@ -364,6 +376,9 @@ public struct SearchResultItem: Codable, Sendable {
   public let type: String
   public let projectSlug: String?
     self.itemID = itemID; self.title = title; self.snippet = snippet; self.type = type; self.projectSlug = projectSlug
+  public init(itemID: String = "", title: String = "", snippet: String = "", type: String = "", projectSlug: String? = nil) {
+    self.itemID = itemID; self.title = title; self.snippet = snippet; self.type = type; self.projectSlug = projectSlug
+  }
   }
 
   public init(itemID: String = "", title: String = "", snippet: String = "", type: String = "", projectSlug: String? = nil) {
@@ -375,6 +390,9 @@ public struct AnalysisData: Codable, Sendable {
   public let itemID: String
   public let sections: [AnalysisSection]
     self.itemID = itemID; self.sections = sections
+  public init(itemID: String = "", sections: [AnalysisSection]) {
+    self.itemID = itemID; self.sections = sections
+  }
   }
 
   public init(itemID: String = "", sections: [AnalysisSection]) {
@@ -387,6 +405,9 @@ public struct AnalysisSection: Codable, Sendable {
   public let count: Int
   public let items: [String]
     self.title = title; self.count = count; self.items = items
+  public init(title: String = "", count: Int = 0, items: [String]) {
+    self.title = title; self.count = count; self.items = items
+  }
   }
 
   public init(title: String = "", count: Int = 0, items: [String]) {
