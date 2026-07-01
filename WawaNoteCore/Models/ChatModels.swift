@@ -111,39 +111,39 @@ public struct ChatConversation: Identifiable, Codable {
 
 // MARK: - Message
 
-public struct ChatMessage: Identifiable, Codable {
+public struct ChatMessage: Identifiable, Codable {public 
   public let id: UUID
-  let conversationId: UUID
-  var role: AIRole
-  var content: String
-  var createdAt: Date
-  var toolCalls: [PersistedToolCall]?
-  var toolCallId: String?
-  var citations: [ChatCitation]?
-  var isThinking: Bool?
-  var projectColorHex: String?
-  var blocksJSON: String?
-  /// When true, this message is invisible in the chat UI but still sent to the agent.
-  /// Used for UI-triggered decisions (ChoicePrompt, swipe actions) that shouldn't
-  /// appear as user-typed bubbles.
-  var isInternal: Bool
-
-  /// Parsed blocks from blocksJSON. Nil if no structured content (falls back to text parsing).
+  public let conversationId: UUID
+  public var role: AIRole
+  public var content: String
+  public var createdAt: Date
+  public var toolCalls: [PersistedToolCall]?
+  public var toolCallId: String?
+  public var citations: [ChatCitation]?
+  public var isThinking: Bool?
+  public var projectColorHex: String?
+  public var blocksJSON: String?
+  public /// When true, this message is invisible in the chat UI but still sent to the agent.
+  public /// Used for UI-triggered decisions (ChoicePrompt, swipe actions) that shouldn't
+  public /// appear as user-typed bubbles.
+  public var isInternal: Bool
+public 
+  public /// Parsed blocks from blocksJSON. Nil if no structured content (falls back to text parsing).
   var blocks: [ChatBlock]? {
     get {
       guard let json = blocksJSON, let data = json.data(using: .utf8) else { return nil }
       return try? JSONDecoder().decode([ChatBlock].self, from: data)
-    }
+    public }
     set {
       if let blocks = newValue, let data = try? JSONEncoder().encode(blocks) {
         blocksJSON = String(data: data, encoding: .utf8)
       } else {
-        blocksJSON = nil
-      }
-    }
-  }
-
-  init(
+        public blocksJSON = nil
+      public }
+    public }
+  public }
+public 
+  public init(
     id: UUID = UUID(),
     conversationId: UUID,
     role: AIRole,
@@ -157,36 +157,36 @@ public struct ChatMessage: Identifiable, Codable {
     blocks: [ChatBlock]? = nil,
     isInternal: Bool = false
   ) {
-    self.id = id
-    self.conversationId = conversationId
-    self.role = role
-    self.content = content
-    self.createdAt = createdAt
-    self.toolCalls = toolCalls
-    self.toolCallId = toolCallId
-    self.citations = citations
-    self.isThinking = isThinking
-    self.projectColorHex = projectColorHex
-    self.isInternal = isInternal
-    self.blocks = blocks
-  }
-}
+    public self.id = id
+    public self.conversationId = conversationId
+    public self.role = role
+    public self.content = content
+    public self.createdAt = createdAt
+    public self.toolCalls = toolCalls
+    public self.toolCallId = toolCallId
+    public self.citations = citations
+    public self.isThinking = isThinking
+    public self.projectColorHex = projectColorHex
+    public self.isInternal = isInternal
+    public self.blocks = blocks
+  public }
+public }
 
 // MARK: - Tool call persistence
 
 public struct PersistedToolCall: Codable {
-  let id: String
-  let name: String
-  let arguments: String
-  var resultPreview: String?
-  var statusRaw: String
+  public let id: String
+  public let name: String
+  public let arguments: String
+  public var resultPreview: String?
+  public var statusRaw: String
 
   var status: ToolCallStatus {
     get { ToolCallStatus(rawValue: statusRaw) ?? .pending }
     set { statusRaw = newValue.rawValue }
   }
 
-  init(
+  public init(
     id: String, name: String, arguments: String, resultPreview: String? = nil,
     status: ToolCallStatus = .pending
   ) {
@@ -208,12 +208,12 @@ public enum ToolCallStatus: String, Codable {
 // MARK: - Citation
 
 public struct ChatCitation: Codable {
-  let itemId: UUID
-  let title: String
-  let snippet: String
-  let itemType: KnowledgeItemType
-  var projectID: UUID?
-  var projectColorHex: String?
+  public let itemId: UUID
+  public let title: String
+  public let snippet: String
+  public let itemType: KnowledgeItemType
+  public var projectID: UUID?
+  public var projectColorHex: String?
 }
 
 // MARK: - Interactive Chat Blocks
