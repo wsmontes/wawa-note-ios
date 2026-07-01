@@ -933,6 +933,13 @@ final class RecordingCoordinator: ObservableObject {
       // Timer.scheduledTimer fires on main run loop — already on main thread.
       if let start = self.recordingStartDate {
         self.elapsedTime = Date().timeIntervalSince(start)
+        // Auto-stop after 2 hours to prevent runaway recordings filling storage
+        if self.elapsedTime > 7200, self.state == .recording {
+          AppLog.audio.warning("Max recording duration (2h) reached — auto-stopping")
+          self.errorMessage = "Recording reached the 2-hour maximum and was stopped."
+          self.stopRecording()
+          return
+        }
       }
       self.audioLevel = self.captureService.audioLevel
       // Clipping detection (hysteresis: on at > 0.95, off at < 0.85)
