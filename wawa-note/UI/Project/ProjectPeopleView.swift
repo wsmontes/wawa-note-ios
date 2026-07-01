@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import WawaNoteCore
 
 // MARK: - DEPRECATED: Subsumed by file browser with type filter (2026-06-18)
 struct PersonSummary: Identifiable {

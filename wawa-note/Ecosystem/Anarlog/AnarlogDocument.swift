@@ -1,4 +1,5 @@
 import Foundation
+import WawaNoteCore
 
 // MARK: - Anarlog Frontmatter Types
 

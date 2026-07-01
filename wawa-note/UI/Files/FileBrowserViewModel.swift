@@ -1,6 +1,7 @@
 import Combine
 import SwiftData
 import SwiftUI
+import WawaNoteCore
 
 /// View model for the file browser. Manages VFS navigation state and file operations.
 @MainActor

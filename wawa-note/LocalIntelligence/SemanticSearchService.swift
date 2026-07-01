@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+import WawaNoteCore
 
 final class SemanticSearchService: @unchecked Sendable {
   private let embeddingService: EmbeddingService

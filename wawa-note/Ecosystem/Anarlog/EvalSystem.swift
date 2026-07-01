@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+import WawaNoteCore
 
 // MARK: - LLM Output Evaluation System
 

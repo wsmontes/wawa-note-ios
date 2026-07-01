@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import OSLog
+import WawaNoteCore
 
 // MARK: - Summary Cache
 

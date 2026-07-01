@@ -1,18 +1,18 @@
 import Foundation
 
-struct TranscriptSegment: Identifiable, Codable {
-  let id: UUID
-  var meetingId: UUID
-  var startTime: Double
-  var endTime: Double?
-  var speakerId: UUID?
-  var text: String
-  var originalText: String?
-  var confidence: Double?
-  var languageCode: String?
-  var sourceEngineId: String
+public struct TranscriptSegment: Identifiable, Codable, Sendable {
+  public let id: UUID
+  public var meetingId: UUID
+  public var startTime: Double
+  public var endTime: Double?
+  public var speakerId: UUID?
+  public var text: String
+  public var originalText: String?
+  public var confidence: Double?
+  public var languageCode: String?
+  public var sourceEngineId: String
 
-  init(
+  public init(
     id: UUID = UUID(),
     meetingId: UUID,
     startTime: Double,
@@ -38,7 +38,7 @@ struct TranscriptSegment: Identifiable, Codable {
 }
 
 struct Speaker: Identifiable, Codable {
-  let id: UUID
+  public let id: UUID
   var meetingId: UUID
   var label: String
   var displayName: String?
@@ -59,14 +59,14 @@ struct Speaker: Identifiable, Codable {
   }
 }
 
-struct Transcript: Codable {
-  var meetingId: UUID?
-  var languageCode: String?
-  var segments: [TranscriptSegment]
-  var sourceEngineId: String
-  var createdAt: Date
+public struct Transcript: Codable {
+  public var meetingId: UUID?
+  public var languageCode: String?
+  public var segments: [TranscriptSegment]
+  public var sourceEngineId: String
+  public var createdAt: Date
 
-  init(
+  public init(
     meetingId: UUID? = nil,
     languageCode: String? = nil,
     segments: [TranscriptSegment] = [],
@@ -83,7 +83,9 @@ struct Transcript: Codable {
   /// Groups raw Apple Speech segments into sentence-like subtitle blocks.
   /// A new group starts when the pause between segments exceeds `pauseThreshold`
   /// seconds, or when the group text exceeds `maxChars`.
-  func groupedSegments(pauseThreshold: Double = 0.4, maxChars: Int = 250) -> [TranscriptGroup] {
+  public func groupedSegments(pauseThreshold: Double = 0.4, maxChars: Int = 250)
+    -> [TranscriptGroup]
+  {
     guard !segments.isEmpty else { return [] }
 
     var groups: [TranscriptGroup] = []
@@ -136,10 +138,10 @@ struct Transcript: Codable {
 }
 
 /// A subtitle-like block of merged transcript segments.
-struct TranscriptGroup: Identifiable {
-  let id = UUID()
-  let text: String
-  let startTime: Double
-  let endTime: Double
-  let confidence: Double?
+public struct TranscriptGroup: Identifiable {
+  public let id = UUID()
+  public let text: String
+  public let startTime: Double
+  public let endTime: Double
+  public let confidence: Double?
 }

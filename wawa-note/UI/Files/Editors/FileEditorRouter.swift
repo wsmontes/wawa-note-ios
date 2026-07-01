@@ -1,4 +1,5 @@
 import SwiftUI
+import WawaNoteCore
 
 /// Routes a VFSNode to the appropriate editor view based on file type.
 @MainActor

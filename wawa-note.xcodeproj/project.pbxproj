@@ -188,7 +188,6 @@
 		DB37FBE9B7A5E595C28D12F9 /* WatchMessageTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4242425358FD99838CC0F8F /* WatchMessageTypes.swift */; };
 		DBAB5E60D40FFED7ED6562C9 /* KnowledgeDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE60784A759E5F7BE68FF4BA /* KnowledgeDetailView.swift */; };
 		DCF3E9F07C1214CAEE842CBA /* SharedContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFFAD3BDA9A8855E0708B83A /* SharedContainer.swift */; };
-		DE145692C3AAAA359DED0AB7 /* wawa-note-watch-widget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 2E62DE4F0922FA4A09CC5F2F /* wawa-note-watch-widget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		DE788C149F90CB0B4F161751 /* AgentTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57E0A2769FF8E6E9E01D5DE1 /* AgentTool.swift */; };
 		DF2F40A5921067C2265F2C77 /* AnarlogDocumentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03E11FFFB2388B3ED948DCD /* AnarlogDocumentTests.swift */; };
 		E21234A24F71C898BEA247BB /* FileBrowserViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80F7721E304467B836BE187E /* FileBrowserViewModel.swift */; };
@@ -246,13 +245,6 @@
 			remoteGlobalIDString = 54DB7E31033B90A0A840BAC4;
 			remoteInfo = WawaNoteCore;
 		};
-		EBB5D706E6E78D3EB945DDEA /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = C0D8C6BD9DC27C691D7F4D40 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 0C1BCC8EB0D5A66978335ED7;
-			remoteInfo = "wawa-note-watch-widget";
-		};
 		FEFE1F576BAA07A8EA4C9BCE /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = C0D8C6BD9DC27C691D7F4D40 /* Project object */;
@@ -272,17 +264,6 @@
 				190D025196CA7204BF02B626 /* WawaNoteCore.framework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		73C37A4D09952459F5359EAC /* Embed Foundation Extensions */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 13;
-			files = (
-				DE145692C3AAAA359DED0AB7 /* wawa-note-watch-widget.appex in Embed Foundation Extensions */,
-			);
-			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		DF4FCEFEA9FC77DFF5A85967 /* Embed Foundation Extensions */ = {
@@ -1223,12 +1204,10 @@
 			buildConfigurationList = FA5073FB7DB2F3A7A95ABABD /* Build configuration list for PBXNativeTarget "wawa-note-watch" */;
 			buildPhases = (
 				E8D7C2532870FD236B328485 /* Sources */,
-				73C37A4D09952459F5359EAC /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				54DD114216DC11E8AF320DCC /* PBXTargetDependency */,
 			);
 			name = "wawa-note-watch";
 			packageProductDependencies = (
@@ -1588,11 +1567,6 @@
 			isa = PBXTargetDependency;
 			target = FBF603A45B7E98AB42328908 /* wawa-note */;
 			targetProxy = FEFE1F576BAA07A8EA4C9BCE /* PBXContainerItemProxy */;
-		};
-		54DD114216DC11E8AF320DCC /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 0C1BCC8EB0D5A66978335ED7 /* wawa-note-watch-widget */;
-			targetProxy = EBB5D706E6E78D3EB945DDEA /* PBXContainerItemProxy */;
 		};
 		63876487E871152D737741BC /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;

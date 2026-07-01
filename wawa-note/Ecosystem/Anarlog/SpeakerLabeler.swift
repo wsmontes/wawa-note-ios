@@ -1,4 +1,5 @@
 import Foundation
+import WawaNoteCore
 
 /// Assigns human-readable speaker labels to transcript segments.
 ///

@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+import WawaNoteCore
 
 /// LLM-based ASR transcript correction using JSON Patch (RFC 6902).
 ///

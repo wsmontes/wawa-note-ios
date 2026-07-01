@@ -2,10 +2,10 @@ import Foundation
 
 // MARK: - Checkpoint
 
-struct TranscriptionCheckpoint: Codable, Sendable {
-  let completedChunks: Int
-  let segments: [TranscriptSegment]
-  let languageCode: String?
-  let sourceEngineId: String
-  let savedAt: Date
+public struct TranscriptionCheckpoint: Codable, Sendable {
+  public let completedChunks: Int
+  public let segments: [TranscriptSegment]
+  public let languageCode: String?
+  public let sourceEngineId: String
+  public let savedAt: Date
 }

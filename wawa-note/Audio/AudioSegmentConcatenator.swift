@@ -1,6 +1,7 @@
 import AVFoundation
 import OSLog
 import UIKit
+import WawaNoteCore
 
 // MARK: - Segment concatenator (non-MainActor)
 
