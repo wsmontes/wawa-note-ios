@@ -54,7 +54,7 @@ public enum ChatContext: Equatable, Hashable, Codable {
   }
 }
 
-public enum AIRole: String, Codable, Sendable {
+public enum AIRole: String, Codable {
   case system
   case user
   case assistant
@@ -84,7 +84,7 @@ public struct ChatConversation: Identifiable, Codable {
   public var lastMessagePreview: String?
   public var contextKey: String?
 
-  init(
+  public init(
     id: UUID = UUID(),
     title: String = "",
     createdAt: Date = Date(),
@@ -113,7 +113,7 @@ public struct ChatConversation: Identifiable, Codable {
 
 public struct ChatMessage: Identifiable, Codable {
   public let id: UUID
-  let conversationId: UUID
+  public let conversationId: UUID
   public var role: AIRole
   public var content: String
   public var createdAt: Date
@@ -121,12 +121,12 @@ public struct ChatMessage: Identifiable, Codable {
   public var toolCallId: String?
   public var citations: [ChatCitation]?
   public var isThinking: Bool?
-  var projectColorHex: String?
-  var blocksJSON: String?
+  public var projectColorHex: String?
+  public var blocksJSON: String?
   /// When true, this message is invisible in the chat UI but still sent to the agent.
   /// Used for UI-triggered decisions (ChoicePrompt, swipe actions) that shouldn't
   /// appear as user-typed bubbles.
-  var isInternal: Bool
+  public var isInternal: Bool
 
   /// Parsed blocks from blocksJSON. Nil if no structured content (falls back to text parsing).
   var blocks: [ChatBlock]? {
@@ -179,7 +179,7 @@ public struct PersistedToolCall: Codable {
   public let name: String
   public let arguments: String
   public var resultPreview: String?
-  public var statusRaw: String
+  public public var statusRaw: String
 
   var status: ToolCallStatus {
     get { ToolCallStatus(rawValue: statusRaw) ?? .pending }
@@ -198,7 +198,7 @@ public struct PersistedToolCall: Codable {
   }
 }
 
-public enum ToolCallStatus: String, Codable, Sendable {
+public enum ToolCallStatus: String, Codable {
   case pending
   case running
   case completed
@@ -207,13 +207,13 @@ public enum ToolCallStatus: String, Codable, Sendable {
 
 // MARK: - Citation
 
-public struct ChatCitation: Codable, Sendable {
-  public let itemId: UUID
-  public let title: String
-  public let snippet: String
-  public let itemType: KnowledgeItemType
-  public var projectID: UUID?
-  public var projectColorHex: String?
+public struct ChatCitation: Codable {
+  let itemId: UUID
+  let title: String
+  let snippet: String
+  let itemType: KnowledgeItemType
+  var projectID: UUID?
+  var projectColorHex: String?
 }
 
 // MARK: - Interactive Chat Blocks
