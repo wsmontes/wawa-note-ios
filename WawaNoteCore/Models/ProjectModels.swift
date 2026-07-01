@@ -1944,15 +1944,11 @@ public struct SignalBody: Codable, Sendable {
 /// Structured body for task-type derived items.
 
 public struct TaskBody: Codable, Sendable {
-
   public var description: String?
-
   public var sourceSegmentIDs: [String]?
-
   public var aiGenerated: Bool
-
   public var suggestedByItemID: UUID?
-
+  public init(description: String? = nil, sourceSegmentIDs: [String]? = nil, aiGenerated: Bool = false, suggestedByItemID: UUID? = nil) { self.description = description; self.sourceSegmentIDs = sourceSegmentIDs; self.aiGenerated = aiGenerated; self.suggestedByItemID = suggestedByItemID }
 }
 
 /// Structured body for synthesis-type derived items.
