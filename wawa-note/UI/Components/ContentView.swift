@@ -172,6 +172,14 @@ struct ContentView: View {
   }
 
   /// Check minimum configuration state on launch and log guidance.
+  // TODO-DISCUSS: First-launch onboarding is missing entirely. New users see
+  // a 4-tab interface with no providers, no guidance, and get "No AI provider
+  // configured" errors when they try to chat. UserDefaultsKeys for onboarding
+  // states (hasCompletedOnboarding, onboardedV1/V2, hasShownWelcome) exist but
+  // are never read. Future iteration should add a welcome flow that:
+  //   a) Asks about use case (meetings, journaling, projects, general)
+  //   b) Guides user through connecting their first AI provider
+  //   c) Shows a quick tour of the 4 tabs
   private func checkFirstLaunchConfig() {
     let allConfigs = (try? modelContext.fetch(FetchDescriptor<AIProviderConfigModel>())) ?? []
     if allConfigs.isEmpty {
