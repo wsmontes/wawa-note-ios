@@ -400,7 +400,9 @@ final class AIConfigService: @unchecked Sendable {
   func requestParams(for feature: String, model: String) -> AIFeatureParams {
     let feat = featureConfig(for: feature)
     let preset = presetFor(model: model)
-    let isReasoning = preset?.reasoningModel ?? false
+    // Prefer preset flag, but fall back to name-pattern heuristics for
+    // unknown models (e.g., new o-series releases without presets yet).
+    let isReasoning = preset?.reasoningModel ?? isReasoningModel(model)
 
     // Rate limiting: monitor burst calls (non-blocking, just logs)
     let minInterval: TimeInterval = feature == "chat" ? 0.5 : 2.0

@@ -354,7 +354,7 @@ final class AnthropicProvider: AIProvider, @unchecked Sendable {
     urlRequest.httpMethod = "POST"
     urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
     urlRequest.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-    urlRequest.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+    urlRequest.setValue("2025-06-01", forHTTPHeaderField: "anthropic-version")
     urlRequest.httpBody = try JSONEncoder().encode(body)
 
     AppLog.provider.info("POST \(url.absoluteString)")
@@ -429,7 +429,7 @@ final class AnthropicProvider: AIProvider, @unchecked Sendable {
           urlRequest.httpMethod = "POST"
           urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
           urlRequest.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-          urlRequest.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+          urlRequest.setValue("2025-06-01", forHTTPHeaderField: "anthropic-version")
           urlRequest.httpBody = try JSONEncoder().encode(body)
 
           AppLog.provider.info("POST \(url.absoluteString) (streaming)")
@@ -511,7 +511,7 @@ final class AnthropicProvider: AIProvider, @unchecked Sendable {
     var request = URLRequest(url: endpoint)
     request.httpMethod = "GET"
     request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-    request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+    request.setValue("2025-06-01", forHTTPHeaderField: "anthropic-version")
     request.timeoutInterval = 10
 
     let (data, response) = try await session.data(for: request)

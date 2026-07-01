@@ -415,7 +415,7 @@ final class GeminiProvider: AIProvider, @unchecked Sendable {
         } else {
           argsStr = "{}"
         }
-        return AIToolCall(id: fc.name, name: fc.name, arguments: argsStr)
+        return AIToolCall(id: UUID().uuidString, name: fc.name, arguments: argsStr)
       }
     }()
 
