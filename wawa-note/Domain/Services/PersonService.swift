@@ -1,4 +1,5 @@
 import Contacts
+import WawaNoteCore
 import Foundation
 import SwiftData
 

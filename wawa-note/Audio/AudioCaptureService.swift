@@ -1,4 +1,5 @@
 import AVFoundation
+import WawaNoteCore
 import Accelerate
 import OSLog
 
