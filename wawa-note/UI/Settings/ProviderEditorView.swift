@@ -20,6 +20,9 @@ final class ProviderEditorViewModel: ObservableObject {
 
   private let keychain = SecureKeyStore()
   private let router = ProviderRouter()
+  // FIXME: No duplicate detection for custom providers. Unlike the template-based
+  // flow (ProviderConnectView), the editor doesn't check for existing configs with
+  // the same type+URL. Users can create unlimited identical providers.
   private var existingProvider: AIProviderConfigModel?
   private let keychainIdentifier: String
 

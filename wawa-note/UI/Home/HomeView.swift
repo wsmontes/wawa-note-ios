@@ -71,7 +71,8 @@ final class HomeViewModel: ObservableObject {
     defer { if didStart { url.stopAccessingSecurityScopedResource() } }
 
     guard let importer = importRouter.importer(for: url) else {
-      importError = "Format not supported."
+      importError =
+        "Format not supported. Supported: audio, images, text, markdown, JSON, PDF, HTML, RTF, SRT, and ICS files."
       return
     }
 
@@ -240,6 +241,8 @@ final class HomeViewModel: ObservableObject {
     } catch {
       AppLog.general.error(
         "HomeView: importAudioFile storeAudio failed — \(error.localizedDescription)")
+      // FIXME: Audio import deletes the item on failure, but text import keeps the form
+      // open for retry. Inconsistent UX — both should allow retry or both should delete.
       await MainActor.run { coord.deleteItem(itemId) }
     }
   }
