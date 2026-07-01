@@ -272,6 +272,7 @@ public struct ProjectContextData: Codable, Sendable {
   public let signalCount: Int
   public let healthStatus: String?
   public let summary: String?
+  public init(projectName: String, slug: String, status: String, taskCount: Int, itemCount: Int, signalCount: Int, healthStatus: String? = nil, summary: String? = nil) { self.projectName = projectName; self.slug = slug; self.status = status; self.taskCount = taskCount; self.itemCount = itemCount; self.signalCount = signalCount; self.healthStatus = healthStatus; self.summary = summary }
 }
 
 public struct TaskCardData: Codable, Sendable {
@@ -282,6 +283,7 @@ public struct TaskCardData: Codable, Sendable {
   public let owner: String?
   public let projectSlug: String?
   public let needsConfirmation: Bool  // true = show Confirm/Cancel buttons
+  public init(taskID: String, title: String, status: String, priority: String, ownerName: String? = nil, dueDate: String? = nil, projectID: String? = nil) { self.taskID = taskID; self.title = title; self.status = status; self.priority = priority; self.ownerName = ownerName; self.dueDate = dueDate; self.projectID = projectID }
 }
 
 public struct ItemCardData: Codable, Sendable {
@@ -293,6 +295,7 @@ public struct ItemCardData: Codable, Sendable {
   public let projectSlug: String?
   public let hasTranscript: Bool
   public let hasAnalysis: Bool
+  public init(itemID: String, title: String, type: String, status: String? = nil, date: String? = nil, summary: String? = nil, projectID: String? = nil, tags: [String] = []) { self.itemID = itemID; self.title = title; self.type = type; self.status = status; self.date = date; self.summary = summary; self.projectID = projectID; self.tags = tags }
 }
 
 public struct SearchResultsData: Codable, Sendable {
@@ -322,11 +325,13 @@ public struct AnalysisSection: Codable, Sendable {
 public struct ChoicePromptData: Codable, Sendable {
   public let question: String
   public let options: [ChoiceOption]
+  public init(question: String, options: [ChoiceOption]) { self.question = question; self.options = options }
 }
 
 public struct ChoiceOption: Codable, Sendable {
   public let label: String
   public let value: String  // sent as user message when tapped
+  public init(label: String, value: String) { self.label = label; self.value = value }
 }
 
 public struct ConfirmationData: Codable, Sendable {
@@ -336,6 +341,7 @@ public struct ConfirmationData: Codable, Sendable {
   public let cancelLabel: String
   public let confirmValue: String
   public let cancelValue: String
+  public init(message: String, confirmLabel: String = "Confirm", cancelLabel: String = "Cancel", isDestructive: Bool = false) { self.message = message; self.confirmLabel = confirmLabel; self.cancelLabel = cancelLabel; self.isDestructive = isDestructive }
 }
 
 // MARK: - Document Link Data
@@ -346,6 +352,7 @@ public struct FileLinkData: Codable, Sendable {
   public let itemType: String
   public let snippet: String
   public let projectSlug: String?
+  public init(itemID: String, title: String, fileType: String? = nil, size: String? = nil, path: String? = nil) { self.itemID = itemID; self.title = title; self.fileType = fileType; self.size = size; self.path = path }
 }
 
 public struct DocumentHeaderData: Codable, Sendable {
@@ -354,16 +361,19 @@ public struct DocumentHeaderData: Codable, Sendable {
   public let summary: String
   public let sectionCount: Int
   public let itemID: String
+  public init(title: String, documentType: String, date: String? = nil, source: String? = nil, itemID: String? = nil) { self.title = title; self.documentType = documentType; self.date = date; self.source = source; self.itemID = itemID }
 }
 
 public struct FreeTextInputData: Codable, Sendable {
   public let question: String
   public let placeholder: String
   public let submitLabel: String
+  public init(question: String, placeholder: String? = nil, submitLabel: String = "Submit") { self.question = question; self.placeholder = placeholder; self.submitLabel = submitLabel }
 }
 
 public struct ProgressUpdateData: Codable, Sendable {
   public let step: Int
   public let total: Int
   public let label: String
+  public init(step: Int, total: Int, label: String = "") { self.step = step; self.total = total; self.label = label }
 }

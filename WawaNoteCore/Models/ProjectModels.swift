@@ -278,7 +278,7 @@ public protocol FieldProvidence: AnyObject {
 
 
 
-  public var provenance: FieldProvenance { get set }
+  var provenance: FieldProvenance { get set }
 
 
   func writeProvenance()
