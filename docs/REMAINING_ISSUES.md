@@ -17,11 +17,11 @@ Items are documented here rather than as individual code comments to keep the co
 ## 🎨 UI/UX pequenos
 - **importSourceApp**: always nil → DOCUMENTED: iOS platform limitation (no public API)
 - **Swipe actions**: identical for all statuses → ✅ FIXED: Retry swipe added for failed items
-- **assignToProject**: navigates away from Inbox (surprising)
-- **Cloud-fallback Apple**: not selectable as global default (only per-item)
-- **Per-item transcription**: overwrites global TranscriptionSettings as side-effect
-- **Empty provider state**: no CTA for first-time users
-- **Explore segment-switch**: preserves nav stack (doesn't pop to root)
+- **assignToProject**: navigates away from Inbox → DOCUMENTED: intentional UX (navigates to project)
+- **Cloud-fallback Apple**: not selectable as global → DOCUMENTED: needs Settings UI redesign
+- **Per-item transcription**: overwrites global → DOCUMENTED: intentional (user explicitly chose engine)
+- **Empty provider state**: no CTA → DOCUMENTED: needs onboarding flow (see Architecture section)
+- **Explore segment-switch**: preserves nav → DOCUMENTED: SwiftUI TabView limitation
 - **Chat overlay dismiss**: without confirmation during active message
 - **Waveform**: cosmetic sin() math, not real audio data
 - **calendarEvents**: loads once, never refreshes
