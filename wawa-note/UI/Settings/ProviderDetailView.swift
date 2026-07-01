@@ -100,6 +100,11 @@ struct ProviderDetailView: View {
   }
 
   private func deleteProvider() {
+    // If deleting the active provider, clear the stale reference so
+    // downstream code doesn't work with a dangling UUID.
+    if ActiveProviderManager.shared.getActiveProviderID() == provider.id.uuidString {
+      ActiveProviderManager.shared.setActiveProviderID("")
+    }
     if let keyId = provider.apiKeyKeychainIdentifier {
       try? keychain.deleteAPIKey(for: keyId)
     }

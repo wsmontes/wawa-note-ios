@@ -109,6 +109,18 @@ struct WawaNoteApp: App {
       }
     )
 
+    // Revalidate automation config when providers change (add/remove/switch).
+    // This cleans up stale model references left behind by deleted providers.
+    notificationTokens.tokens.append(
+      NotificationCenter.default.addObserver(
+        forName: .activeProviderChanged,
+        object: nil,
+        queue: .main
+      ) { _ in
+        AutomationSettings.shared.revalidateAutomationConfig(context: ModelContext(modelContainer))
+      }
+    )
+
     // Mark clean exit on normal termination
     notificationTokens.tokens.append(
       NotificationCenter.default.addObserver(

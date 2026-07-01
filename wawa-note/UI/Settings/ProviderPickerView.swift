@@ -29,7 +29,9 @@ struct ProviderPickerView: View {
         } else {
           Picker("Provider", selection: $activeModelKey) {
             ForEach(allModelKeys, id: \.self) { key in
-              Text(key).tag(key)
+              if let provider = providers.first(where: { $0.id.uuidString == key }) {
+                Text(displayLabel(for: provider)).tag(key)
+              }
             }
           }
           .pickerStyle(.menu)
@@ -83,7 +85,13 @@ struct ProviderPickerView: View {
   // MARK: - Model key management
 
   private var allModelKeys: [String] {
-    providers.map { "\($0.type.displayName) · \($0.defaultModel)" }
+    // Use provider UUID as the picker identity — concatenated display strings
+    // collide when two providers share the same type + default model.
+    providers.map { $0.id.uuidString }
+  }
+
+  private func displayLabel(for provider: AIProviderConfigModel) -> String {
+    "\(provider.type.displayName) · \(provider.defaultModel)"
   }
 
   private var activeProvider: AIProviderConfigModel? {
@@ -109,16 +117,16 @@ struct ProviderPickerView: View {
       let uuid = UUID(uuidString: activeId),
       let active = providers.first(where: { $0.id == uuid })
     {
-      activeModelKey = "\(active.type.displayName) · \(active.defaultModel)"
+      activeModelKey = active.id.uuidString
     } else if let first = providers.first {
       activeManager.setActiveProviderID(first.id.uuidString)
-      activeModelKey = "\(first.type.displayName) · \(first.defaultModel)"
+      activeModelKey = first.id.uuidString
     }
   }
 
   private func updateActiveFromKey(_ key: String) {
     guard
-      let provider = providers.first(where: { "\($0.type.displayName) · \($0.defaultModel)" == key }
+      let provider = providers.first(where: { $0.id.uuidString == key }
       )
     else { return }
     activeManager.setActiveProviderID(provider.id.uuidString)

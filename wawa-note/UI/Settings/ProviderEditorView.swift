@@ -16,6 +16,7 @@ final class ProviderEditorViewModel: ObservableObject {
 
   @Published var connectionStatus: ConnectionStatus = .notTested
   @Published var isSaving = false
+  @Published var saveError: String?
 
   private let keychain = SecureKeyStore()
   private let router = ProviderRouter()
@@ -51,7 +52,19 @@ final class ProviderEditorViewModel: ObservableObject {
   }
 
   func save(context: ModelContext) {
+    // Validate before saving — catch empty names and invalid URLs early.
+    let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedName.isEmpty else {
+      saveError = "Please enter a name for this provider."
+      return
+    }
+    guard !baseURLString.isEmpty, URL(string: baseURLString) != nil else {
+      saveError = "Please enter a valid server URL (e.g., https://api.openai.com/v1)."
+      return
+    }
+
     isSaving = true
+    saveError = nil
     defer { isSaving = false }
 
     if let provider = existingProvider {
@@ -209,11 +222,22 @@ struct ProviderEditorView: View {
         ToolbarItem(placement: .topBarTrailing) {
           Button("Save") {
             viewModel.save(context: modelContext)
-            dismiss()
+            if viewModel.saveError == nil { dismiss() }
           }
           .bold()
           .disabled(viewModel.isSaving)
         }
+      }
+      .alert(
+        "Cannot Save",
+        isPresented: Binding(
+          get: { viewModel.saveError != nil },
+          set: { if !$0 { viewModel.saveError = nil } }
+        )
+      ) {
+        Button("OK") { viewModel.saveError = nil }
+      } message: {
+        Text(viewModel.saveError ?? "")
       }
     }
   }
