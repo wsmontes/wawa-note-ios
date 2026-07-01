@@ -32,37 +32,37 @@ Items are documented here rather than as individual code comments to keep the co
 - **Default streaming wrapper**: no real streaming → DOCUMENTED: needs provider-specific SSE overrides
 - **Tool descriptions**: captured at init → DOCUMENTED: needs dynamic refresh on schema/skill changes
 - **Full-text reassignment**: per-token → DOCUMENTED: acceptable for chat, monitor on older devices
-- **Item context resolve-away**: to project, sharing chat between items
-- **EmbeddingService**: no in-memory LRU cache
-- **LocalIntelligence**: directory name misleading (no on-device ML)
+- **Item context resolve-away**: → DOCUMENTED: intentional (all items in project share conversation)
+- **EmbeddingService**: no cache → DOCUMENTED: reads from disk per call, add LRU for frequent items
+- **LocalIntelligence**: misleading name → DOCUMENTED: rename to SemanticSearch or VectorSearch
 
-## ⚙️ Config / Dados (já documentados no ai_config.json)
-- 7 model presets referenced in model_policy without presets
-- gpt-4o/gpt-4o-mini deprecated 2026-07-23
-- agent feature uses gpt-5-nano (weak for agents)
-- Hardcoded $0.002/1K cost estimate
-- maxChunkChars double-counts output budget
-- Budget tier thresholds create abrupt cliff at 75%
-- OpenRouter provider ordering hardcoded
-- ModelCache TTL 1h high for OpenRouter
+## ⚙️ Config / Dados (documentados)
+- 7 model presets referenced without presets → DOCUMENTED: add presets or update references
+- gpt-4o/gpt-4o-mini deprecated 2026-07-23 → DOCUMENTED: remove after deprecation date
+- agent feature uses gpt-5-nano → DOCUMENTED: consider upgrading to gpt-5.5 for agents
+- Hardcoded $0.002/1K cost → DOCUMENTED: update to per-model pricing
+- maxChunkChars double-counts → DOCUMENTED: conservative but safe, reduce margin
+- Budget tier cliff at 75% → DOCUMENTED: add intermediate tier at 85%
+- OpenRouter ordering hardcoded → DOCUMENTED: add user-configurable provider preferences
+- ModelCache TTL 1h → DOCUMENTED: reduce to 15-30min for OpenRouter pricing
 
-## 🏗️ Arquitetura (precisa de redesign)
-- ImportError.timeout: defined but never raised in Share Extension
-- isIncomplete/importError: never set by Share Extension
-- Partial success: silently swallows failures in Share Extension
-- Chat citation links: unreachable (overlay without NavigationStack)
-- Disk-full mid-recording: bypasses coordinator orchestration
-- Semantic search results: discarded (ShellInterpreter never returns them)
-- Semantic search toggle: nonexistent in InboxView
-- System errors: reach user unfiltered (NSURLError.localizedDescription)
-- Tool call arguments: invisible in AgentStatusBar UI
-- Apple cloud fallback: happens without user indicator
-- Onboarding flow: entirely missing (first-launch users see no guidance)
-- BudgetTracker.recordSpend: now wired ✅
-- Anthropic prompt caching: not implemented (50-90% cost reduction opportunity)
-- Mode picker (Auto/Deep/Fast): cosmetic — doesn't change model, only iterations
-- AIService: orphaned architecture (well-designed but never instantiated)
-- ModelPolicy.swift: protocol + actor defined but never used
-- Auto-summarize layer 4: not real summarization (concatenates 80-char previews)
-- No output token reservation in context budget
-- Push-back mechanism: single-iteration only
+## 🏗️ Arquitetura (documentados para redesign)
+- ImportError.timeout: never raised → DOCUMENTED: needs watchdog timer in extension
+- isIncomplete/importError: never set → DOCUMENTED: needs extension lifecycle hooks
+- Partial success: silently swallowed → DOCUMENTED: needs partial-results UI
+- Chat citation links: unreachable → DOCUMENTED: needs NavigationStack in overlay
+- Disk-full mid-recording: bypasses coordinator → DOCUMENTED: needs audio service callback
+- Semantic search results: discarded → DOCUMENTED: needs observable singleton or shell output
+- Semantic search toggle: nonexistent → DOCUMENTED: needs InboxView search integration
+- System errors: reach user unfiltered → DOCUMENTED: needs ProviderError mapping layer
+- Tool call arguments: invisible → DOCUMENTED: needs AgentStatusBar expansion
+- Apple cloud fallback: no indicator → DOCUMENTED: needs UI badge on transcription result
+- Onboarding flow: entirely missing → DOCUMENTED: needs first-launch welcome + provider setup wizard
+- BudgetTracker.recordSpend: ✅ FIXED — wired in all 3 providers
+- Anthropic prompt caching: not implemented → DOCUMENTED: 50-90% cost reduction opportunity
+- Mode picker (Auto/Deep/Fast): cosmetic → DOCUMENTED: needs separate exec/advisor model pickers
+- AIService: orphaned → DOCUMENTED: needs wiring into ProviderRouter or removal
+- ModelPolicy.swift: unused → DOCUMENTED: needs wiring into AgentLoop or removal
+- Auto-summarize layer 4: not real summary → DOCUMENTED: needs LLM-based summarization
+- No output token reservation → DOCUMENTED: needs margin calculation update
+- Push-back mechanism: single-iteration → DOCUMENTED: needs persistent push-back in message history
