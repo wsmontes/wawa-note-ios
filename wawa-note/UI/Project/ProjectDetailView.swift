@@ -98,6 +98,15 @@ struct ProjectDetailLink: View {
 // MARK: - Project Home (Simplified)
 // NOTE: This is the simplified version with Synthesis | Files segments (2026-06-18).
 // The old ProjectHomeView with multiple tabs has been consolidated into this version.
+//
+// KNOWN DEAD CODE: BoardView (Kanban, line 510) and ProjectGraphView are defined
+// but have no navigation entry point from this view. The old multi-tab layout
+// (Items/Tasks/Graph/Kanban) was removed during consolidation. HealthRing (line 251)
+// is also unused.
+//
+// To restore: either add back the segmented tabs, or add toolbar buttons that
+// present BoardView/ProjectGraphView as sheets. The Kanban board supports
+// drag-and-drop and would be valuable for task management.
 
 struct ProjectHomeView: View {
   let project: Project
