@@ -370,8 +370,7 @@ final class RecordingCoordinator: ObservableObject {
   func pauseRecording() {
     // Pause in any active state — the capture service handles the transition.
     // Guard only against truly inactive states (idle, stopped).
-    let isFailed: Bool = if case .failed = state { true } else { false }
-    guard state != .idle, state != .stopped, !isFailed else { return }
+    guard state != .idle, state != .stopped else { return }
 
     captureService.pauseRecording()
     wasUserPaused = true
@@ -865,7 +864,6 @@ final class RecordingCoordinator: ObservableObject {
     case .recording: return "recording"
     case .paused: return "paused"
     case .stopped: return "stopped"
-    case .failed: return "failed"
     }
   }
 

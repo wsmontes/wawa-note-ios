@@ -7,7 +7,6 @@ enum RecordingUIState: Equatable {
   case recording
   case paused
   case stopped
-  case failed(String)
 }
 
 @MainActor
