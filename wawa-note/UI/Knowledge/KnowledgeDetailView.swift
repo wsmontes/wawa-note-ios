@@ -115,6 +115,15 @@ struct KnowledgeDetailView: View {
               if !agentEvents.isEmpty {
                 Text("\(agentEvents.count) steps").font(.caption2).foregroundStyle(.secondary)
               }
+              Button {
+                Task { await cancelCurrentProcessing() }
+              } label: {
+                Image(systemName: "stop.circle.fill")
+                  .font(.title2)
+                  .foregroundStyle(.red)
+                  .symbolRenderingMode(.hierarchical)
+              }
+              .buttonStyle(.plain)
             }
             .padding(12)
 
@@ -1978,6 +1987,30 @@ struct KnowledgeDetailView: View {
       let storage = results["storage"] as? [String: Any]
     {
       rawAnalysisJSON = storage
+    }
+  }
+
+  /// Cancels all in-flight processing for the current item — both queue-backed
+  /// (analysis/full reprocess) and direct (transcribe-only). Resets all local
+  /// processing state so the UI returns to idle.
+  private func cancelCurrentProcessing() async {
+    // Cancel via queue if this item has a queue entry
+    if let entry = processingQueue.entries.first(where: { $0.itemID == item.id }) {
+      processingQueue.cancel(entry.id)
+    }
+    // Cancel direct pipeline job (transcribe-only path bypasses the queue)
+    contentPipeline.cancelItem(item.id)
+    // Reset local state
+    await MainActor.run {
+      isTranscribing = false
+      isAnalyzing = false
+      pipelineStage = ""
+      agentEvents = []
+      isAgentThinking = false
+      transcriptionError = nil
+      analysisError = nil
+      loadData()
+      refreshID = UUID()
     }
   }
 

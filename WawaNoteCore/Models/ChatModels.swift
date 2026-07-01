@@ -9,7 +9,7 @@ public enum ChatContext: Equatable, Hashable, Codable {
   case exploreProjects
   case project(UUID)
 
-  var key: String {
+  public var key: String {
     switch self {
     case .global: return "global"
     case .inbox: return "inbox"
@@ -19,7 +19,7 @@ public enum ChatContext: Equatable, Hashable, Codable {
     }
   }
 
-  var displayName: String {
+  public var displayName: String {
     switch self {
     case .global: return "General"
     case .inbox: return "Inbox"
@@ -29,7 +29,7 @@ public enum ChatContext: Equatable, Hashable, Codable {
     }
   }
 
-  var associatedID: UUID? {
+  public var associatedID: UUID? {
     switch self {
     case .item(let id): return id
     case .project(let id): return id
@@ -37,7 +37,7 @@ public enum ChatContext: Equatable, Hashable, Codable {
     }
   }
 
-  static func from(key: String) -> ChatContext? {
+  public static func from(key: String) -> ChatContext? {
     switch key {
     case "global": return .global
     case "inbox": return .inbox
@@ -121,7 +121,7 @@ public struct ChatMessage: Identifiable, Codable {
   public var toolCallId: String?
   public var citations: [ChatCitation]?
   public var isThinking: Bool?
-  var projectColorHex: String?
+  public var projectColorHex: String?
   public var blocksJSON: String?
   /// When true, this message is invisible in the chat UI but still sent to the agent.
   /// Used for UI-triggered decisions (ChoicePrompt, swipe actions) that shouldn't
@@ -129,7 +129,7 @@ public struct ChatMessage: Identifiable, Codable {
   public var isInternal: Bool
 
   /// Parsed blocks from blocksJSON. Nil if no structured content (falls back to text parsing).
-  var blocks: [ChatBlock]? {
+  public var blocks: [ChatBlock]? {
     get {
       guard let json = blocksJSON, let data = json.data(using: .utf8) else { return nil }
       return try? JSONDecoder().decode([ChatBlock].self, from: data)
@@ -179,9 +179,9 @@ public struct PersistedToolCall: Codable {
   public let name: String
   public let arguments: String
   public var resultPreview: String?
-  var statusRaw: String
+  public var statusRaw: String
 
-  var status: ToolCallStatus {
+  public var status: ToolCallStatus {
     get { ToolCallStatus(rawValue: statusRaw) ?? .pending }
     set { statusRaw = newValue.rawValue }
   }
@@ -208,12 +208,28 @@ public enum ToolCallStatus: String, Codable, Sendable {
 // MARK: - Citation
 
 public struct ChatCitation: Codable, Sendable {
-  let itemId: UUID
-  let title: String
-  let snippet: String
-  let itemType: KnowledgeItemType
-  var projectID: UUID?
-  var projectColorHex: String?
+  public let itemId: UUID
+  public let title: String
+  public let snippet: String
+  public let itemType: KnowledgeItemType
+  public var projectID: UUID?
+  public var projectColorHex: String?
+
+  public init(
+    itemId: UUID,
+    title: String,
+    snippet: String,
+    itemType: KnowledgeItemType,
+    projectID: UUID? = nil,
+    projectColorHex: String? = nil
+  ) {
+    self.itemId = itemId
+    self.title = title
+    self.snippet = snippet
+    self.itemType = itemType
+    self.projectID = projectID
+    self.projectColorHex = projectColorHex
+  }
 }
 
 // MARK: - Interactive Chat Blocks
@@ -252,26 +268,53 @@ public enum ChatBlock: Codable, Sendable {
 // MARK: - Block Data Types
 
 public struct TableData: Codable, Sendable {
-  let title: String?
-  let headers: [String]
-  let rows: [[String]]
+  public let title: String?
+  public let headers: [String]
+  public let rows: [[String]]
+
+  public init(title: String? = nil, headers: [String] = [], rows: [[String]] = []) {
+    self.title = title
+    self.headers = headers
+    self.rows = rows
+  }
 }
 
 public struct CodeData: Codable, Sendable {
-  let code: String
-  let language: String?
-  let caption: String?
+  public let code: String
+  public let language: String?
+  public let caption: String?
+
+  public init(code: String = "", language: String? = nil, caption: String? = nil) {
+    self.code = code
+    self.language = language
+    self.caption = caption
+  }
 }
 
 public struct ProjectContextData: Codable, Sendable {
-  let projectName: String
-  let slug: String
-  let status: String
-  let taskCount: Int
-  let itemCount: Int
-  let signalCount: Int
-  let healthStatus: String?
-  let summary: String?
+  public let projectName: String
+  public let slug: String
+  public let status: String
+  public let taskCount: Int
+  public let itemCount: Int
+  public let signalCount: Int
+  public let healthStatus: String?
+  public let summary: String?
+
+  public init(
+    projectName: String = "", slug: String = "", status: String = "",
+    taskCount: Int = 0, itemCount: Int = 0, signalCount: Int = 0,
+    healthStatus: String? = nil, summary: String? = nil
+  ) {
+    self.projectName = projectName
+    self.slug = slug
+    self.status = status
+    self.taskCount = taskCount
+    self.itemCount = itemCount
+    self.signalCount = signalCount
+    self.healthStatus = healthStatus
+    self.summary = summary
+  }
 }
 
 public struct TaskCardData: Codable, Sendable {
@@ -322,27 +365,54 @@ public struct ItemCardData: Codable, Sendable {
 }
 
 public struct SearchResultsData: Codable, Sendable {
-  let query: String
-  let results: [SearchResultItem]
+  public let query: String
+  public let results: [SearchResultItem]
+
+  public init(query: String = "", results: [SearchResultItem] = []) {
+    self.query = query
+    self.results = results
+  }
 }
 
 public struct SearchResultItem: Codable, Sendable {
-  let itemID: String
-  let title: String
-  let snippet: String
-  let type: String
-  let projectSlug: String?
+  public let itemID: String
+  public let title: String
+  public let snippet: String
+  public let type: String
+  public let projectSlug: String?
+
+  public init(
+    itemID: String = "", title: String = "", snippet: String = "",
+    type: String = "", projectSlug: String? = nil
+  ) {
+    self.itemID = itemID
+    self.title = title
+    self.snippet = snippet
+    self.type = type
+    self.projectSlug = projectSlug
+  }
 }
 
 public struct AnalysisData: Codable, Sendable {
-  let itemID: String
-  let sections: [AnalysisSection]
+  public let itemID: String
+  public let sections: [AnalysisSection]
+
+  public init(itemID: String = "", sections: [AnalysisSection] = []) {
+    self.itemID = itemID
+    self.sections = sections
+  }
 }
 
 public struct AnalysisSection: Codable, Sendable {
-  let title: String
-  let count: Int
-  let items: [String]
+  public let title: String
+  public let count: Int
+  public let items: [String]
+
+  public init(title: String = "", count: Int = 0, items: [String] = []) {
+    self.title = title
+    self.count = count
+    self.items = items
+  }
 }
 
 public struct ChoicePromptData: Codable, Sendable {

@@ -75,6 +75,22 @@ public final class AudioImportService: @unchecked Sendable {
     }
   }
 
+  /// Copies or converts audio into the App Group shared container so both the
+  /// Share Extension and main app can access it. Stores at files/<itemID>/audio.m4a.
+  public func storeSharedAudio(sourceURL: URL, itemID: UUID) async throws {
+    let destDir = SharedContainer.filesURL.appendingPathComponent(itemID.uuidString)
+    try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
+    let destURL = destDir.appendingPathComponent(AppFileConstants.audioFileName)
+    if isNativeM4ACompatible(sourceURL) {
+      if FileManager.default.fileExists(atPath: destURL.path) {
+        try FileManager.default.removeItem(at: destURL)
+      }
+      try FileManager.default.copyItem(at: sourceURL, to: destURL)
+    } else {
+      try await convertToAAC(inputURL: sourceURL, outputURL: destURL)
+    }
+  }
+
   // MARK: - Metadata extraction
 
   public func extractMetadata(url: URL) async throws -> ImportMetadata {

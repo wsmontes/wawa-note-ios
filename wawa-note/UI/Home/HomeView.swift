@@ -153,6 +153,7 @@ final class HomeViewModel: ObservableObject {
     guard let ctx = modelContext, let pipeline = contentPipeline else { return }
     let total = urls.count
     var imported = 0
+    var skipped = 0
     await MainActor.run { importProgress = "Importing 0/\(total)..." }
 
     for url in urls {
@@ -175,16 +176,17 @@ final class HomeViewModel: ObservableObject {
         await importImageFile(
           url, deleteSource: deleteSource, modelContext: ctx, pipeline: pipeline)
       } else {
-        // Unrecognized file — remove from shared directory so it isn't
-        // rediscovered on every scan. Log for diagnostics.
+        // Unrecognized file — skip and surface to user
         AppLog.general.warning(
           "HomeView: unrecognized file in shared directory — removing: \(url.lastPathComponent)")
         if deleteSource { try? FileManager.default.removeItem(at: url) }
+        skipped += 1
         continue
       }
 
       imported += 1
-      await MainActor.run { importProgress = "Importing \(imported)/\(total)..." }
+      let suffix = skipped > 0 ? " (\(skipped) skipped)" : ""
+      await MainActor.run { importProgress = "Importing \(imported)/\(total)...\(suffix)" }
     }
 
     await MainActor.run {
@@ -609,9 +611,11 @@ struct HomeView: View {
               VStack(spacing: 4) {
                 Image(systemName: "square.and.arrow.down").font(.subheadline)
                 Text("Import").font(.caption2)
-              }.foregroundStyle(.primary).frame(width: 60, height: 52)
+              }.foregroundStyle(importVM.importProgress != nil ? .secondary : .primary)
+                .frame(width: 60, height: 52)
                 .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
             }
+            .disabled(importVM.importProgress != nil)
             Button(action: { showCreationSheet = true }) {
               VStack(spacing: 4) {
                 Image(systemName: "plus.circle").font(.subheadline)

@@ -699,6 +699,23 @@ public final class FileArtifactStore: @unchecked Sendable {
 
     }
 
+    // Also clean up the App Group shared container copy if present.
+    // Share Extension imports store files at SharedContainer.filesURL/<uuid>/
+    // rather than in the sandbox, and the sandbox-only cleanup above would
+    // leave them orphaned, leaking storage over time.
+    let sharedURL = SharedContainer.filesURL.appendingPathComponent(meetingId.uuidString)
+    if fileManager.fileExists(atPath: sharedURL.path) {
+      do {
+        try fileManager.removeItem(at: sharedURL)
+        logger.info("Cleaned up shared container directory for \(meetingId)")
+      } catch {
+        logger.warning(
+          "Failed to clean up shared container directory — \(sharedURL.path): \(error.localizedDescription)"
+        )
+        // Don't throw — sandbox delete already succeeded, shared cleanup is best-effort
+      }
+    }
+
   }
 
   // MARK: - Audio
@@ -709,6 +726,26 @@ public final class FileArtifactStore: @unchecked Sendable {
 
       .appendingPathComponent("audio.m4a")
 
+  }
+
+  /// Resolves audio via App Group shared container — used by Share Extension imports
+  /// where the file is stored in the App Group rather than the app sandbox.
+  public func sharedAudioURL(for itemId: UUID) -> URL {
+    SharedContainer.filesURL
+      .appendingPathComponent(itemId.uuidString)
+      .appendingPathComponent(AppFileConstants.audioFileName)
+  }
+
+  /// Resolves an image file via App Group shared container — used by Share Extension
+  /// imports where the image is stored in the App Group rather than the app sandbox.
+  /// Mirrors the audio dual-path pattern so shared images can be OCR'd.
+  public func sharedImageURL(for itemId: UUID, relativePath: String) -> URL {
+    // relativePath is e.g. "files/<uuid>/photo.jpg" — strip the "files/" prefix
+    // since SharedContainer.filesURL already points to the files directory.
+    let stripped =
+      relativePath.hasPrefix("files/")
+      ? String(relativePath.dropFirst(6)) : relativePath
+    return SharedContainer.filesURL.appendingPathComponent(stripped)
   }
 
   public func audioFileExists(for meetingId: UUID) -> Bool {

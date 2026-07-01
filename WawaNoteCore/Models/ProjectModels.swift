@@ -1029,6 +1029,26 @@ public struct Lens: Codable, Sendable, Identifiable {
 
   public var hasFramework: Bool { framework != nil }
 
+  public init(
+    id: String,
+    name: String,
+    description: String = "",
+    icon: String = "sparkles",
+    category: LensCategory,
+    framework: ProjectFramework? = nil,
+    systemPromptOverride: String? = nil,
+    userPromptTemplate: String? = nil
+  ) {
+    self.id = id
+    self.name = name
+    self.description = description
+    self.icon = icon
+    self.category = category
+    self.framework = framework
+    self.systemPromptOverride = systemPromptOverride
+    self.userPromptTemplate = userPromptTemplate
+  }
+
 }
 
 // MARK: - Preset
@@ -1948,7 +1968,15 @@ public struct TaskBody: Codable, Sendable {
   public var sourceSegmentIDs: [String]?
   public var aiGenerated: Bool
   public var suggestedByItemID: UUID?
-  public init(description: String? = nil, sourceSegmentIDs: [String]? = nil, aiGenerated: Bool = false, suggestedByItemID: UUID? = nil) { self.description = description; self.sourceSegmentIDs = sourceSegmentIDs; self.aiGenerated = aiGenerated; self.suggestedByItemID = suggestedByItemID }
+  public init(
+    description: String? = nil, sourceSegmentIDs: [String]? = nil, aiGenerated: Bool = false,
+    suggestedByItemID: UUID? = nil
+  ) {
+    self.description = description
+    self.sourceSegmentIDs = sourceSegmentIDs
+    self.aiGenerated = aiGenerated
+    self.suggestedByItemID = suggestedByItemID
+  }
 }
 
 /// Structured body for synthesis-type derived items.
@@ -1959,7 +1987,16 @@ public struct SynthesisBody: Codable, Sendable {
   public var metrics: [SynthesisMetric]
   public var updatedFromItemIDs: [UUID]
   public var generatedAt: Date
-  public init(markdown: String = "", sections: [SynthesisSection] = [], metrics: [SynthesisMetric] = [], updatedFromItemIDs: [UUID] = [], generatedAt: Date = Date()) { self.markdown = markdown; self.sections = sections; self.metrics = metrics; self.updatedFromItemIDs = updatedFromItemIDs; self.generatedAt = generatedAt }
+  public init(
+    markdown: String = "", sections: [SynthesisSection] = [], metrics: [SynthesisMetric] = [],
+    updatedFromItemIDs: [UUID] = [], generatedAt: Date = Date()
+  ) {
+    self.markdown = markdown
+    self.sections = sections
+    self.metrics = metrics
+    self.updatedFromItemIDs = updatedFromItemIDs
+    self.generatedAt = generatedAt
+  }
 }
 
 public struct SynthesisSection: Codable, Sendable {

@@ -74,6 +74,11 @@ final class ShareExtensionViewModel: ObservableObject {
       }
     }
 
+    // TODO-DISCUSS: Partial success is silently swallowed. If 2 of 5 items fail,
+    // the user sees "done(3)" with no indication that 2 failed. Errors are only
+    // surfaced when importedCount == 0. A future iteration should either:
+    //   a) Show a summary screen ("3 imported, 2 failed") before dismiss, or
+    //   b) Surface partial-failure errors in the importSourceApp/importError fields.
     if importedCount > 0 {
       finish(with: .done(itemCount: importedCount))
     } else {
@@ -120,26 +125,15 @@ final class ShareExtensionViewModel: ObservableObject {
     let item = KnowledgeItem(type: itemType, title: originalName, status: .draft)
     item.isImported = true
 
-    // Extract audio metadata
+    // Extract audio metadata + convert and store in App Group shared container
     if itemType == .audio, let audioService = router.importer(for: url) as? AudioImportService {
       let result = try await audioService.importFromURL(url)
       item.title = result.knowledgeItem.title
       item.durationSeconds = result.knowledgeItem.durationSeconds
-      // Merge artifacts
-      for (artifactKey, artifactURL) in result.artifacts {
-        let destURL = SharedContainer.filesURL
-          .appendingPathComponent(item.id.uuidString)
-          .appendingPathComponent(artifactURL.lastPathComponent)
-        try FileManager.default.createDirectory(
-          at: destURL.deletingLastPathComponent(),
-          withIntermediateDirectories: true
-        )
-        try FileManager.default.copyItem(at: artifactURL, to: destURL)
-        if artifactKey == "audio" {
-          item.audioFileRelativePath =
-            "files/\(item.id.uuidString)/\(artifactURL.lastPathComponent)"
-        }
-      }
+      // Convert to AAC and store at predictable path: files/<UUID>/audio.m4a
+      // Both the Share Extension and main app access this via App Group
+      try await audioService.storeSharedAudio(sourceURL: url, itemID: item.id)
+      item.audioFileRelativePath = AppFileConstants.audioFileName
     } else {
       // Copy file to App Group
       let safeName = String.safeImportFilename(original: originalName)
@@ -187,15 +181,21 @@ final class ShareExtensionViewModel: ObservableObject {
     }
 
     // Fallback: import as plain file
+    // TODO-DISCUSS: Binary/unrecognized files (zip, numbers, exe, etc.) become
+    // KnowledgeItem(type: .note) with no usable content — orphan items that can
+    // never be processed. A future iteration should either:
+    //   a) Detect binary files and refuse import with a user-friendly error, or
+    //   b) Store the file bytes and expose them as a downloadable attachment.
     let safeName = String.safeImportFilename(original: originalName)
-    let itemDir = SharedContainer.filesURL.appendingPathComponent(UUID().uuidString)
-    try FileManager.default.createDirectory(at: itemDir, withIntermediateDirectories: true)
-    let destURL = itemDir.appendingPathComponent(safeName)
-    try FileManager.default.copyItem(at: url, to: destURL)
-
     let item = KnowledgeItem(type: .note, title: originalName, status: .draft)
     item.isImported = true
     item.importSourceURL = url.absoluteString
+    // Store in directory keyed by the item's ID so the main app can find it.
+    let itemDir = SharedContainer.filesURL.appendingPathComponent(item.id.uuidString)
+    try FileManager.default.createDirectory(at: itemDir, withIntermediateDirectories: true)
+    let destURL = itemDir.appendingPathComponent(safeName)
+    try FileManager.default.copyItem(at: url, to: destURL)
+    item.importSourceURL = destURL.absoluteString
     return item
   }
 

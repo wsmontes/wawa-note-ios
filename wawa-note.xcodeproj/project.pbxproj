@@ -221,6 +221,7 @@
 		FC882AB3805E2CE559DD33AB /* ChatBlockViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A8531ADA9FEB67D391CDD40 /* ChatBlockViews.swift */; };
 		FD0799DC28F8515FAD62D77E /* ContextSensor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D12A5328821C091082B78FB3 /* ContextSensor.swift */; };
 		FF48C20D0A3FDD16A4D4B7BF /* FocusModeSensor.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA70DD32D85A83F607CF2D5A /* FocusModeSensor.swift */; };
+		450A4DB5EC4627B532D2FAFE /* ai_config.json in Resources */ = {isa = PBXBuildFile; fileRef = EFEB0BAA1CD058DDA3FB36C1 /* ai_config.json */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -496,6 +497,7 @@
 		FBBF1F833C2C6268366B6671 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		FDE499C4C6FBD48305E55385 /* ProviderPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderPickerView.swift; sourceTree = "<group>"; };
 		FFC932A776BC7FD12B0C6434 /* TranscriptPatchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptPatchService.swift; sourceTree = "<group>"; };
+		EFEB0BAA1CD058DDA3FB36C1 /* ai_config.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = ai_config.json; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -774,6 +776,7 @@
 				8BAC4EC501E7A388314200B9 /* templates */,
 				7394D93A2BF19F119E4FB10E /* Assets.xcassets */,
 				CB78C00685952F40F9C50636 /* PrivacyInfo.xcprivacy */,
+				EFEB0BAA1CD058DDA3FB36C1 /* ai_config.json */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -1310,6 +1313,7 @@
 				0DAFDA30A68648C8AD232FC2 /* compare.md in Resources */,
 				80CEC69B92C4B96BA72F5037 /* expand.md in Resources */,
 				765CBDB0CBEB83EB6E554004 /* organize.md in Resources */,
+				450A4DB5EC4627B532D2FAFE /* ai_config.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

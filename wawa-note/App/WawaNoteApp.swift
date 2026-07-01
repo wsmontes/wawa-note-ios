@@ -158,8 +158,63 @@ struct WawaNoteApp: App {
   /// If the on-disk store cannot be loaded (schema change, corruption, etc.),
   /// the old store is deleted and a fresh container is created automatically.
   private static func createModelContainer(schema: Schema) -> ModelContainer {
+    // One-time migration: if the App Group database doesn't exist yet but
+    // the legacy default.store does, copy it to the shared container so
+    // existing data (providers, projects, items) is preserved.
+    migrateLegacyStoreIfNeeded()
     let config = ModelConfiguration(schema: schema, url: SharedContainer.databaseURL)
     return createModelContainer(schema: schema, config: config)
+  }
+
+  /// Copies legacy default.store (from default SwiftData location) to the
+  /// App Group shared container as WawaNote.sqlite. Runs once — when the
+  /// new store doesn't exist but the legacy store does.
+  ///
+  /// Background: commit 1c9a0ab switched the database URL from the default
+  /// location to the App Group without data migration. Users who had data
+  /// in the old location saw all providers/items disappear because the app
+  /// opened a new empty database. This migration preserves that data.
+  private static func migrateLegacyStoreIfNeeded() {
+    let newURL = SharedContainer.databaseURL
+
+    // New store already exists — migration already done or app is fresh
+    guard !FileManager.default.fileExists(atPath: newURL.path) else { return }
+
+    guard
+      let appSupport = FileManager.default
+        .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+    else { return }
+
+    let legacyURL = appSupport.appendingPathComponent("default.store")
+
+    // No legacy data to migrate — fresh install
+    guard FileManager.default.fileExists(atPath: legacyURL.path) else { return }
+
+    AppLog.general.info("🔄 Migrating legacy database from \(legacyURL.path) to \(newURL.path)")
+
+    // Ensure parent directory exists in App Group container
+    let newDir = newURL.deletingLastPathComponent()
+    try? FileManager.default.createDirectory(at: newDir, withIntermediateDirectories: true)
+
+    // Copy store file + WAL companions
+    // legacy: default.store, default.store-shm, default.store-wal
+    // new:     WawaNote.sqlite, WawaNote.sqlite-shm, WawaNote.sqlite-wal
+    let companions = ["", "-shm", "-wal"]
+    for suffix in companions {
+      let sourceURL = appSupport.appendingPathComponent("default.store" + suffix)
+      guard FileManager.default.fileExists(atPath: sourceURL.path) else { continue }
+
+      let destFileName = "WawaNote.sqlite" + suffix
+      let destURL = newDir.appendingPathComponent(destFileName)
+      do {
+        try FileManager.default.copyItem(at: sourceURL, to: destURL)
+        AppLog.general.info("✅ Migrated default.store\(suffix) → \(destFileName)")
+      } catch {
+        AppLog.warn("general", "⚠️ Failed to migrate default.store\(suffix): \(error)")
+      }
+    }
+
+    AppLog.general.info("✅ Legacy database migration complete")
   }
 
   private static func createModelContainer(schema: Schema, config: ModelConfiguration)
@@ -170,11 +225,14 @@ struct WawaNoteApp: App {
     } catch {
       AppLog.warn("general", "⚠️ ModelContainer load failed — recreating store. Error: \(error)")
 
+      // Save a backup before destroying, so data can be recovered manually.
+      Self.backupStoreBeforeDestroy()
+
       // Delete stores in all possible locations (app container + App Group)
       Self.destroyAllStores()
 
-      // Retry with fresh store
-      let freshConfig = ModelConfiguration(schema: schema)
+      // Retry with fresh store at the same App Group URL
+      let freshConfig = ModelConfiguration(schema: schema, url: SharedContainer.databaseURL)
       do {
         return try ModelContainer(for: schema, configurations: freshConfig)
       } catch {
@@ -183,7 +241,56 @@ struct WawaNoteApp: App {
     }
   }
 
-  /// Deletes default.store files from both the app container and App Group container.
+  /// Saves a timestamped backup of the current database before it gets destroyed.
+  /// Backup goes to <AppGroup>/DatabaseBackups/<timestamp>/ so the user or support
+  /// can recover data manually if the automatic recovery was a false positive.
+  private static func backupStoreBeforeDestroy() {
+    guard
+      let groupURL = FileManager.default.containerURL(
+        forSecurityApplicationGroupIdentifier: SharedContainer.appGroupIdentifier)
+    else { return }
+
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+      .replacingOccurrences(of: ":", with: "-")
+    let backupDir = groupURL.appendingPathComponent(
+      "DatabaseBackups/\(timestamp)", isDirectory: true)
+    try? FileManager.default.createDirectory(at: backupDir, withIntermediateDirectories: true)
+
+    let storeNames = ["WawaNote.sqlite", "default.store"]
+    let companions = ["", "-shm", "-wal"]
+
+    // Search both the App Group root and the app container
+    var searchDirs: [URL] = [groupURL]
+    if let appSupport = FileManager.default
+      .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+    {
+      searchDirs.append(appSupport)
+    }
+
+    var backedUp = 0
+    for dir in searchDirs {
+      for name in storeNames {
+        for suffix in companions {
+          let source = dir.appendingPathComponent(name + suffix)
+          guard FileManager.default.fileExists(atPath: source.path) else { continue }
+          let dest = backupDir.appendingPathComponent(name + suffix)
+          do {
+            try FileManager.default.copyItem(at: source, to: dest)
+            backedUp += 1
+          } catch {
+            AppLog.warn("general", "⚠️ Backup failed for \(name + suffix): \(error)")
+          }
+        }
+      }
+    }
+
+    if backedUp > 0 {
+      AppLog.general.info("📦 Database backup saved to \(backupDir.path) (\(backedUp) files)")
+    }
+  }
+
+  /// Deletes store files from both the app container and App Group container,
+  /// covering both legacy (default.store) and current (WawaNote.sqlite) names.
   private static func destroyAllStores() {
     var searchDirs: [URL] = []
 
@@ -194,15 +301,21 @@ struct WawaNoteApp: App {
       searchDirs.append(appSupport)
     }
 
-    // App Group container
+    // App Group container — root (where WawaNote.sqlite lives)
     if let groupURL = FileManager.default
-      .containerURL(forSecurityApplicationGroupIdentifier: "group.com.wawa-note")
+      .containerURL(forSecurityApplicationGroupIdentifier: SharedContainer.appGroupIdentifier)
     {
+      searchDirs.append(groupURL)
+      // Also check Library/Application Support inside the group (legacy location)
       searchDirs.append(groupURL.appendingPathComponent("Library/Application Support"))
     }
 
+    // Destroy both legacy and current store names in every searched directory
+    let storeNames = ["default.store", "WawaNote.sqlite"]
     for dir in searchDirs {
-      Self.destroyStore(at: dir.appendingPathComponent("default.store"))
+      for name in storeNames {
+        Self.destroyStore(at: dir.appendingPathComponent(name))
+      }
     }
   }
 

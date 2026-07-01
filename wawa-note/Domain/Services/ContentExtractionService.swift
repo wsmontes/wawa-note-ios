@@ -49,6 +49,7 @@ final class ContentExtractionService {
   /// Never returns nil as long as a transcript exists on disk — extraction failure
   /// falls back to the existing transcript instead of blocking Phase 3.
   func extractTextFromAudio(_ item: KnowledgeItem) async -> String? {
+    guard !Task.isCancelled else { return nil }
     let startTime = Date()
     let id = item.id
     AppLog.provider.info(
@@ -56,8 +57,21 @@ final class ContentExtractionService {
     )
 
     // ── Diagnostic logging: final audio state ──────────────────
-    let audioURL = fileStore.audioFileURL(for: item.id)
-    let audioExists = FileManager.default.fileExists(atPath: audioURL.path)
+    let sandboxURL = fileStore.audioFileURL(for: item.id)
+    let sharedURL = fileStore.sharedAudioURL(for: item.id)
+    // Prefer sandbox path; fall back to App Group shared container (Share Extension imports)
+    let audioURL: URL
+    let audioExists: Bool
+    if FileManager.default.fileExists(atPath: sandboxURL.path) {
+      audioURL = sandboxURL
+      audioExists = true
+    } else if FileManager.default.fileExists(atPath: sharedURL.path) {
+      audioURL = sharedURL
+      audioExists = true
+    } else {
+      audioURL = sandboxURL
+      audioExists = false
+    }
     let audioSize =
       audioExists
       ? (try? FileManager.default.attributesOfItem(atPath: audioURL.path)[.size] as? Int) ?? 0 : 0
@@ -203,7 +217,17 @@ final class ContentExtractionService {
   /// Transcribe the consolidated audio.m4a (AAC) via the selected engine.
   /// Apple engines decode AAC→WAV internally; Whisper sends AAC directly.
   private func transcribeSingleFile(item: KnowledgeItem) async -> String? {
-    let audioURL = fileStore.audioFileURL(for: item.id)
+    // Prefer sandbox path; fall back to App Group shared container (Share Extension imports)
+    let sandboxURL = fileStore.audioFileURL(for: item.id)
+    let sharedURL = fileStore.sharedAudioURL(for: item.id)
+    let audioURL: URL
+    if FileManager.default.fileExists(atPath: sandboxURL.path) {
+      audioURL = sandboxURL
+    } else if FileManager.default.fileExists(atPath: sharedURL.path) {
+      audioURL = sharedURL
+    } else {
+      audioURL = sandboxURL
+    }
     guard FileManager.default.fileExists(atPath: audioURL.path) else {
       AppLog.provider.warning("ContentExtraction: no audio file for item \(item.id)")
       item.status = .failed
@@ -211,12 +235,24 @@ final class ContentExtractionService {
       return nil
     }
 
+    guard !Task.isCancelled else { return nil }
+
     let engine = resolveTranscriptionEngine()
     guard let engine else {
       item.status = .failed
       try? modelContext.save()
       return nil
     }
+
+    // Propagate parent task cancellation to the transcription engine.
+    // When ProcessingQueueService cancels the active Task, this monitor
+    // detects it and calls engine.cancel(), stopping the underlying
+    // SFSpeechRecognitionTask or HTTP stream promptly.
+    let monitor = Task { [engine] in
+      while !Task.isCancelled { try? await Task.sleep(nanoseconds: 200_000_000) }
+      engine.cancel()
+    }
+    defer { monitor.cancel() }
 
     do {
       var result = try await engine.transcribeFile(audioURL, meetingId: item.id)
@@ -303,6 +339,7 @@ final class ContentExtractionService {
   }
 
   func extractTextFromImage(_ item: KnowledgeItem) async -> String? {
+    guard !Task.isCancelled else { return nil }
     // Return cached text if already extracted — prevents double extraction
     // from overwriting a successful OCR+Vision result.
     if let body = item.bodyText, !body.isEmpty, body != " " {
@@ -310,7 +347,18 @@ final class ContentExtractionService {
       return body
     }
     guard let relativePath = item.imageFileRelativePath else { return nil }
-    let imageURL = fileStore.itemDirectoryURL(for: item.id).appendingPathComponent(relativePath)
+    // Dual-path resolution: try sandbox first, then App Group shared container.
+    // Share Extension imports store images in the App Group, not the sandbox.
+    let sandboxURL = fileStore.itemDirectoryURL(for: item.id).appendingPathComponent(relativePath)
+    let sharedURL = fileStore.sharedImageURL(for: item.id, relativePath: relativePath)
+    let imageURL: URL
+    if FileManager.default.fileExists(atPath: sandboxURL.path) {
+      imageURL = sandboxURL
+    } else if FileManager.default.fileExists(atPath: sharedURL.path) {
+      imageURL = sharedURL
+    } else {
+      imageURL = sandboxURL
+    }
     guard let imageData = try? Data(contentsOf: imageURL),
       let image = UIImage(data: imageData),
       let cgImage = image.cgImage

@@ -177,22 +177,45 @@ struct ContentView: View {
 
   /// Scan for unprocessed items and enqueue them for background processing.
   private func autoProcessPendingItems() {
-    // Only auto-process if a provider is configured
-    guard (try? ProviderRouter.resolveActive(context: modelContext)) != nil else {
-      AppLog.debug("lifecycle", "autoProcessPendingItems: no provider configured — skipping")
-      return
-    }
-    guard AutomationSettings.shared.autoAnalyze else {
-      AppLog.debug("lifecycle", "autoProcessPendingItems: autoAnalyze disabled — skipping")
-      return
-    }
-
     let allItems = (try? modelContext.fetch(FetchDescriptor<KnowledgeItem>())) ?? []
-    let pending = allItems.filter { $0.inboxDate != nil && $0.analysisProviderId == nil }
-    guard !pending.isEmpty else { return }
 
-    AppLog.event("pipeline", "Auto-processing \(pending.count) pending item(s)")
-    for item in pending.prefix(5) {
+    // ── Audio transcription (independent of autoAnalyze) ──────────
+    // Share-imported audio should transcribe even when autoAnalyze is off.
+    if AutomationSettings.shared.autoTranscribe {
+      let needsTranscription = allItems.filter {
+        $0.inboxDate != nil
+          && $0.type == .audio
+          && $0.transcriptionEngineId == nil
+          && $0.status != .failed
+      }
+      if !needsTranscription.isEmpty {
+        AppLog.event(
+          "pipeline",
+          "Auto-transcribing \(needsTranscription.count) pending audio item(s)")
+        for item in needsTranscription.prefix(5) {
+          processingQueue.enqueue(
+            itemID: item.id, projectID: item.projectID, trigger: .backgroundBackfill)
+        }
+      }
+    }
+
+    // ── Analysis (requires autoAnalyze + provider) ────────────────
+    guard AutomationSettings.shared.autoAnalyze else {
+      AppLog.debug("lifecycle", "autoProcessPendingItems: autoAnalyze disabled — skipping analysis")
+      return
+    }
+    guard (try? ProviderRouter.resolveActive(context: modelContext)) != nil else {
+      AppLog.debug(
+        "lifecycle", "autoProcessPendingItems: no provider configured — skipping analysis")
+      return
+    }
+
+    let needsAnalysis = allItems.filter { $0.inboxDate != nil && $0.analysisProviderId == nil }
+    guard !needsAnalysis.isEmpty else { return }
+
+    AppLog.event(
+      "pipeline", "Auto-processing \(needsAnalysis.count) pending item(s) for analysis")
+    for item in needsAnalysis.prefix(5) {
       processingQueue.enqueue(
         itemID: item.id, projectID: item.projectID, trigger: .backgroundBackfill)
     }
@@ -306,15 +329,43 @@ struct ProcessingQueueSheet: View {
             }
           }
         }
+        // Clear completed/failed — inside the List
+        if !processingQueue.entries.isEmpty {
+          let hasDone = processingQueue.entries.contains { $0.status == .done }
+          let hasFailed = processingQueue.entries.contains { $0.status == .failed }
+          if hasDone || hasFailed {
+            Section {
+              if hasDone {
+                Button("Clear Completed") { processingQueue.clearCompleted() }
+                  .foregroundStyle(.secondary)
+              }
+              if hasFailed {
+                Button("Clear Failed", role: .destructive) {
+                  processingQueue.clearFailed()
+                }
+              }
+            }
+          }
+        }
       }
       .navigationTitle("Processing Queue")
       .toolbar {
         ToolbarItem(placement: .topBarLeading) {
-          Button(processingQueue.isPaused ? "Resume" : "Pause") {
-            if processingQueue.isPaused {
-              processingQueue.resumeQueue()
-            } else {
-              processingQueue.pauseQueue()
+          HStack(spacing: 16) {
+            Button(processingQueue.isPaused ? "Resume" : "Pause") {
+              if processingQueue.isPaused {
+                processingQueue.resumeQueue()
+              } else {
+                processingQueue.pauseQueue()
+              }
+            }
+            let activeCount = processingQueue.entries.filter {
+              $0.status == .queued || $0.status == .processing
+            }.count
+            if activeCount > 0 {
+              Button("Cancel All", role: .destructive) {
+                processingQueue.cancelAll()
+              }
             }
           }
         }
@@ -328,6 +379,7 @@ struct ProcessingQueueSheet: View {
 
 private struct QueueEntryRow: View {
   let entry: QueueEntry
+  @EnvironmentObject private var processingQueue: ProcessingQueueService
 
   var body: some View {
     HStack(spacing: 12) {
@@ -348,6 +400,17 @@ private struct QueueEntryRow: View {
         Text(statusText).font(.caption2).foregroundStyle(.secondary)
       }
       Spacer()
+      // Explicit cancel button for queued/processing items
+      if entry.status == .queued || entry.status == .processing {
+        Button {
+          processingQueue.cancel(entry.id)
+        } label: {
+          Image(systemName: "xmark.circle.fill")
+            .foregroundStyle(.secondary)
+            .font(.title3)
+        }
+        .buttonStyle(.plain)
+      }
       PriorityBadge(score: entry.priority)
     }
     .padding(.vertical, 2)

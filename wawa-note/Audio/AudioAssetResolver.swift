@@ -36,6 +36,12 @@ final class AudioAssetResolver: Sendable {
       return .singleFileReady(legacyURL)
     }
 
+    // Fallback: audio imported via Share Extension lives in App Group shared container
+    let sharedURL = store.sharedAudioURL(for: itemId)
+    if FileManager.default.fileExists(atPath: sharedURL.path) {
+      return .singleFileReady(sharedURL)
+    }
+
     if store.recordingManifestExists(for: itemId),
       let manifest = try? store.readRecordingManifest(for: itemId)
     {

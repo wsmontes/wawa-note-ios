@@ -607,7 +607,7 @@ public enum TagNormalizer {
 
   /// Existing tags are preserved; suggested tags are appended (normalized, deduped).
 
-  static func merge(existing: [String], suggested: [String]) -> [String] {
+  public static func merge(existing: [String], suggested: [String]) -> [String] {
 
     let normalized = normalize(existing + suggested)
 
@@ -619,7 +619,7 @@ public enum TagNormalizer {
 
   /// Use this instead of raw `.append()` to keep tags consistent.
 
-  static func append(tag: String, to existing: [String]) -> [String] {
+  public static func append(tag: String, to existing: [String]) -> [String] {
 
     merge(existing: existing, suggested: [tag])
 

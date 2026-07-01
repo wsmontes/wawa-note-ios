@@ -209,6 +209,19 @@ struct InboxView: View {
                 } label: {
                   Label("Restore", systemImage: "arrow.uturn.backward")
                 }.tint(.green)
+              } else if item.status == .failed {
+                // Failed items can be retried directly from the inbox
+                Button {
+                  processingQueue.enqueue(
+                    itemID: item.id, projectID: item.projectID, trigger: .directUserAction)
+                } label: {
+                  Label("Retry", systemImage: "arrow.clockwise")
+                }.tint(.orange)
+                Button {
+                  archiveItem(item)
+                } label: {
+                  Label("Mark Reviewed", systemImage: "checkmark.circle")
+                }.tint(.green)
               } else {
                 Button {
                   archiveItem(item)

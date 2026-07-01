@@ -791,6 +791,14 @@ final class ContentPipelineService: ObservableObject {
   var isProcessing: Bool { !activeJobs.isEmpty }
   func isProcessingItem(_ itemID: UUID) -> Bool { activeJobs[itemID] != nil }
 
+  /// Cancels a direct pipeline job (bypassing the queue). Used by
+  /// KnowledgeDetailView's stop button for transcribe-only mode.
+  func cancelItem(_ itemID: UUID) {
+    activeJobs[itemID]?.cancel()
+    activeJobs[itemID] = nil
+    endBackgroundTask()
+  }
+
   private func beginBackgroundTask() {
     backgroundTaskCount += 1
     guard backgroundTaskID == .invalid else { return }
@@ -3406,12 +3414,25 @@ final class ProcessingQueueService: ObservableObject {
     }
     entry.status = .cancelled
     entry.completedAt = Date()
+    // Notify observers so the detail view can reset its processing state.
+    NotificationCenter.default.post(name: .pipelineCompleted, object: entry.itemID.uuidString)
     entries.removeAll { $0.id == entryID }
     processNext()
   }
 
   func pauseQueue() {
     isPaused = true
+    // Cancel all active tasks and re-queue them so Resume picks them up.
+    for (entryID, task) in activeTasks {
+      task.cancel()
+      activeTasks[entryID] = nil
+      if let entry = entries.first(where: { $0.id == entryID }), entry.status == .processing {
+        entry.status = .queued
+        entry.startedAt = nil
+      }
+    }
+    activeJobCount = 0
+    endBackgroundTask()
   }
 
   func resumeQueue() {
@@ -3430,6 +3451,25 @@ final class ProcessingQueueService: ObservableObject {
     entry.completedAt = nil
     sortEntries()
     processNext()
+  }
+
+  /// Cancels all queued and processing items. Removes them from the queue.
+  func cancelAll() {
+    for (_, task) in activeTasks { task.cancel() }
+    activeTasks.removeAll()
+    activeJobCount = 0
+    endBackgroundTask()
+    entries.removeAll { $0.status == .queued || $0.status == .processing }
+  }
+
+  /// Removes all done, failed, and cancelled entries from the queue.
+  func clearCompleted() {
+    entries.removeAll { $0.status == .done || $0.status == .failed || $0.status == .cancelled }
+  }
+
+  /// Removes all failed entries from the queue, keeping completed ones.
+  func clearFailed() {
+    entries.removeAll { $0.status == .failed }
   }
 
   // MARK: - Processing
