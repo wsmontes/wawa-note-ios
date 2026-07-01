@@ -258,11 +258,11 @@ public final class AudioImportService: @unchecked Sendable {
 // MARK: - FormatImporter conformance
 
 extension AudioImportService: FormatImporter {
-  var formatIdentifier: String { "audio" }
-  var displayName: String { "Audio File" }
-  var supportedUTTypes: [UTType] { Self.supportedUTTypes }
+  public var formatIdentifier: String { "audio" }
+  public var displayName: String { "Audio File" }
+  public var supportedUTTypes: [UTType] { Self.supportedUTTypes }
 
-  func importFromURL(_ url: URL) async throws -> ImportResult {
+  public func importFromURL(_ url: URL) async throws -> ImportResult {
     let metadata = try await extractMetadata(url: url)
 
     let item = KnowledgeItem(
@@ -283,7 +283,7 @@ extension AudioImportService: FormatImporter {
   }
 
   // canRead(url:) already exists
-  func canRead(data: Data) -> Bool { false }
+  public func canRead(data: Data) -> Bool { false }
 }
 
 // MARK: - Errors

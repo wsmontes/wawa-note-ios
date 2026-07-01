@@ -1,23 +1,24 @@
 import Foundation
 import UniformTypeIdentifiers
 
-final class ICSImporter: FormatImporter, @unchecked Sendable {
-  let formatIdentifier = "ics"
-  let displayName = "Calendar Event"
-  let supportedUTTypes: [UTType] = [.data]
+public final class ICSImporter: FormatImporter, @unchecked Sendable {
+  public init() {}
+  public let formatIdentifier = "ics"
+  public let displayName = "Calendar Event"
+  public let supportedUTTypes: [UTType] = [.data]
 
-  func canRead(url: URL) -> Bool {
+  public func canRead(url: URL) -> Bool {
     url.pathExtension.lowercased() == "ics"
   }
 
-  func canRead(data: Data) -> Bool {
+  public func canRead(data: Data) -> Bool {
     if let str = String(data: data.prefix(1024), encoding: .utf8) {
       return str.contains("BEGIN:VCALENDAR")
     }
     return false
   }
 
-  func importFromURL(_ url: URL) async throws -> ImportResult {
+  public func importFromURL(_ url: URL) async throws -> ImportResult {
     let text = try String(contentsOf: url, encoding: .utf8)
     var warnings: [String] = []
 

@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 
 extension UTType {
   /// Types supported by the Share Extension, in detection priority order.
-  static let shareableTypes: [UTType] = [
+  public static let shareableTypes: [UTType] = [
     .audio,
     .movie,
     .image,

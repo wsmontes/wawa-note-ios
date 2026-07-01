@@ -4,7 +4,7 @@ import SwiftData
 
 private let log = Logger(subsystem: "com.wawa-note.core", category: "models")
 
-enum ItemStatus: String, Codable, CaseIterable {
+public enum ItemStatus: String, Codable, CaseIterable {
   case draft
   case recording
   /// Audio segments written. Concatenation to audio.m4a is in progress.
@@ -116,7 +116,7 @@ enum ItemStatus: String, Codable, CaseIterable {
   }
 }
 
-enum KnowledgeItemType: String, Codable, CaseIterable, Hashable {
+public enum KnowledgeItemType: String, Codable, CaseIterable, Hashable {
   case audio = "audio"
   case note
   case journalEntry
@@ -141,10 +141,10 @@ extension KnowledgeItemType {
 }
 
 @Model
-final class KnowledgeItem {
-  @Attribute(.unique) var id: UUID
-  var typeRaw: String
-  var title: String
+public final class KnowledgeItem {
+  @Attribute(.unique) public var id: UUID
+  public var typeRaw: String
+  public var title: String
   /// Preserved original title (filename, recording date, etc.) before AI rename.
   var originalTitle: String?
   var createdAt: Date
@@ -176,14 +176,14 @@ final class KnowledgeItem {
   }
 
   // Cross-type queryable columns
-  var durationSeconds: Double?
-  var languageCode: String?
+  public var durationSeconds: Double?
+  public var languageCode: String?
   var folderID: UUID?
   var projectID: UUID?
   var isFlagged: Bool
 
   // Content body (Markdown for notes, journal entries)
-  var bodyText: String?
+  public var bodyText: String?
 
   // Inbox — non-nil means item is waiting to be processed
   var inboxDate: Date?
@@ -199,7 +199,7 @@ final class KnowledgeItem {
   var contextBatteryLevel: Double?
 
   // Legacy meeting fields
-  var audioFileRelativePath: String?
+  public var audioFileRelativePath: String?
   /// Sample rate of the captured audio (e.g., 44100 for built-in mic, 8000 for Bluetooth HFP).
   var audioSampleRate: Double?
   /// Number of audio channels (1 = mono).
@@ -208,14 +208,14 @@ final class KnowledgeItem {
   var audioInputPortType: String?
   /// Human-readable input port name (e.g., "iPhone", "AirPods Pro").
   var audioInputPortName: String?
-  var imageFileRelativePath: String?
+  public var imageFileRelativePath: String?
   var imagePageCount: Int?
   var transcriptionEngineId: String?
   var analysisProviderId: String?
   var calendarEventIdentifier: String?
   var scheduledDate: Date?
-  var isImported: Bool = false
-  var importSourceURL: String?
+  public var isImported: Bool = false
+  public var importSourceURL: String?
   // Field authority
   var fieldProvenanceJSON: String?
   // Anarlog compatibility: preserves original YAML frontmatter for round-trip fidelity
@@ -252,7 +252,7 @@ final class KnowledgeItem {
     self.status = next
   }
 
-  init(
+  public init(
     id: UUID = UUID(),
     type: KnowledgeItemType = .audio,
     title: String = "",

@@ -2,15 +2,15 @@ import Foundation
 import OSLog
 import UniformTypeIdentifiers
 
-final class ImportRouter {
+public final class ImportRouter {
   private let logger = Logger(subsystem: "com.wawa-note.core", category: "ImportRouter")
   private let importers: [any FormatImporter]
 
-  init(importers: [any FormatImporter]) {
+  public init(importers: [any FormatImporter]) {
     self.importers = importers.sorted { ($0.priority ?? 0) > ($1.priority ?? 0) }
   }
 
-  func importer(for url: URL) -> (any FormatImporter)? {
+  public func importer(for url: URL) -> (any FormatImporter)? {
     guard let importer = importers.first(where: { $0.canRead(url: url) }) else {
       logger.debug(
         "No importer found for URL: \(url) (pathExtension: \(url.pathExtension))")

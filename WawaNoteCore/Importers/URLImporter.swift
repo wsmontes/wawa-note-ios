@@ -3,24 +3,25 @@ import Foundation
 import UniformTypeIdentifiers
 
 /// Imports shared URLs (from Safari, etc.) as webBookmark KnowledgeItems.
-struct URLImporter: FormatImporter {
-  let formatIdentifier = "url"
-  let displayName = "URL"
-  let supportedUTTypes: [UTType] = [.url]
-  let priority = 0
+public struct URLImporter: FormatImporter {
+  public init() {}
+  public let formatIdentifier = "url"
+  public let displayName = "URL"
+  public let supportedUTTypes: [UTType] = [.url]
+  public let priority = 0
 
-  func canRead(url: URL) -> Bool {
+  public func canRead(url: URL) -> Bool {
     // URLImporter handles URL objects directly via NSItemProvider,
     // not file URLs. File-based detection returns false.
     false
   }
 
-  func canRead(data: Data) -> Bool {
+  public func canRead(data: Data) -> Bool {
     // URLs come as objects, not Data.
     false
   }
 
-  func importFromURL(_ url: URL) async throws -> ImportResult {
+  public func importFromURL(_ url: URL) async throws -> ImportResult {
     let host = url.host ?? url.absoluteString
     let title =
       host

@@ -1,13 +1,19 @@
 import Foundation
 import UniformTypeIdentifiers
 
-struct ImportResult {
-  let knowledgeItem: KnowledgeItem
-  let artifacts: [String: URL]
-  let warnings: [String]
+public struct ImportResult {
+  public let knowledgeItem: KnowledgeItem
+  public let artifacts: [String: URL]
+  public let warnings: [String]
+
+  public init(knowledgeItem: KnowledgeItem, artifacts: [String: URL], warnings: [String]) {
+    self.knowledgeItem = knowledgeItem
+    self.artifacts = artifacts
+    self.warnings = warnings
+  }
 }
 
-protocol FormatImporter: Sendable {
+public protocol FormatImporter: Sendable {
   var formatIdentifier: String { get }
   var displayName: String { get }
   var supportedUTTypes: [UTType] { get }
@@ -18,5 +24,5 @@ protocol FormatImporter: Sendable {
 }
 
 extension FormatImporter {
-  var priority: Int { 0 }
+  public var priority: Int { 0 }
 }

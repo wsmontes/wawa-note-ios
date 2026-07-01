@@ -1,18 +1,19 @@
 import Foundation
 import UniformTypeIdentifiers
 
-struct RTFImporter: FormatImporter {
-  let formatIdentifier = "rtf"
-  let displayName = "Rich Text"
-  let supportedUTTypes: [UTType] = [.rtf]
+public struct RTFImporter: FormatImporter {
+  public init() {}
+  public let formatIdentifier = "rtf"
+  public let displayName = "Rich Text"
+  public let supportedUTTypes: [UTType] = [.rtf]
 
-  func canRead(url: URL) -> Bool { url.pathExtension.lowercased() == "rtf" }
-  func canRead(data: Data) -> Bool {
+  public func canRead(url: URL) -> Bool { url.pathExtension.lowercased() == "rtf" }
+  public func canRead(data: Data) -> Bool {
     guard let str = String(data: data, encoding: .ascii) else { return false }
     return str.hasPrefix("{\\rtf")
   }
 
-  func importFromURL(_ url: URL) async throws -> ImportResult {
+  public func importFromURL(_ url: URL) async throws -> ImportResult {
     let data = try Data(contentsOf: url)
 
     // Try NSAttributedString first, fall back to stripping RTF tags

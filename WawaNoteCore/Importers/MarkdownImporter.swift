@@ -1,17 +1,18 @@
 import Foundation
 import UniformTypeIdentifiers
 
-final class MarkdownImporter: FormatImporter, @unchecked Sendable {
-  let formatIdentifier = "markdown"
-  let displayName = "Markdown"
-  let supportedUTTypes: [UTType] = [.plainText]
+public final class MarkdownImporter: FormatImporter, @unchecked Sendable {
+  public init() {}
+  public let formatIdentifier = "markdown"
+  public let displayName = "Markdown"
+  public let supportedUTTypes: [UTType] = [.plainText]
 
-  func canRead(url: URL) -> Bool {
+  public func canRead(url: URL) -> Bool {
     let ext = url.pathExtension.lowercased()
     return ext == "md" || ext == "markdown" || ext == "txt"
   }
 
-  func canRead(data: Data) -> Bool {
+  public func canRead(data: Data) -> Bool {
     // Check for YAML frontmatter or markdown heading
     if let str = String(data: data.prefix(1024), encoding: .utf8) {
       return str.hasPrefix("---") || str.hasPrefix("# ") || str.contains("\n---\n")
@@ -19,7 +20,7 @@ final class MarkdownImporter: FormatImporter, @unchecked Sendable {
     return false
   }
 
-  func importFromURL(_ url: URL) async throws -> ImportResult {
+  public func importFromURL(_ url: URL) async throws -> ImportResult {
     let text = try String(contentsOf: url, encoding: .utf8)
     var warnings: [String] = []
 

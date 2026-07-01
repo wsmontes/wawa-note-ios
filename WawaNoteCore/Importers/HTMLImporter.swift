@@ -1,23 +1,24 @@
 import Foundation
 import UniformTypeIdentifiers
 
-struct HTMLImporter: FormatImporter {
-  let formatIdentifier = "html"
-  let displayName = "HTML Document"
-  let supportedUTTypes: [UTType] = [.html]
+public struct HTMLImporter: FormatImporter {
+  public init() {}
+  public let formatIdentifier = "html"
+  public let displayName = "HTML Document"
+  public let supportedUTTypes: [UTType] = [.html]
 
-  func canRead(url: URL) -> Bool {
+  public func canRead(url: URL) -> Bool {
     ["html", "htm"].contains(url.pathExtension.lowercased())
   }
 
-  func canRead(data: Data) -> Bool {
+  public func canRead(data: Data) -> Bool {
     guard let str = String(data: data, encoding: .utf8) else { return false }
     let lower = str.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
     return lower.hasPrefix("<!doctype") || lower.hasPrefix("<html") || lower.hasPrefix("<head")
       || lower.hasPrefix("<body")
   }
 
-  func importFromURL(_ url: URL) async throws -> ImportResult {
+  public func importFromURL(_ url: URL) async throws -> ImportResult {
     let html = try String(contentsOf: url, encoding: .utf8)
 
     // Strip HTML tags

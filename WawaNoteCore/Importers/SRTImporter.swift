@@ -1,23 +1,24 @@
 import Foundation
 import UniformTypeIdentifiers
 
-final class SRTImporter: FormatImporter, @unchecked Sendable {
-  let formatIdentifier = "srt"
-  let displayName = "Subtitle (SRT)"
-  let supportedUTTypes: [UTType] = [.plainText]
+public final class SRTImporter: FormatImporter, @unchecked Sendable {
+  public init() {}
+  public let formatIdentifier = "srt"
+  public let displayName = "Subtitle (SRT)"
+  public let supportedUTTypes: [UTType] = [.plainText]
 
-  func canRead(url: URL) -> Bool {
+  public func canRead(url: URL) -> Bool {
     url.pathExtension.lowercased() == "srt"
   }
 
-  func canRead(data: Data) -> Bool {
+  public func canRead(data: Data) -> Bool {
     if let str = String(data: data.prefix(256), encoding: .utf8) {
       return str.contains("-->")
     }
     return false
   }
 
-  func importFromURL(_ url: URL) async throws -> ImportResult {
+  public func importFromURL(_ url: URL) async throws -> ImportResult {
     let text = try String(contentsOf: url, encoding: .utf8)
     var warnings: [String] = []
 

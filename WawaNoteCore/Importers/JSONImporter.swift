@@ -1,23 +1,24 @@
 import Foundation
 import UniformTypeIdentifiers
 
-final class JSONImporter: FormatImporter, @unchecked Sendable {
-  let formatIdentifier = "json"
-  let displayName = "Wawa Note JSON"
-  let supportedUTTypes: [UTType] = [.json]
+public final class JSONImporter: FormatImporter, @unchecked Sendable {
+  public init() {}
+  public let formatIdentifier = "json"
+  public let displayName = "Wawa Note JSON"
+  public let supportedUTTypes: [UTType] = [.json]
 
-  func canRead(url: URL) -> Bool {
+  public func canRead(url: URL) -> Bool {
     url.pathExtension.lowercased() == "json"
   }
 
-  func canRead(data: Data) -> Bool {
+  public func canRead(data: Data) -> Bool {
     if let str = String(data: data.prefix(100), encoding: .utf8) {
       return str.trimmingCharacters(in: .whitespaces).hasPrefix("{")
     }
     return false
   }
 
-  func importFromURL(_ url: URL) async throws -> ImportResult {
+  public func importFromURL(_ url: URL) async throws -> ImportResult {
     let data = try Data(contentsOf: url)
     let decoder = JSONDecoder()
 
