@@ -1085,7 +1085,7 @@ public enum LensCategory: String, Codable, Sendable, CaseIterable {
 
 
 
-struct Lens: Codable, Sendable, Identifiable {
+public struct Lens: Codable, Sendable, Identifiable {
 
   public var id: String
   public var name: String
@@ -1109,7 +1109,7 @@ struct Lens: Codable, Sendable, Identifiable {
 
 /// Exportable project behavior preset. Contains process, not data.
 
-struct Preset: Codable, Sendable, Identifiable {
+public struct Preset: Codable, Sendable, Identifiable {
 
   public var id: String
   public var name: String
@@ -1986,7 +1986,7 @@ extension ProjectDerivedItem {
 
 /// Structured body for signal-type derived items.
 
-struct SignalBody: Codable, Sendable {
+public struct SignalBody: Codable, Sendable {
 
   public var signalType: String  // risk, alert, opportunity, doubt, pattern, contradiction
   public var description: String
@@ -2023,7 +2023,7 @@ struct SynthesisBody: Codable, Sendable {
 
 
 
-struct SynthesisSection: Codable, Sendable {
+public struct SynthesisSection: Codable, Sendable {
 
   public var id: String
   public var title: String
@@ -2034,7 +2034,7 @@ struct SynthesisSection: Codable, Sendable {
 
 
 
-struct SynthesisMetric: Codable, Sendable {
+public struct SynthesisMetric: Codable, Sendable {
 
   public var id: String
   public var label: String
