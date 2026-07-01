@@ -27,11 +27,11 @@ Items are documented here rather than as individual code comments to keep the co
 - **calendarEvents**: loads once, never refreshes → DOCUMENTED: add EKEventStore change observer
 - **OnThisDay cards**: from iPhone Calendar render as dead taps → ✅ FIXED: nil guard on NavigationLink
 - **deletePartialTranscript**: silently swallows errors → DOCUMENTED: best-effort cleanup, error logged
-- **Disk space API**: inconsistency between Share Extension (raw) and main app (ImportantUsage)
-- **ProviderAdapter**: maps Anthropic/Gemini as promptedJSON (both support native JSON mode)
-- **Default streaming wrapper**: no real streaming for OpenAI/Gemini providers
-- **Tool descriptions**: captured at init time, don't update mid-session
-- **Full-text reassignment**: streamingText = fullContent on every token delta
+- **Disk space API**: inconsistency → DOCUMENTED: different APIs serve different purposes
+- **ProviderAdapter**: maps as promptedJSON → DOCUMENTED: both support native JSON, adapter conservative
+- **Default streaming wrapper**: no real streaming → DOCUMENTED: needs provider-specific SSE overrides
+- **Tool descriptions**: captured at init → DOCUMENTED: needs dynamic refresh on schema/skill changes
+- **Full-text reassignment**: per-token → DOCUMENTED: acceptable for chat, monitor on older devices
 - **Item context resolve-away**: to project, sharing chat between items
 - **EmbeddingService**: no in-memory LRU cache
 - **LocalIntelligence**: directory name misleading (no on-device ML)
