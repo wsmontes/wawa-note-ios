@@ -60,7 +60,7 @@ public enum AIRole: String, Codable {
   case assistant
   case tool
 
-  var apiName: String {
+  public var apiName: String {
     switch self {
     case .system: "system"
     case .user: "user"
