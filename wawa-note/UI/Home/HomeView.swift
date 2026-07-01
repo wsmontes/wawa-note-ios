@@ -123,8 +123,9 @@ final class HomeViewModel: ObservableObject {
   func discoverImportedItems() async {
     guard let ctx = modelContext, let queue = processingQueue else { return }
 
+    // Using raw value string because SwiftData #Predicate cannot reference enum cases
     let draftPredicate = #Predicate<KnowledgeItem> {
-      $0.isImported == true && $0.statusRaw == ItemStatus.draft.rawValue
+      $0.isImported == true && $0.statusRaw == "draft"
     }
     let descriptor = FetchDescriptor<KnowledgeItem>(predicate: draftPredicate)
 

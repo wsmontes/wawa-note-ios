@@ -585,7 +585,7 @@ public enum TagNormalizer {
 
   /// Normalize a single tag: lowercase, trim whitespace.
 
-  static func normalize(_ tag: String) -> String {
+  public static func normalize(_ tag: String) -> String {
 
     tag.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
@@ -593,7 +593,7 @@ public enum TagNormalizer {
 
   /// Normalize and deduplicate an array of tags.
 
-  static func normalize(_ tags: [String]) -> [String] {
+  public static func normalize(_ tags: [String]) -> [String] {
 
     let cleaned = tags.map { normalize($0) }.filter { !$0.isEmpty }
 

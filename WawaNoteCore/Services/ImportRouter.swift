@@ -31,7 +31,7 @@ public final class ImportRouter {
     importers
   }
 
-  func allUTTypes() -> [UTType] {
+  public func allUTTypes() -> [UTType] {
     importers.flatMap(\.supportedUTTypes)
   }
 }
