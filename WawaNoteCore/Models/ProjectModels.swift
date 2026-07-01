@@ -2031,8 +2031,8 @@ public struct SynthesisSection: Codable, Sendable {
   public var content: String  // Markdown or JSON depending on renderType
   public var order: Int
 
-  public init(title: String = "", body: String? = nil) {
-    self.title = title; self.body = body
+  public init(id: String = "", title: String = "", renderType: String = "markdown", content: String = "", order: Int = 0) {
+    self.id = id; self.title = title; self.renderType = renderType; self.content = content; self.order = order
   }
 }
 
@@ -2047,7 +2047,7 @@ public struct SynthesisMetric: Codable, Sendable {
   public var status: String  // "healthy", "warning", "critical", "neutral"
   public var icon: String?
 
-  public init(label: String = "", value: Double = 0, format: String = "", status: String = "", icon: String? = nil) {
-    self.label = label; self.value = value; self.format = format; self.status = status; self.icon = icon
+  public init(id: String = "", label: String = "", value: Double = 0, format: String = "number", status: String = "neutral", icon: String? = nil) {
+    self.id = id; self.label = label; self.value = value; self.format = format; self.status = status; self.icon = icon
   }
 }
