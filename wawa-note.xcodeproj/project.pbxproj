@@ -222,6 +222,8 @@
 		FD0799DC28F8515FAD62D77E /* ContextSensor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D12A5328821C091082B78FB3 /* ContextSensor.swift */; };
 		FF48C20D0A3FDD16A4D4B7BF /* FocusModeSensor.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA70DD32D85A83F607CF2D5A /* FocusModeSensor.swift */; };
 		450A4DB5EC4627B532D2FAFE /* ai_config.json in Resources */ = {isa = PBXBuildFile; fileRef = EFEB0BAA1CD058DDA3FB36C1 /* ai_config.json */; };
+		DFA0E0EFCA54F66EE46FE127 /* DatabaseManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87AF25AFF33DDD8D3F9DD30E /* DatabaseManager.swift */; };
+		E3FC4791B8A4B80DDF8AF0DA /* ProcessingQueueService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED7FFF6AB4CEFED6B9B9B104 /* ProcessingQueueService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -498,6 +500,8 @@
 		FDE499C4C6FBD48305E55385 /* ProviderPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderPickerView.swift; sourceTree = "<group>"; };
 		FFC932A776BC7FD12B0C6434 /* TranscriptPatchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptPatchService.swift; sourceTree = "<group>"; };
 		EFEB0BAA1CD058DDA3FB36C1 /* ai_config.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = ai_config.json; sourceTree = "<group>"; };
+		87AF25AFF33DDD8D3F9DD30E /* DatabaseManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseManager.swift; sourceTree = "<group>"; };
+		ED7FFF6AB4CEFED6B9B9B104 /* ProcessingQueueService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingQueueService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -633,6 +637,7 @@
 			isa = PBXGroup;
 			children = (
 				76CCCBF0094EADF2DA0FC9AB /* WawaNoteApp.swift */,
+				87AF25AFF33DDD8D3F9DD30E /* DatabaseManager.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -1085,6 +1090,7 @@
 				91863F18655F6D2D447F3EB6 /* ConfigProjectService.swift */,
 				C1346F947CAF8521E4037122 /* ContentExtractionService.swift */,
 				C10E922845D97CA92A333D30 /* ContentPipelineService.swift */,
+				ED7FFF6AB4CEFED6B9B9B104 /* ProcessingQueueService.swift */,
 				B2AB7A55355C419C1BA41F79 /* DeviceContextService.swift */,
 				CF6FB14E2C4252EF2822C115 /* EmbeddingPipelineService.swift */,
 				E57BE97B9454601F86DFA491 /* EntityExtractionService.swift */,
@@ -1415,6 +1421,7 @@
 				885001E1C0E3BDE6ABA19E12 /* ConfigProjectService.swift in Sources */,
 				BE4943566D2D92552C4E1B5C /* ContentExtractionService.swift in Sources */,
 				70F438F2662A7C7BB748093D /* ContentPipelineService.swift in Sources */,
+				E3FC4791B8A4B80DDF8AF0DA /* ProcessingQueueService.swift in Sources */,
 				C3F9BD71B219914B8AAE0ABE /* ContentView.swift in Sources */,
 				982F46E71D0834D05B414346 /* ContextCaptureService.swift in Sources */,
 				FD0799DC28F8515FAD62D77E /* ContextSensor.swift in Sources */,
@@ -1532,6 +1539,7 @@
 				B8F8B02D360197CF4337BCC0 /* VoiceActivityDetector.swift in Sources */,
 				DB37FBE9B7A5E595C28D12F9 /* WatchMessageTypes.swift in Sources */,
 				9B353D551EE9E92ACD1247EE /* WawaNoteApp.swift in Sources */,
+				DFA0E0EFCA54F66EE46FE127 /* DatabaseManager.swift in Sources */,
 				7FD824B80407FFEC1EC246FD /* WriteAnalysisTool.swift in Sources */,
 				92850D4DA17B1D0DDB0B52EB /* iOSWatchSessionManager.swift in Sources */,
 			);

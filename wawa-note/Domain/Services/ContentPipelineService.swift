@@ -3349,11 +3349,6 @@ enum QueueTrigger: String, Sendable {
   case backgroundBackfill  // Embedding or other background work
 }
 
-// MARK: - ProcessingQueueService
-
-/// Manages the visible processing queue with throttling, priority, and cancellation.
-@MainActor
-
 // MARK: - Connectivity Monitor
 
 /// Monitors network connectivity and notifies when the device goes online.

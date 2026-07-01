@@ -283,7 +283,7 @@ struct SettingsView: View {
               UserDefaults.standard.set(v, forKey: "developer_mode_enabled")
             }
           Button {
-            UserDefaults.standard.set(false, forKey: UserDefaultsKey.hasCompletedOnboarding)
+            UserDefaults.standard.set(false, forKey: "has_completed_onboarding")
             showWelcomeAgain = true
           } label: {
             Label("Show Welcome Again", systemImage: "hand.wave")
