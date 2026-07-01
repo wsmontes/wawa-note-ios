@@ -3351,11 +3351,9 @@ public struct RecordingManifest: Codable, Sendable {
   public var endedAt: Date?
 
   public var segments: [RecordingSegment]
-
-
-
-
-
+  public init(recordingId: UUID, title: String, startedAt: Date, endedAt: Date? = nil, segments: [RecordingSegment] = []) {
+    self.recordingId = recordingId; self.title = title; self.startedAt = startedAt; self.endedAt = endedAt; self.segments = segments
+  }
   public var totalDuration: TimeInterval {
 
     segments.compactMap { seg in

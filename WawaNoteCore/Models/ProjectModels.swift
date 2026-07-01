@@ -609,7 +609,7 @@ public final class GraphEdge {
   public var createdAt: Date
 
 
-  var edgeType: EdgeType {
+  public var edgeType: EdgeType {
 
     get { EdgeType(rawValue: edgeTypeRaw) ?? .relatesTo }
 
@@ -1987,13 +1987,15 @@ extension ProjectDerivedItem {
 /// Structured body for signal-type derived items.
 
 public struct SignalBody: Codable, Sendable {
-
-  public var signalType: String  // risk, alert, opportunity, doubt, pattern, contradiction
+  public var signalType: String
   public var description: String
-  public var suggestedAction: String?  // What the agent suggests doing about it
-  public var relatedItemIDs: [UUID]?  // Items this signal connects
-  public var impactScore: Double?  // 0-1
-  public var urgencyScore: Double?  // 0-1
+  public var suggestedAction: String?
+  public var relatedItemIDs: [UUID]?
+  public var impactScore: Double?
+  public var urgencyScore: Double?
+  public init(signalType: String, description: String, suggestedAction: String? = nil, relatedItemIDs: [UUID]? = nil, impactScore: Double? = nil, urgencyScore: Double? = nil) {
+    self.signalType = signalType; self.description = description; self.suggestedAction = suggestedAction; self.relatedItemIDs = relatedItemIDs; self.impactScore = impactScore; self.urgencyScore = urgencyScore
+  }
 }
 
 
