@@ -470,3 +470,89 @@ public struct ProgressUpdateData: Codable, Sendable {
     self.step = step; self.total = total; self.label = label
   }
 }
+
+// MARK: - Public Inits for cross-module use
+
+public extension ProjectContextData {
+  init(projectName: String = "", slug: String = "", status: String = "", taskCount: Int = 0, itemCount: Int = 0, signalCount: Int = 0, healthStatus: String? = nil, summary: String? = nil) {
+    self.projectName = projectName; self.slug = slug; self.status = status; self.taskCount = taskCount; self.itemCount = itemCount; self.signalCount = signalCount; self.healthStatus = healthStatus; self.summary = summary
+  }
+}
+
+public extension TaskCardData {
+  init(taskID: String = "", title: String = "", status: String = "", priority: String = "", owner: String? = nil, projectSlug: String? = nil, needsConfirmation: Bool = false) {
+    self.taskID = taskID; self.title = title; self.status = status; self.priority = priority; self.owner = owner; self.projectSlug = projectSlug; self.needsConfirmation = needsConfirmation
+  }
+}
+
+public extension ItemCardData {
+  init(itemID: String = "", title: String = "", type: String = "", status: String? = nil, durationSeconds: Double? = nil, projectSlug: String? = nil, hasTranscript: Bool = false, hasAnalysis: Bool = false) {
+    self.itemID = itemID; self.title = title; self.type = type; self.status = status; self.durationSeconds = durationSeconds; self.projectSlug = projectSlug; self.hasTranscript = hasTranscript; self.hasAnalysis = hasAnalysis
+  }
+}
+
+public extension SearchResultsData {
+  init(query: String = "", results: [SearchResultItem] = []) {
+    self.query = query; self.results = results
+  }
+}
+
+public extension SearchResultItem {
+  init(itemID: String = "", title: String = "", snippet: String = "", type: String = "", projectSlug: String? = nil) {
+    self.itemID = itemID; self.title = title; self.snippet = snippet; self.type = type; self.projectSlug = projectSlug
+  }
+}
+
+public extension AnalysisData {
+  init(itemID: String = "", sections: [AnalysisSection] = []) {
+    self.itemID = itemID; self.sections = sections
+  }
+}
+
+public extension AnalysisSection {
+  init(title: String = "", count: Int = 0, items: [String] = []) {
+    self.title = title; self.count = count; self.items = items
+  }
+}
+
+public extension ChoicePromptData {
+  init(question: String = "", options: [ChoiceOption] = []) {
+    self.question = question; self.options = options
+  }
+}
+
+public extension ChoiceOption {
+  init(label: String = "", value: String = "") {
+    self.label = label; self.value = value
+  }
+}
+
+public extension ConfirmationData {
+  init(title: String = "", message: String = "", confirmLabel: String = "Confirm", cancelLabel: String = "Cancel", confirmValue: String = "confirm", cancelValue: String = "cancel") {
+    self.title = title; self.message = message; self.confirmLabel = confirmLabel; self.cancelLabel = cancelLabel; self.confirmValue = confirmValue; self.cancelValue = cancelValue
+  }
+}
+
+public extension FileLinkData {
+  init(itemID: String = "", title: String = "", itemType: String = "", snippet: String = "", projectSlug: String? = nil) {
+    self.itemID = itemID; self.title = title; self.itemType = itemType; self.snippet = snippet; self.projectSlug = projectSlug
+  }
+}
+
+public extension DocumentHeaderData {
+  init(title: String = "", documentType: String = "", summary: String? = nil, sectionCount: Int = 0, itemID: String? = nil) {
+    self.title = title; self.documentType = documentType; self.summary = summary; self.sectionCount = sectionCount; self.itemID = itemID
+  }
+}
+
+public extension FreeTextInputData {
+  init(question: String = "", placeholder: String? = nil, submitLabel: String = "Submit") {
+    self.question = question; self.placeholder = placeholder; self.submitLabel = submitLabel
+  }
+}
+
+public extension ProgressUpdateData {
+  init(step: Int = 0, total: Int = 0, label: String = "") {
+    self.step = step; self.total = total; self.label = label
+  }
+}
