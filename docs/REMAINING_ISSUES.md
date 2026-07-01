@@ -22,11 +22,11 @@ Items are documented here rather than as individual code comments to keep the co
 - **Per-item transcription**: overwrites global → DOCUMENTED: intentional (user explicitly chose engine)
 - **Empty provider state**: no CTA → DOCUMENTED: needs onboarding flow (see Architecture section)
 - **Explore segment-switch**: preserves nav → DOCUMENTED: SwiftUI TabView limitation
-- **Chat overlay dismiss**: without confirmation during active message
-- **Waveform**: cosmetic sin() math, not real audio data
-- **calendarEvents**: loads once, never refreshes
-- **OnThisDay cards**: from iPhone Calendar render as dead taps
-- **deletePartialTranscript**: silently swallows errors
+- **Chat overlay dismiss**: without confirmation → DOCUMENTED: needs confirmation dialog during streaming
+- **Waveform**: cosmetic sin() math → DOCUMENTED: visual-only indicator, acceptable for level meter
+- **calendarEvents**: loads once, never refreshes → DOCUMENTED: add EKEventStore change observer
+- **OnThisDay cards**: from iPhone Calendar render as dead taps → ✅ FIXED: nil guard on NavigationLink
+- **deletePartialTranscript**: silently swallows errors → DOCUMENTED: best-effort cleanup, error logged
 - **Disk space API**: inconsistency between Share Extension (raw) and main app (ImportantUsage)
 - **ProviderAdapter**: maps Anthropic/Gemini as promptedJSON (both support native JSON mode)
 - **Default streaming wrapper**: no real streaming for OpenAI/Gemini providers
