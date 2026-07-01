@@ -66,6 +66,18 @@ final class ProviderEditorViewModel: ObservableObject {
       return
     }
 
+    // Duplicate detection for new providers: prevent creating identical configs
+    if existingProvider == nil {
+      let existing = (try? context.fetch(FetchDescriptor<AIProviderConfigModel>())) ?? []
+      let duplicate = existing.first {
+        $0.typeRaw == type.rawValue && $0.baseURLString == baseURLString
+      }
+      if duplicate != nil {
+        saveError = "A provider with this type and URL already exists."
+        return
+      }
+    }
+
     isSaving = true
     saveError = nil
     defer { isSaving = false }
