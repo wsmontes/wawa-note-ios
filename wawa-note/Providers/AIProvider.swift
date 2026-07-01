@@ -228,6 +228,9 @@ enum RequestPriority: Sendable, Comparable {
 
 /// Persists daily aggregated metrics per provider.
 /// Stored in UserDefaults as JSON, keyed by provider ID + date.
+/// Deprecated: fully dead code. Zero call sites in the production codebase.
+/// record() is never called from any provider or service. BudgetTracker now
+/// handles spend tracking (wired in all 3 providers as of 2026-07).
 final class MetricsHistoryStore: @unchecked Sendable {
   static let shared = MetricsHistoryStore()
   private let defaults = UserDefaults.standard
@@ -299,6 +302,8 @@ final class MetricsHistoryStore: @unchecked Sendable {
 }
 
 /// Tracks request timing and builds ProviderMetrics on completion.
+/// Deprecated: fully dead code. Zero call sites; never instantiated.
+/// start/stop/build exist but no provider or service uses this tracker.
 final class MetricsTracker {
   private let startTime: CFAbsoluteTime
   private var firstTokenTime: CFAbsoluteTime?

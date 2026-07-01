@@ -465,25 +465,6 @@ final class AIConfigService: @unchecked Sendable {
     return String(format: "$%.4f (%d calls, %d tokens)", cost, calls, tokens)
   }
 
-  /// Quick health check: pings each configured provider endpoint.
-  static func healthCheck(context: ModelContext) async -> [(String, Bool)] {
-    let configs = (try? context.fetch(FetchDescriptor<AIProviderConfigModel>())) ?? []
-    var results: [(String, Bool)] = []
-    for config in configs {
-      guard let base = config.baseURLString, let url = URL(string: base) else { continue }
-      var req = URLRequest(url: url.appendingPathComponent("health"))
-      req.httpMethod = "HEAD"
-      req.timeoutInterval = 5
-      if let (_, resp) = try? await URLSession.shared.data(for: req),
-        let http = resp as? HTTPURLResponse, (200...499).contains(http.statusCode)
-      {
-        results.append((config.name, true))
-      } else {
-        results.append((config.name, false))
-      }
-    }
-    return results
-  }
 }
 
 // MARK: - Feature params DTO
