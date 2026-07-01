@@ -216,6 +216,12 @@ public final class KnowledgeItem {
   var scheduledDate: Date?
   public var isImported: Bool = false
   public var importSourceURL: String?
+  /// Bundle ID of the source app (e.g., "net.whatsapp.WhatsApp")
+  var importSourceApp: String?
+  /// true if the extension timed out before completing the import
+  var isIncomplete: Bool = false
+  /// Error message if the import failed in the extension but the item was still created
+  var importError: String?
   // Field authority
   var fieldProvenanceJSON: String?
   // Anarlog compatibility: preserves original YAML frontmatter for round-trip fidelity
@@ -288,6 +294,9 @@ public final class KnowledgeItem {
     self.fieldProvenanceJSON = nil
     self.needsProjectReprocessing = false
     self.projectReprocessContext = nil
+    self.importSourceApp = nil
+    self.isIncomplete = false
+    self.importError = nil
   }
 }
 
