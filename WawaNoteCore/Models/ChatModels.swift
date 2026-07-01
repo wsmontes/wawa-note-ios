@@ -111,38 +111,38 @@ public struct ChatConversation: Identifiable, Codable {
 
 // MARK: - Message
 
-public struct ChatMessage: Identifiable, Codable {public 
+public struct ChatMessage: Identifiable, Codable {
   public let id: UUID
-  public let conversationId: UUID
-  public var role: AIRole
-  public var content: String
-  public var createdAt: Date
-  public var toolCalls: [PersistedToolCall]?
-  public var toolCallId: String?
-  public var citations: [ChatCitation]?
-  public var isThinking: Bool?
-  public var projectColorHex: String?
-  public var blocksJSON: String?
-  public /// When true, this message is invisible in the chat UI but still sent to the agent.
-  public /// Used for UI-triggered decisions (ChoicePrompt, swipe actions) that shouldn't
-  public /// appear as user-typed bubbles.
-  public var isInternal: Bool
-public 
-  public /// Parsed blocks from blocksJSON. Nil if no structured content (falls back to text parsing).
+  let conversationId: UUID
+  var role: AIRole
+  var content: String
+  var createdAt: Date
+  var toolCalls: [PersistedToolCall]?
+  var toolCallId: String?
+  var citations: [ChatCitation]?
+  var isThinking: Bool?
+  var projectColorHex: String?
+  var blocksJSON: String?
+  /// When true, this message is invisible in the chat UI but still sent to the agent.
+  /// Used for UI-triggered decisions (ChoicePrompt, swipe actions) that shouldn't
+  /// appear as user-typed bubbles.
+  var isInternal: Bool
+
+  /// Parsed blocks from blocksJSON. Nil if no structured content (falls back to text parsing).
   var blocks: [ChatBlock]? {
     get {
       guard let json = blocksJSON, let data = json.data(using: .utf8) else { return nil }
       return try? JSONDecoder().decode([ChatBlock].self, from: data)
-    public }
+    }
     set {
       if let blocks = newValue, let data = try? JSONEncoder().encode(blocks) {
         blocksJSON = String(data: data, encoding: .utf8)
       } else {
-        public blocksJSON = nil
-      public }
-    public }
-  public }
-public 
+        blocksJSON = nil
+      }
+    }
+  }
+
   public init(
     id: UUID = UUID(),
     conversationId: UUID,
@@ -157,20 +157,20 @@ public
     blocks: [ChatBlock]? = nil,
     isInternal: Bool = false
   ) {
-    public self.id = id
-    public self.conversationId = conversationId
-    public self.role = role
-    public self.content = content
-    public self.createdAt = createdAt
-    public self.toolCalls = toolCalls
-    public self.toolCallId = toolCallId
-    public self.citations = citations
-    public self.isThinking = isThinking
-    public self.projectColorHex = projectColorHex
-    public self.isInternal = isInternal
-    public self.blocks = blocks
-  public }
-public }
+    self.id = id
+    self.conversationId = conversationId
+    self.role = role
+    self.content = content
+    self.createdAt = createdAt
+    self.toolCalls = toolCalls
+    self.toolCallId = toolCallId
+    self.citations = citations
+    self.isThinking = isThinking
+    self.projectColorHex = projectColorHex
+    self.isInternal = isInternal
+    self.blocks = blocks
+  }
+}
 
 // MARK: - Tool call persistence
 
