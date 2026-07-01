@@ -72,6 +72,9 @@ struct AutomationSettings: @unchecked Sendable {
   }
 
   /// Provider type string for auto-analysis model resolution.
+  /// FIXME: This is set (ProviderConnectView, ConfigProjectService) but never
+  /// consumed by resolveAutoAnalysisModel() — which always uses the active
+  /// provider. Either wire it into model resolution or remove it.
   var autoAnalysisProvider: String {
     get { defaults.string(forKey: Key.autoAnalysisProvider) ?? "" }
     set { defaults.set(newValue, forKey: Key.autoAnalysisProvider) }

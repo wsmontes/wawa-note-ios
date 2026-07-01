@@ -257,6 +257,8 @@ struct ProjectHomeView: View {
 
 // MARK: - Health Ring
 
+/// Deprecated: unused after ProjectHomeView tab consolidation (2026-06-18).
+/// No caller instantiates this view. Kept for potential future project health dashboard.
 private struct HealthRing: View {
   let score: Double
   let status: String
