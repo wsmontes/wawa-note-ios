@@ -114,13 +114,13 @@ public struct ChatConversation: Identifiable, Codable {
 public struct ChatMessage: Identifiable, Codable {
   public let id: UUID
   let conversationId: UUID
-  var role: AIRole
-  var content: String
-  var createdAt: Date
-  var toolCalls: [PersistedToolCall]?
-  var toolCallId: String?
-  var citations: [ChatCitation]?
-  var isThinking: Bool?
+  public var role: AIRole
+  public var content: String
+  public var createdAt: Date
+  public var toolCalls: [PersistedToolCall]?
+  public var toolCallId: String?
+  public var citations: [ChatCitation]?
+  public var isThinking: Bool?
   var projectColorHex: String?
   var blocksJSON: String?
   /// When true, this message is invisible in the chat UI but still sent to the agent.
