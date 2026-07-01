@@ -190,7 +190,8 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
 
         let (resData, response) = try await session.upload(for: request, fromFile: bodyURL)
         guard let http = response as? HTTPURLResponse else {
-          throw TranscriptionError.recognitionFailed("Remote transcription error")
+          throw TranscriptionError.recognitionFailed(
+            "Transcription failed — invalid server response")
         }
 
         guard (200...299).contains(http.statusCode) else {
@@ -202,13 +203,15 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
             lastError = TranscriptionError.recognitionFailed("HTTP \(http.statusCode)")
             continue
           }
-          throw TranscriptionError.recognitionFailed("Remote transcription error")
+          throw TranscriptionError.recognitionFailed(
+            "Transcription failed — HTTP \(http.statusCode)")
         }
 
         guard let json = try JSONSerialization.jsonObject(with: resData) as? [String: Any] else {
           let body = String(data: resData, encoding: .utf8) ?? "<no body>"
           AppLog.transcription.error("Parse error: \(body.prefix(300))")
-          throw TranscriptionError.recognitionFailed("Remote transcription error")
+          throw TranscriptionError.recognitionFailed(
+            "Transcription failed — could not parse response")
         }
 
         // Parse verbose_json segments when available (whisper-1 with
