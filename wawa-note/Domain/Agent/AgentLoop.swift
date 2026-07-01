@@ -327,7 +327,9 @@ final class AgentLoop: @unchecked Sendable {
             "Circuit breaker: \(consecutiveFailures)/\(maxConsecutiveFailures) consecutive tool-error iterations"
           )
         } else if !toolMessages.isEmpty {
-          consecutiveFailures = 0  // at least one tool succeeded
+          // Gradual cooldown instead of instant reset — prevents
+          // intermittent fail-succeed-fail patterns from avoiding the breaker.
+          consecutiveFailures = max(0, consecutiveFailures - 1)
         }
       } else {
         AppLog.event("agent", "Response (no tool calls): \(fullContent.prefix(300))")
