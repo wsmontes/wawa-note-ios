@@ -797,6 +797,7 @@ final class RecordingCoordinator: ObservableObject {
           AppLog.audio.warning(
             "Found broken M4A for item \(item.id.uuidString.prefix(8)) — re-concatenating from WAV segments"
           )
+          repairedIds.append(item.id)
           // Re-concatenate from WAV segments if manifest exists.
           // Use Task because concatenate() is async but cleanupOrphanedRecordings is sync.
           if let manifest = try? store.readRecordingManifest(for: item.id) {
@@ -809,6 +810,9 @@ final class RecordingCoordinator: ObservableObject {
                 AppLog.audio.info("Repaired broken M4A for item \(itemId.uuidString.prefix(8))")
                 // Re-enqueue for pipeline processing
                 capturedQueue?.enqueue(itemID: itemId, trigger: .backgroundBackfill)
+                // Notify views so they can refresh to show the repaired item
+                NotificationCenter.default.post(
+                  name: .pipelineCompleted, object: itemId.uuidString)
               } else {
                 AppLog.audio.error(
                   "Failed to repair broken M4A for item \(itemId.uuidString.prefix(8))")
