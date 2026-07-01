@@ -1958,17 +1958,12 @@ public struct TaskBody: Codable, Sendable {
 /// Structured body for synthesis-type derived items.
 
 public struct SynthesisBody: Codable, Sendable {
-
-  public var markdown: String  // Full synthesis in markdown
-
-  public var sections: [SynthesisSection]  // Parsed sections for rendering
-
-  public var metrics: [SynthesisMetric]  // Computed metrics
-
-  public var updatedFromItemIDs: [UUID]  // Items that contributed to latest version
-
+  public var markdown: String
+  public var sections: [SynthesisSection]
+  public var metrics: [SynthesisMetric]
+  public var updatedFromItemIDs: [UUID]
   public var generatedAt: Date
-
+  public init(markdown: String = "", sections: [SynthesisSection] = [], metrics: [SynthesisMetric] = [], updatedFromItemIDs: [UUID] = [], generatedAt: Date = Date()) { self.markdown = markdown; self.sections = sections; self.metrics = metrics; self.updatedFromItemIDs = updatedFromItemIDs; self.generatedAt = generatedAt }
 }
 
 public struct SynthesisSection: Codable, Sendable {
