@@ -79,6 +79,10 @@ final class ShareExtensionViewModel: ObservableObject {
     // surfaced when importedCount == 0. A future iteration should either:
     //   a) Show a summary screen ("3 imported, 2 failed") before dismiss, or
     //   b) Surface partial-failure errors in the importSourceApp/importError fields.
+    //
+    // NOTE: importSourceApp cannot be populated — iOS does not expose the source
+    // application's bundle ID to Share Extensions through public API. This is a
+    // platform limitation, not a code gap.
     if importedCount > 0 {
       finish(with: .done(itemCount: importedCount))
     } else {
