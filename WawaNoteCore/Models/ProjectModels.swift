@@ -200,7 +200,7 @@ public final class Project {
 
 
 
-  init(
+  public init(
 
     id: UUID = UUID(),
 
@@ -413,7 +413,7 @@ public final class TaskItem {
 
 
 
-  init(
+  public init(
 
     id: UUID = UUID(),
 
@@ -555,7 +555,7 @@ public final class Person {
   public var createdAt: Date
 
 
-  init(
+  public init(
 
     id: UUID = UUID(),
 
@@ -633,7 +633,7 @@ public final class GraphEdge {
 
 
 
-  init(
+  public init(
 
     id: UUID = UUID(),
 
@@ -735,7 +735,7 @@ public final class Entity {
 
 
 
-  init(
+  public init(
 
     id: UUID = UUID(),
 
@@ -1126,7 +1126,7 @@ struct Preset: Codable, Sendable, Identifiable {
   public var version: Int
 
 
-  init(
+  public init(
 
     id: String, name: String, description: String = "", lensID: String? = nil,
 
@@ -1296,7 +1296,7 @@ public final class ProjectFrame {
 
 
 
-  init(
+  public init(
 
     id: UUID = UUID(), projectID: UUID, parentFrameID: UUID? = nil, name: String,
 
@@ -1376,7 +1376,7 @@ public final class ChangeRecord {
 
 
 
-  init(
+  public init(
 
     id: UUID = UUID(), entityType: String, entityID: UUID, projectID: UUID? = nil,
 
@@ -1437,7 +1437,7 @@ public final class ProjectSnapshot {
 
 
 
-  init(
+  public init(
 
     id: UUID = UUID(), projectID: UUID, label: String? = nil,
 
@@ -1511,7 +1511,7 @@ public final class AgentSuggestion {
   public var isCritical: Bool
 
 
-  init(
+  public init(
 
     id: UUID = UUID(), projectID: UUID? = nil, type: String, title: String,
 
@@ -1641,7 +1641,7 @@ public final class QueueEntry {
 
 
 
-  init(
+  public init(
 
     id: UUID = UUID(),
 
@@ -1812,7 +1812,7 @@ public final class ProjectDerivedItem {
 
 
 
-  init(
+  public init(
 
     id: UUID = UUID(),
 
