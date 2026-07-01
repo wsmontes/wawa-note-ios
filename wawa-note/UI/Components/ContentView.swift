@@ -24,6 +24,7 @@ struct ContentView: View {
   @State private var selectedTab = 0
   @State private var keyboardHeight: CGFloat = 0
   @State private var safeAreaBottom: CGFloat = 0
+  @State private var showOnboarding = false
   @StateObject private var chatState = ChatOverlayState()
   @StateObject private var chatViewModel = ChatViewModel()
   @Query(filter: #Predicate<KnowledgeItem> { $0.inboxDate != nil }) private var inboxItems:
@@ -137,6 +138,9 @@ struct ContentView: View {
     .environmentObject(chatViewModel)
     .sheet(isPresented: $showSettings) { SettingsView() }
     .sheet(isPresented: $showQueue) { ProcessingQueueSheet() }
+    .fullScreenCover(isPresented: $showOnboarding) {
+      OnboardingView()
+    }
     .onReceive(keyboardPublisher) { keyboardHeight = $0 }
     .onReceive(NotificationCenter.default.publisher(for: .pipelineCompleted)) { _ in
       WawaNoteApp.updateAppBadge(modelContext: modelContext)
@@ -171,16 +175,13 @@ struct ContentView: View {
     }
   }
 
-  /// Check minimum configuration state on launch and log guidance.
-  // TODO-DISCUSS: First-launch onboarding is missing entirely. New users see
-  // a 4-tab interface with no providers, no guidance, and get "No AI provider
-  // configured" errors when they try to chat. UserDefaultsKeys for onboarding
-  // states (hasCompletedOnboarding, onboardedV1/V2, hasShownWelcome) exist but
-  // are never read. Future iteration should add a welcome flow that:
-  //   a) Asks about use case (meetings, journaling, projects, general)
-  //   b) Guides user through connecting their first AI provider
-  //   c) Shows a quick tour of the 4 tabs
+  /// Check first-launch state and trigger onboarding if needed.
   private func checkFirstLaunchConfig() {
+    let hasOnboarded = UserDefaults.standard.bool(forKey: UserDefaultsKey.hasCompletedOnboarding)
+    if !hasOnboarded {
+      showOnboarding = true
+    }
+
     let allConfigs = (try? modelContext.fetch(FetchDescriptor<AIProviderConfigModel>())) ?? []
     if allConfigs.isEmpty {
       AppLog.event(
@@ -460,5 +461,188 @@ private struct PriorityBadge: View {
       .padding(.horizontal, 6).padding(.vertical, 1)
       .background(color.opacity(0.15)).clipShape(Capsule())
       .foregroundStyle(color)
+  }
+}
+
+// MARK: - Onboarding View
+
+/// First-launch onboarding flow: welcome → provider → tour.
+/// Persists completion to UserDefaults.hasCompletedOnboarding.
+/// Accessible later via Settings → "Show Welcome Again".
+struct OnboardingView: View {
+  @Environment(\.modelContext) private var modelContext
+  @Environment(\.dismiss) private var dismiss
+  @State private var step: Step = .welcome
+  @State private var selectedUseCase: UseCase = .general
+  @State private var selectedTemplate: ProviderTemplate?
+
+  enum Step: Int, CaseIterable { case welcome, provider, tour }
+
+  enum UseCase: String, CaseIterable {
+    case meetings = "Meetings & Calls", journaling = "Journaling"
+    case projects = "Projects & Tasks", general = "General Knowledge"
+    var icon: String {
+      switch self {
+      case .meetings: "mic.fill"
+      case .journaling: "book.fill"
+      case .projects: "folder.fill"
+      case .general: "sparkles"
+      }
+    }
+    var description: String {
+      switch self {
+      case .meetings: "Record, transcribe, and analyze meetings with AI-powered summaries."
+      case .journaling: "Capture daily thoughts, ideas, and reflections with smart organization."
+      case .projects: "Manage projects with AI-synthesized overviews, tasks, and knowledge graphs."
+      case .general: "Use as a personal AI workspace — capture anything, let AI connect the dots."
+      }
+    }
+  }
+
+  var body: some View {
+    NavigationStack {
+      VStack(spacing: 0) {
+        HStack(spacing: 8) {
+          ForEach(Step.allCases, id: \.rawValue) { s in
+            Circle().fill(s.rawValue <= step.rawValue ? Color.accentColor : Color(.systemGray5))
+              .frame(width: 8, height: 8)
+          }
+        }.padding(.top, 24)
+
+        Group {
+          switch step {
+          case .welcome: welcomeStep
+          case .provider: providerStep
+          case .tour: tourStep
+          }
+        }
+        .transition(.opacity.combined(with: .move(edge: .trailing)))
+        .animation(.easeInOut(duration: 0.3), value: step)
+
+        Spacer()
+        VStack(spacing: 12) {
+          if step != .tour {
+            Button(step == .welcome ? "Continue" : "Skip for Now") { advanceStep() }
+              .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 14)
+              .buttonStyle(.borderedProminent).padding(.horizontal, 32)
+          }
+          if step == .welcome {
+            Button("Skip Setup") { finish() }.font(.subheadline).foregroundStyle(.secondary)
+          }
+          if step == .tour {
+            Button("Get Started") { finish() }
+              .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 14)
+              .buttonStyle(.borderedProminent).padding(.horizontal, 32)
+          }
+        }.padding(.bottom, 48)
+      }.navigationBarHidden(true)
+    }
+    .sheet(item: $selectedTemplate) { template in ProviderConnectView(template: template) }
+    .interactiveDismissDisabled()
+  }
+
+  private var welcomeStep: some View {
+    VStack(spacing: 24) {
+      Spacer().frame(height: 40)
+      ZStack {
+        RoundedRectangle(cornerRadius: 28, style: .continuous)
+          .fill(Color.accentColor.opacity(0.1)).frame(width: 100, height: 100)
+        Image(systemName: "brain.head.profile").font(.system(size: 44)).foregroundStyle(.accent)
+      }
+      VStack(spacing: 8) {
+        Text("Welcome to\nWawa Note").font(.largeTitle).fontWeight(.bold).multilineTextAlignment(.center)
+        Text("Your personal AI workspace.\nHow will you use it?").font(.body)
+          .foregroundStyle(.secondary).multilineTextAlignment(.center)
+      }
+      VStack(spacing: 10) {
+        ForEach(UseCase.allCases, id: \.rawValue) { uc in
+          Button { withAnimation { selectedUseCase = uc } } label: {
+            HStack(spacing: 12) {
+              Image(systemName: uc.icon).font(.title3)
+                .foregroundStyle(selectedUseCase == uc ? .white : .accent).frame(width: 32)
+              VStack(alignment: .leading, spacing: 2) {
+                Text(uc.rawValue).font(.subheadline).fontWeight(.medium)
+                  .foregroundStyle(selectedUseCase == uc ? .white : .primary)
+                Text(uc.description).font(.caption)
+                  .foregroundStyle(selectedUseCase == uc ? .white.opacity(0.8) : .secondary).lineLimit(2)
+              }
+              Spacer()
+              if selectedUseCase == uc { Image(systemName: "checkmark.circle.fill").foregroundStyle(.white) }
+            }.padding(14)
+              .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(selectedUseCase == uc ? Color.accentColor : Color(.systemGray6)))
+          }.buttonStyle(.plain)
+        }
+      }.padding(.horizontal, 24)
+    }
+  }
+
+  private var providerStep: some View {
+    VStack(spacing: 20) {
+      Spacer().frame(height: 32)
+      Image(systemName: "link.circle.fill").font(.system(size: 56)).foregroundStyle(.accent)
+      VStack(spacing: 8) {
+        Text("Connect an AI Provider").font(.title2).fontWeight(.bold)
+        Text("Choose a provider and paste your API key.\nYou can add more later in Settings.")
+          .font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
+      }
+      VStack(spacing: 10) {
+        ForEach(ProviderTemplate.cloudTemplates) { template in
+          Button { selectedTemplate = template } label: {
+            HStack(spacing: 12) {
+              Image(systemName: template.systemImageName).font(.title3).frame(width: 32)
+              VStack(alignment: .leading, spacing: 2) {
+                Text(template.displayName).font(.subheadline).fontWeight(.medium)
+                Text(template.subtitle).font(.caption).foregroundStyle(.secondary)
+              }
+              Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+            }.padding(14)
+              .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.systemGray6)))
+          }.buttonStyle(.plain)
+        }
+      }.padding(.horizontal, 24)
+      Text("Local providers (Ollama, LM Studio) can be added later in Settings.")
+        .font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 32)
+    }
+  }
+
+  private var tourStep: some View {
+    VStack(spacing: 32) {
+      Spacer().frame(height: 40)
+      Image(systemName: "rectangle.split.3x1.fill").font(.system(size: 48)).foregroundStyle(.accent)
+      Text("You're All Set").font(.title2).fontWeight(.bold)
+      Text("Here's a quick tour of your workspace.").font(.body).foregroundStyle(.secondary)
+      VStack(spacing: 16) {
+        TourCard(icon: "mic.fill", title: "Capture", desc: "Record meetings, scan documents, import files.", color: .orange)
+        TourCard(icon: "tray.full.fill", title: "Inbox", desc: "Review and triage everything — search across all items.", color: .blue)
+        TourCard(icon: "folder.fill", title: "Explore", desc: "Browse projects, files, and timeline — your organized knowledge graph.", color: .green)
+        TourCard(icon: "bubble.left.and.bubble.right.fill", title: "Chat", desc: "Ask your AI assistant anything — it has access to your entire workspace.", color: .purple)
+      }.padding(.horizontal, 24)
+    }
+  }
+
+  private func advanceStep() {
+    step = step == .welcome ? .provider : .tour
+  }
+
+  private func finish() {
+    UserDefaults.standard.set(true, forKey: UserDefaultsKey.hasCompletedOnboarding)
+    UserDefaults.standard.set(selectedUseCase.rawValue, forKey: "onboarding_use_case")
+    dismiss()
+  }
+}
+
+private struct TourCard: View {
+  let icon: String, title: String, desc: String, color: Color
+  var body: some View {
+    HStack(spacing: 14) {
+      Image(systemName: icon).font(.title3).foregroundStyle(color).frame(width: 28)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(title).font(.subheadline).fontWeight(.semibold)
+        Text(desc).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+      }
+      Spacer()
+    }.padding(12)
+      .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(.systemGray6)))
   }
 }

@@ -18,6 +18,7 @@ struct SettingsView: View {
   @State private var preferBuiltInMic: Bool = AudioSessionManager.preferBuiltInMicOverBluetooth
   @State private var allowCloudTranscription: Bool = UserDefaults.standard.bool(
     forKey: "transcription_allow_cloud")
+  @State private var showWelcomeAgain = false
   @State private var developerModeEnabled: Bool = UserDefaults.standard.bool(
     forKey: "developer_mode_enabled")
 
@@ -281,6 +282,15 @@ struct SettingsView: View {
             .onChange(of: developerModeEnabled) { _, v in
               UserDefaults.standard.set(v, forKey: "developer_mode_enabled")
             }
+          Button {
+            UserDefaults.standard.set(false, forKey: UserDefaultsKey.hasCompletedOnboarding)
+            showWelcomeAgain = true
+          } label: {
+            Label("Show Welcome Again", systemImage: "hand.wave")
+          }
+          .fullScreenCover(isPresented: $showWelcomeAgain) {
+            OnboardingView()
+          }
         } header: {
           Text("Developer")
         } footer: {
