@@ -407,6 +407,7 @@ final class AnthropicProvider: AIProvider, @unchecked Sendable {
     let usage = AIUsage(
       promptTokens: decoded.usage.inputTokens, completionTokens: decoded.usage.outputTokens,
       totalTokens: (decoded.usage.inputTokens ?? 0) + (decoded.usage.outputTokens ?? 0))
+    BudgetTracker.shared.recordSpend(tokens: usage.totalTokens ?? 0)
 
     AppLog.provider.info(
       "Anthropic response: \(text.prefix(100))... tool_calls: \(toolCalls?.count ?? 0)")

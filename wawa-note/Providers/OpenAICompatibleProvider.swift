@@ -298,6 +298,10 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
 
     let usage: AIUsage? = {
       if let u = decoded.usage {
+        // Track spend so AgentLoop budget enforcement has real data.
+        // Previously BudgetTracker.recordSpend was never called — spentToday
+        // always 0.0, budget enforcement was non-functional.
+        BudgetTracker.shared.recordSpend(tokens: u.totalTokens ?? 0)
         return AIUsage(
           promptTokens: u.promptTokens, completionTokens: u.completionTokens,
           totalTokens: u.totalTokens)

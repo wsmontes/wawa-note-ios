@@ -423,6 +423,7 @@ final class GeminiProvider: AIProvider, @unchecked Sendable {
 
     let usage: AIUsage? = {
       guard let u = decoded.usageMetadata else { return nil }
+      BudgetTracker.shared.recordSpend(tokens: u.totalTokenCount ?? 0)
       return AIUsage(
         promptTokens: u.promptTokenCount,
         completionTokens: u.candidatesTokenCount,
