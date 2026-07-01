@@ -53,6 +53,13 @@ final class ShareExtensionViewModel: ObservableObject {
       return
     }
 
+    // Check available disk space before importing
+    let freeBytes = SharedContainer.availableSpace()
+    if freeBytes < 52_428_800 {
+      finish(with: .error(ImportError.diskFull.localizedDescription))
+      return
+    }
+
     for (index, provider) in providers.enumerated() {
       let progress = providers.count > 1 ? "\(index + 1)/\(providers.count)" : ""
       state = .importing(fileName: "Detecting content...", progress: progress)

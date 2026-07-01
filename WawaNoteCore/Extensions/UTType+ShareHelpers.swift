@@ -8,6 +8,7 @@ extension UTType {
     .movie,
     .image,
     .fileURL,
+    .data,
     .url,
     .plainText,
   ]
