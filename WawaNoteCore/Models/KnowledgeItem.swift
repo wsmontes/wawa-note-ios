@@ -217,11 +217,11 @@ public final class KnowledgeItem {
   public var isImported: Bool = false
   public var importSourceURL: String?
   /// Bundle ID of the source app (e.g., "net.whatsapp.WhatsApp")
-  var importSourceApp: String?
+  public var importSourceApp: String?
   /// true if the extension timed out before completing the import
-  var isIncomplete: Bool = false
+  public var isIncomplete: Bool = false
   /// Error message if the import failed in the extension but the item was still created
-  var importError: String?
+  public var importError: String?
   // Field authority
   var fieldProvenanceJSON: String?
   // Anarlog compatibility: preserves original YAML frontmatter for round-trip fidelity

@@ -158,7 +158,7 @@ struct WawaNoteApp: App {
   /// If the on-disk store cannot be loaded (schema change, corruption, etc.),
   /// the old store is deleted and a fresh container is created automatically.
   private static func createModelContainer(schema: Schema) -> ModelContainer {
-    let config = ModelConfiguration(schema: schema)
+    let config = ModelConfiguration(schema: schema, url: SharedContainer.databaseURL)
     return createModelContainer(schema: schema, config: config)
   }
 
