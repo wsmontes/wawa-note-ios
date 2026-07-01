@@ -59,7 +59,7 @@ struct Speaker: Identifiable, Codable {
   }
 }
 
-public struct Transcript: Codable {
+public struct Transcript: Codable, Sendable {
   public var meetingId: UUID?
   public var languageCode: String?
   public var segments: [TranscriptSegment]
