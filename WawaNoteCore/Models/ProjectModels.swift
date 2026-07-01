@@ -647,7 +647,7 @@ public final class GraphEdge {
 
 }
 
-public enum EdgeType: String, Codable, CaseIterable {
+public enum EdgeType: String, Codable, Sendable, CaseIterable {
 
   case relatesTo
 
