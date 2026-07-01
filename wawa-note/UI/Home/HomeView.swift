@@ -807,10 +807,6 @@ struct HomeView: View {
   private var recordingPanel: some View {
     let isActive = captureVM.recordingState == .recording
     let isPaused = captureVM.recordingState == .paused
-    let isWaiting = false  // simplified — no longer a separate state
-    let isSwitching = false
-    let isSystemInterrupted = false
-    let isTroubled = isWaiting || isSwitching || isSystemInterrupted
     return VStack(spacing: 0) {
       Spacer()
       ScrollingWaveformView(level: captureVM.audioLevel, isRunning: isActive)
@@ -843,22 +839,8 @@ struct HomeView: View {
       Spacer().frame(height: 16)
       Text(captureVM.elapsedTimeFormatted)
         .font(.system(.largeTitle, design: .monospaced).weight(.thin))
-        .foregroundStyle(isTroubled ? .orange : (isPaused ? .orange : .primary))
-      if isSwitching {
-        VStack(spacing: 4) {
-          ProgressView().tint(.orange)
-          Text("Switching microphone…")
-            .font(.subheadline).foregroundStyle(.orange)
-          Text("Your recording is safe — this may take a moment")
-            .font(.caption2).foregroundStyle(.secondary)
-        }
-      } else if isWaiting {
-        Text("Waiting for microphone…")
-          .font(.subheadline).foregroundStyle(.orange)
-      } else if isSystemInterrupted {
-        Text("Recording interrupted")
-          .font(.subheadline).foregroundStyle(.red)
-      } else if isActive {
+        .foregroundStyle(isPaused ? .orange : .primary)
+      if isActive {
         HStack(spacing: 6) {
           PulsingRecordingDot()
           Text("Recording")
@@ -895,16 +877,13 @@ struct HomeView: View {
                 .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 22))
             }
           }
-        } else if isPaused || isSystemInterrupted {
+        } else if isPaused {
           HStack(spacing: 40) {
             Button(action: { captureVM.resumeRecording() }) {
               ZStack {
-                Circle().fill(isSystemInterrupted ? .orange : .red).frame(width: 64, height: 64)
-                Image(
-                  systemName: isSystemInterrupted
-                    ? "arrow.clockwise.circle.fill" : "record.circle.fill"
-                )
-                .font(.system(size: buttonIconSize)).foregroundStyle(.white)
+                Circle().fill(.red).frame(width: 64, height: 64)
+                Image(systemName: "record.circle.fill")
+                  .font(.system(size: buttonIconSize)).foregroundStyle(.white)
               }
             }
             Button(action: {
@@ -915,35 +894,6 @@ struct HomeView: View {
                 .frame(width: 80, height: 44)
                 .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 22))
             }
-          }
-        } else if isWaiting {
-          VStack(spacing: 12) {
-            Button(action: { captureVM.resumeRecording() }) {
-              Label("Try Again", systemImage: "arrow.clockwise")
-                .font(.headline).frame(maxWidth: 200, minHeight: 40)
-            }
-            .buttonStyle(.borderedProminent)
-            Button(action: { captureVM.forceBuiltInMic() }) {
-              Label("Use iPhone Microphone", systemImage: "iphone")
-                .font(.subheadline).frame(maxWidth: 200, minHeight: 36)
-            }
-            .buttonStyle(.bordered)
-            Button(action: {
-              UINotificationFeedbackGenerator().notificationOccurred(.success)
-              captureVM.stopRecording()
-            }) {
-              Text("Finish").font(.headline).foregroundStyle(.secondary)
-                .frame(width: 80, height: 44)
-            }
-          }
-        } else if isSwitching {
-          Button(action: {
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-            captureVM.stopRecording()
-          }) {
-            Text("Finish").font(.headline).foregroundStyle(.primary)
-              .frame(width: 80, height: 44)
-              .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 22))
           }
         }
       }.padding(.bottom, 48)
