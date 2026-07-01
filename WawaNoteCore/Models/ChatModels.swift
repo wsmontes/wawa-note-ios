@@ -179,7 +179,7 @@ public struct PersistedToolCall: Codable {
   public let name: String
   public let arguments: String
   public var resultPreview: String?
-  public public var statusRaw: String
+  public var statusRaw: String
 
   var status: ToolCallStatus {
     get { ToolCallStatus(rawValue: statusRaw) ?? .pending }
