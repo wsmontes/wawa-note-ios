@@ -149,7 +149,12 @@ final class ShareExtensionViewModel: ObservableObject {
       }
     }
 
-    item.importSourceURL = url.absoluteString
+    // Set to the persistent shared path, not the temp URL (defer deletes temp).
+    item.importSourceURL =
+      SharedContainer.filesURL
+      .appendingPathComponent(item.id.uuidString)
+      .appendingPathComponent(item.imageFileRelativePath ?? item.audioFileRelativePath ?? "file")
+      .absoluteString
     return item
   }
 
@@ -168,15 +173,17 @@ final class ShareExtensionViewModel: ObservableObject {
       let result = try await importer.importFromURL(url)
       let item = result.knowledgeItem
       item.isImported = true
-      item.importSourceURL = url.absoluteString
 
       // Copy artifacts
       let itemDir = SharedContainer.filesURL.appendingPathComponent(item.id.uuidString)
       try FileManager.default.createDirectory(at: itemDir, withIntermediateDirectories: true)
+      var firstDest: URL?
       for (_, artifactURL) in result.artifacts {
         let destURL = itemDir.appendingPathComponent(artifactURL.lastPathComponent)
         try FileManager.default.copyItem(at: artifactURL, to: destURL)
+        if firstDest == nil { firstDest = destURL }
       }
+      item.importSourceURL = firstDest?.absoluteString ?? url.absoluteString
       return item
     }
 
@@ -189,7 +196,6 @@ final class ShareExtensionViewModel: ObservableObject {
     let safeName = String.safeImportFilename(original: originalName)
     let item = KnowledgeItem(type: .note, title: originalName, status: .draft)
     item.isImported = true
-    item.importSourceURL = url.absoluteString
     // Store in directory keyed by the item's ID so the main app can find it.
     let itemDir = SharedContainer.filesURL.appendingPathComponent(item.id.uuidString)
     try FileManager.default.createDirectory(at: itemDir, withIntermediateDirectories: true)
