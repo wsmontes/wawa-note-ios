@@ -15,8 +15,8 @@ Items are documented here rather than as individual code comments to keep the co
 - **Sub-agent**: no structured output contract, parent parses free text
 
 ## 🎨 UI/UX pequenos
-- **importSourceApp**: always nil (Share Extension never sets it)
-- **Swipe actions**: identical for all statuses in InboxView (failed items should show Retry)
+- **importSourceApp**: always nil → DOCUMENTED: iOS platform limitation (no public API)
+- **Swipe actions**: identical for all statuses → ✅ FIXED: Retry swipe added for failed items
 - **assignToProject**: navigates away from Inbox (surprising)
 - **Cloud-fallback Apple**: not selectable as global default (only per-item)
 - **Per-item transcription**: overwrites global TranscriptionSettings as side-effect
