@@ -4,7 +4,7 @@ import WawaNoteCore
 
 /// Unchecked Sendable wrapper for passing edges across actor boundaries in force layout.
 /// GraphEdge is a @Model class (non-Sendable); this wrapper isolates the captured value.
-struct SendableEdges: @unchecked Sendable { var edges: [GraphEdge] }
+struct SendableEdges: @unchecked Sendable { var edges: [GraphEdgeItem] }
 
 // MARK: - Graph Node
 
@@ -34,7 +34,7 @@ struct GraphNode: Identifiable {
   var radius: CGFloat { min(40, max(16, 14 + CGFloat(degree) * 3)) }
 }
 
-struct GraphEdgeItem: Identifiable {
+struct GraphEdgeItem: Identifiable, Sendable {
   let id = UUID()
   let fromID: UUID
   let toID: UUID
