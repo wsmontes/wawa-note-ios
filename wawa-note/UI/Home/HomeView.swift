@@ -498,6 +498,9 @@ struct HomeView: View {
       guard let photo else { return }
       Task {
         let items = await processPhotoItem(photo)
+        if items.isEmpty {
+          captureVM.scannerError = "Could not save photo. Please try again."
+        }
         for item in items {
           processingQueue.enqueue(itemID: item.id, trigger: .newCapture)
         }
@@ -509,6 +512,9 @@ struct HomeView: View {
       guard !images.isEmpty else { return }
       Task {
         let items = await scannerVM.createItems(from: images, context: modelContext)
+        if items.isEmpty {
+          captureVM.scannerError = "Could not save scanned document. Please try again."
+        }
         for item in items {
           processingQueue.enqueue(itemID: item.id, trigger: .newCapture)
         }
