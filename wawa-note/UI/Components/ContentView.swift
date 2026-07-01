@@ -479,8 +479,10 @@ struct OnboardingView: View {
   enum Step: Int, CaseIterable { case welcome, provider, tour }
 
   enum UseCase: String, CaseIterable {
-    case meetings = "Meetings & Calls", journaling = "Journaling"
-    case projects = "Projects & Tasks", general = "General Knowledge"
+    case meetings = "Meetings & Calls"
+    case journaling = "Journaling"
+    case projects = "Projects & Tasks"
+    case general = "General Knowledge"
     var icon: String {
       switch self {
       case .meetings: "mic.fill"
@@ -550,13 +552,16 @@ struct OnboardingView: View {
         Image(systemName: "brain.head.profile").font(.system(size: 44)).foregroundStyle(.accent)
       }
       VStack(spacing: 8) {
-        Text("Welcome to\nWawa Note").font(.largeTitle).fontWeight(.bold).multilineTextAlignment(.center)
+        Text("Welcome to\nWawa Note").font(.largeTitle).fontWeight(.bold).multilineTextAlignment(
+          .center)
         Text("Your personal AI workspace.\nHow will you use it?").font(.body)
           .foregroundStyle(.secondary).multilineTextAlignment(.center)
       }
       VStack(spacing: 10) {
         ForEach(UseCase.allCases, id: \.rawValue) { uc in
-          Button { withAnimation { selectedUseCase = uc } } label: {
+          Button {
+            withAnimation { selectedUseCase = uc }
+          } label: {
             HStack(spacing: 12) {
               Image(systemName: uc.icon).font(.title3)
                 .foregroundStyle(selectedUseCase == uc ? .white : .accent).frame(width: 32)
@@ -564,13 +569,17 @@ struct OnboardingView: View {
                 Text(uc.rawValue).font(.subheadline).fontWeight(.medium)
                   .foregroundStyle(selectedUseCase == uc ? .white : .primary)
                 Text(uc.description).font(.caption)
-                  .foregroundStyle(selectedUseCase == uc ? .white.opacity(0.8) : .secondary).lineLimit(2)
+                  .foregroundStyle(selectedUseCase == uc ? .white.opacity(0.8) : .secondary)
+                  .lineLimit(2)
               }
               Spacer()
-              if selectedUseCase == uc { Image(systemName: "checkmark.circle.fill").foregroundStyle(.white) }
+              if selectedUseCase == uc {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.white)
+              }
             }.padding(14)
-              .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(selectedUseCase == uc ? Color.accentColor : Color(.systemGray6)))
+              .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                  .fill(selectedUseCase == uc ? Color.accentColor : Color(.systemGray6)))
           }.buttonStyle(.plain)
         }
       }.padding(.horizontal, 24)
@@ -588,16 +597,20 @@ struct OnboardingView: View {
       }
       VStack(spacing: 10) {
         ForEach(ProviderTemplate.cloudTemplates) { template in
-          Button { selectedTemplate = template } label: {
+          Button {
+            selectedTemplate = template
+          } label: {
             HStack(spacing: 12) {
               Image(systemName: template.systemImageName).font(.title3).frame(width: 32)
               VStack(alignment: .leading, spacing: 2) {
                 Text(template.displayName).font(.subheadline).fontWeight(.medium)
                 Text(template.subtitle).font(.caption).foregroundStyle(.secondary)
               }
-              Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+              Spacer()
+              Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
             }.padding(14)
-              .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.systemGray6)))
+              .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.systemGray6)))
           }.buttonStyle(.plain)
         }
       }.padding(.horizontal, 24)
@@ -613,10 +626,20 @@ struct OnboardingView: View {
       Text("You're All Set").font(.title2).fontWeight(.bold)
       Text("Here's a quick tour of your workspace.").font(.body).foregroundStyle(.secondary)
       VStack(spacing: 16) {
-        TourCard(icon: "mic.fill", title: "Capture", desc: "Record meetings, scan documents, import files.", color: .orange)
-        TourCard(icon: "tray.full.fill", title: "Inbox", desc: "Review and triage everything — search across all items.", color: .blue)
-        TourCard(icon: "folder.fill", title: "Explore", desc: "Browse projects, files, and timeline — your organized knowledge graph.", color: .green)
-        TourCard(icon: "bubble.left.and.bubble.right.fill", title: "Chat", desc: "Ask your AI assistant anything — it has access to your entire workspace.", color: .purple)
+        TourCard(
+          icon: "mic.fill", title: "Capture",
+          desc: "Record meetings, scan documents, import files.", color: .orange)
+        TourCard(
+          icon: "tray.full.fill", title: "Inbox",
+          desc: "Review and triage everything — search across all items.", color: .blue)
+        TourCard(
+          icon: "folder.fill", title: "Explore",
+          desc: "Browse projects, files, and timeline — your organized knowledge graph.",
+          color: .green)
+        TourCard(
+          icon: "bubble.left.and.bubble.right.fill", title: "Chat",
+          desc: "Ask your AI assistant anything — it has access to your entire workspace.",
+          color: .purple)
       }.padding(.horizontal, 24)
     }
   }

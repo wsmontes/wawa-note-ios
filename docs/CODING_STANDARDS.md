@@ -125,3 +125,26 @@ For each implemented service, add at least one of:
 - Manual test instructions in `docs/TEST_PLAN.md`.
 
 Do not claim something works on iPhone 14 Plus until tested on device.
+
+## 11. Comment conventions
+
+Three standardized levels — grep-friendly and self-documenting:
+
+```swift
+/// FIXME(author): Known bug that requires correction.
+/// Example: "FIXME(wagner): Audio import deletes item on failure — inconsistent with text import."
+
+/// TODO(author): Future improvement, not release-blocking.
+/// Example: "TODO(wagner): Add LRU cache to EmbeddingService for frequent items."
+
+/// NOTE: Explains a non-obvious design decision — the "why", not the "what".
+/// Example: "NOTE: Uses 80% of context window for history, reserving 20% for system + tools + output."
+```
+
+**Rules:**
+- `FIXME` = broken now, fix before next release if P0/P1
+- `TODO` = nice to have, safe to ship without
+- `NOTE` = design rationale, prevents future developers from "fixing" intentional behavior
+- Always include author tag for accountability — `FIXME(name):` or `TODO(name):`
+- Never use `TODO-DISCUSS` — if discussion is needed, create a JIRA ticket
+- Inline comments (`// ...`) remain for brief explanations within a function body
