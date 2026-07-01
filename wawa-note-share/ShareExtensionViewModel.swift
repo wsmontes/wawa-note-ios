@@ -126,7 +126,7 @@ final class ShareExtensionViewModel: ObservableObject {
       item.title = result.knowledgeItem.title
       item.durationSeconds = result.knowledgeItem.durationSeconds
       // Merge artifacts
-      for (_, artifactURL) in result.artifacts {
+      for (artifactKey, artifactURL) in result.artifacts {
         let destURL = SharedContainer.filesURL
           .appendingPathComponent(item.id.uuidString)
           .appendingPathComponent(artifactURL.lastPathComponent)
@@ -135,7 +135,7 @@ final class ShareExtensionViewModel: ObservableObject {
           withIntermediateDirectories: true
         )
         try FileManager.default.copyItem(at: artifactURL, to: destURL)
-        if key == "audio" {
+        if artifactKey == "audio" {
           item.audioFileRelativePath =
             "files/\(item.id.uuidString)/\(artifactURL.lastPathComponent)"
         }
