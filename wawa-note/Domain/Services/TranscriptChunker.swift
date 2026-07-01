@@ -1,6 +1,6 @@
 import Foundation
-
 import WawaNoteCore
+
 struct TextChunk {
   let text: String
   let segmentRange: Range<Int>

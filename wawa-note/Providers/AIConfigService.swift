@@ -1,8 +1,8 @@
 import Foundation
 import OSLog
 import SwiftData
-
 import WawaNoteCore
+
 // MARK: - Config models
 
 struct AIConfig: Codable, Sendable {

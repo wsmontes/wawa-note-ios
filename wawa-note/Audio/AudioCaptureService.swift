@@ -1,7 +1,7 @@
 import AVFoundation
-import WawaNoteCore
 import Accelerate
 import OSLog
+import WawaNoteCore
 
 // MARK: - State
 

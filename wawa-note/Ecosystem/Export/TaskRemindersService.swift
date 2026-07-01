@@ -1,7 +1,7 @@
 import EventKit
-import WawaNoteCore
 import Foundation
 import OSLog
+import WawaNoteCore
 
 enum RemindersExportResult {
   case success(exported: Int)

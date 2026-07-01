@@ -1,14 +1,8 @@
 import Foundation
-
 import OSLog
-
 import SwiftData
 
-
-
 private let log = Logger(subsystem: "com.wawa-note.core", category: "models")
-
-
 
 public enum ItemStatus: String, Codable, CaseIterable {
 
@@ -45,8 +39,6 @@ public enum ItemStatus: String, Codable, CaseIterable {
   case failed
 
   case archived
-
-
 
   /// State machine: valid transitions for each status.
 
@@ -122,8 +114,6 @@ public enum ItemStatus: String, Codable, CaseIterable {
 
   }
 
-
-
   /// Returns true if transitioning to `next` is allowed by the state machine.
 
   public func canTransition(to next: ItemStatus) -> Bool {
@@ -131,8 +121,6 @@ public enum ItemStatus: String, Codable, CaseIterable {
     validNextStatuses.contains(next)
 
   }
-
-
 
   /// Human-readable label for UI badges and status bars.
 
@@ -168,8 +156,6 @@ public enum ItemStatus: String, Codable, CaseIterable {
 
   }
 
-
-
   /// SF Symbol for the status badge.
 
   public var icon: String {
@@ -204,8 +190,6 @@ public enum ItemStatus: String, Codable, CaseIterable {
 
   }
 
-
-
   /// Semantic tone for color-coding badges.
 
   public enum StatusTone { case neutral, active, success, warning, error }
@@ -232,8 +216,6 @@ public enum ItemStatus: String, Codable, CaseIterable {
 
 }
 
-
-
 public enum KnowledgeItemType: String, Codable, Sendable, CaseIterable, Hashable {
 
   case audio = "audio"
@@ -248,11 +230,7 @@ public enum KnowledgeItemType: String, Codable, Sendable, CaseIterable, Hashable
 
 }
 
-
-
 // MARK: - Display helpers
-
-
 
 extension KnowledgeItemType {
 
@@ -274,13 +252,9 @@ extension KnowledgeItemType {
 
   }
 
-
-
   public var label: String { rawValue.capitalized }
 
 }
-
-
 
 @Model
 
@@ -350,8 +324,6 @@ public final class KnowledgeItem {
 
   }
 
-
-
   // Cross-type queryable columns
 
   public var durationSeconds: Double?
@@ -364,19 +336,13 @@ public final class KnowledgeItem {
 
   public var isFlagged: Bool
 
-
-
   // Content body (Markdown for notes, journal entries)
 
   public var bodyText: String?
 
-
-
   // Inbox — non-nil means item is waiting to be processed
 
   public var inboxDate: Date?
-
-
 
   // Context columns
 
@@ -395,8 +361,6 @@ public final class KnowledgeItem {
   public var contextMotionActivity: String?
 
   public var contextBatteryLevel: Double?
-
-
 
   // Legacy meeting fields
 
@@ -458,8 +422,6 @@ public final class KnowledgeItem {
 
   public var projectReprocessContext: String?
 
-
-
   public var type: KnowledgeItemType {
 
     get {
@@ -476,8 +438,6 @@ public final class KnowledgeItem {
 
   }
 
-
-
   public var status: ItemStatus {
 
     get { ItemStatus(rawValue: statusRaw) ?? .draft }
@@ -485,8 +445,6 @@ public final class KnowledgeItem {
     set { statusRaw = newValue.rawValue }
 
   }
-
-
 
   /// Transition to a new status with validation. Logs a warning if the
 
@@ -514,8 +472,6 @@ public final class KnowledgeItem {
     self.status = next
 
   }
-
-
 
   public init(
 
@@ -599,11 +555,7 @@ public final class KnowledgeItem {
 
 }
 
-
-
 // MARK: - KnowledgeItem + FieldProvidence
-
-
 
 extension KnowledgeItem: FieldProvidence {
 
@@ -615,8 +567,6 @@ extension KnowledgeItem: FieldProvidence {
 
   }
 
-
-
   public func writeProvenance() {
 
     fieldProvenanceJSON = provenance.encode()
@@ -625,11 +575,7 @@ extension KnowledgeItem: FieldProvidence {
 
 }
 
-
-
 // MARK: - Tag normalization
-
-
 
 /// Normalizes and merges tags to keep the tag vocabulary consistent.
 
@@ -645,8 +591,6 @@ public enum TagNormalizer {
 
   }
 
-
-
   /// Normalize and deduplicate an array of tags.
 
   static func normalize(_ tags: [String]) -> [String] {
@@ -658,8 +602,6 @@ public enum TagNormalizer {
     return cleaned.filter { seen.insert($0).inserted }.sorted()
 
   }
-
-
 
   /// Merge AI-suggested tags with existing user/in-app tags.
 
@@ -673,8 +615,6 @@ public enum TagNormalizer {
 
   }
 
-
-
   /// Append a single tag to an existing array, normalizing and deduplicating.
 
   /// Use this instead of raw `.append()` to keep tags consistent.
@@ -684,8 +624,6 @@ public enum TagNormalizer {
     merge(existing: existing, suggested: [tag])
 
   }
-
-
 
   /// Replace tags matching a prefix with a new tag (e.g. mood/ tags).
 

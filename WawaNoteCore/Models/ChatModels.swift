@@ -275,24 +275,50 @@ public struct ProjectContextData: Codable, Sendable {
 }
 
 public struct TaskCardData: Codable, Sendable {
-  let taskID: String
-  let title: String
-  let status: String
-  let priority: String
-  let owner: String?
-  let projectSlug: String?
-  let needsConfirmation: Bool  // true = show Confirm/Cancel buttons
+  public let taskID: String
+  public let title: String
+  public let status: String
+  public let priority: String
+  public let owner: String?
+  public let projectSlug: String?
+  public let needsConfirmation: Bool
+  public init(
+    taskID: String = "", title: String = "", status: String = "", priority: String = "",
+    owner: String? = nil, projectSlug: String? = nil, needsConfirmation: Bool = false
+  ) {
+    self.taskID = taskID
+    self.title = title
+    self.status = status
+    self.priority = priority
+    self.owner = owner
+    self.projectSlug = projectSlug
+    self.needsConfirmation = needsConfirmation
+  }
 }
 
 public struct ItemCardData: Codable, Sendable {
-  let itemID: String
-  let title: String
-  let type: String
-  let status: String
-  let durationSeconds: Double?
-  let projectSlug: String?
-  let hasTranscript: Bool
-  let hasAnalysis: Bool
+  public let itemID: String
+  public let title: String
+  public let type: String
+  public let status: String
+  public let durationSeconds: Double?
+  public let projectSlug: String?
+  public let hasTranscript: Bool
+  public let hasAnalysis: Bool
+  public init(
+    itemID: String = "", title: String = "", type: String = "", status: String = "",
+    durationSeconds: Double? = nil, projectSlug: String? = nil, hasTranscript: Bool = false,
+    hasAnalysis: Bool = false
+  ) {
+    self.itemID = itemID
+    self.title = title
+    self.type = type
+    self.status = status
+    self.durationSeconds = durationSeconds
+    self.projectSlug = projectSlug
+    self.hasTranscript = hasTranscript
+    self.hasAnalysis = hasAnalysis
+  }
 }
 
 public struct SearchResultsData: Codable, Sendable {
@@ -320,50 +346,99 @@ public struct AnalysisSection: Codable, Sendable {
 }
 
 public struct ChoicePromptData: Codable, Sendable {
-  let question: String
-  let options: [ChoiceOption]
+  public let question: String
+  public let options: [ChoiceOption]
+  public init(question: String = "", options: [ChoiceOption] = []) {
+    self.question = question
+    self.options = options
+  }
 }
 
 public struct ChoiceOption: Codable, Sendable {
-  let label: String
-  let value: String  // sent as user message when tapped
+  public let label: String
+  public let value: String
+  public init(label: String = "", value: String = "") {
+    self.label = label
+    self.value = value
+  }
 }
 
 public struct ConfirmationData: Codable, Sendable {
-  let title: String
-  let message: String
-  let confirmLabel: String
-  let cancelLabel: String
-  let confirmValue: String
-  let cancelValue: String
+  public let title: String
+  public let message: String
+  public let confirmLabel: String
+  public let cancelLabel: String
+  public let confirmValue: String
+  public let cancelValue: String
+  public init(
+    title: String = "", message: String = "", confirmLabel: String = "Confirm",
+    cancelLabel: String = "Cancel", confirmValue: String = "confirm", cancelValue: String = "cancel"
+  ) {
+    self.title = title
+    self.message = message
+    self.confirmLabel = confirmLabel
+    self.cancelLabel = cancelLabel
+    self.confirmValue = confirmValue
+    self.cancelValue = cancelValue
+  }
 }
 
 // MARK: - Document Link Data
 
 public struct FileLinkData: Codable, Sendable {
-  let itemID: String
-  let title: String
-  let itemType: String
-  let snippet: String
-  let projectSlug: String?
+  public let itemID: String
+  public let title: String
+  public let itemType: String
+  public let snippet: String
+  public let projectSlug: String?
+  public init(
+    itemID: String = "", title: String = "", itemType: String = "", snippet: String = "",
+    projectSlug: String? = nil
+  ) {
+    self.itemID = itemID
+    self.title = title
+    self.itemType = itemType
+    self.snippet = snippet
+    self.projectSlug = projectSlug
+  }
 }
 
 public struct DocumentHeaderData: Codable, Sendable {
-  let title: String
-  let documentType: String
-  let summary: String
-  let sectionCount: Int
-  let itemID: String
+  public let title: String
+  public let documentType: String
+  public let summary: String
+  public let sectionCount: Int
+  public let itemID: String
+  public init(
+    title: String = "", documentType: String = "", summary: String = "", sectionCount: Int = 0,
+    itemID: String = ""
+  ) {
+    self.title = title
+    self.documentType = documentType
+    self.summary = summary
+    self.sectionCount = sectionCount
+    self.itemID = itemID
+  }
 }
 
 public struct FreeTextInputData: Codable, Sendable {
-  let question: String
-  let placeholder: String
-  let submitLabel: String
+  public let question: String
+  public let placeholder: String
+  public let submitLabel: String
+  public init(question: String = "", placeholder: String = "", submitLabel: String = "Submit") {
+    self.question = question
+    self.placeholder = placeholder
+    self.submitLabel = submitLabel
+  }
 }
 
 public struct ProgressUpdateData: Codable, Sendable {
-  let step: Int
-  let total: Int
-  let label: String
+  public let step: Int
+  public let total: Int
+  public let label: String
+  public init(step: Int = 0, total: Int = 0, label: String = "") {
+    self.step = step
+    self.total = total
+    self.label = label
+  }
 }
