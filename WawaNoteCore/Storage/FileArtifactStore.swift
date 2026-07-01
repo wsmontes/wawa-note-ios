@@ -3313,31 +3313,19 @@ public final class FileArtifactStore: @unchecked Sendable {
 
 
 public struct RecordingSegment: Codable, Identifiable, Sendable {
-
-
-
   public let id: UUID
-
   public let index: Int
-
-  public let fileName: String  // e.g. "segment-000.wav" (no directory prefix)
-
-
-
+  public let fileName: String
   public let startedAt: Date
-
   public var endedAt: Date?
-
   public let inputPortName: String
-
   public let inputPortType: String
-
   public let routeChangeReason: String
-
   public var sampleRate: Double?
-
   public var fileSize: Int64?
-
+  public init(id: UUID = UUID(), index: Int, fileName: String, startedAt: Date, endedAt: Date? = nil, inputPortName: String, inputPortType: String, routeChangeReason: String, sampleRate: Double? = nil, fileSize: Int64? = nil) {
+    self.id = id; self.index = index; self.fileName = fileName; self.startedAt = startedAt; self.endedAt = endedAt; self.inputPortName = inputPortName; self.inputPortType = inputPortType; self.routeChangeReason = routeChangeReason; self.sampleRate = sampleRate; self.fileSize = fileSize
+  }
 }
 
 
