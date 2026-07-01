@@ -11,11 +11,6 @@ final class OnThisDayService {
   }
 
   func entries(for date: Date) -> [TimelineEntry] {
-    let cal = Calendar.current
-    let month = cal.component(.month, from: date)
-    let day = cal.component(.day, from: date)
-    let currentYear = cal.component(.year, from: date)
-
     var allItems: [KnowledgeItem] = []
     do {
       var descriptor = FetchDescriptor<KnowledgeItem>()
@@ -24,9 +19,19 @@ final class OnThisDayService {
     } catch {
       return []
     }
+    return Self.filterEntries(from: allItems, for: date)
+  }
+
+  /// Bulk version: filters pre-fetched items for a date. Use this when
+  /// computing entries for multiple days to avoid repeated full-table scans.
+  static func filterEntries(from items: [KnowledgeItem], for date: Date) -> [TimelineEntry] {
+    let cal = Calendar.current
+    let month = cal.component(.month, from: date)
+    let day = cal.component(.day, from: date)
+    let currentYear = cal.component(.year, from: date)
 
     return
-      allItems
+      items
       .filter { item in
         let itemYear = cal.component(.year, from: item.createdAt)
         let itemMonth = cal.component(.month, from: item.createdAt)

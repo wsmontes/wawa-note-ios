@@ -22,7 +22,9 @@ struct TimelineExplorerView: View {
       MonthGridView(
         month: displayedMonth,
         daySummaries: daySummaries,
-        onDayLongPress: { _ in }
+        // TODO-DISCUSS: Wire onDayLongPress to create note/journal for the date.
+        // Currently nil to avoid showing dead context menu buttons.
+        onDayLongPress: nil
       )
 
       if !calendarSync.hasPermission {

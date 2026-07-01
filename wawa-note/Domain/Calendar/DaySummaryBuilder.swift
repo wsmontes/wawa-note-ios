@@ -21,8 +21,10 @@ struct DaySummary {
 @MainActor
 final class DaySummaryBuilder {
   private let onThisDayService: OnThisDayService
+  private let context: ModelContext
 
   init(context: ModelContext) {
+    self.context = context
     self.onThisDayService = OnThisDayService(context: context)
   }
 
@@ -51,9 +53,11 @@ final class DaySummaryBuilder {
       result[day] = summary
     }
 
-    // Mark days that have on-this-day entries
+    // Mark days that have on-this-day entries.
+    // Fetch all items once instead of per-day to avoid repeated full-table scans.
+    let allItems = (try? context.fetch(FetchDescriptor<KnowledgeItem>())) ?? []
     for (day, var summary) in result {
-      let onThisDayEntries = onThisDayService.entries(for: day)
+      let onThisDayEntries = OnThisDayService.filterEntries(from: allItems, for: day)
       summary.hasOnThisDay = !onThisDayEntries.isEmpty
       result[day] = summary
     }
