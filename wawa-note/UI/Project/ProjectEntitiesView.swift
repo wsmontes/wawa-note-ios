@@ -131,10 +131,10 @@ struct ProjectEntitiesView: View {
       }
     }
 
-    entities = nameToEntry.map {
+    entities = nameToEntry.map { (key, entry) in
       EntitySummary(
-        name: String($0.key.split(separator: "|")[0]), kind: $1.kind, mentionCount: $1.count,
-        sourceItems: $1.items)
+        name: String(key.split(separator: "|")[0]), kind: entry.kind, mentionCount: entry.count,
+        sourceItems: entry.items)
     }.sorted { $0.mentionCount > $1.mentionCount }
 
     isLoading = false

@@ -126,7 +126,7 @@ final class ShareExtensionViewModel: ObservableObject {
       item.title = result.knowledgeItem.title
       item.durationSeconds = result.knowledgeItem.durationSeconds
       // Merge artifacts
-      for (key, artifactURL) in result.artifacts {
+      for (_, artifactURL) in result.artifacts {
         let destURL = SharedContainer.filesURL
           .appendingPathComponent(item.id.uuidString)
           .appendingPathComponent(artifactURL.lastPathComponent)
@@ -179,7 +179,7 @@ final class ShareExtensionViewModel: ObservableObject {
       // Copy artifacts
       let itemDir = SharedContainer.filesURL.appendingPathComponent(item.id.uuidString)
       try FileManager.default.createDirectory(at: itemDir, withIntermediateDirectories: true)
-      for (key, artifactURL) in result.artifacts {
+      for (_, artifactURL) in result.artifacts {
         let destURL = itemDir.appendingPathComponent(artifactURL.lastPathComponent)
         try FileManager.default.copyItem(at: artifactURL, to: destURL)
       }
@@ -203,7 +203,7 @@ final class ShareExtensionViewModel: ObservableObject {
 
   private func importURL(_ provider: NSItemProvider) async throws -> KnowledgeItem {
     let url: URL = try await withCheckedThrowingContinuation { continuation in
-      _ = provider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { item, error in
+      provider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { item, error in
         if let error = error {
           continuation.resume(throwing: error)
         } else if let url = item as? URL {
@@ -226,7 +226,7 @@ final class ShareExtensionViewModel: ObservableObject {
 
   private func importText(_ provider: NSItemProvider) async throws -> KnowledgeItem {
     let text: String = try await withCheckedThrowingContinuation { continuation in
-      _ = provider.loadItem(forTypeIdentifier: UTType.plainText.identifier, options: nil) {
+      provider.loadItem(forTypeIdentifier: UTType.plainText.identifier, options: nil) {
         item, error in
         if let error = error {
           continuation.resume(throwing: error)
