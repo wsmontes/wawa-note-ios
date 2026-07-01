@@ -146,9 +146,9 @@ public final class KnowledgeItem {
   public var typeRaw: String
   public var title: String
   /// Preserved original title (filename, recording date, etc.) before AI rename.
-  var originalTitle: String?
-  var createdAt: Date
-  var updatedAt: Date
+  public var originalTitle: String?
+  public var createdAt: Date
+  public var updatedAt: Date
   var statusRaw: String
   // [String] is NOT supported as a direct SwiftData attribute — CoreData
   // cannot materialize "Array<String>" (crash: "Could not materialize
@@ -189,7 +189,7 @@ public final class KnowledgeItem {
   var inboxDate: Date?
 
   // Context columns
-  var contextCalendarEventTitle: String?
+  public var contextCalendarEventTitle: String?
   var contextAudioRoute: String?
   var contextPlaceName: String?
   var contextLatitude: Double?
@@ -223,7 +223,7 @@ public final class KnowledgeItem {
   /// Error message if the import failed in the extension but the item was still created
   public var importError: String?
   // Field authority
-  var fieldProvenanceJSON: String?
+  public var fieldProvenanceJSON: String?
   // Anarlog compatibility: preserves original YAML frontmatter for round-trip fidelity
   var anarlogFrontmatterJSON: String?
   var needsProjectReprocessing: Bool = false
@@ -303,12 +303,12 @@ public final class KnowledgeItem {
 // MARK: - KnowledgeItem + FieldProvidence
 
 extension KnowledgeItem: FieldProvidence {
-  var provenance: FieldProvenance {
+  public var provenance: FieldProvenance {
     get { FieldProvenance.decode(from: fieldProvenanceJSON) }
     set { fieldProvenanceJSON = newValue.encode() }
   }
 
-  func writeProvenance() {
+  public func writeProvenance() {
     fieldProvenanceJSON = provenance.encode()
   }
 }

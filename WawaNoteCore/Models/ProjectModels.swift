@@ -3,14 +3,14 @@ import SwiftData
 
 // MARK: - FieldOrigin
 
-enum FieldOrigin: String, Codable, Sendable, CaseIterable {
+public enum FieldOrigin: String, Codable, Sendable, CaseIterable {
   case user  // Manually edited by user via UI
   case llm  // Written by an AI agent or pipeline
   case `import`  // Created by file import (PDF, markdown, etc.)
   case system  // System-generated (e.g., OCR, default values, migrations)
 }
 
-enum CorrectionScope: String, Codable, Sendable, CaseIterable {
+public enum CorrectionScope: String, Codable, Sendable, CaseIterable {
   case item  // Correction applies to this item only
   case project  // Correction may impact the project
   case global  // Correction applies globally (requires explicit confirmation)
@@ -20,7 +20,7 @@ enum CorrectionScope: String, Codable, Sendable, CaseIterable {
 
 /// Tracks who last modified each field, when, and by what source.
 /// Stored as a JSON column (`fieldProvenanceJSON`) on each model.
-struct FieldProvenance: Codable, Sendable {
+public struct FieldProvenance: Codable, Sendable {
   var fields: [String: Entry]
 
   struct Entry: Codable, Sendable {
@@ -33,41 +33,41 @@ struct FieldProvenance: Codable, Sendable {
     }
   }
 
-  func isOwned(by origin: FieldOrigin, field: String) -> Bool {
+  public func isOwned(by origin: FieldOrigin, field: String) -> Bool {
     fields[field]?.origin == origin
   }
 
-  func isUserOwned(field: String) -> Bool {
+  public func isUserOwned(field: String) -> Bool {
     isOwned(by: .user, field: field)
   }
 
-  func origin(for field: String) -> FieldOrigin {
+  public func origin(for field: String) -> FieldOrigin {
     fields[field]?.origin ?? .llm
   }
 
-  mutating func mark(field: String, origin: FieldOrigin) {
+  public mutating func mark(field: String, origin: FieldOrigin) {
     fields[field] = Entry(origin: origin, modifiedAt: Date())
   }
 
-  func encode() -> String? {
+  public func encode() -> String? {
     guard let data = try? JSONEncoder().encode(self) else { return nil }
     return String(data: data, encoding: .utf8)
   }
 
-  static func decode(from json: String?) -> FieldProvenance {
+  public static func decode(from json: String?) -> FieldProvenance {
     guard let json, let data = json.data(using: .utf8),
       let prov = try? JSONDecoder().decode(FieldProvenance.self, from: data)
     else { return FieldProvenance(fields: [:]) }
     return prov
   }
 
-  static let empty = FieldProvenance(fields: [:])
+  public static let empty = FieldProvenance(fields: [:])
 }
 
 // MARK: - FieldProvidence protocol
 
 /// Conforming models carry a FieldProvenance and know how to persist it.
-protocol FieldProvidence: AnyObject {
+public protocol FieldProvidence: AnyObject {
   var provenance: FieldProvenance { get set }
   func writeProvenance()
 }
@@ -171,7 +171,7 @@ extension Project: FieldProvidence {
   }
 }
 
-enum ProjectStatus: String, Codable, CaseIterable {
+public enum ProjectStatus: String, Codable, CaseIterable {
   case active
   case archived
   case completed
@@ -274,7 +274,7 @@ extension TaskItem: FieldProvidence {
   }
 }
 
-enum TaskStatus: String, Codable, CaseIterable {
+public enum TaskStatus: String, Codable, CaseIterable {
   case todo
   case inProgress
   case done
@@ -368,7 +368,7 @@ final class GraphEdge {
   }
 }
 
-enum EdgeType: String, Codable, CaseIterable {
+public enum EdgeType: String, Codable, CaseIterable {
   case relatesTo
   case mentions
   case supports
@@ -422,39 +422,39 @@ enum EntityKind: String, Codable, CaseIterable {
 
 // MARK: - Project Framework (stored as JSON in Project.frameworkJSON)
 
-struct ProjectFramework: Codable, Sendable {
-  let id: String
-  let name: String
-  let description: String
-  let itemAnalysis: AnalysisConfig
-  let projectSynthesis: SynthesisConfig
-  let views: [ViewDefinition]
-  let entityKinds: [String]
-  let edgeTypes: [String]
+public struct ProjectFramework: Codable, Sendable {
+  public let id: String
+  public let name: String
+  public let description: String
+  public let itemAnalysis: AnalysisConfig
+  public let projectSynthesis: SynthesisConfig
+  public let views: [ViewDefinition]
+  public let entityKinds: [String]
+  public let edgeTypes: [String]
 }
 
-struct AnalysisConfig: Codable, Sendable {
-  let systemPrompt: String
-  let outputSchema: AnalysisOutputSchema
-  let renderAs: [FieldRenderer]
+public struct AnalysisConfig: Codable, Sendable {
+  public let systemPrompt: String
+  public let outputSchema: AnalysisOutputSchema
+  public let renderAs: [FieldRenderer]
 }
 
-struct AnalysisOutputSchema: Codable, Sendable {
-  let type: String  // "object"
-  let properties: [String: SchemaProperty]
-  let required: [String]?
+public struct AnalysisOutputSchema: Codable, Sendable {
+  public let type: String  // "object"
+  public let properties: [String: SchemaProperty]
+  public let required: [String]?
 }
 
-struct SchemaProperty: Codable, Sendable {
-  let type: String  // "string", "array", "object"
-  let items: SchemaItems?  // for array types
-  let properties: [String: SchemaProperty]?  // for object types
-  let description: String?
+public struct SchemaProperty: Codable, Sendable {
+  public let type: String  // "string", "array", "object"
+  public let items: SchemaItems?  // for array types
+  public let properties: [String: SchemaProperty]?  // for object types
+  public let description: String?
 }
 
-struct SchemaItems: Codable, Sendable {
-  let type: String
-  let properties: [String: SchemaProperty]?
+public struct SchemaItems: Codable, Sendable {
+  public let type: String
+  public let properties: [String: SchemaProperty]?
 
   init(type: String, properties: [String: SchemaProperty]? = nil) {
     self.type = type
@@ -462,19 +462,19 @@ struct SchemaItems: Codable, Sendable {
   }
 }
 
-struct SynthesisConfig: Codable, Sendable {
+public struct SynthesisConfig: Codable, Sendable {
   let systemPrompt: String
   let outputSchema: AnalysisOutputSchema
 }
 
-struct FieldRenderer: Codable, Sendable {
-  let field: String
-  let type: RenderType
-  let title: String
-  let icon: String?
+public struct FieldRenderer: Codable, Sendable {
+  public let field: String
+  public let type: RenderType
+  public let title: String
+  public let icon: String?
 }
 
-enum RenderType: String, Codable, Sendable {
+public enum RenderType: String, Codable, Sendable {
   case card
   case list
   case table
@@ -483,7 +483,7 @@ enum RenderType: String, Codable, Sendable {
   case timeline
 }
 
-struct ViewDefinition: Codable, Sendable {
+public struct ViewDefinition: Codable, Sendable {
   let id: String
   let title: String
   let type: ViewType

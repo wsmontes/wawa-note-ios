@@ -60,14 +60,19 @@ targets:
       - path: wawa-note
         excludes:
           - "**/.DS_Store"
+          - "**/*.json"
+          - "**/Info.plist"
+        resources:
+          - path: wawa-note/Resources/Skills
+            type: process
     capabilities:
       - backgroundModes:
           - audio
       - appGroups:
           - group.com.wawa-note
     dependencies:
-      - target: WawaNoteCore
       - target: wawa-note-watch
+      - target: WawaNoteCore
       - target: wawa-note-share
       - package: Yams
     settings:
@@ -94,6 +99,7 @@ targets:
     sources:
       - path: wawa-noteTests
     dependencies:
+      - target: wawa-note-watch
       - target: wawa-note
     settings:
       base:
@@ -136,7 +142,6 @@ targets:
       - appGroups:
           - group.com.wawa-note
     dependencies:
-      - target: wawa-note-watch-widget
     settings:
       base:
         GENERATE_INFOPLIST_FILE: "YES"

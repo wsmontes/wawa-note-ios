@@ -212,7 +212,7 @@ public final class FileArtifactStore: @unchecked Sendable {
 
   // MARK: - New knowledge workspace paths
 
-  func itemDirectoryURL(for itemId: UUID) -> URL {
+  public func itemDirectoryURL(for itemId: UUID) -> URL {
     baseURL.appendingPathComponent(AppDirectoryNames.items, isDirectory: true)
       .appendingPathComponent(itemId.uuidString, isDirectory: true)
   }
@@ -291,7 +291,7 @@ public final class FileArtifactStore: @unchecked Sendable {
 
   // MARK: - Directory creation (public, for services that need explicit guarantees)
 
-  func createMeetingDirectory(for meetingId: UUID) throws {
+  public func createMeetingDirectory(for meetingId: UUID) throws {
     let url = meetingDirectoryURL(for: meetingId)
     do {
       try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
@@ -570,7 +570,7 @@ public final class FileArtifactStore: @unchecked Sendable {
 
   // MARK: - Artifacts
 
-  func writeArtifact<T: Encodable>(_ value: T, fileName: String, meetingId: UUID) throws {
+  public func writeArtifact<T: Encodable>(_ value: T, fileName: String, meetingId: UUID) throws {
     try createMeetingDirectory(for: meetingId)
     let url = meetingDirectoryURL(for: meetingId).appendingPathComponent(fileName)
     do {
@@ -590,7 +590,9 @@ public final class FileArtifactStore: @unchecked Sendable {
     }
   }
 
-  func readArtifact<T: Decodable>(_ type: T.Type, fileName: String, meetingId: UUID) throws -> T {
+  public func readArtifact<T: Decodable>(_ type: T.Type, fileName: String, meetingId: UUID) throws
+    -> T
+  {
     let url = meetingDirectoryURL(for: meetingId).appendingPathComponent(fileName)
     guard fileManager.fileExists(atPath: url.path) else {
       throw FileArtifactStoreError.fileNotFound
@@ -620,7 +622,7 @@ public final class FileArtifactStore: @unchecked Sendable {
   ///
   /// If any step fails, the original file is untouched.
   /// Callers must ensure the parent directory exists before calling.
-  func atomicWriteWithBackup(data: Data, url: URL) throws {
+  public func atomicWriteWithBackup(data: Data, url: URL) throws {
     let newURL = url.appendingPathExtension("NEW")
     let bakURL = url.appendingPathExtension("BAK")
 

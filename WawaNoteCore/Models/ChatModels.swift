@@ -2,14 +2,14 @@ import Foundation
 
 // MARK: - Chat Context
 
-enum ChatContext: Equatable, Hashable, Codable {
+public enum ChatContext: Equatable, Hashable, Codable {
   case global
   case inbox
   case item(UUID)
   case exploreProjects
   case project(UUID)
 
-  var key: String {
+  public var key: String {
     switch self {
     case .global: return "global"
     case .inbox: return "inbox"
@@ -19,7 +19,7 @@ enum ChatContext: Equatable, Hashable, Codable {
     }
   }
 
-  var displayName: String {
+  public var displayName: String {
     switch self {
     case .global: return "General"
     case .inbox: return "Inbox"
@@ -29,7 +29,7 @@ enum ChatContext: Equatable, Hashable, Codable {
     }
   }
 
-  var associatedID: UUID? {
+  public var associatedID: UUID? {
     switch self {
     case .item(let id): return id
     case .project(let id): return id
@@ -54,13 +54,13 @@ enum ChatContext: Equatable, Hashable, Codable {
   }
 }
 
-enum AIRole: String, Codable {
+public enum AIRole: String, Codable {
   case system
   case user
   case assistant
   case tool
 
-  var apiName: String {
+  public var apiName: String {
     switch self {
     case .system: "system"
     case .user: "user"
@@ -72,19 +72,19 @@ enum AIRole: String, Codable {
 
 // MARK: - Conversation
 
-struct ChatConversation: Identifiable, Codable {
-  let id: UUID
-  var title: String
-  var createdAt: Date
-  var updatedAt: Date
-  var providerId: UUID?
-  var model: String?
-  var messageCount: Int
-  var pinnedAt: Date?
-  var lastMessagePreview: String?
-  var contextKey: String?
+public struct ChatConversation: Identifiable, Codable {
+  public let id: UUID
+  public var title: String
+  public var createdAt: Date
+  public var updatedAt: Date
+  public var providerId: UUID?
+  public var model: String?
+  public var messageCount: Int
+  public var pinnedAt: Date?
+  public var lastMessagePreview: String?
+  public var contextKey: String?
 
-  init(
+  public init(
     id: UUID = UUID(),
     title: String = "",
     createdAt: Date = Date(),
@@ -111,25 +111,25 @@ struct ChatConversation: Identifiable, Codable {
 
 // MARK: - Message
 
-struct ChatMessage: Identifiable, Codable {
-  let id: UUID
-  let conversationId: UUID
-  var role: AIRole
-  var content: String
-  var createdAt: Date
-  var toolCalls: [PersistedToolCall]?
-  var toolCallId: String?
-  var citations: [ChatCitation]?
-  var isThinking: Bool?
-  var projectColorHex: String?
-  var blocksJSON: String?
+public struct ChatMessage: Identifiable, Codable {
+  public let id: UUID
+  public let conversationId: UUID
+  public var role: AIRole
+  public var content: String
+  public var createdAt: Date
+  public var toolCalls: [PersistedToolCall]?
+  public var toolCallId: String?
+  public var citations: [ChatCitation]?
+  public var isThinking: Bool?
+  public var projectColorHex: String?
+  public var blocksJSON: String?
   /// When true, this message is invisible in the chat UI but still sent to the agent.
   /// Used for UI-triggered decisions (ChoicePrompt, swipe actions) that shouldn't
   /// appear as user-typed bubbles.
-  var isInternal: Bool
+  public var isInternal: Bool
 
   /// Parsed blocks from blocksJSON. Nil if no structured content (falls back to text parsing).
-  var blocks: [ChatBlock]? {
+  public var blocks: [ChatBlock]? {
     get {
       guard let json = blocksJSON, let data = json.data(using: .utf8) else { return nil }
       return try? JSONDecoder().decode([ChatBlock].self, from: data)
@@ -143,7 +143,7 @@ struct ChatMessage: Identifiable, Codable {
     }
   }
 
-  init(
+  public init(
     id: UUID = UUID(),
     conversationId: UUID,
     role: AIRole,
@@ -174,19 +174,19 @@ struct ChatMessage: Identifiable, Codable {
 
 // MARK: - Tool call persistence
 
-struct PersistedToolCall: Codable {
-  let id: String
-  let name: String
-  let arguments: String
-  var resultPreview: String?
-  var statusRaw: String
+public struct PersistedToolCall: Codable {
+  public let id: String
+  public let name: String
+  public let arguments: String
+  public var resultPreview: String?
+  public var statusRaw: String
 
-  var status: ToolCallStatus {
+  public var status: ToolCallStatus {
     get { ToolCallStatus(rawValue: statusRaw) ?? .pending }
     set { statusRaw = newValue.rawValue }
   }
 
-  init(
+  public init(
     id: String, name: String, arguments: String, resultPreview: String? = nil,
     status: ToolCallStatus = .pending
   ) {
@@ -198,7 +198,7 @@ struct PersistedToolCall: Codable {
   }
 }
 
-enum ToolCallStatus: String, Codable {
+public enum ToolCallStatus: String, Codable {
   case pending
   case running
   case completed
@@ -207,20 +207,20 @@ enum ToolCallStatus: String, Codable {
 
 // MARK: - Citation
 
-struct ChatCitation: Codable {
-  let itemId: UUID
-  let title: String
-  let snippet: String
-  let itemType: KnowledgeItemType
-  var projectID: UUID?
-  var projectColorHex: String?
+public struct ChatCitation: Codable {
+  public let itemId: UUID
+  public let title: String
+  public let snippet: String
+  public let itemType: KnowledgeItemType
+  public var projectID: UUID?
+  public var projectColorHex: String?
 }
 
 // MARK: - Interactive Chat Blocks
 
 /// Structured content blocks that render as native SwiftUI views in the chat.
 /// Emitted by ShellInterpreter tool handlers and persisted in ChatMessage.blocksJSON.
-enum ChatBlock: Codable, Sendable {
+public enum ChatBlock: Codable, Sendable {
   case text(String)
   case table(TableData)
   case code(CodeData)
@@ -251,119 +251,119 @@ enum ChatBlock: Codable, Sendable {
 
 // MARK: - Block Data Types
 
-struct TableData: Codable, Sendable {
-  let title: String?
-  let headers: [String]
-  let rows: [[String]]
+public struct TableData: Codable, Sendable {
+  public let title: String?
+  public let headers: [String]
+  public let rows: [[String]]
 }
 
-struct CodeData: Codable, Sendable {
-  let code: String
-  let language: String?
-  let caption: String?
+public struct CodeData: Codable, Sendable {
+  public let code: String
+  public let language: String?
+  public let caption: String?
 }
 
-struct ProjectContextData: Codable, Sendable {
-  let projectName: String
-  let slug: String
-  let status: String
-  let taskCount: Int
-  let itemCount: Int
-  let signalCount: Int
-  let healthStatus: String?
-  let summary: String?
+public struct ProjectContextData: Codable, Sendable {
+  public let projectName: String
+  public let slug: String
+  public let status: String
+  public let taskCount: Int
+  public let itemCount: Int
+  public let signalCount: Int
+  public let healthStatus: String?
+  public let summary: String?
 }
 
-struct TaskCardData: Codable, Sendable {
-  let taskID: String
-  let title: String
-  let status: String
-  let priority: String
-  let owner: String?
-  let projectSlug: String?
-  let needsConfirmation: Bool  // true = show Confirm/Cancel buttons
+public struct TaskCardData: Codable, Sendable {
+  public let taskID: String
+  public let title: String
+  public let status: String
+  public let priority: String
+  public let owner: String?
+  public let projectSlug: String?
+  public let needsConfirmation: Bool  // true = show Confirm/Cancel buttons
 }
 
-struct ItemCardData: Codable, Sendable {
-  let itemID: String
-  let title: String
-  let type: String
-  let status: String
-  let durationSeconds: Double?
-  let projectSlug: String?
-  let hasTranscript: Bool
-  let hasAnalysis: Bool
+public struct ItemCardData: Codable, Sendable {
+  public let itemID: String
+  public let title: String
+  public let type: String
+  public let status: String
+  public let durationSeconds: Double?
+  public let projectSlug: String?
+  public let hasTranscript: Bool
+  public let hasAnalysis: Bool
 }
 
-struct SearchResultsData: Codable, Sendable {
-  let query: String
-  let results: [SearchResultItem]
+public struct SearchResultsData: Codable, Sendable {
+  public let query: String
+  public let results: [SearchResultItem]
 }
 
-struct SearchResultItem: Codable, Sendable {
-  let itemID: String
-  let title: String
-  let snippet: String
-  let type: String
-  let projectSlug: String?
+public struct SearchResultItem: Codable, Sendable {
+  public let itemID: String
+  public let title: String
+  public let snippet: String
+  public let type: String
+  public let projectSlug: String?
 }
 
-struct AnalysisData: Codable, Sendable {
-  let itemID: String
-  let sections: [AnalysisSection]
+public struct AnalysisData: Codable, Sendable {
+  public let itemID: String
+  public let sections: [AnalysisSection]
 }
 
-struct AnalysisSection: Codable, Sendable {
-  let title: String
-  let count: Int
-  let items: [String]
+public struct AnalysisSection: Codable, Sendable {
+  public let title: String
+  public let count: Int
+  public let items: [String]
 }
 
-struct ChoicePromptData: Codable, Sendable {
-  let question: String
-  let options: [ChoiceOption]
+public struct ChoicePromptData: Codable, Sendable {
+  public let question: String
+  public let options: [ChoiceOption]
 }
 
-struct ChoiceOption: Codable, Sendable {
-  let label: String
-  let value: String  // sent as user message when tapped
+public struct ChoiceOption: Codable, Sendable {
+  public let label: String
+  public let value: String  // sent as user message when tapped
 }
 
-struct ConfirmationData: Codable, Sendable {
-  let title: String
-  let message: String
-  let confirmLabel: String
-  let cancelLabel: String
-  let confirmValue: String
-  let cancelValue: String
+public struct ConfirmationData: Codable, Sendable {
+  public let title: String
+  public let message: String
+  public let confirmLabel: String
+  public let cancelLabel: String
+  public let confirmValue: String
+  public let cancelValue: String
 }
 
 // MARK: - Document Link Data
 
-struct FileLinkData: Codable, Sendable {
-  let itemID: String
-  let title: String
-  let itemType: String
-  let snippet: String
-  let projectSlug: String?
+public struct FileLinkData: Codable, Sendable {
+  public let itemID: String
+  public let title: String
+  public let itemType: String
+  public let snippet: String
+  public let projectSlug: String?
 }
 
-struct DocumentHeaderData: Codable, Sendable {
-  let title: String
-  let documentType: String
-  let summary: String
-  let sectionCount: Int
-  let itemID: String
+public struct DocumentHeaderData: Codable, Sendable {
+  public let title: String
+  public let documentType: String
+  public let summary: String
+  public let sectionCount: Int
+  public let itemID: String
 }
 
-struct FreeTextInputData: Codable, Sendable {
-  let question: String
-  let placeholder: String
-  let submitLabel: String
+public struct FreeTextInputData: Codable, Sendable {
+  public let question: String
+  public let placeholder: String
+  public let submitLabel: String
 }
 
-struct ProgressUpdateData: Codable, Sendable {
-  let step: Int
-  let total: Int
-  let label: String
+public struct ProgressUpdateData: Codable, Sendable {
+  public let step: Int
+  public let total: Int
+  public let label: String
 }
