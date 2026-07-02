@@ -266,6 +266,23 @@ public final class KnowledgeItem {
 
   public var title: String
 
+  /// Whether the title looks auto-generated (recording date, "Untitled", etc.)
+  /// and should be replaced with an AI-generated one from analysis.
+  public var isGenericTitle: Bool {
+    let t = title.lowercased()
+    let genericPrefixes = [
+      "recording", "untitled", "imported", "scanned", "photo",
+      "new note", "new journal", "meeting", "call", "capture",
+      "screen recording", "voice memo",
+    ]
+    for prefix in genericPrefixes {
+      if t.hasPrefix(prefix) { return true }
+    }
+    // Also match date-based auto-titles like "2026-07-01 14:30"
+    if t.range(of: #"^\d{4}-\d{2}-\d{2}"#, options: .regularExpression) != nil { return true }
+    return false
+  }
+
   /// Preserved original title (filename, recording date, etc.) before AI rename.
 
   public var originalTitle: String?

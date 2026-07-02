@@ -707,6 +707,25 @@ final class ContentPipelineService: ObservableObject {
         fresh.analysisProviderId = provider.id
         fresh.status = lastError == nil ? .analyzed : .failed
         if lastError == nil { fresh.inboxDate = nil }
+        // Fallback title: if the agent didn't call set_title, the item
+        // still has a generic name like "Recording 2026-07-01". Extract a
+        // better title from the short_summary in analysis.json.
+        if lastError == nil, fresh.title.isEmpty || fresh.isGenericTitle {
+          let analysisURL = FileArtifactStore().itemDirectoryURL(for: itemID).appendingPathComponent("analysis.json")
+          if let data = try? Data(contentsOf: analysisURL),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let shortSummary = json["short_summary"] as? String, !shortSummary.isEmpty
+          {
+            let candidate =
+              shortSummary
+              .replacingOccurrences(of: "\n", with: " ")
+              .trimmingCharacters(in: .whitespaces)
+            if candidate.count > 5, candidate.count < 120 {
+              fresh.title = String(candidate.prefix(100))
+              AppLog.provider.info("📝 Fallback title from analysis: \(fresh.title)")
+            }
+          }
+        }
         do { try modelContext.save() } catch {
           AppLog.provider.error(
             "ContentPipeline: critical save failed (analysis status): \(error.localizedDescription)"
