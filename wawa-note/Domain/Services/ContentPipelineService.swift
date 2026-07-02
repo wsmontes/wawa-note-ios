@@ -865,6 +865,15 @@ final class ContentPipelineService: ObservableObject {
     activeJobs[itemID]?.cancel()
     activeJobs[itemID] = nil
     endBackgroundTask()
+    // Roll back item status so UI doesn't stay stuck on "Analyzing..."
+    let ctx = ModelContext(modelContainer)
+    if let item = try? KnowledgeItemService(context: ctx).fetchItem(id: itemID) {
+      if item.status == .analyzing { item.status = .transcribed }
+      if item.status == .transcribing { item.status = .recorded }
+      try? ctx.save()
+    }
+    // Notify observers so UI refreshes immediately
+    NotificationCenter.default.post(name: .pipelineCompleted, object: itemID.uuidString)
   }
 
   private func beginBackgroundTask() {
