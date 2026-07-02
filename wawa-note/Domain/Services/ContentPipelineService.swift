@@ -555,6 +555,11 @@ final class ContentPipelineService: ObservableObject {
                 PipelineAgentEvent(
                   id: UUID(), kind: .textDelta, timestamp: Date(),
                   detail: String(delta.prefix(100)), metadata: nil))
+            case .statusUpdate(let message):
+              // One-line status from the agent for the processing UI
+              NotificationCenter.default.post(
+                name: .contentPipelineStageChanged, object: itemID.uuidString,
+                userInfo: ["stage": message, "events": agentEvents, "itemTitle": item.title])
             case .thinking:
               pipelineStatus = PipelineProgress(
                 itemId: itemID, itemTitle: item.title,

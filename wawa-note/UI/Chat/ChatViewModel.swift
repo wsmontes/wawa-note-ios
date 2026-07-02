@@ -545,6 +545,8 @@ final class ChatViewModel: ObservableObject {
           switch event {
           case .thinking:
             state = .thinking
+          case .statusUpdate:
+            break  // status updates are for the processing UI, not chat
           case .textDelta(let delta):
             state = .streaming
             fullContent += delta
@@ -914,6 +916,8 @@ final class ChatViewModel: ObservableObject {
           switch event {
           case .thinking:
             state = .thinking
+          case .statusUpdate:
+            break  // status updates are for the processing UI, not chat
           case .textDelta(let delta):
             state = .streaming
             fullContent += delta

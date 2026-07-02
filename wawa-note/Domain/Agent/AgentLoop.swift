@@ -17,7 +17,8 @@ enum AgentStreamEvent {
   case textDelta(String)
   case toolCallStarted(name: String, id: String, arguments: String)
   case toolCallCompleted(name: String, id: String, summary: String)
-  case truncated(reason: String, progress: String)  // max iterations reached before task completion
+  case statusUpdate(String)  // one-line summary for the processing UI
+  case truncated(reason: String, progress: String)
   case finished(citations: [ChatCitation])
   case error(Error)
 }
@@ -333,6 +334,16 @@ final class AgentLoop: @unchecked Sendable {
         }
       } else {
         AppLog.event("agent", "Response (no tool calls): \(fullContent.prefix(300))")
+        // Extract a one-line summary for the processing UI
+        let statusLine =
+          fullContent
+          .components(separatedBy: "\n")
+          .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }?
+          .trimmingCharacters(in: .whitespaces)
+          .prefix(120) ?? ""
+        if !statusLine.isEmpty {
+          continuation.yield(.statusUpdate(String(statusLine)))
+        }
         messages.append(
           ChatMessage(
             conversationId: UUID(), role: .assistant, content: fullContent, citations: allCitations)
