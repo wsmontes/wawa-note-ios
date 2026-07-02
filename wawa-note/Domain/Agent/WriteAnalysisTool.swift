@@ -635,8 +635,49 @@ struct WriteAnalysisTool: AgentTool {
       }
       // ── End schema validation ──────────────────────────────────
 
-      let successMsg =
-        "Analysis written (\(json.count) sections, \(prettyData.count) bytes) to analysis.json.\(validationNote)"
+      // Build a dynamic state summary so the agent knows exactly where it stands.
+      // This replaces static prompt enforcement — the agent sees what's done,
+      // what's missing, and what to do next.
+      var stateMsg = "## ANALYSIS STATE\n"
+      let allWrittenFields = enrichedJSON.keys.filter { $0 != "_metadata" }.sorted()
+      stateMsg += "Fields written: \(allWrittenFields.joined(separator: ", "))\n"
+
+      if let fw = context.activeFramework {
+        let schemaFields = fw.itemAnalysis.outputSchema.properties.keys.sorted()
+        let requiredFields = fw.itemAnalysis.outputSchema.required ?? []
+        let missingRequired = requiredFields.filter { !allWrittenFields.contains($0) }
+        let missingOptional = schemaFields.filter {
+          !allWrittenFields.contains($0) && !requiredFields.contains($0)
+        }
+        if !missingRequired.isEmpty {
+          stateMsg += "MISSING REQUIRED: \(missingRequired.joined(separator: ", "))\n"
+        }
+        if !missingOptional.isEmpty {
+          stateMsg += "Optional not yet written: \(missingOptional.joined(separator: ", "))\n"
+        }
+        if missingRequired.isEmpty && validationNote.isEmpty {
+          stateMsg += "Status: COMPLETE — all required fields present and valid.\n"
+        } else if !validationNote.isEmpty {
+          stateMsg += "Status: NEEDS FIXES — see issues below.\n"
+        } else {
+          stateMsg += "Status: IN PROGRESS — required fields done, optional fields can be added.\n"
+        }
+      } else {
+        stateMsg += "Status: \(allWrittenFields.count) fields written (no schema active).\n"
+      }
+
+      // Check title
+      if let itemID = context.activeItemID ?? context.sandboxedItemID,
+        let item = try? KnowledgeItemService(context: context.modelContext).fetchItem(id: itemID)
+      {
+        if item.isGenericTitle {
+          stateMsg += "TITLE: NOT SET — you MUST call set_title.\n"
+        } else {
+          stateMsg += "Title: \"\(item.title)\"\n"
+        }
+      }
+
+      let successMsg = "\(stateMsg)\n\(validationNote)"
       return ToolResult(
         content: successMsg,
         displaySummary: validationNote.isEmpty ? "Analysis saved" : "Analysis saved — needs fixes"
