@@ -32,10 +32,10 @@ enum PipelineTemplate {
     Use run_command: `extract <item-id>`
     If empty or fails, report and stop.
 
-    ### Step 2: TITLE (after reading)
-    Read the extracted content. Generate a concise, descriptive title
-    (5-10 words) that captures the essence. Call set_title with the title.
-    Better than generic names like "Recording 2026-06-15".
+    ### Step 2: TITLE — MANDATORY, DO NOT SKIP
+    After reading the content, you MUST call set_title. Generate a concise, descriptive title
+    (5-10 words) that captures the essence. This step is REQUIRED — never skip it.
+    The pipeline will reject analyses without a meaningful title.
 
     ### Step 3: ANALYZE (adaptive)
     Review the content and decide which sections are relevant. Not all content needs the same sections — a casual note and a formal meeting have different needs.
@@ -68,6 +68,7 @@ enum PipelineTemplate {
 
     ## RULES
     - ALWAYS start with extract
+    - ALWAYS call set_title BEFORE write_analysis — never skip
     - ALWAYS use write_analysis — never just describe results
     - "summary" is the only REQUIRED section. All others are OPTIONAL.
     - ONLY include sections that have meaningful content. Skip empty ones entirely (don't use null).
@@ -707,25 +708,6 @@ final class ContentPipelineService: ObservableObject {
         fresh.analysisProviderId = provider.id
         fresh.status = lastError == nil ? .analyzed : .failed
         if lastError == nil { fresh.inboxDate = nil }
-        // Fallback title: if the agent didn't call set_title, the item
-        // still has a generic name like "Recording 2026-07-01". Extract a
-        // better title from the short_summary in analysis.json.
-        if lastError == nil, fresh.title.isEmpty || fresh.isGenericTitle {
-          let analysisURL = FileArtifactStore().itemDirectoryURL(for: itemID).appendingPathComponent("analysis.json")
-          if let data = try? Data(contentsOf: analysisURL),
-            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let shortSummary = json["short_summary"] as? String, !shortSummary.isEmpty
-          {
-            let candidate =
-              shortSummary
-              .replacingOccurrences(of: "\n", with: " ")
-              .trimmingCharacters(in: .whitespaces)
-            if candidate.count > 5, candidate.count < 120 {
-              fresh.title = String(candidate.prefix(100))
-              AppLog.provider.info("📝 Fallback title from analysis: \(fresh.title)")
-            }
-          }
-        }
         do { try modelContext.save() } catch {
           AppLog.provider.error(
             "ContentPipeline: critical save failed (analysis status): \(error.localizedDescription)"
