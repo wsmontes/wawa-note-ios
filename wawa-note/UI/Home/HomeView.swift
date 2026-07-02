@@ -128,30 +128,70 @@ final class HomeViewModel: ObservableObject {
   func discoverImportedItems() async {
     guard let ctx = modelContext, let queue = processingQueue else { return }
 
-    // Using raw value string because SwiftData #Predicate cannot reference enum cases
-    let draftPredicate = #Predicate<KnowledgeItem> {
-      $0.isImported == true && $0.statusRaw == "draft"
-    }
-    let descriptor = FetchDescriptor<KnowledgeItem>(predicate: draftPredicate)
+    // NOTE: Share Extension no longer writes to SwiftData directly — it saves
+    // JSON manifests to SharedContainer.filesURL/imported/ to avoid opening the
+    // main app's database with a different schema (which caused AI provider
+    // configurations to be lost).
+    let importedDir = SharedContainer.filesURL.appendingPathComponent("imported", isDirectory: true)
+    guard FileManager.default.fileExists(atPath: importedDir.path) else { return }
 
-    guard let items = try? ctx.fetch(descriptor), !items.isEmpty else { return }
+    let jsonFiles: [URL]
+    do {
+      jsonFiles = try FileManager.default.contentsOfDirectory(
+        at: importedDir, includingPropertiesForKeys: nil
+      )
+      .filter { $0.pathExtension == "json" }
+    } catch { return }
 
-    logger.info("Discovered \(items.count) imported items to process")
+    guard !jsonFiles.isEmpty else { return }
+    logger.info("Discovered \(jsonFiles.count) imported item manifests to process")
 
-    for item in items {
-      // Mark as queued to prevent double-enqueue
-      item.statusRaw = ItemStatus.queuedForTranscription.rawValue
-
-      // Handle incomplete items
-      if item.isIncomplete {
-        logger.warning("Item \(item.id) was incomplete — will re-extract metadata")
-        // The pipeline will handle missing metadata
+    for jsonURL in jsonFiles {
+      guard let data = try? Data(contentsOf: jsonURL),
+        let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let idString = dict["id"] as? String,
+        let itemId = UUID(uuidString: idString),
+        let typeRaw = dict["type"] as? String,
+        let type = KnowledgeItemType(rawValue: typeRaw)
+      else {
+        try? FileManager.default.removeItem(at: jsonURL)
+        continue
       }
 
-      queue.enqueue(itemID: item.id, trigger: .newCapture)
-    }
+      // Skip if already imported (dedup)
+      let existingPred = #Predicate<KnowledgeItem> { $0.id == itemId }
+      if (try? ctx.fetch(FetchDescriptor(predicate: existingPred)).first) != nil {
+        try? FileManager.default.removeItem(at: jsonURL)
+        continue
+      }
 
-    try? ctx.save()
+      let title = dict["title"] as? String ?? "Imported Item"
+      let statusRaw = dict["status"] as? String ?? "draft"
+      let item = KnowledgeItem(
+        type: type, title: title, status: ItemStatus(rawValue: statusRaw) ?? .draft)
+      item.id = itemId  // preserve the original UUID for file path resolution
+      item.isImported = true
+      item.importSourceURL = dict["importSourceURL"] as? String
+      item.audioFileRelativePath = (dict["audioFileRelativePath"] as? String).flatMap {
+        $0.isEmpty ? nil : $0
+      }
+      item.imageFileRelativePath = (dict["imageFileRelativePath"] as? String).flatMap {
+        $0.isEmpty ? nil : $0
+      }
+      if let dur = dict["durationSeconds"] as? Double, dur > 0 { item.durationSeconds = dur }
+      if let ts = dict["createdAt"] as? TimeInterval {
+        item.createdAt = Date(timeIntervalSince1970: ts)
+      }
+
+      ctx.insert(item)
+      try? ctx.save()
+
+      queue.enqueue(itemID: item.id, trigger: .newCapture)
+      try? FileManager.default.removeItem(at: jsonURL)
+
+      logger.info(
+        "Imported item \(itemId.uuidString.prefix(8)) — type: \(typeRaw), title: \(title)")
+    }
   }
 
   private func importFiles(_ urls: [URL], deleteSource: Bool) async {

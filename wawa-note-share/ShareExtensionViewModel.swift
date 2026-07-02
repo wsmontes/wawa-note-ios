@@ -284,12 +284,34 @@ final class ShareExtensionViewModel: ObservableObject {
     }
   }
 
+  /// Writes item metadata as JSON to the App Group filesystem instead of using
+  /// SwiftData directly. This avoids the Share Extension opening the main app's
+  /// database with a different schema, which previously caused AI provider
+  /// configurations to be lost (schema hash mismatch → destroyAllStores).
+  ///
+  /// The main app's discoverImportedItems() picks up these JSON files on launch
+  /// and creates the corresponding SwiftData records.
   private func persistItem(_ item: KnowledgeItem) async throws {
-    let container = try SharedContainer.makeModelContainer()
-    let context = ModelContext(container)
-    context.insert(item)
-    try context.save()
-    logger.info("Persisted item \(item.id) — type: \(item.typeRaw), title: \(item.title)")
+    let importedDir = SharedContainer.filesURL.appendingPathComponent("imported", isDirectory: true)
+    try FileManager.default.createDirectory(at: importedDir, withIntermediateDirectories: true)
+
+    let json: [String: Any] = [
+      "id": item.id.uuidString,
+      "type": item.typeRaw,
+      "title": item.title,
+      "status": item.statusRaw,
+      "isImported": true,
+      "importSourceURL": item.importSourceURL ?? "",
+      "audioFileRelativePath": item.audioFileRelativePath ?? "",
+      "imageFileRelativePath": item.imageFileRelativePath ?? "",
+      "durationSeconds": item.durationSeconds as Any,
+      "createdAt": item.createdAt.timeIntervalSince1970,
+    ]
+    let data = try JSONSerialization.data(withJSONObject: json)
+    let jsonURL = importedDir.appendingPathComponent("\(item.id.uuidString).json")
+    try data.write(to: jsonURL)
+    logger.info(
+      "Wrote import manifest for item \(item.id) — type: \(item.typeRaw), title: \(item.title)")
   }
 
   private func finish(with state: ImportState) {
