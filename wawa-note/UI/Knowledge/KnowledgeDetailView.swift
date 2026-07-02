@@ -474,14 +474,13 @@ struct KnowledgeDetailView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentPipelineStageChanged)) { n in
       guard n.object as? String == item.id.uuidString else { return }
+      // Priority: explicit stage message > tool result summary > tool name
       if let stage = n.userInfo?["stage"] as? String {
         pipelineStage = stage.capitalized
-      }
-      if let tool = n.userInfo?["tool"] as? String {
-        pipelineStage = "Agent: \(tool)"
-      }
-      if let summary = n.userInfo?["summary"] as? String {
+      } else if let summary = n.userInfo?["summary"] as? String, !summary.isEmpty {
         pipelineStage = summary
+      } else if let tool = n.userInfo?["tool"] as? String {
+        pipelineStage = "Agent: \(tool)"
       }
       if let phase = n.userInfo?["phase"] as? String {
         pipelineStage = phase == "completed" ? "Analysis complete" : pipelineStage
