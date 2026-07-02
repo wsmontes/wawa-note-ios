@@ -588,23 +588,29 @@ struct WriteAnalysisTool: AgentTool {
       // in the next iteration without restarting the pipeline.
       var validationNote = ""
       if let fw = context.activeFramework {
-        let errors = FrameworkService.validateAnalysis(json: json, against: fw)
-        if let errors {
-          let errorList = errors.components(separatedBy: "\n").prefix(5).joined(separator: "\n")
+        let validationErrors = FrameworkService.validateAnalysis(json: json, against: fw)
+        if let validationErrors {
+          // Constructive: list each error separately so the agent can fix them
+          let errorList = validationErrors.enumerated().map { "\($0 + 1). \($1)" }.joined(
+            separator: "\n")
+          let validFields = json.keys.filter { k in
+            !validationErrors.contains(where: { $0.contains("'\(k)'") })
+          }.joined(separator: ", ")
+          let savedNote =
+            validFields.isEmpty
+            ? "" : "\nValid fields already saved: \(validFields). Only fix the errors above."
           validationNote = """
 
-            ⚠️ SCHEMA VALIDATION ISSUES (fix and call write_analysis again):
-            Framework: \(fw.name)
-            \(errorList)
+            ⚠️ VALIDATION ISSUES (your valid fields ARE saved — only fix these):
+            \(errorList)\(savedNote)
 
-            Required fields: \((fw.itemAnalysis.outputSchema.required ?? Array(fw.itemAnalysis.outputSchema.properties.keys)).joined(separator: ", "))
-
-            Fix your analysis JSON to include all required fields with correct types, then call write_analysis again.
+            Call write_analysis again with ONLY the corrected fields. You don't need to resend fields that are already valid.
             """
           AppLog.provider.warning(
-            "write_analysis: schema validation failed — \(fw.name): \(errors)")
+            "write_analysis: validation issues — \(fw.name): \(validationErrors.joined(separator: "; "))"
+          )
         } else {
-          AppLog.provider.info("write_analysis: schema validation passed — \(fw.name)")
+          AppLog.provider.info("write_analysis: all fields valid — \(fw.name)")
         }
       } else if let schema = context.activeSchema {
         let errors = Self.validateJSON(json, against: schema)

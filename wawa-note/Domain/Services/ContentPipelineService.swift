@@ -629,14 +629,13 @@ final class ContentPipelineService: ObservableObject {
               let fileURL = store.itemDirectoryURL(for: itemID).appendingPathComponent(
                 "analysis.json")
               if let data = try? Data(contentsOf: fileURL),
-                let validationError = FrameworkService.validateAnalysis(
+                let validationErrors = FrameworkService.validateAnalysis(
                   data: data, against: framework)
               {
                 // WriteAnalysisTool already gave the agent feedback during the loop.
-                // If we still have validation errors here, the agent couldn't fix them.
-                // Accept the output anyway — partial analysis is better than none.
+                // Residual issues are acceptable — partial valid analysis > no analysis.
                 AppLog.provider.warning(
-                  "Pipeline: analysis.json has residual schema issues after agent feedback loop: \(validationError)"
+                  "Pipeline: analysis.json has \(validationErrors.count) residual schema issues after agent feedback loop: \(validationErrors.joined(separator: "; "))"
                 )
               }
             }
@@ -1019,50 +1018,61 @@ final class FrameworkService {
 
   /// Validate analysis JSON against a framework's outputSchema.
   /// Returns nil on success, or an error message describing what's wrong.
-  static func validateAnalysis(json: [String: Any], against framework: ProjectFramework) -> String?
+  /// Validates analysis JSON against a framework schema. Returns a list of
+  /// field-specific errors, or nil if all present fields are valid.
+  /// NOTE: Missing optional fields are NOT errors — only type mismatches
+  /// and missing REQUIRED fields are reported.
+  static func validateAnalysis(json: [String: Any], against framework: ProjectFramework)
+    -> [String]?
   {
     let schema = framework.itemAnalysis.outputSchema
-    // Only enforce required fields if the schema explicitly lists them.
-    // When required is nil, all properties are optional (adaptive mode).
     let required = schema.required ?? []
+    var errors: [String] = []
 
-    // Check required fields are present
-    for field in required {
-      if json[field] == nil {
-        return "Missing required field '\(field)'. Required: \(required.joined(separator: ", "))."
-      }
+    // Check required fields are present (only report missing ones, not all at once)
+    let missingRequired = required.filter { json[$0] == nil }
+    if !missingRequired.isEmpty {
+      errors.append(
+        "Missing required field(s): \(missingRequired.joined(separator: ", ")). Add these fields to your write_analysis call."
+      )
     }
 
-    // Check field types against schema
+    // Check field types — only report type mismatches, skip missing optional fields
     for (field, prop) in schema.properties {
-      guard let value = json[field] else {
-        if required.contains(field) { return "Missing required field '\(field)'" }
-        continue  // optional field not present, OK
-      }
+      guard let value = json[field] else { continue }  // missing field handled above or is optional
 
       switch prop.type {
       case "string":
-        guard value is String else { return "Field '\(field)' must be a string" }
+        if !(value is String) {
+          errors.append(
+            "'\(field)' must be a string (text), got \(type(of: value)). Example: \"\(field)\": \"your text here\""
+          )
+        }
       case "array":
-        guard let arr = value as? [Any] else { return "Field '\(field)' must be an array" }
-        // Validate array items if schema specifies item properties
+        guard let arr = value as? [Any] else {
+          errors.append(
+            "'\(field)' must be an array [...], got \(type(of: value)). Example: \"\(field)\": [{{\"key\": \"value\"}}]"
+          )
+          continue
+        }
         if let itemProps = prop.items?.properties {
           for (idx, item) in arr.enumerated() {
             guard let obj = item as? [String: Any] else {
-              return "Field '\(field)'[\(idx)] must be an object"
+              errors.append("'\(field)'[\(idx)] must be an object {{...}}, got \(type(of: item))")
+              continue
             }
             for (itemField, itemProp) in itemProps {
-              if obj[itemField] == nil { continue }  // optional
+              guard let itemValue = obj[itemField] else { continue }
               switch itemProp.type {
               case "string":
-                if !(obj[itemField] is String) {
-                  return "Field '\(field)'[\(idx)].\(itemField) must be a string"
+                if !(itemValue is String) {
+                  errors.append(
+                    "'\(field)'[\(idx)].\(itemField) must be a string. Got: \(itemValue)")
                 }
               case "number", "integer":
-                if !(obj[itemField] is NSNumber) && !(obj[itemField] is Int)
-                  && !(obj[itemField] is Double)
-                {
-                  return "Field '\(field)'[\(idx)].\(itemField) must be a number"
+                if !(itemValue is NSNumber) && !(itemValue is Int) && !(itemValue is Double) {
+                  errors.append(
+                    "'\(field)'[\(idx)].\(itemField) must be a number. Got: \(itemValue)")
                 }
               default: break
               }
@@ -1070,25 +1080,28 @@ final class FrameworkService {
           }
         }
       case "object":
-        guard value is [String: Any] else { return "Field '\(field)' must be an object" }
+        if !(value is [String: Any]) {
+          errors.append("'\(field)' must be an object {{...}}, got \(type(of: value))")
+        }
       case "number", "integer":
-        guard value is NSNumber || value is Int || value is Double else {
-          return "Field '\(field)' must be a number"
+        if !(value is NSNumber) && !(value is Int) && !(value is Double) {
+          errors.append("'\(field)' must be a number. Got: \(value)")
         }
       case "boolean":
-        guard value is Bool else { return "Field '\(field)' must be a boolean" }
-      default:
-        break
+        if !(value is Bool) {
+          errors.append("'\(field)' must be true or false. Got: \(value)")
+        }
+      default: break
       }
     }
 
-    return nil  // valid
+    return errors.isEmpty ? nil : errors
   }
 
   /// Validate analysis JSON bytes against a framework. Convenience wrapper.
-  static func validateAnalysis(data: Data, against framework: ProjectFramework) -> String? {
+  static func validateAnalysis(data: Data, against framework: ProjectFramework) -> [String]? {
     guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-      return "Analysis file is not valid JSON"
+      return ["Analysis file is not valid JSON. Check for unescaped quotes or trailing commas."]
     }
     return validateAnalysis(json: json, against: framework)
   }
