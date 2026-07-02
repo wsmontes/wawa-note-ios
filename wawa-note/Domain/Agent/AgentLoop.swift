@@ -566,8 +566,17 @@ final class AgentLoop: @unchecked Sendable {
 
     var dynamicPrompt = "Today's date: \(Date().formatted(date: .complete, time: .omitted))."
 
-    // Context-aware guidance — filesystem edition
-    if let slug = toolContext.activeProjectSlug, let pid = toolContext.activeProjectID {
+    // Context-aware guidance — filesystem edition.
+    // NOTE: When sandboxed to a single item (pipeline analysis), skip all
+    // project/workspace context. The model should only know about the current
+    // item — not other projects, items, or the folder structure.
+    if toolContext.sandboxedItemID != nil {
+      if let itemID = toolContext.activeItemID {
+        dynamicPrompt += "\n\nFOCUSED ITEM: \(itemID.uuidString.prefix(8))"
+        dynamicPrompt +=
+          "\nYou are analyzing this single item. Use extract to read its content, then set_title and write_analysis. Do not explore other items or projects."
+      }
+    } else if let slug = toolContext.activeProjectSlug, let pid = toolContext.activeProjectID {
       dynamicPrompt += "\n\nCURRENT DIRECTORY: /projects/\(slug)/"
       dynamicPrompt += "\nProject ID: \(pid.uuidString.prefix(8))"
       if let name = toolContext.activeProjectName {
@@ -591,7 +600,7 @@ final class AgentLoop: @unchecked Sendable {
       }
     }
 
-    if let itemID = toolContext.activeItemID {
+    if let itemID = toolContext.activeItemID, toolContext.sandboxedItemID == nil {
       dynamicPrompt += "\n\nFOCUSED ITEM: \(itemID.uuidString.prefix(8))"
       dynamicPrompt += "\nUse cat to read its full content."
     }
