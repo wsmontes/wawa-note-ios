@@ -261,35 +261,102 @@ final class AnalysisService: @unchecked Sendable {
 
     await MainActor.run { onProgress?(.reducing) }
 
-    let combined = validSummaries.enumerated().map { idx, summary in
-      "--- Part \(idx + 1) of \(validSummaries.count) ---\n\(summary)"
+    // Recursive reduce: if the combined summaries exceed the chunk limit,
+    // reduce in batches first, then reduce the reduced results. This prevents
+    // context window overflow for long transcriptions with many chunks.
+    let maxReduce = configService.maxChunkChars(for: model)
+    let reduced = try await recursiveReduce(
+      summaries: validSummaries, maxChars: maxReduce,
+      provider: provider, model: model, systemPrompt: systemPrompt,
+      meetingId: meetingId)
+    return reduced
+  }
+
+  /// Recursively reduces chunk summaries until they fit in a single prompt.
+  /// For very long content with many chunks, this prevents the combined reduce
+  /// prompt from exceeding the model's context window.
+  private func recursiveReduce(
+    summaries: [String], maxChars: Int,
+    provider: any AIProvider, model: String, systemPrompt: String,
+    meetingId: UUID
+  ) async throws -> MeetingAnalysis {
+    let combined = summaries.enumerated().map { idx, summary in
+      "--- Part \(idx + 1) of \(summaries.count) ---\n\(summary)"
     }.joined(separator: "\n\n")
 
-    let reducePrompt = """
-      Below are summaries from different parts of a content. Synthesize them into a complete meeting analysis.
-      Extract: short_summary, detailed_summary, decisions (title, details), action_items (task, owner, due_date), open_questions, risks (risk, details), important_dates (date, meaning), mentioned_people, mentioned_systems, mentioned_organizations, mentioned_repositories, mentioned_locations.
+    // If it fits, reduce directly
+    if combined.count <= maxChars {
+      let reducePrompt = """
+        Below are summaries from different parts of a content. Synthesize them into a complete meeting analysis.
+        Extract: short_summary, detailed_summary, decisions (title, details), action_items (task, owner, due_date), open_questions, risks (risk, details), important_dates (date, meaning), mentioned_people, mentioned_systems, mentioned_organizations, mentioned_repositories, mentioned_locations.
 
-      \(combined)
+        \(combined)
 
-      Return only valid JSON with these keys: short_summary, detailed_summary, decisions, action_items, open_questions, risks, important_dates, mentioned_people, mentioned_systems, mentioned_organizations, mentioned_repositories, mentioned_locations.
-      """
+        Return only valid JSON with these keys: short_summary, detailed_summary, decisions, action_items, open_questions, risks, important_dates, mentioned_people, mentioned_systems, mentioned_organizations, mentioned_repositories, mentioned_locations.
+        """
 
-    let params = configService.requestParams(for: "analysis", model: model)
-    let request = AIRequest(
-      model: model,
-      messages: [
-        AIMessage(role: .system, content: [.text(systemPrompt)]),
-        AIMessage(role: .user, content: [.text(reducePrompt)]),
-      ],
-      temperature: params.temperature,
-      maxTokens: params.maxTokens,
-      responseFormat: jsonResponseFormat(for: model)
+      let params = configService.requestParams(for: "analysis", model: model)
+      let request = AIRequest(
+        model: model,
+        messages: [
+          AIMessage(role: .system, content: [.text(systemPrompt)]),
+          AIMessage(role: .user, content: [.text(reducePrompt)]),
+        ],
+        temperature: params.temperature,
+        maxTokens: params.maxTokens,
+        responseFormat: jsonResponseFormat(for: model)
+      )
+      let response = try await sendWithRetry(
+        provider: provider, request: request, maxRetries: Self.maxRetries)
+      return await parseResponse(
+        response.content, meetingId: meetingId, providerId: provider.id, model: model,
+        provider: provider)
+    }
+
+    // Too large — split into batches, reduce each, then recursively reduce results
+    AppLog.provider.info(
+      "Reduce: combined \(summaries.count) summaries (\(combined.count) chars) exceeds \(maxChars) limit — recursing in batches"
     )
-    let response = try await sendWithRetry(
-      provider: provider, request: request, maxRetries: Self.maxRetries)
-    return await parseResponse(
-      response.content, meetingId: meetingId, providerId: provider.id, model: model,
-      provider: provider)
+    let batchSize = max(2, summaries.count / 2)
+    var reducedSummaries: [String] = []
+    for batchStart in stride(from: 0, to: summaries.count, by: batchSize) {
+      let batch = Array(summaries[batchStart..<min(batchStart + batchSize, summaries.count)])
+      let batchCombined = batch.enumerated().map { idx, summary in
+        "--- Part \(idx + 1) ---\n\(summary)"
+      }.joined(separator: "\n\n")
+
+      let batchPrompt = """
+        Below are summaries from parts of a content. Merge them into a single structured summary covering the same sections: key points, decisions, action items, risks, people mentioned.
+
+        \(batchCombined)
+
+        Return the merged summary as plain text, keeping all important details.
+        """
+      let params = configService.requestParams(for: "analysis", model: model)
+      let batchRequest = AIRequest(
+        model: model,
+        messages: [
+          AIMessage(
+            role: .system,
+            content: [
+              .text(
+                "You are a precise content summarizer. Merge these meeting summaries without losing detail."
+              )
+            ]),
+          AIMessage(role: .user, content: [.text(batchPrompt)]),
+        ],
+        temperature: params.temperature,
+        maxTokens: params.maxTokens
+      )
+      let batchResponse = try await sendWithRetry(
+        provider: provider, request: batchRequest, maxRetries: 1)
+      reducedSummaries.append(batchResponse.content)
+    }
+
+    return try await recursiveReduce(
+      summaries: reducedSummaries, maxChars: maxChars,
+      provider: provider, model: model, systemPrompt: systemPrompt,
+      meetingId: meetingId)
   }
 
   private func summarizeChunksWithLimit(
