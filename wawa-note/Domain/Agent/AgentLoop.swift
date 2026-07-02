@@ -462,6 +462,12 @@ final class AgentLoop: @unchecked Sendable {
   /// dynamic content (project context, date — changes per request).
   /// Providers that support prompt caching can reuse the static portion.
   private func buildSystemPrompt() -> String {
+    // When sandboxed to a single item, skip the workspace-oriented static
+    // prompt entirely. The agent should only see a minimal prompt that tells
+    // it about extract, set_title, and write_analysis — nothing else.
+    if toolContext.sandboxedItemID != nil {
+      return buildPromptFragments().dynamic
+    }
     let fragments = buildPromptFragments()
     return fragments.static + "\n\n" + fragments.dynamic
   }
@@ -567,14 +573,31 @@ final class AgentLoop: @unchecked Sendable {
     var dynamicPrompt = "Today's date: \(Date().formatted(date: .complete, time: .omitted))."
 
     // Context-aware guidance — filesystem edition.
-    // NOTE: When sandboxed to a single item (pipeline analysis), skip all
-    // project/workspace context. The model should only know about the current
-    // item — not other projects, items, or the folder structure.
+    // NOTE: When sandboxed (pipeline analysis), use a minimal prompt.
+    // The static prompt mentions /projects, /inbox, touch, mv — none of
+    // these exist in the sandbox. The agent should only know about the
+    // current item and the 3 tools it actually has: extract, set_title,
+    // write_analysis.
     if toolContext.sandboxedItemID != nil {
+      dynamicPrompt = """
+        You are analyzing a single item in Wawa Note.
+
+        TOOLS AVAILABLE:
+        - extract: read the item's content
+        - set_title: set a descriptive title for this item (MANDATORY)
+        - write_analysis: save your structured analysis as JSON
+
+        STEPS:
+        1. Call extract to read the content
+        2. Call set_title with a concise descriptive title (5-10 words). NEVER skip this.
+        3. Call write_analysis with your analysis JSON
+
+        The current directory is / (the item's root folder).
+        There are no other items, projects, or folders — just this one item.
+        Do NOT try to cd, ls, or explore — there is nothing else to see.
+        """
       if let itemID = toolContext.activeItemID {
-        dynamicPrompt += "\n\nFOCUSED ITEM: \(itemID.uuidString.prefix(8))"
-        dynamicPrompt +=
-          "\nYou are analyzing this single item. Use extract to read its content, then set_title and write_analysis. Do not explore other items or projects."
+        dynamicPrompt += "\n\nITEM ID: \(itemID.uuidString.prefix(8))"
       }
     } else if let slug = toolContext.activeProjectSlug, let pid = toolContext.activeProjectID {
       dynamicPrompt += "\n\nCURRENT DIRECTORY: /projects/\(slug)/"

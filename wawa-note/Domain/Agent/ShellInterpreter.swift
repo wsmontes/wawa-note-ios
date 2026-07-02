@@ -812,9 +812,23 @@ enum ShellInterpreter {
 
   private static func handleCd(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
     var target = cmd.args.first ?? "/"
-    // Normalize trailing slashes: /projects/ → /projects
     if target.hasSuffix("/") && target.count > 1 {
       target = String(target.dropLast())
+    }
+
+    // Sandboxed mode: the item's folder IS the root. All paths are
+    // relative to the item. cd / goes to item root, cd .. is a no-op.
+    if ctx.sandboxedItemID != nil {
+      if target == "/" || target == ".." || target.isEmpty || target == "." {
+        ctx.activeProjectID = nil
+        ctx.activeProjectName = nil
+        ctx.activeProjectSlug = nil
+        ctx.activeItemID = ctx.sandboxedItemID
+        ctx.contextKey = nil
+        return ok("/  (item root)")
+      }
+      // Any other path: stay in the item — the sandbox has no subdirectories
+      return ok("/  (item root — sandboxed)")
     }
 
     if target == "/" || target == ".." || target.isEmpty {
