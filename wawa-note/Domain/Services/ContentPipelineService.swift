@@ -718,16 +718,24 @@ final class ContentPipelineService: ObservableObject {
                   "Pipeline: failed to save analyzed item \(itemID.uuidString.prefix(8)): \(error.localizedDescription)"
                 )
               }
-              // Title enforcement: if the agent skipped set_title, retry with
-              // a specific error. The title is mandatory — do not accept
-              // analysis without it, even if the JSON is valid.
+              // Title enforcement with grace period: require title for first 2
+              // attempts, then accept the analysis anyway. Better to have
+              // analysis without a perfect title than no analysis at all.
               let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID)
               if fresh?.isGenericTitle ?? true {
-                AppLog.provider.warning(
-                  "Pipeline attempt \(attemptCount): analysis exists but title was not set")
-                lastError =
-                  "You forgot to call set_title. The title is MANDATORY. Call set_title with a specific, descriptive title (10+ chars, not generic like 'Recording'). Then call write_analysis again."
-                failed = true
+                if attemptCount < 2 {
+                  AppLog.provider.warning(
+                    "Pipeline attempt \(attemptCount): analysis exists but title was not set — retrying"
+                  )
+                  lastError =
+                    "You forgot to call set_title. The title is MANDATORY. Call set_title with a specific, descriptive title (10+ chars, not generic like 'Recording'). Then call write_analysis again."
+                  failed = true
+                } else {
+                  AppLog.provider.warning(
+                    "Pipeline attempt \(attemptCount): accepting analysis without title after \(attemptCount) attempts"
+                  )
+                  break  // Accept — partial analysis > no analysis
+                }
               } else {
                 break  // Success — analysis exists, title set, DynamicAnalysis created
               }
