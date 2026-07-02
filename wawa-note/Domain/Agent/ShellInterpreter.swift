@@ -234,12 +234,13 @@ enum ShellInterpreter {
     case "person": result = handlePerson(cmd, ctx)
     case "help": result = handleHelp(cmd, ctx)
     case "ask_user": result = handleAskUser(cmd, ctx)
+    case "set_title": result = handleSetTitle(cmd, ctx)
     default:
       // Try fuzzy matching
       let suggestions = [
         "ls", "cd", "cat", "find", "grep", "touch", "echo", "rm", "mv", "head", "wc", "history",
         "extract", "semantic", "analyze", "cal", "person", "export", "vision", "describe",
-        "progress", "help", "ask_user",
+        "progress", "help", "ask_user", "set_title",
       ]
       let close = suggestions.filter { $0.hasPrefix(cmd.name) || levenshtein(cmd.name, $0) <= 2 }
       let hint = close.isEmpty ? "" : ". Did you mean: \(close.joined(separator: ", "))?"
@@ -1746,6 +1747,31 @@ enum ShellInterpreter {
   /// Cross-references a person name across all available sources.
   /// Returns a structured summary with match quality labels.
   /// Usage: person "Carla"  |  person show "Carla Silva"
+  /// Handles `set_title <title>` — same behavior as the native SetTitleTool
+  /// but accessible as a shell command so the agent doesn't get 'command not found'.
+  private static func handleSetTitle(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
+    let title = cmd.args.joined(separator: " ")
+    guard !title.trimmingCharacters(in: .whitespaces).isEmpty else {
+      return ToolResult(
+        content: "Error: title is required. Usage: set_title <new title>",
+        isError: true, displaySummary: "Missing title")
+    }
+    guard let itemID = ctx.activeItemID else {
+      return ToolResult(
+        content: "Error: no active item in context",
+        isError: true, displaySummary: "No item")
+    }
+    let fetch = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.id == itemID })
+    guard let item = try? ctx.modelContext.fetch(fetch).first else {
+      return ToolResult(
+        content: "Error: item not found", isError: true, displaySummary: "Not found")
+    }
+    if item.originalTitle == nil { item.originalTitle = item.title }
+    item.title = title
+    try? ctx.modelContext.save()
+    return ToolResult(content: "Title set to: \(title)", displaySummary: "Renamed")
+  }
+
   private static func handlePerson(_ cmd: ShellCommand, _ ctx: ToolContext) -> ToolResult {
     if cmd.args.first == "show" {
       return handlePersonShow(Array(cmd.args.dropFirst()), ctx)
