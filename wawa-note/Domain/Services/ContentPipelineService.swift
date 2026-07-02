@@ -344,14 +344,15 @@ final class ContentPipelineService: ObservableObject {
         activeFramework: resolvedFramework  // Schema for write_analysis validation
       )
 
-      // Sandboxed analysis: use text-focused tools instead of the full VFS shell.
-      // The agent operates on a text buffer (extract → grep → head → wc → write)
-      // without filesystem navigation or awareness of other items/projects.
+      // Sandboxed analysis: text-focused tools + schema selection.
+      // The agent reads content, chooses the right schema, then populates
+      // fields incrementally. No VFS — no filesystem navigation.
       let tools: [any AgentTool] = [
         ExtractItemTool(),
         TextGrepTool(),
         TextHeadTool(),
         TextWcTool(),
+        SelectSchemaTool(),
         SetTitleTool(),
         WriteAnalysisTool(),
         WriteSpeakersTool(),
@@ -367,29 +368,30 @@ final class ContentPipelineService: ObservableObject {
           You are analyzing a single item using a text-analysis toolkit.
 
           TOOLS:
-          - extract_item: load the full text (call first)
-          - text_wc: count chars/words/lines
-          - text_grep pattern: search for specific patterns
-          - text_head count=N offset=M: read a portion of text
-          - set_title: set a descriptive title (MANDATORY)
-          - write_analysis: save analysis fields as JSON (call multiple times to add fields incrementally)
-          - write_speakers: identify speakers in transcripts
+          - extract_item: load the full text into the buffer (call first)
+          - text_wc: count characters, words, lines — understand the scale
+          - text_grep pattern: search for specific words, names, topics
+          - text_head count=N offset=M: read a portion of the text
+          - select_schema: after reading, choose the analysis schema that best matches the content (call BEFORE write_analysis)
+          - set_title: set a descriptive title (MANDATORY — call after reading)
+          - write_analysis: populate analysis fields as JSON. Call MULTIPLE TIMES to add fields incrementally. Each call merges into the existing analysis.
+          - write_speakers: identify and record speakers (if multi-person transcript)
 
           WORKFLOW:
-          1. extract_item
-          2. text_wc to understand size. If >20K chars, plan chunking with text_head.
-          3. text_grep for key topics, names, decisions
-          4. text_head to read chunks if needed
-          5. set_title (MANDATORY — concise, 5-10 words)
-          6. write_analysis — populate incrementally. Start with short_summary, then add decisions, action_items, risks, etc.
-          7. write_speakers if multi-person transcript
-
-          SCHEMA FIELDS (choose which apply): short_summary, detailed_summary, decisions[{title,details,confidence}], action_items[{task,owner,due_date,confidence}], open_questions, risks, important_dates, mentioned_people, mentioned_systems, mentioned_organizations, mentioned_locations.
+          1. extract_item — load the text
+          2. text_wc — understand the size. If huge (>20K chars), plan a chunking strategy with text_head
+          3. text_grep — search for key topics, names, dates, decisions, risks
+          4. text_head — read chunks if the text is too large for a single pass
+          5. select_schema — based on what you read, pick the schema that fits this content. Is it a meeting? Research? Interview? Journal entry? Choose the schema whose fields match what you found.
+          6. set_title — concise, descriptive title (10+ chars, not generic). MANDATORY.
+          7. write_analysis — populate fields incrementally. Start with summary, then decisions, action_items, risks, etc. Call once per major section — fields accumulate.
+          8. write_speakers — identify speakers if this is a multi-person transcript
 
           RULES:
-          - set_title is MANDATORY. Never skip.
-          - write_analysis CAN be called multiple times. Each call merges new fields.
-          - Schema fields are validated. Fix errors and retry.
+          - select_schema BEFORE write_analysis — the schema defines what fields to produce
+          - set_title is MANDATORY. Never skip it. Titles must be specific.
+          - write_analysis CAN be called multiple times. Build up the analysis incrementally.
+          - Schema fields are validated. If told about issues, fix them and call write_analysis again.
           - No filesystem. No navigation. No other items. Just analyze this text.
           """
       } else {

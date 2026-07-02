@@ -580,33 +580,34 @@ final class AgentLoop: @unchecked Sendable {
     // write_analysis.
     if toolContext.sandboxedItemID != nil {
       dynamicPrompt = """
-        You are analyzing a single item. You have a focused text-analysis toolkit — no filesystem, no navigation. Just tools to read, search, measure, and write.
+        You are analyzing a single item with a text-analysis toolkit.
 
         TOOLS:
-        - extract_item: load the full text content into the buffer (call first)
-        - text_wc: count characters, words, lines — understand the scale
-        - text_grep: search for specific patterns (names, topics, phrases)
-        - text_head: read a portion of text (count=N, offset=M for chunks)
-        - set_title: set a descriptive title (MANDATORY — call after reading)
-        - write_analysis: save analysis fields as JSON. You can call this MULTIPLE TIMES to add fields incrementally. Each call merges new fields into the existing analysis. Build it up: summary first, then decisions, then action items, etc.
-        - write_speakers: identify and record speakers (if applicable)
+        - extract_item: load the full text (call first)
+        - text_wc: count chars/words/lines — understand the scale
+        - text_grep pattern: search for specific words, names, topics
+        - text_head count=N offset=M: read a portion of the text
+        - select_schema: after reading, pick the analysis schema that best matches this content (call BEFORE write_analysis)
+        - set_title: set a descriptive title (MANDATORY)
+        - write_analysis: populate analysis fields as JSON. Call MULTIPLE TIMES to add fields incrementally.
+        - write_speakers: identify speakers in transcripts
 
         WORKFLOW:
         1. extract_item — load the text
-        2. text_wc — understand the size. If huge (>20K chars), plan a chunking strategy
-        3. text_grep — search for key topics, names, dates, decisions
-        4. text_head — read chunks if the text is too large for a single pass
-        5. set_title — concise, descriptive title (5-10 words). MANDATORY.
-        6. write_analysis — populate fields incrementally. Start with summary, then decisions, action_items, risks, etc. Call it once per major section if needed — fields accumulate.
-        7. write_speakers — identify speakers if this is a multi-person transcript
-
-        SCHEMA: Your analysis should include relevant sections from: short_summary, detailed_summary, decisions (array of {title, details, confidence}), action_items (array of {task, owner, due_date, confidence}), open_questions, risks, important_dates, mentioned_people, mentioned_systems, mentioned_organizations, mentioned_locations.
+        2. text_wc — understand the size. If huge, plan chunking with text_head
+        3. text_grep — search for key topics, names, decisions, risks
+        4. text_head — read chunks if needed
+        5. select_schema — based on the content, pick the schema that fits. Is this a meeting? Research? Interview? Journal? Choose whose fields match what you found.
+        6. set_title — specific, descriptive (10+ chars, not generic). MANDATORY.
+        7. write_analysis — populate incrementally. Start with summary, then decisions, action_items, etc. Call once per section — fields accumulate.
+        8. write_speakers — if multi-person transcript
 
         RULES:
-        - set_title is MANDATORY. Never skip it.
-        - You CAN call write_analysis multiple times to add fields incrementally.
-        - Schema fields are validated — fix errors and retry if told about issues.
-        - Do NOT try to navigate, list directories, or explore. There is nothing else.
+        - select_schema BEFORE write_analysis — the schema defines what fields to produce
+        - set_title is MANDATORY. Never skip.
+        - write_analysis CAN be called multiple times. Build up incrementally.
+        - Schema fields are validated. Fix issues and retry.
+        - No filesystem. No navigation. No other items. Just analyze this text.
         """
       if let itemID = toolContext.activeItemID {
         dynamicPrompt += "\n\nITEM ID: \(itemID.uuidString.prefix(8))"
