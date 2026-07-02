@@ -712,7 +712,19 @@ final class ContentPipelineService: ObservableObject {
                   "Pipeline: failed to save analyzed item \(itemID.uuidString.prefix(8)): \(error.localizedDescription)"
                 )
               }
-              break  // Success — analysis exists and DynamicAnalysis created
+              // Title enforcement: if the agent skipped set_title, retry with
+              // a specific error. The title is mandatory — do not accept
+              // analysis without it, even if the JSON is valid.
+              let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID)
+              if fresh?.isGenericTitle ?? true {
+                AppLog.provider.warning(
+                  "Pipeline attempt \(attemptCount): analysis exists but title was not set")
+                lastError =
+                  "You forgot to call set_title. The title is MANDATORY. Call set_title with a specific, descriptive title (10+ chars, not generic like 'Recording'). Then call write_analysis again."
+                failed = true
+              } else {
+                break  // Success — analysis exists, title set, DynamicAnalysis created
+              }
             }
           } else {
             // Agent finished but didn't create analysis

@@ -881,12 +881,32 @@ struct SetTitleTool: AgentTool {
       !newTitle.trimmingCharacters(in: .whitespaces).isEmpty
     else {
       return ToolResult(
-        content: "Error: title is required and must be non-empty",
+        content:
+          "ERROR: set_title requires a non-empty 'title' parameter. Example: set_title with title='Q4 Budget Review — Key Decisions'. Try again with a concise 5-10 word title.",
         isError: true, displaySummary: "Missing title")
+    }
+    // Reject generic titles — the agent may try "Recording" or the date
+    let genericPatterns = ["recording", "untitled", "meeting", "call", "transcript", "capture"]
+    let lowerTitle = newTitle.lowercased()
+    if genericPatterns.contains(where: {
+      lowerTitle == $0 || lowerTitle.hasPrefix("\($0) ") || lowerTitle.hasPrefix("\($0)-")
+    }) {
+      return ToolResult(
+        content:
+          "REJECTED: '\(newTitle)' is too generic. Generate a specific, descriptive title that captures what this content is actually about. Include key topics, people, or decisions. Example: 'Q4 Budget Review — Marketing vs Engineering' instead of 'Meeting'.",
+        isError: true, displaySummary: "Generic title rejected")
+    }
+    // Reject too-short titles
+    if newTitle.count < 10 {
+      return ToolResult(
+        content:
+          "REJECTED: '\(newTitle)' is too short (\(newTitle.count) chars). Titles should be at least 10 characters — descriptive enough that someone can understand what this item is about without opening it.",
+        isError: true, displaySummary: "Title too short")
     }
     guard let itemID = context.activeItemID else {
       return ToolResult(
-        content: "Error: no active item in context",
+        content:
+          "ERROR: No active item in context. Make sure you're analyzing a specific item before calling set_title.",
         isError: true, displaySummary: "No item")
     }
 
@@ -895,13 +915,16 @@ struct SetTitleTool: AgentTool {
     do {
       guard let fetched = try context.modelContext.fetch(fetch).first else {
         return ToolResult(
-          content: "Error: item \(itemID) not found", isError: true, displaySummary: "Not found")
+          content:
+            "ERROR: Item not found in database. The item may have been deleted. Continue with write_analysis — the analysis will still be saved.",
+          isError: true, displaySummary: "Not found")
       }
       item = fetched
     } catch {
       AppLog.provider.error("set_title: fetch failed: \(error.localizedDescription)")
       return ToolResult(
-        content: "Error fetching item: \(error.localizedDescription)",
+        content:
+          "ERROR: Database error fetching item. Try again — this is usually a transient issue. Error: \(error.localizedDescription)",
         isError: true, displaySummary: "Fetch failed")
     }
 
@@ -916,14 +939,12 @@ struct SetTitleTool: AgentTool {
     } catch {
       AppLog.provider.error("set_title: save failed: \(error.localizedDescription)")
       return ToolResult(
-        content: "Error saving title: \(error.localizedDescription)",
+        content:
+          "ERROR: Could not save title to database. Try again — this is usually transient. If it persists, continue with write_analysis anyway. Error: \(error.localizedDescription)",
         isError: true, displaySummary: "Save failed")
     }
   }
 }
-import Foundation
-import SwiftData
-import WawaNoteCore
 
 // MARK: - Text Analysis Tools
 
