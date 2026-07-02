@@ -541,6 +541,23 @@ struct WriteAnalysisTool: AgentTool {
     do {
       try fileStore.createMeetingDirectory(for: itemId)
 
+      // Incremental merge: if analysis.json already exists (from a previous
+      // write_analysis call), deep-merge the new fields into it. This allows
+      // the agent to build up the analysis field by field across multiple
+      // iterations — summary first, decisions next, action_items last.
+      let analysisURL = fileStore.itemDirectoryURL(for: itemId)
+        .appendingPathComponent(AppFileConstants.analysisFileName)
+      if let existingData = try? Data(contentsOf: analysisURL),
+        let existingJSON = try? JSONSerialization.jsonObject(with: existingData) as? [String: Any]
+      {
+        var merged = existingJSON
+        for (key, value) in enrichedJSON where key != "_metadata" {
+          merged[key] = value
+        }
+        merged["_metadata"] = enrichedJSON["_metadata"]
+        enrichedJSON = merged
+      }
+
       let prettyData = try JSONSerialization.data(
         withJSONObject: enrichedJSON, options: [.prettyPrinted, .sortedKeys])
       let url = fileStore.itemDirectoryURL(for: itemId).appendingPathComponent(
@@ -902,5 +919,176 @@ struct SetTitleTool: AgentTool {
         content: "Error saving title: \(error.localizedDescription)",
         isError: true, displaySummary: "Save failed")
     }
+  }
+}
+import Foundation
+import SwiftData
+import WawaNoteCore
+
+// MARK: - Text Analysis Tools
+
+/// Lightweight text buffer shared across text-analysis tools.
+/// Holds the extracted content and provides grep/head/wc operations
+/// without a virtual filesystem.
+@MainActor
+final class TextBuffer {
+  static let shared = TextBuffer()
+  var content: String = ""
+  var itemID: UUID?
+
+  func load(itemID: UUID, context: ToolContext) -> ToolResult {
+    self.itemID = itemID
+    guard
+      let item = try? KnowledgeItemService(context: context.modelContext).fetchItem(id: itemID)
+    else {
+      return ToolResult(
+        content: "Error: item not found", isError: true, displaySummary: "Not found")
+    }
+    let extractSvc = ContentExtractionService(
+      modelContext: context.modelContext, fileStore: context.fileStore)
+    guard let text = extractSvc.bestAvailableTextSync(for: item), !text.isEmpty else {
+      return ToolResult(
+        content: "Error: no extractable text found. The item may need transcription first.",
+        isError: true, displaySummary: "No text")
+    }
+    self.content = text
+    let lines = text.components(separatedBy: "\n").count
+    return ToolResult(
+      content: "Loaded \(text.count) chars, ~\(lines) lines.",
+      displaySummary: "Loaded \(text.count) chars")
+  }
+
+  func grep(_ pattern: String) -> ToolResult {
+    guard !content.isEmpty else {
+      return ToolResult(
+        content: "Error: no text loaded. Use extract_item first.", isError: true,
+        displaySummary: "No text")
+    }
+    let lines = content.components(separatedBy: "\n")
+    let matches = lines.enumerated().filter { $1.localizedCaseInsensitiveContains(pattern) }
+    if matches.isEmpty {
+      return ToolResult(
+        content: "No matches for '\(pattern)' in \(lines.count) lines.",
+        displaySummary: "grep: 0 matches")
+    }
+    let output = matches.map { "[L\($0 + 1)] \($1)" }.joined(separator: "\n")
+    let preview = matches.prefix(3).map { "[L\($0 + 1)] \($1.prefix(80))" }.joined(separator: "\n")
+    return ToolResult(
+      content: output,
+      displaySummary: "grep '\(pattern)': \(matches.count) matches — \(preview)...")
+  }
+
+  func head(_ count: Int, offset: Int = 0) -> ToolResult {
+    guard !content.isEmpty else {
+      return ToolResult(content: "Error: no text loaded.", isError: true, displaySummary: "No text")
+    }
+    let start = min(offset, content.count)
+    let end = min(start + count, content.count)
+    let range =
+      content.index(
+        content.startIndex, offsetBy: start)..<content.index(content.startIndex, offsetBy: end)
+    let chunk = String(content[range])
+    return ToolResult(
+      content: chunk,
+      displaySummary: "Chars \(start)-\(end) of \(content.count)")
+  }
+
+  func wc() -> ToolResult {
+    guard !content.isEmpty else {
+      return ToolResult(content: "0 chars, 0 words, 0 lines", displaySummary: "wc: empty")
+    }
+    let chars = content.count
+    let lines = content.components(separatedBy: "\n").count
+    let words = content.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+      .count
+    return ToolResult(
+      content: "\(chars) chars, \(words) words, \(lines) lines",
+      displaySummary: "wc: \(chars)c \(words)w \(lines)l")
+  }
+}
+
+// MARK: - Extract Item Tool
+
+struct ExtractItemTool: AgentTool {
+  let name = "extract_item"
+  let description =
+    "Extract and load the full text content of this item into the text buffer. Must be called first before grep, head, or wc."
+  let parameters = AIToolParameters(properties: [:], required: [])
+
+  @MainActor
+  func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult
+  {
+    guard let itemID = context.activeItemID ?? context.sandboxedItemID else {
+      return ToolResult(
+        content: "Error: no item in context", isError: true, displaySummary: "No item")
+    }
+    return TextBuffer.shared.load(itemID: itemID, context: context)
+  }
+}
+
+// MARK: - Text Grep Tool
+
+struct TextGrepTool: AgentTool {
+  let name = "text_grep"
+  let description =
+    "Search for a case-insensitive pattern in the loaded text. Returns matching lines with line numbers. Use this to find specific topics, names, or phrases in long texts."
+  let parameters = AIToolParameters(
+    properties: [
+      "pattern": AIToolProperty(
+        type: "string", description: "The word or phrase to search for (case-insensitive)")
+    ],
+    required: ["pattern"]
+  )
+
+  @MainActor
+  func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult
+  {
+    guard let pattern = arguments["pattern"] as? String,
+      !pattern.trimmingCharacters(in: .whitespaces).isEmpty
+    else {
+      return ToolResult(
+        content: "Error: pattern is required.", isError: true, displaySummary: "Missing pattern")
+    }
+    return TextBuffer.shared.grep(pattern)
+  }
+}
+
+// MARK: - Text Head Tool
+
+struct TextHeadTool: AgentTool {
+  let name = "text_head"
+  let description =
+    "Read a portion of the loaded text. Use count for how many characters to read, and offset to start from a position. Example: count=1000 offset=5000 reads chars 5000-6000. Useful for processing long texts in chunks."
+  let parameters = AIToolParameters(
+    properties: [
+      "count": AIToolProperty(
+        type: "integer", description: "Number of characters to read (default 2000)"),
+      "offset": AIToolProperty(
+        type: "integer", description: "Starting character position (default 0 = beginning)"),
+    ],
+    required: []
+  )
+
+  @MainActor
+  func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult
+  {
+    let count = (arguments["count"] as? Int) ?? 2000
+    let offset = (arguments["offset"] as? Int) ?? 0
+    return TextBuffer.shared.head(count, offset: offset)
+  }
+}
+
+// MARK: - Text WC Tool
+
+struct TextWcTool: AgentTool {
+  let name = "text_wc"
+  let description =
+    "Count characters, words, and lines in the loaded text. Use this to understand the size of the content before planning your analysis strategy."
+  let parameters = AIToolParameters(properties: [:], required: [])
+
+  @MainActor
+  func execute(_ arguments: [String: any Sendable], context: ToolContext) async throws -> ToolResult
+  {
+    return TextBuffer.shared.wc()
   }
 }

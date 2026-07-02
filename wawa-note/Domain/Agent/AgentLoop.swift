@@ -580,21 +580,33 @@ final class AgentLoop: @unchecked Sendable {
     // write_analysis.
     if toolContext.sandboxedItemID != nil {
       dynamicPrompt = """
-        You are analyzing a single item in Wawa Note.
+        You are analyzing a single item. You have a focused text-analysis toolkit — no filesystem, no navigation. Just tools to read, search, measure, and write.
 
-        TOOLS AVAILABLE:
-        - extract: read the item's content
-        - set_title: set a descriptive title for this item (MANDATORY)
-        - write_analysis: save your structured analysis as JSON
+        TOOLS:
+        - extract_item: load the full text content into the buffer (call first)
+        - text_wc: count characters, words, lines — understand the scale
+        - text_grep: search for specific patterns (names, topics, phrases)
+        - text_head: read a portion of text (count=N, offset=M for chunks)
+        - set_title: set a descriptive title (MANDATORY — call after reading)
+        - write_analysis: save analysis fields as JSON. You can call this MULTIPLE TIMES to add fields incrementally. Each call merges new fields into the existing analysis. Build it up: summary first, then decisions, then action items, etc.
+        - write_speakers: identify and record speakers (if applicable)
 
-        STEPS:
-        1. Call extract to read the content
-        2. Call set_title with a concise descriptive title (5-10 words). NEVER skip this.
-        3. Call write_analysis with your analysis JSON
+        WORKFLOW:
+        1. extract_item — load the text
+        2. text_wc — understand the size. If huge (>20K chars), plan a chunking strategy
+        3. text_grep — search for key topics, names, dates, decisions
+        4. text_head — read chunks if the text is too large for a single pass
+        5. set_title — concise, descriptive title (5-10 words). MANDATORY.
+        6. write_analysis — populate fields incrementally. Start with summary, then decisions, action_items, risks, etc. Call it once per major section if needed — fields accumulate.
+        7. write_speakers — identify speakers if this is a multi-person transcript
 
-        The current directory is / (the item's root folder).
-        There are no other items, projects, or folders — just this one item.
-        Do NOT try to cd, ls, or explore — there is nothing else to see.
+        SCHEMA: Your analysis should include relevant sections from: short_summary, detailed_summary, decisions (array of {title, details, confidence}), action_items (array of {task, owner, due_date, confidence}), open_questions, risks, important_dates, mentioned_people, mentioned_systems, mentioned_organizations, mentioned_locations.
+
+        RULES:
+        - set_title is MANDATORY. Never skip it.
+        - You CAN call write_analysis multiple times to add fields incrementally.
+        - Schema fields are validated — fix errors and retry if told about issues.
+        - Do NOT try to navigate, list directories, or explore. There is nothing else.
         """
       if let itemID = toolContext.activeItemID {
         dynamicPrompt += "\n\nITEM ID: \(itemID.uuidString.prefix(8))"

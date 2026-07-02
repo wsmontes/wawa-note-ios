@@ -344,19 +344,60 @@ final class ContentPipelineService: ObservableObject {
         activeFramework: resolvedFramework  // Schema for write_analysis validation
       )
 
+      // Sandboxed analysis: use text-focused tools instead of the full VFS shell.
+      // The agent operates on a text buffer (extract → grep → head → wc → write)
+      // without filesystem navigation or awareness of other items/projects.
       let tools: [any AgentTool] = [
-        ShellTool(),
+        ExtractItemTool(),
+        TextGrepTool(),
+        TextHeadTool(),
+        TextWcTool(),
         SetTitleTool(),
-        SelectSchemaTool(),
-        SelectSkillTool(),
         WriteAnalysisTool(),
         WriteSpeakersTool(),
       ]
 
+      // Sandboxed item analysis uses a focused text-analysis prompt instead
+      // of the full workspace-oriented catalog + pipeline template. The agent
+      // has text tools (extract, grep, head, wc) and no filesystem awareness.
       let catalogPrompt = Self.buildCatalogPrompt()
-      let systemPrompt =
-        catalogPrompt + "\n\n"
-        + (resolvedFramework.map { PipelineTemplate.forFramework($0) } ?? PipelineTemplate.standard)
+      let systemPrompt: String
+      if toolContext.sandboxedItemID != nil {
+        systemPrompt = """
+          You are analyzing a single item using a text-analysis toolkit.
+
+          TOOLS:
+          - extract_item: load the full text (call first)
+          - text_wc: count chars/words/lines
+          - text_grep pattern: search for specific patterns
+          - text_head count=N offset=M: read a portion of text
+          - set_title: set a descriptive title (MANDATORY)
+          - write_analysis: save analysis fields as JSON (call multiple times to add fields incrementally)
+          - write_speakers: identify speakers in transcripts
+
+          WORKFLOW:
+          1. extract_item
+          2. text_wc to understand size. If >20K chars, plan chunking with text_head.
+          3. text_grep for key topics, names, decisions
+          4. text_head to read chunks if needed
+          5. set_title (MANDATORY — concise, 5-10 words)
+          6. write_analysis — populate incrementally. Start with short_summary, then add decisions, action_items, risks, etc.
+          7. write_speakers if multi-person transcript
+
+          SCHEMA FIELDS (choose which apply): short_summary, detailed_summary, decisions[{title,details,confidence}], action_items[{task,owner,due_date,confidence}], open_questions, risks, important_dates, mentioned_people, mentioned_systems, mentioned_organizations, mentioned_locations.
+
+          RULES:
+          - set_title is MANDATORY. Never skip.
+          - write_analysis CAN be called multiple times. Each call merges new fields.
+          - Schema fields are validated. Fix errors and retry.
+          - No filesystem. No navigation. No other items. Just analyze this text.
+          """
+      } else {
+        systemPrompt =
+          catalogPrompt + "\n\n"
+          + (resolvedFramework.map { PipelineTemplate.forFramework($0) }
+            ?? PipelineTemplate.standard)
+      }
       let pipelineDef = PipelineStore.shared.active
       let iterationBudget = pipelineDef?.params?.maxIterations ?? 15
       let agentMode: AgentMode =
