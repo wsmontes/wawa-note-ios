@@ -820,7 +820,7 @@ struct WriteSpeakersTool: AgentTool {
     }
 
     // Write speakers.json artifact
-    guard let itemID = context.activeItemID else {
+    guard let itemID = context.activeItemID ?? context.sandboxedItemID else {
       return ToolResult(
         content: "Error: no active item in context", isError: true, displaySummary: "No item")
     }
@@ -950,7 +950,7 @@ struct SetTitleTool: AgentTool {
           "REJECTED: '\(newTitle)' is too short (\(newTitle.count) chars). Titles should be at least 10 characters — descriptive enough that someone can understand what this item is about without opening it.",
         isError: true, displaySummary: "Title too short")
     }
-    guard let itemID = context.activeItemID else {
+    guard let itemID = context.activeItemID ?? context.sandboxedItemID else {
       return ToolResult(
         content:
           "ERROR: No active item in context. Make sure you're analyzing a specific item before calling set_title.",

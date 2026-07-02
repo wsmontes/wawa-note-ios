@@ -340,6 +340,7 @@ final class ContentPipelineService: ObservableObject {
         activeProjectID: item.projectID,
         activeProjectName: project?.name,
         activeProjectSlug: project?.slug,
+        activeItemID: itemID,  // The item being analyzed
         sandboxedItemID: itemID,  // Agent restricted to this item's folder
         activeFramework: resolvedFramework  // Schema for write_analysis validation
       )
