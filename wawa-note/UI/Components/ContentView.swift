@@ -549,7 +549,8 @@ struct OnboardingView: View {
       ZStack {
         RoundedRectangle(cornerRadius: 28, style: .continuous)
           .fill(Color.accentColor.opacity(0.1)).frame(width: 100, height: 100)
-        Image(systemName: "brain.head.profile").font(.system(size: 44)).foregroundStyle(Color.accentColor)
+        Image(systemName: "brain.head.profile").font(.system(size: 44)).foregroundStyle(
+          Color.accentColor)
       }
       VStack(spacing: 8) {
         Text("Welcome to\nWawa Note").font(.largeTitle).fontWeight(.bold).multilineTextAlignment(
@@ -564,7 +565,8 @@ struct OnboardingView: View {
           } label: {
             HStack(spacing: 12) {
               Image(systemName: uc.icon).font(.title3)
-                .foregroundStyle(selectedUseCase == uc ? .white : Color.accentColor).frame(width: 32)
+                .foregroundStyle(selectedUseCase == uc ? .white : Color.accentColor).frame(
+                  width: 32)
               VStack(alignment: .leading, spacing: 2) {
                 Text(uc.rawValue).font(.subheadline).fontWeight(.medium)
                   .foregroundStyle(selectedUseCase == uc ? .white : .primary)
@@ -589,7 +591,8 @@ struct OnboardingView: View {
   private var providerStep: some View {
     VStack(spacing: 20) {
       Spacer().frame(height: 32)
-      Image(systemName: "link.circle.fill").font(.system(size: 56)).foregroundStyle(Color.accentColor)
+      Image(systemName: "link.circle.fill").font(.system(size: 56)).foregroundStyle(
+        Color.accentColor)
       VStack(spacing: 8) {
         Text("Connect an AI Provider").font(.title2).fontWeight(.bold)
         Text("Choose a provider and paste your API key.\nYou can add more later in Settings.")
@@ -622,7 +625,8 @@ struct OnboardingView: View {
   private var tourStep: some View {
     VStack(spacing: 32) {
       Spacer().frame(height: 40)
-      Image(systemName: "rectangle.split.3x1.fill").font(.system(size: 48)).foregroundStyle(Color.accentColor)
+      Image(systemName: "rectangle.split.3x1.fill").font(.system(size: 48)).foregroundStyle(
+        Color.accentColor)
       Text("You're All Set").font(.title2).fontWeight(.bold)
       Text("Here's a quick tour of your workspace.").font(.body).foregroundStyle(.secondary)
       VStack(spacing: 16) {

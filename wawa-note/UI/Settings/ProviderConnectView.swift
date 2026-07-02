@@ -144,15 +144,21 @@ final class ProviderConnectViewModel: ObservableObject {
       let staticModels = AIConfigService.shared.availableModels(for: template.id)
       var merged = Set(staticModels)
       models.forEach { merged.insert($0) }
-      // Highlight recommended models first, then alphabetically
+      // Sort by quality: recommended first, then config order (reflects capability),
+      // then reverse-alpha so newer/faster models surface before legacy ones.
       let recommended = AIConfigService.shared.config.defaultModels
       let recSet = Set(
         [recommended?.analysis, recommended?.chat, recommended?.transcription].compactMap { $0 })
+      let configOrder: [String: Int] = Dictionary(
+        uniqueKeysWithValues: staticModels.enumerated().map { ($1, $0) })
       availableModels = Array(merged).sorted { a, b in
         let aRec = recSet.contains(a)
         let bRec = recSet.contains(b)
         if aRec != bRec { return aRec }
-        return a < b
+        let aIdx = configOrder[a] ?? Int.max
+        let bIdx = configOrder[b] ?? Int.max
+        if aIdx != bIdx { return aIdx < bIdx }
+        return a > b  // reverse-alpha: gpt-5.5 before babbage
       }
       if availableModels.isEmpty {
         modelFetchError = "No models available."
@@ -162,7 +168,7 @@ final class ProviderConnectViewModel: ObservableObject {
     } catch {
       let staticModels = AIConfigService.shared.availableModels(for: template.id)
       if !staticModels.isEmpty {
-        availableModels = staticModels.sorted()
+        availableModels = staticModels  // already in capability order from ai_config.json
         selectedModel = template.defaultModel
       } else {
         modelFetchError = "Could not fetch models."
