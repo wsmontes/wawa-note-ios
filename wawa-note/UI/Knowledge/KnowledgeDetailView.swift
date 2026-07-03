@@ -728,34 +728,191 @@ struct KnowledgeDetailView: View {
   }
 
   private var contextSection: some View {
-    VStack(alignment: .leading, spacing: 6) {
+    VStack(alignment: .leading, spacing: 8) {
       sectionHeader("Context", icon: "location.fill.viewfinder")
-      HStack(spacing: 12) {
-        if let place = item.contextPlaceName { contextBadge(icon: "mappin", text: place) }
-        if let route = item.contextAudioRoute { contextBadge(icon: "airpodspro", text: route) }
-        if let cal = item.contextCalendarEventTitle { contextBadge(icon: "calendar", text: cal) }
-        if let motion = item.contextMotionActivity {
-          contextBadge(icon: "figure.walk", text: motion)
+
+      VStack(spacing: 8) {
+        if let place = item.contextPlaceName {
+          placeGroup(place)
         }
-        if let focus = item.contextFocusActive {
-          contextBadge(icon: focus ? "moon.fill" : "sun.max", text: focus ? "Focus" : "Active")
+
+        if let event = item.contextCalendarEventTitle {
+          eventGroup(event)
         }
-        if let battery = item.contextBatteryLevel {
-          contextBadge(icon: "battery.75", text: "\(Int(battery*100))%")
+
+        if hasDeviceFields {
+          deviceGroup
         }
       }
     }
     .padding(.horizontal, 16)
   }
 
-  private func contextBadge(icon: String, text: String) -> some View {
-    HStack(spacing: 3) {
-      Image(systemName: icon).font(.system(size: 9))
-      Text(text).font(.caption2).lineLimit(1)
+  private var hasDeviceFields: Bool {
+    item.contextAudioRoute != nil || item.contextMotionActivity != nil
+      || item.contextBatteryLevel != nil || item.contextFocusActive != nil
+  }
+
+  // MARK: - Place group
+
+  private func placeGroup(_ place: String) -> some View {
+    GroupCard(icon: "mappin.and.ellipse", color: .blue) {
+      VStack(alignment: .leading, spacing: 2) {
+        Text(place).font(.caption).foregroundStyle(.primary)
+        if item.contextLatitude != nil || item.contextLongitude != nil {
+          Text(
+            "(\(String(format: "%.4f", item.contextLatitude ?? 0)), \(String(format: "%.4f", item.contextLongitude ?? 0)))"
+          )
+          .font(.caption2).foregroundStyle(.secondary)
+          .monospacedDigit()
+        }
+      }
     }
-    .foregroundStyle(.secondary)
-    .padding(.horizontal, 6).padding(.vertical, 2)
-    .background(Color(.tertiarySystemBackground), in: Capsule())
+    .contextMenu {
+      Button {
+        UIPasteboard.general.string = place
+      } label: {
+        Label("Copy location", systemImage: "doc.on.doc")
+      }
+    }
+  }
+
+  // MARK: - Event group
+
+  private func eventGroup(_ event: String) -> some View {
+    GroupCard(icon: "calendar.badge.clock", color: .orange) {
+      HStack(spacing: 6) {
+        Text(event).font(.caption).foregroundStyle(.primary)
+        if item.calendarEventIdentifier != nil {
+          HStack(spacing: 2) {
+            Image(systemName: "checkmark.seal.fill")
+              .font(.system(size: 10))
+              .foregroundStyle(.green)
+            Text("Matched")
+              .font(.caption2)
+              .foregroundStyle(.green)
+          }
+          .padding(.horizontal, 4).padding(.vertical, 1)
+          .background(.green.opacity(0.12), in: Capsule())
+        }
+      }
+    }
+    .contextMenu {
+      Button {
+        UIPasteboard.general.string = event
+      } label: {
+        Label("Copy event", systemImage: "doc.on.doc")
+      }
+    }
+  }
+
+  // MARK: - Device group
+
+  private var deviceGroup: some View {
+    GroupCard(icon: "airpodspro", color: .indigo) {
+      HStack(spacing: 6) {
+        if let route = item.contextAudioRoute {
+          HStack(spacing: 3) {
+            Image(systemName: audioRouteIcon(for: route)).font(.system(size: 9))
+            Text(shortAudioLabel(route)).font(.caption)
+          }
+          .foregroundStyle(.primary)
+        }
+        if let motion = item.contextMotionActivity {
+          if item.contextAudioRoute != nil {
+            Text("·").font(.caption2).foregroundStyle(.tertiary)
+          }
+          HStack(spacing: 3) {
+            Image(systemName: motionIcon(for: motion)).font(.system(size: 9))
+            Text(motion).font(.caption)
+          }
+          .foregroundStyle(.secondary)
+        }
+        if let battery = item.contextBatteryLevel {
+          if item.contextAudioRoute != nil || item.contextMotionActivity != nil {
+            Text("·").font(.caption2).foregroundStyle(.tertiary)
+          }
+          HStack(spacing: 3) {
+            Image(systemName: batteryIcon(for: battery)).font(.system(size: 9))
+            Text("\(Int(battery * 100))%").font(.caption)
+          }
+          .foregroundStyle(.secondary)
+        }
+        if let focus = item.contextFocusActive {
+          if item.contextAudioRoute != nil || item.contextMotionActivity != nil
+            || item.contextBatteryLevel != nil
+          {
+            Text("·").font(.caption2).foregroundStyle(.tertiary)
+          }
+          HStack(spacing: 3) {
+            Image(systemName: focus ? "moon.fill" : "sun.max").font(.system(size: 9))
+            Text(focus ? "Focus" : "Active").font(.caption)
+          }
+          .foregroundStyle(.secondary)
+        }
+      }
+    }
+    .contextMenu {
+      let deviceText =
+        [
+          item.contextAudioRoute.map { shortAudioLabel($0) },
+          item.contextMotionActivity,
+          item.contextBatteryLevel.map { "\(Int($0 * 100))%" },
+          item.contextFocusActive.map { $0 ? "Focus active" : "Focus inactive" },
+        ].compactMap { $0 }.joined(separator: " · ")
+      if !deviceText.isEmpty {
+        Button {
+          UIPasteboard.general.string = deviceText
+        } label: {
+          Label("Copy device info", systemImage: "doc.on.doc")
+        }
+      }
+    }
+  }
+
+  // MARK: - Helper formatters
+
+  private func audioRouteIcon(for route: String) -> String {
+    let lower = route.lowercased()
+    if lower.contains("bluetooth") || lower.contains("airpod") { return "airpodspro" }
+    if lower.contains("speaker") { return "speaker.wave.2" }
+    if lower.contains("headphone") || lower.contains("wired") { return "headphones" }
+    if lower.contains("car") { return "car" }
+    return "mic.fill"
+  }
+
+  private func shortAudioLabel(_ route: String) -> String {
+    let lower = route.lowercased()
+    if lower.contains("airpod") { return "AirPods" }
+    if lower.contains("bluetooth") { return "Bluetooth" }
+    if lower.contains("speaker") { return "Speaker" }
+    if lower.contains("headphone") { return "Headphones" }
+    if lower.contains("car") { return "Car" }
+    if route.count > 20 { return String(route.prefix(18)) + "…" }
+    return route
+  }
+
+  private func motionIcon(for activity: String) -> String {
+    switch activity.lowercased() {
+    case "stationary": "figure.stand"
+    case "walking": "figure.walk"
+    case "running": "figure.run"
+    case "automotive": "car"
+    case "cycling": "bicycle"
+    default: "figure.walk"
+    }
+  }
+
+  private func batteryIcon(for level: Double) -> String {
+    if level >= 0.75 {
+      "battery.75"
+    } else if level >= 0.5 {
+      "battery.50"
+    } else if level >= 0.25 {
+      "battery.25"
+    } else {
+      "battery.0"
+    }
   }
 
   private var audioPlayerSection: some View {
@@ -841,8 +998,6 @@ struct KnowledgeDetailView: View {
     } else {
       b.append(("No project", "folder", .neutral))
     }
-    if let cal = item.contextCalendarEventTitle { b.append((cal, "calendar", .neutral)) }
-    if let route = item.contextAudioRoute { b.append((route, "airpodspro", .neutral)) }
     return b
   }
 
@@ -2608,5 +2763,26 @@ struct ConfidenceBar: View {
     case 0.5..<0.7: return .orange
     default: return .red
     }
+  }
+}
+
+// MARK: - Context Group Card
+
+private struct GroupCard<Content: View>: View {
+  let icon: String
+  let color: Color
+  @ViewBuilder let content: () -> Content
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 10) {
+      Image(systemName: icon)
+        .font(.system(size: 13))
+        .foregroundStyle(color)
+        .frame(width: 22, alignment: .leading)
+      content()
+      Spacer(minLength: 0)
+    }
+    .padding(10)
+    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
   }
 }
