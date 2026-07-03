@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+import SwiftData
 import WawaNoteCore
 
 // MARK: - Agent mode
@@ -652,7 +653,71 @@ final class AgentLoop: @unchecked Sendable {
       dynamicPrompt += "\nUse cat to read its full content."
     }
 
+    // Inject device context (location, calendar, audio, motion, battery, focus)
+    // when available for the focused or sandboxed item.
+    let contextItemID = toolContext.sandboxedItemID ?? toolContext.activeItemID
+    if let deviceCtx = buildDeviceContextFragment(for: contextItemID) {
+      dynamicPrompt += deviceCtx
+    }
+
     return (static: staticPrompt, dynamic: dynamicPrompt)
+  }
+
+  /// Builds a device context summary fragment for the given item.
+  /// Injects location, calendar, audio route, motion, battery, and focus mode
+  /// when available on the KnowledgeItem's typed context columns.
+  private func buildDeviceContextFragment(for itemID: UUID?) -> String? {
+    guard let itemID else { return nil }
+
+    let descriptor = FetchDescriptor<KnowledgeItem>(
+      predicate: #Predicate { $0.id == itemID }
+    )
+    guard let item = try? toolContext.modelContext.fetch(descriptor).first else { return nil }
+
+    var lines: [String] = []
+
+    // Location
+    if let place = item.contextPlaceName {
+      var loc = "Location: \(place)"
+      if let lat = item.contextLatitude, let lon = item.contextLongitude {
+        loc += String(format: " (%.4f, %.4f)", lat, lon)
+      }
+      lines.append(loc)
+    } else if item.contextLatitude != nil || item.contextLongitude != nil {
+      let lat = item.contextLatitude.map { String(format: "%.4f", $0) } ?? "?"
+      let lon = item.contextLongitude.map { String(format: "%.4f", $0) } ?? "?"
+      lines.append("Location: \(lat), \(lon)")
+    }
+
+    // Calendar
+    if let event = item.contextCalendarEventTitle {
+      lines.append("Calendar: \"\(event)\"")
+    }
+
+    // Audio route
+    if let route = item.contextAudioRoute {
+      lines.append("Audio: \(route)")
+    }
+
+    // Motion activity
+    if let motion = item.contextMotionActivity {
+      lines.append("Motion: \(motion)")
+    }
+
+    // Battery
+    if let battery = item.contextBatteryLevel {
+      lines.append("Battery: \(String(format: "%.0f", battery * 100))%")
+    }
+
+    // Focus mode
+    if let focusActive = item.contextFocusActive {
+      lines.append("Focus Mode: \(focusActive ? "Active" : "Inactive")")
+    }
+
+    guard !lines.isEmpty else { return nil }
+
+    return "\n\nDEVICE CONTEXT (at time of capture):\n"
+      + lines.map { "- \($0)" }.joined(separator: "\n")
   }
 
   private func buildRequest(

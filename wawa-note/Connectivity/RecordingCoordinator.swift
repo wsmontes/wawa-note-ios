@@ -32,6 +32,7 @@ final class RecordingCoordinator: ObservableObject {
   private let modelContainer: ModelContainer
   private var modelContext: ModelContext
   private let contextCaptureService = ContextCaptureService()
+  private let deviceContextService = DeviceContextService()
   private var annotationService: AnnotationService
   var contentPipeline: ContentPipelineService?
   /// When set, pipeline processing is enqueued through this service instead of
@@ -1001,15 +1002,53 @@ final class RecordingCoordinator: ObservableObject {
   private func captureContextSafely(for itemId: UUID) {
     let sensors = contextCaptureService
     let annotSvc = annotationService
-    Task.detached {
+    let deviceCtx = deviceContextService
+    Task.detached { [weak self] in
       let captured = await sensors.captureAll()
       guard !captured.isEmpty else { return }
-      await MainActor.run {
+      await MainActor.run { [weak self] in
+        guard let self else { return }
         do {
           try annotSvc.upsert(captured, itemID: itemId, source: "recording_context")
           AppLog.general.info("Context: \(captured.count) annotations for item \(itemId)")
         } catch {
           AppLog.error("general", "Context capture save failed: \(error.localizedDescription)")
+        }
+        // Bridge annotations → KnowledgeItem typed context fields
+        ContextBridgeService.applyAnnotations(captured, to: itemId, context: self.modelContext)
+      }
+
+      // Cross-reference with device context (calendar, contacts)
+      // Runs in Task.detached context — must use its own ModelContext fetch
+      await Task { @MainActor [weak self] in
+        guard let self else { return }
+        let ctx = self.modelContext
+        let descriptor = FetchDescriptor<KnowledgeItem>(
+          predicate: #Predicate { $0.id == itemId }
+        )
+        guard let item = try? ctx.fetch(descriptor).first else { return }
+        let enrichments = await deviceCtx.crossReference(item: item)
+        for enrichment in enrichments {
+          switch enrichment {
+          case .calendarEvent(let match):
+            item.calendarEventIdentifier = match.eventID
+            item.contextCalendarEventTitle = match.title
+            AppLog.event(
+              "context",
+              "Calendar match: \"\(match.title)\" for item \(itemId.uuidString.prefix(8))")
+          case .contact(let contact):
+            if (try? ensurePersonExists(contact, context: ctx)) != nil {
+              AppLog.event(
+                "context",
+                "Contact match: \"\(contact.displayName)\" for item \(itemId.uuidString.prefix(8))"
+              )
+            }
+          case .location:
+            break  // Already handled by ContextBridgeService
+          }
+        }
+        if !enrichments.isEmpty {
+          try? ctx.save()
         }
       }
     }
