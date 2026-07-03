@@ -108,10 +108,11 @@ struct ProjectListView: View {
 
   private var listView: some View {
     List {
-      ForEach(sortedProjects) { project in
+      ForEach(Array(sortedProjects.enumerated()), id: \.element.id) { index, project in
         NavigationLink(value: project.id) {
           projectRow(project)
         }
+        .staggeredAppear(index: index)
         .swipeActions(edge: .leading) {
           Button {
             recordingCoordinator.startRecording(projectID: project.id)

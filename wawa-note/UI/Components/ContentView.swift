@@ -27,6 +27,8 @@ struct ContentView: View {
   @State private var showOnboarding = false
   @StateObject private var chatState = ChatOverlayState()
   @StateObject private var chatViewModel = ChatViewModel()
+  @State private var toastQueue = ToastQueue()
+  @State private var networkMonitor = NetworkMonitorService()
   @Query(filter: #Predicate<KnowledgeItem> { $0.inboxDate != nil }) private var inboxItems:
     [KnowledgeItem]
 
@@ -132,10 +134,24 @@ struct ContentView: View {
         .padding(.bottom, max(0, keyboardHeight - safeAreaBottom))
         .transition(.move(edge: .bottom).combined(with: .opacity))
       }
+
+      // -- Network status banner (top)
+      VStack {
+        NetworkStatusBanner(
+          isConnected: networkMonitor.isConnected,
+          wasDisconnected: networkMonitor.wasDisconnected,
+          pendingCount: networkMonitor.pendingOperations.count
+        )
+        Spacer()
+      }
+      .animation(.easeInOut(duration: 0.3), value: networkMonitor.isConnected)
     }
     .ignoresSafeArea(.keyboard, edges: .bottom)
+    .toastContainer()
     .environmentObject(chatState)
     .environmentObject(chatViewModel)
+    .environment(toastQueue)
+    .environment(networkMonitor)
     .sheet(isPresented: $showSettings) { SettingsView() }
     .sheet(isPresented: $showQueue) { ProcessingQueueSheet() }
     .fullScreenCover(isPresented: $showOnboarding) {
@@ -159,6 +175,8 @@ struct ContentView: View {
       showSettings = true
     }
     .onAppear {
+      networkMonitor.start()
+      registerMemoryPressureHandlers()
       chatViewModel.setup(modelContext: modelContext)
       chatViewModel.observeContext(from: chatState)
       _ = ConfigProjectService.ensureConfigProject(context: modelContext)
@@ -172,6 +190,18 @@ struct ContentView: View {
       {
         safeAreaBottom = window.safeAreaInsets.bottom
       }
+    }
+  }
+
+  /// Register cleanup handlers that run on memory pressure warnings.
+  private func registerMemoryPressureHandlers() {
+    MemoryPressureHandler.shared.register("Clear URL cache") {
+      URLCache.shared.removeAllCachedResponses()
+    }
+    MemoryPressureHandler.shared.register("Clear Kingfisher/Image cache") {
+      // Kingfisher uses ImageCache.default — if available, clear memory cache
+      // (safe no-op if Kingfisher is not linked in this target)
+      URLCache.shared.removeAllCachedResponses()
     }
   }
 

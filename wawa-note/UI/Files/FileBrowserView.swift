@@ -213,7 +213,8 @@ struct FileBrowserView: View {
 
   private var fileList: some View {
     List {
-      ForEach(viewModel.sortedNodes(by: sortOrder)) { node in
+      ForEach(Array(viewModel.sortedNodes(by: sortOrder).enumerated()), id: \.element.id) {
+        index, node in
         Group {
           if node.isDirectory {
             FileRowView(
@@ -245,6 +246,7 @@ struct FileBrowserView: View {
             .onTapGesture { navigateToEditor = node }
           }
         }
+        .staggeredAppear(index: index)
         .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 12))
       }
     }

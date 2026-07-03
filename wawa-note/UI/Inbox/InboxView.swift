@@ -4,6 +4,7 @@ import WawaNoteCore
 
 struct InboxView: View {
   @Environment(\.modelContext) private var modelContext
+  @Environment(ToastQueue.self) private var toastQueue
   @EnvironmentObject private var contentPipeline: ContentPipelineService
   @EnvironmentObject private var processingQueue: ProcessingQueueService
   @EnvironmentObject private var chatState: ChatOverlayState
@@ -15,9 +16,6 @@ struct InboxView: View {
   @State private var searchText = ""
   @State private var filterMode: InboxFilter = .needsReview
   @State private var refreshID = UUID()
-  @State private var lastTrashedItem: KnowledgeItem?
-  @State private var showUndoToast = false
-  @State private var undoTimer: Timer?
   @State private var showDeleteConfirmation = false
   @State private var itemToDelete: KnowledgeItem?
   @State private var searchTask: Task<Void, Never>?
@@ -49,27 +47,13 @@ struct InboxView: View {
   }
 
   var body: some View {
-    ZStack(alignment: .bottom) {
-      VStack(spacing: 0) {
-        filterBar
-        Divider()
-        if filteredItems.isEmpty {
-          emptyState
-        } else {
-          itemList
-        }
-      }
-
-      // Undo toast
-      if showUndoToast {
-        UndoToastView(
-          message: "Item moved to Trash",
-          onUndo: { undoTrash() },
-          onDismiss: { showUndoToast = false }
-        )
-        .transition(.move(edge: .bottom).combined(with: .opacity))
-        .animation(.easeInOut(duration: 0.3), value: showUndoToast)
-        .padding(.bottom, 16)
+    VStack(spacing: 0) {
+      filterBar
+      Divider()
+      if filteredItems.isEmpty {
+        emptyState
+      } else {
+        itemList
       }
     }
     .navigationTitle("Inbox")
@@ -170,12 +154,13 @@ struct InboxView: View {
     List {
       ForEach(groupedItems, id: \.0) { header, items in
         Section {
-          ForEach(items) { item in
+          ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
             NavigationLink {
               KnowledgeDetailView(item: item)
             } label: {
               inboxRow(item)
             }
+            .staggeredAppear(index: index)
             .contextMenu {
               Button {
                 archiveItem(item)
@@ -475,29 +460,25 @@ struct InboxView: View {
   }
 
   private func discardItem(_ item: KnowledgeItem) {
+    let itemID = item.id
     let trash = TrashService(context: modelContext)
     try? trash.moveToTrash(item)
     Haptics.warning()
-    lastTrashedItem = item
-    showUndoToast = true
-    undoTimer?.invalidate()
-    // Struct capture is fine — timer fires once and releases the copied struct within 5s.
-    undoTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { _ in
-      Task { @MainActor in
-        self.showUndoToast = false
-        self.lastTrashedItem = nil
-      }
-    }
-  }
-
-  private func undoTrash() {
-    guard let item = lastTrashedItem else { return }
-    try? TrashService(context: modelContext).restore(item)
-    Haptics.success()
-    showUndoToast = false
-    lastTrashedItem = nil
-    undoTimer?.invalidate()
-    undoTimer = nil
+    toastQueue.enqueue(
+      ToastMessage(
+        message: "Item moved to Trash",
+        style: .warning,
+        actionLabel: "Undo",
+        action: { @MainActor @Sendable in
+          let ctx = modelContext
+          let allItems = (try? ctx.fetch(FetchDescriptor<KnowledgeItem>())) ?? []
+          if let trashedItem = allItems.first(where: { $0.id == itemID }) {
+            try? TrashService(context: ctx).restore(trashedItem)
+            Haptics.success()
+          }
+        }
+      )
+    )
   }
 
   private func shareItem(_ item: KnowledgeItem) {
@@ -615,35 +596,5 @@ struct InboxView: View {
     let m = Int(seconds) / 60
     if m >= 60 { return "\(m / 60)h \(m % 60)m" }
     return "\(m)m"
-  }
-}
-
-// MARK: - Undo Toast
-
-struct UndoToastView: View {
-  let message: String
-  let onUndo: () -> Void
-  let onDismiss: () -> Void
-
-  var body: some View {
-    HStack(spacing: 12) {
-      Image(systemName: "trash.fill").foregroundStyle(.red)
-      Text(message).font(.subheadline)
-      Spacer()
-      Button("Undo") { onUndo() }
-        .font(.subheadline).fontWeight(.semibold)
-        .foregroundStyle(.blue)
-        .accessibilityLabel("Undo delete")
-        .accessibilityHint("Restores the most recently trashed item")
-      Button {
-        onDismiss()
-      } label: {
-        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-      }
-      .accessibilityLabel("Dismiss undo")
-    }
-    .padding(.horizontal, 16).padding(.vertical, 12)
-    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-    .padding(.horizontal, 16)
   }
 }

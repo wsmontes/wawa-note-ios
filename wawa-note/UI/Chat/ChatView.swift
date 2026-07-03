@@ -316,7 +316,7 @@ struct ChatView: View {
           }
         } else {
           LazyVStack(spacing: 12) {
-            ForEach(viewModel.messages) { msg in
+            ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { index, msg in
               // Skip internal messages — they're in agent history but invisible in UI
               if msg.isInternal {
                 EmptyView()
@@ -328,11 +328,13 @@ struct ChatView: View {
                   onChooseOption: { option in viewModel.sendInternalMessage(option) }
                 )
                 .id(msg.id)
+                .staggeredAppear(index: index)
               } else {
                 ChatMessageBubbleView(
                   message: msg, projectColorHex: viewModel.activeProjectColorHex
                 )
                 .id(msg.id)
+                .staggeredAppear(index: index)
               }
             }
 
