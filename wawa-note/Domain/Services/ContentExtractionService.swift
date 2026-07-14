@@ -377,10 +377,12 @@ final class ContentExtractionService {
       let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
       AppLog.provider.error("ContentExtraction: transcription failed for item \(item.id): \(msg)")
       item.status = .failed
+      item.lastErrorRaw = msg
       modelContext.safeSave(context: "transcription-failed", itemId: item.id)
-      if let fallback = loadExistingTranscriptText(for: item.id) {
-        return fallback
-      }
+      // DO NOT return fallback text — returning non-nil would cause the
+      // pipeline to overwrite .failed with .pendingReview, silently hiding
+      // the transcription failure. The Phase 3.1 backup/restore pattern in
+      // ContentPipelineService preserves the old transcript.
       return nil
     }
   }
