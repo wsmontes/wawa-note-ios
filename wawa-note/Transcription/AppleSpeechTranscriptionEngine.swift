@@ -504,6 +504,11 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
           if nsError.domain.contains("AssistantError") && forceOnDevice {
             AppLog.transcription.warning(
               "Local recognizer rejected audio, falling back to cloud recognition")
+            // Cancel the original on-device task before starting cloud fallback.
+            // Without this, the on-device task continues processing in background,
+            // consuming CPU and memory for the full audio buffer duration.
+            recognitionTask?.cancel()
+            self.activeRecognitionTask = nil
             let cloudRequest = SFSpeechURLRecognitionRequest(url: recognitionURL)
             cloudRequest.shouldReportPartialResults = false
             cloudRequest.addsPunctuation = true
