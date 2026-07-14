@@ -148,6 +148,36 @@ struct KnowledgeDetailView: View {
           .padding(.top, 12)
         }
 
+        // Pipeline failure banner — shows lastError when item is .failed
+        if item.status == .failed, let pipelineError = item.lastErrorRaw {
+          VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+              Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+              Text("Transcription failed").font(.subheadline).bold()
+            }
+            Text(pipelineError).font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+              Button("Retry") {
+                item.status = .queuedForTranscription
+                item.transcriptionEngineId = nil
+                modelContext.safeSave(context: "retry-from-error-banner", itemId: item.id)
+                processingQueue.enqueue(itemID: item.id, trigger: .directUserAction)
+                isTranscribing = true
+              }
+              .buttonStyle(.borderedProminent)
+              .controlSize(.small)
+              Button("Change Engine") { showEnginePicker = true }
+                .buttonStyle(.bordered).controlSize(.small)
+            }
+          }
+          .padding(12)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .background(Color.red.opacity(0.08))
+          .clipShape(RoundedRectangle(cornerRadius: 10))
+          .padding(.horizontal, 16)
+          .padding(.top, 12)
+        }
+
         if let error = transcriptionError {
           VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
