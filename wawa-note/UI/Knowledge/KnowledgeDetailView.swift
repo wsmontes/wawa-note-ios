@@ -496,8 +496,10 @@ struct KnowledgeDetailView: View {
         isTranscribing = false
         transcriptionProgress = nil
         transcriptionError = nil
-        // Force SwiftUI to re-render with fresh data — the managed object
-        // may have been updated in another context.
+        // CRITICAL: refresh the item from the view's own ModelContext.
+        // The pipeline updates item.status in a different context, and
+        // SwiftUI may not auto-refresh without an explicit refresh().
+        modelContext.refresh(item)
         refreshID = UUID()
         Task { @MainActor in
           loadRawAnalysisJSON()

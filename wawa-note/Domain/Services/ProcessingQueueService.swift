@@ -199,9 +199,14 @@ final class ProcessingQueueService: ObservableObject {
       return
     }
 
+    // Fetch item status before dispatching to pipeline
+    let preCtx = ModelContext(self.pipeline?.container ?? DatabaseManager.shared)
+    let preDesc = FetchDescriptor<KnowledgeItem>(
+      predicate: #Predicate<KnowledgeItem> { $0.id == next.itemID })
+    let preStatus = (try? preCtx.fetch(preDesc).first)?.statusRaw ?? "unknown"
     AppLog.event(
       "pipeline",
-      "Processing item — itemID=\(next.itemID.uuidString.prefix(8)) priority=\(next.priority) projectID=\(next.projectID?.uuidString.prefix(8) ?? "nil")"
+      "TRACE Processing item — itemID=\(next.itemID.uuidString.prefix(8)) preStatus=\(preStatus) priority=\(next.priority)"
     )
 
     next.status = .processing
