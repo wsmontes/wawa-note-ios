@@ -278,3 +278,48 @@ extension String {
     return result
   }
 }
+
+// MARK: - Safe save with structured logging
+
+/// Replaces `try? modelContext.save()` with proper error handling.
+/// Critical state transitions (item status changes, crash recovery,
+/// pipeline completion) must use `safeSave` to surface persistence failures
+/// instead of silently discarding them.
+extension ModelContext {
+
+  /// Save with structured error logging. Returns true on success.
+  /// Use for critical state transitions where a failed save means data loss.
+  @discardableResult
+  func safeSave(context label: String, itemId: UUID? = nil) -> Bool {
+    do {
+      try save()
+      return true
+    } catch {
+      let itemStr = itemId.map { $0.uuidString.prefix(8).description } ?? "nil"
+      let msg = "💾 SAVE FAILED [\(label)] item=\(itemStr): \(error.localizedDescription)"
+      AppLog.storage.error("\(msg)")
+      AppLog.error("storage", msg)
+
+      // Attempt to surface to user via notification.
+      // Dispatched to MainActor so UI observers can safely update state.
+      DispatchQueue.main.async {
+        NotificationCenter.default.post(
+          name: .persistenceError,
+          object: nil,
+          userInfo: [
+            "context": label,
+            "itemId": itemId as Any,
+            "error": error.localizedDescription,
+          ]
+        )
+      }
+      return false
+    }
+  }
+}
+
+extension Notification.Name {
+  /// Posted when a critical `modelContext.save()` fails.
+  /// UI layers can observe this to show error banners.
+  static let persistenceError = Notification.Name("com.wawa-note.persistenceError")
+}
