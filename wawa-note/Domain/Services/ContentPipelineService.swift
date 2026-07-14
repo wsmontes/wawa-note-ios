@@ -197,16 +197,37 @@ final class ContentPipelineService: ObservableObject {
     }
 
     activeJobs[itemID] = Task { @MainActor in
+      // Terminal state guarantee: every exit from this Task MUST leave the
+      // item in a terminal state (.failed, .analyzed, .archived) or valid
+      // semi-terminal state (.transcribed, .pendingReview). No silent traps.
+      var terminalStateReached = false
       defer {
         activeJobs[itemID] = nil
         endBackgroundTask()
+        if !terminalStateReached {
+          // Pipeline exited without reaching a terminal state. Force .failed
+          // so the user sees the failure instead of a permanently stuck item.
+          if let stuckItem = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID)
+          {
+            if !stuckItem.status.isTerminal {
+              stuckItem.lastErrorRaw = "Pipeline terminated without reaching a terminal state."
+              stuckItem.status = .failed
+              modelContext.safeSave(context: "pipeline-terminal-guarantee", itemId: itemID)
+            }
+          }
+        }
         NotificationCenter.default.post(name: .pipelineCompleted, object: itemID.uuidString)
       }
-      guard !Task.isCancelled else { return }
+      guard !Task.isCancelled else {
+        // Task cancelled before work started — still a terminal exit
+        terminalStateReached = true
+        return
+      }
       beginBackgroundTask()
 
       guard let item = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) else {
         AppLog.provider.error("ContentPipeline: item \(itemID) not found in store, aborting")
+        terminalStateReached = true  // Nothing to process — terminal by definition
         return
       }
 
@@ -216,6 +237,7 @@ final class ContentPipelineService: ObservableObject {
       guard forceReanalysis || item.status != .pendingReview else {
         AppLog.provider.info(
           "ContentPipeline: item \(itemID) pending review — waiting for user approval")
+        terminalStateReached = true  // Valid semi-terminal state — user gate
         return
       }
 
@@ -230,6 +252,7 @@ final class ContentPipelineService: ObservableObject {
         if let projectID = item.projectID {
           await ingestionPipeline.ingest(itemID: itemID, projectID: projectID, using: modelContext)
         }
+        terminalStateReached = true  // .analyzed is terminal
         return
       }
 
@@ -267,15 +290,20 @@ final class ContentPipelineService: ObservableObject {
         }
 
         if item.type == .audio, needsTranscription {
-          if item.transcriptionEngineId != nil {
-            // Clear old transcript before re-transcription
-            let meetingDir = fileStore.meetingDirectoryURL(for: itemID)
-            try? FileManager.default.removeItem(
-              at: meetingDir.appendingPathComponent(AppFileConstants.transcriptFileName))
-            try? FileManager.default.removeItem(
-              at: meetingDir.appendingPathComponent(AppFileConstants.checkpointFileName))
+          // Backup old transcript before re-transcription.
+          // If the new transcription fails, restore the backup so
+          // the user doesn't lose their previous transcript permanently.
+          let meetingDir = fileStore.meetingDirectoryURL(for: itemID)
+          let transcriptURL = meetingDir.appendingPathComponent(AppFileConstants.transcriptFileName)
+          let backupURL = meetingDir.appendingPathComponent("transcript.json.bak")
+          let checkpointURL = meetingDir.appendingPathComponent(AppFileConstants.checkpointFileName)
+          let isReTranscribing = item.transcriptionEngineId != nil
+
+          if isReTranscribing {
+            try? FileManager.default.moveItem(at: transcriptURL, to: backupURL)
+            try? FileManager.default.removeItem(at: checkpointURL)
             AppLog.transcription.info(
-              "Re-transcribing item \(itemID.uuidString.prefix(8)) — engine/locale changed, old transcript cleared"
+              "Re-transcribing item \(itemID.uuidString.prefix(8)) — old transcript backed up to .bak"
             )
           }
 
@@ -297,6 +325,8 @@ final class ContentPipelineService: ObservableObject {
             AppLog.provider.info(
               "ContentPipeline: pre-transcription complete for item \(itemID) — \(transcribedText.count) chars"
             )
+            // Success: delete the backup of the old transcript
+            if isReTranscribing { try? FileManager.default.removeItem(at: backupURL) }
             // Set pendingReview so user can verify transcription before analysis
             if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
               fresh.status = .pendingReview
@@ -308,6 +338,12 @@ final class ContentPipelineService: ObservableObject {
             }
           } else {
             AppLog.provider.warning("ContentPipeline: pre-transcription failed for item \(itemID)")
+            // Restore the old transcript from backup so the user doesn't lose data
+            if isReTranscribing {
+              try? FileManager.default.moveItem(at: backupURL, to: transcriptURL)
+              AppLog.transcription.info(
+                "Re-transcription failed — restored previous transcript from backup")
+            }
           }
         }
         if item.type == .image, item.bodyText == nil {
@@ -357,6 +393,7 @@ final class ContentPipelineService: ObservableObject {
       if extractionOnly {
         AppLog.provider.info(
           "ContentPipeline: extractionOnly — stopping after Phase 0 for \(itemID)")
+        terminalStateReached = true  // Valid: Phase 0 only, caller handles rest
         return
       }
 
@@ -529,9 +566,11 @@ final class ContentPipelineService: ObservableObject {
         if item.status != .failed, item.status != .transcribed, item.status != .analyzed {
           if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
             fresh.status = .failed
+            fresh.lastErrorRaw = "No extractable text found — pipeline cannot proceed."
             modelContext.safeSave(context: "pipeline-no-text-failed", itemId: itemID)
           }
         }
+        terminalStateReached = true
         return
       }
 
@@ -726,6 +765,7 @@ final class ContentPipelineService: ObservableObject {
                   break
                 }
                 didComplete = true
+                terminalStateReached = true
                 fresh.status = .analyzed
                 fresh.analysisProviderId = executorModel
                 // Read analysis for AI-suggested metadata.
@@ -822,10 +862,12 @@ final class ContentPipelineService: ObservableObject {
       // Mark item as processed. On success, clear inboxDate so the
       // Unprocessed badge disappears — item is fully analyzed, no review needed.
       didComplete = true  // defer won't roll back
+      terminalStateReached = true
       if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
         fresh.analysisProviderId = provider.id
         fresh.status = lastError == nil ? .analyzed : .failed
         if lastError == nil { fresh.inboxDate = nil }
+        if lastError != nil { fresh.lastErrorRaw = lastError }
         do { try modelContext.save() } catch {
           AppLog.provider.error(
             "ContentPipeline: critical save failed (analysis status): \(error.localizedDescription)"
