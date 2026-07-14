@@ -18,9 +18,7 @@ final class AudioProcessor: ContentProcessor {
 
   // MARK: - ContentProcessor
 
-  nonisolated
-    func extract(from item: KnowledgeItem, context: ModelContext) async -> String?
-  {
+  func extract(from item: KnowledgeItem, context: ModelContext) async -> String? {
     guard !Task.isCancelled else {
       fail(item, context: context, error: .taskCancelled)
       return nil

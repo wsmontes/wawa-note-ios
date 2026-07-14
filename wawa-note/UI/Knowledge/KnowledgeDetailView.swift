@@ -93,171 +93,188 @@ struct KnowledgeDetailView: View {
     return item.status.label
   }
 
-  var body: some View {
+  @ViewBuilder
+  private var processingBar: some View {
+    if isTranscribing || isPipelineProcessing {
+      VStack(spacing: 0) {
+        HStack(spacing: 10) {
+          ProgressView()
+          VStack(alignment: .leading, spacing: 2) {
+            Text(statusLabel)
+              .font(.subheadline).foregroundStyle(.primary)
+            if isAgentThinking {
+              Text("Agent is thinking…").font(.caption2).foregroundStyle(.secondary)
+            }
+          }
+          Spacer()
+          if !agentEvents.isEmpty {
+            Text("\(agentEvents.count) steps").font(.caption2).foregroundStyle(.secondary)
+          }
+          Button {
+            Task { await cancelCurrentProcessing() }
+          } label: {
+            Image(systemName: "stop.circle.fill")
+              .font(.title2).foregroundStyle(.red).symbolRenderingMode(.hierarchical)
+          }
+          .buttonStyle(.plain)
+        }
+        .padding(12)
+
+        if !agentEvents.isEmpty {
+          Divider().padding(.horizontal, 12)
+          ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+              ForEach(agentEvents) { evt in
+                agentEventBadge(evt)
+              }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+          }
+        }
+      }
+      .frame(maxWidth: .infinity)
+      .background(Color(.secondarySystemGroupedBackground))
+      .clipShape(RoundedRectangle(cornerRadius: 10))
+      .padding(.horizontal, 16)
+      .padding(.top, 12)
+    }
+  }
+
+  @ViewBuilder
+  private var pipelineFailureContent: some View {
+    if item.status == .failed, let pipelineError = item.lastErrorRaw {
+      VStack(alignment: .leading, spacing: 8) {
+        HStack(spacing: 8) {
+          Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+          Text("Transcription failed").font(.subheadline).bold()
+        }
+        Text(pipelineError).font(.caption).foregroundStyle(.secondary)
+        HStack(spacing: 12) {
+          Button("Retry") {
+            item.status = .queuedForTranscription
+            item.transcriptionEngineId = nil
+            modelContext.safeSave(context: "retry-from-error-banner", itemId: item.id)
+            processingQueue.enqueue(itemID: item.id, trigger: .directUserAction)
+            isTranscribing = true
+          }
+          .buttonStyle(.borderedProminent)
+          .controlSize(.small)
+          Button("Change Engine") { showTranscribeSheet = true }
+            .buttonStyle(.bordered).controlSize(.small)
+        }
+      }
+      .padding(12)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(Color.red.opacity(0.08))
+      .clipShape(RoundedRectangle(cornerRadius: 10))
+      .padding(.horizontal, 16)
+      .padding(.top, 12)
+    }
+  }
+
+  @ViewBuilder
+  private var analysisErrorContent: some View {
+    if let error = analysisError {
+      VStack(alignment: .leading, spacing: 8) {
+        HStack(spacing: 8) {
+          Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+          Text(error).font(.subheadline)
+        }
+        if error.contains("Settings") {
+          Button("Open Settings") {
+            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+            UIApplication.shared.open(url)
+          }.font(.subheadline)
+        }
+      }
+      .padding(12)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(Color.red.opacity(0.08))
+      .clipShape(RoundedRectangle(cornerRadius: 10))
+      .padding(.horizontal, 16)
+      .padding(.top, 12)
+    }
+  }
+
+  @ViewBuilder
+  private var transcriptionErrorBanner: some View {
+    if let error = transcriptionError {
+      VStack(alignment: .leading, spacing: 8) {
+        HStack(spacing: 8) {
+          Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+          Text(error).font(.subheadline)
+        }
+        if error.contains("Settings") {
+          Button("Open Settings") {
+            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+            UIApplication.shared.open(url)
+          }.font(.subheadline)
+        }
+      }
+      .padding(12)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(Color.red.opacity(0.08))
+      .clipShape(RoundedRectangle(cornerRadius: 10))
+      .padding(.horizontal, 16)
+      .padding(.top, 12)
+    }
+  }
+
+  @ViewBuilder
+  private var audioSection: some View {
+    if hasPlayableAudio {
+      if isPreparingAudio {
+        HStack {
+          ProgressView()
+          Text("Preparing audio…").font(.subheadline).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16).padding(.top, 12)
+      } else if let url = audioPlaybackURL {
+        AudioPlayerView(audioURL: url, title: item.title)
+          .padding(.horizontal, 16).padding(.top, 12)
+      } else if case .segmentsAvailable(let count) = audioAssetState {
+        let segLabel = "Prepare Audio \(count) segments"
+        Button {
+          Task { await prepareAudioForPlayback() }
+        } label: {
+          Label(segLabel, systemImage: "waveform.circle")
+        }
+        .buttonStyle(.bordered)
+        .padding(.horizontal, 16).padding(.top, 12)
+      }
+    } else if case .failed(let reason) = audioAssetState {
+      HStack {
+        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+        Text(reason).font(.caption).foregroundStyle(.secondary)
+      }
+      .padding(.horizontal, 16).padding(.top, 8)
+    }
+  }
+
+  private var contentBody: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 0) {
         header
           .padding(.horizontal, 16)
 
         if isTranscribing || isPipelineProcessing {
-          VStack(spacing: 0) {
-            // Current status bar
-            HStack(spacing: 10) {
-              ProgressView()
-              VStack(alignment: .leading, spacing: 2) {
-                Text(statusLabel)
-                  .font(.subheadline).foregroundStyle(.primary)
-                if isAgentThinking {
-                  Text("Agent is thinking…").font(.caption2).foregroundStyle(.secondary)
-                }
-              }
-              Spacer()
-              if !agentEvents.isEmpty {
-                Text("\(agentEvents.count) steps").font(.caption2).foregroundStyle(.secondary)
-              }
-              Button {
-                Task { await cancelCurrentProcessing() }
-              } label: {
-                Image(systemName: "stop.circle.fill")
-                  .font(.title2)
-                  .foregroundStyle(.red)
-                  .symbolRenderingMode(.hierarchical)
-              }
-              .buttonStyle(.plain)
-            }
-            .padding(12)
-
-            // Agent trace — collapsible log of tool calls & results
-            if !agentEvents.isEmpty {
-              Divider().padding(.horizontal, 12)
-              ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                  ForEach(agentEvents) { evt in
-                    agentEventBadge(evt)
-                  }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-              }
-            }
-          }
-          .frame(maxWidth: .infinity)
-          .background(Color(.secondarySystemGroupedBackground))
-          .clipShape(RoundedRectangle(cornerRadius: 10))
-          .padding(.horizontal, 16)
-          .padding(.top, 12)
+          processingBar
         }
 
-        // Pipeline failure banner — shows lastError when item is .failed
-        if item.status == .failed, let pipelineError = item.lastErrorRaw {
-          VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-              Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
-              Text("Transcription failed").font(.subheadline).bold()
-            }
-            Text(pipelineError).font(.caption).foregroundStyle(.secondary)
-            HStack(spacing: 12) {
-              Button("Retry") {
-                item.status = .queuedForTranscription
-                item.transcriptionEngineId = nil
-                modelContext.safeSave(context: "retry-from-error-banner", itemId: item.id)
-                processingQueue.enqueue(itemID: item.id, trigger: .directUserAction)
-                isTranscribing = true
-              }
-              .buttonStyle(.borderedProminent)
-              .controlSize(.small)
-              Button("Change Engine") { showEnginePicker = true }
-                .buttonStyle(.bordered).controlSize(.small)
-            }
-          }
-          .padding(12)
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .background(Color.red.opacity(0.08))
-          .clipShape(RoundedRectangle(cornerRadius: 10))
-          .padding(.horizontal, 16)
-          .padding(.top, 12)
-        }
+        pipelineFailureContent
 
-        if let error = transcriptionError {
-          VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-              Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
-              Text(error).font(.subheadline)
-            }
-            if error.contains("Settings") {
-              Button("Open Settings") {
-                guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-                UIApplication.shared.open(url)
-              }.font(.subheadline)
-            }
-          }
-          .padding(12)
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .background(Color.red.opacity(0.08))
-          .clipShape(RoundedRectangle(cornerRadius: 10))
-          .padding(.horizontal, 16)
-          .padding(.top, 12)
-        }
+        transcriptionErrorBanner
 
-        if let error = analysisError {
-          VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-              Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
-              Text(error).font(.subheadline)
-            }
-            if error.contains("Settings") {
-              Button("Open Settings") {
-                guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-                UIApplication.shared.open(url)
-              }.font(.subheadline)
-            }
-          }
-          .padding(12)
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .background(Color.red.opacity(0.08))
-          .clipShape(RoundedRectangle(cornerRadius: 10))
-          .padding(.horizontal, 16)
-          .padding(.top, 12)
-        }
+        analysisErrorContent
 
         Divider().padding(.top, 16)
 
-        // Audio player — shown when item has playable audio (single file or segments)
-        if hasPlayableAudio {
-          if isPreparingAudio {
-            HStack {
-              ProgressView()
-              Text("Preparing audio…").font(.subheadline).foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 16).padding(.top, 12)
-          } else if let url = audioPlaybackURL {
-            AudioPlayerView(audioURL: url, title: item.title)
-              .padding(.horizontal, 16).padding(.top, 12)
-          } else if case .segmentsAvailable(let count) = audioAssetState {
-            Button {
-              Task { await prepareAudioForPlayback() }
-            } label: {
-              Label("Prepare Audio (\(count) segments)", systemImage: "waveform.circle")
-            }
-            .buttonStyle(.bordered)
-            .padding(.horizontal, 16).padding(.top, 12)
-          }
-        } else if case .failed(let reason) = audioAssetState {
-          HStack {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-            Text(reason).font(.caption).foregroundStyle(.secondary)
-          }
-          .padding(.horizontal, 16).padding(.top, 8)
-        }
+        audioSection
 
-        // Analysis always at the top — like every other item type
         if transcript != nil || analysis != nil { artifactSections }
 
-        // Image gallery + OCR for scanned documents
         if item.type == .image { imageSection }
 
-        // Body text for notes, journals, and any non-image item with bodyText
-        // Images: OCR text already shown inside imageSection
         if (item.bodyText != nil && item.type != .image) || item.type == .note
           || item.type == .journalEntry
         {
@@ -265,12 +282,8 @@ struct KnowledgeDetailView: View {
         }
         if item.type == .webBookmark { bookmarkSection }
 
-        // Context metadata (read-only display)
         if hasContextFields { contextSection }
 
-        // Debug: show raw LLM response (Developer Mode only).
-        // Gated behind #if DEBUG so it's NEVER compiled into App Store builds,
-        // even if the UserDefaults key is accidentally set.
         #if DEBUG
           if UserDefaults.standard.bool(forKey: "developer_mode_enabled"),
             let a = analysis, a.shortSummary.trimmingCharacters(in: .whitespaces).isEmpty
@@ -291,264 +304,271 @@ struct KnowledgeDetailView: View {
       }
       .padding(.vertical, 16)
     }
-    .id(refreshID)  // force re-render on pipeline complete
-    .background(Color(.systemGroupedBackground))
-    .navigationBarTitleDisplayMode(.inline)
-    .toolbar {
-      ToolbarItem(placement: .topBarTrailing) {
-        HStack(spacing: 12) {
-          if item.bodyText != nil {
-            if isEditing {
-              Button("Save") { saveEdits() }
-                .fontWeight(.semibold)
-              Button("Cancel") { cancelEditing() }
-                .foregroundStyle(.secondary)
-            } else {
-              Button("Edit") { startEditing() }
+  }
+
+  var body: some View {
+    AnyView(contentBody)
+      .id(refreshID)
+      .background(Color(.systemGroupedBackground))
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .topBarTrailing) {
+          HStack(spacing: 12) {
+            if item.bodyText != nil {
+              if isEditing {
+                Button("Save") { saveEdits() }
+                  .fontWeight(.semibold)
+                Button("Cancel") { cancelEditing() }
+                  .foregroundStyle(.secondary)
+              } else {
+                Button("Edit") { startEditing() }
+              }
             }
-          }
 
-          Button {
-            showPromoteSheet = true
-          } label: {
-            Label("Turn into Project", systemImage: "sparkles.rectangle.stack")
-          }
-
-          Button {
-            showConnectSheet = true
-          } label: {
-            Label("Connect to Item", systemImage: "arrow.triangle.pull")
-          }
-
-          // Reprocess menu — available for any processable item.
-          let canReprocess =
-            item.type == .audio || item.type == .image
-            || item.bodyText != nil || item.analysisProviderId != nil
-            || item.transcriptionEngineId != nil
-          if canReprocess {
-            Menu {
-              if item.type == .audio {
-                let already = item.transcriptionEngineId != nil
-                let prefix = already ? "Re-transcribe" : "Transcribe"
-                Section("Transcription Engine") {
-                  // Apple engines need a locale — show language picker modal
-                  Button {
-                    pendingTranscribeEngine = .appleOnDevice
-                    showTranscribeSheet = true
-                  } label: {
-                    Label(
-                      "\(prefix) (On-Device)",
-                      systemImage: TranscriptionOverride.appleOnDevice.icon)
-                  }
-                  Button {
-                    pendingTranscribeEngine = .appleCloud
-                    showTranscribeSheet = true
-                  } label: {
-                    Label(
-                      "\(prefix) (Cloud Fallback)",
-                      systemImage: TranscriptionOverride.appleCloud.icon)
-                  }
-                  // Whisper auto-detects language — no picker needed
-                  Button {
-                    Task { await reprocessItem(mode: .transcribeOnly, engine: .whisper) }
-                  } label: {
-                    Label(
-                      "\(prefix) (Whisper API)",
-                      systemImage: TranscriptionOverride.whisper.icon)
-                  }
-                }
-              }
-              if item.type == .image {
-                Button {
-                  Task { await reprocessItem(mode: .transcribeOnly) }
-                } label: {
-                  Label(
-                    item.bodyText?.isEmpty != false ? "Extract Text" : "Re-extract Text",
-                    systemImage: "text.viewfinder")
-                }
-              }
-              // Re-analyze: only when there's content to analyze
-              let canAnalyze =
-                (item.type == .audio && item.transcriptionEngineId != nil)
-                || (item.type == .image && item.bodyText?.isEmpty == false)
-                || item.bodyText?.isEmpty == false
-                || item.analysisProviderId != nil
-              if canAnalyze {
-                Button {
-                  Task { await reprocessItem(mode: .analyzeOnly) }
-                } label: {
-                  Label("Re-analyze", systemImage: "brain.head.profile")
-                }
-              }
-              let canFullReprocess =
-                (item.type == .audio && item.transcriptionEngineId != nil
-                  && item.analysisProviderId != nil)
-                || (item.type == .image && item.bodyText?.isEmpty == false
-                  && item.analysisProviderId != nil)
-              if canFullReprocess {
-                Divider()
-                Button {
-                  Task { await reprocessItem(mode: .full) }
-                } label: {
-                  Label("Full Reprocess", systemImage: "arrow.triangle.2.circlepath")
-                }
-              }
+            Button {
+              showPromoteSheet = true
             } label: {
-              Label("Reprocess", systemImage: "arrow.triangle.2.circlepath")
+              Label("Turn into Project", systemImage: "sparkles.rectangle.stack")
             }
-            .disabled(isReprocessing || isPipelineProcessing)
-          }
 
-          if hasExportableContent {
-            Menu {
-              // Textual exports (when transcript/analysis available)
-              if transcript != nil || analysis != nil {
-                ShareLink(
-                  "Markdown",
-                  item: MarkdownExporter().export(
-                    item: item, transcript: transcript, analysis: analysis))
-                if let jsonData = try? JSONExporter().export(
-                  item: item, transcript: transcript, analysis: analysis),
-                  let jsonString = String(data: jsonData, encoding: .utf8)
+            Button {
+              showConnectSheet = true
+            } label: {
+              Label("Connect to Item", systemImage: "arrow.triangle.pull")
+            }
+
+            // Reprocess menu — available for any processable item.
+            let canReprocess =
+              item.type == .audio || item.type == .image
+              || item.bodyText != nil || item.analysisProviderId != nil
+              || item.transcriptionEngineId != nil
+            if canReprocess {
+              Menu {
+                if item.type == .audio {
+                  let already = item.transcriptionEngineId != nil
+                  let prefix = already ? "Re-transcribe" : "Transcribe"
+                  Section("Transcription Engine") {
+                    // Apple engines need a locale — show language picker modal
+                    Button {
+                      pendingTranscribeEngine = .appleOnDevice
+                      showTranscribeSheet = true
+                    } label: {
+                      Label(
+                        "\(prefix) (On-Device)",
+                        systemImage: TranscriptionOverride.appleOnDevice.icon)
+                    }
+                    Button {
+                      pendingTranscribeEngine = .appleCloud
+                      showTranscribeSheet = true
+                    } label: {
+                      Label(
+                        "\(prefix) (Cloud Fallback)",
+                        systemImage: TranscriptionOverride.appleCloud.icon)
+                    }
+                    // Whisper auto-detects language — no picker needed
+                    Button {
+                      Task { await reprocessItem(mode: .transcribeOnly, engine: .whisper) }
+                    } label: {
+                      Label(
+                        "\(prefix) (Whisper API)",
+                        systemImage: TranscriptionOverride.whisper.icon)
+                    }
+                  }
+                }
+                if item.type == .image {
+                  Button {
+                    Task { await reprocessItem(mode: .transcribeOnly) }
+                  } label: {
+                    Label(
+                      item.bodyText?.isEmpty != false ? "Extract Text" : "Re-extract Text",
+                      systemImage: "text.viewfinder")
+                  }
+                }
+                // Re-analyze: only when there's content to analyze
+                let canAnalyze =
+                  (item.type == .audio && item.transcriptionEngineId != nil)
+                  || (item.type == .image && item.bodyText?.isEmpty == false)
+                  || item.bodyText?.isEmpty == false
+                  || item.analysisProviderId != nil
+                if canAnalyze {
+                  Button {
+                    Task { await reprocessItem(mode: .analyzeOnly) }
+                  } label: {
+                    Label("Re-analyze", systemImage: "brain.head.profile")
+                  }
+                }
+                let _hasAudio = item.type == .audio
+                let _hasEngine = item.transcriptionEngineId != nil
+                let _hasAnalysis = item.analysisProviderId != nil
+                let _hasBody = item.bodyText?.isEmpty ?? true
+                let canFullReprocess =
+                  (_hasAudio && _hasEngine && _hasAnalysis)
+                  || (item.type == .image && !_hasBody && _hasAnalysis)
+                if canFullReprocess {
+                  Divider()
+                  Button {
+                    Task { await reprocessItem(mode: .full) }
+                  } label: {
+                    Label("Full Reprocess", systemImage: "arrow.triangle.2.circlepath")
+                  }
+                }
+              } label: {
+                Label("Reprocess", systemImage: "arrow.triangle.2.circlepath")
+              }
+              .disabled(isReprocessing || isPipelineProcessing)
+            }
+
+            if hasExportableContent {
+              Menu {
+                // Textual exports (when transcript/analysis available)
+                if transcript != nil || analysis != nil {
+                  ShareLink(
+                    "Markdown",
+                    item: MarkdownExporter().export(
+                      item: item, transcript: transcript, analysis: analysis))
+                  if let jsonData = try? JSONExporter().export(
+                    item: item, transcript: transcript, analysis: analysis),
+                    let jsonString = String(data: jsonData, encoding: .utf8)
+                  {
+                    ShareLink("JSON Export", item: jsonString)
+                  }
+                }
+                if let anarlogMD = try? AnarlogExporter().exportMarkdown(item: item) {
+                  ShareLink("Anarlog .md", item: anarlogMD)
+                }
+                if let meetilyData = try? MeetilyExporter().exportJSON(item: item),
+                  let meetilyString = String(data: meetilyData, encoding: .utf8)
                 {
-                  ShareLink("JSON Export", item: jsonString)
+                  ShareLink("Meetily .json", item: meetilyString)
                 }
-              }
-              if let anarlogMD = try? AnarlogExporter().exportMarkdown(item: item) {
-                ShareLink("Anarlog .md", item: anarlogMD)
-              }
-              if let meetilyData = try? MeetilyExporter().exportJSON(item: item),
-                let meetilyString = String(data: meetilyData, encoding: .utf8)
-              {
-                ShareLink("Meetily .json", item: meetilyString)
-              }
-              // Audio export — available even without transcript
-              if hasPlayableAudio, let url = audioPlaybackURL {
-                ShareLink("Audio", item: url)
-              } else if case .segmentsAvailable = audioAssetState {
-                Button("Export Audio") {
-                  Task { await prepareAudioForExport() }
+                // Audio export — available even without transcript
+                if hasPlayableAudio, let url = audioPlaybackURL {
+                  ShareLink("Audio", item: url)
+                } else if case .segmentsAvailable = audioAssetState {
+                  Button("Export Audio") {
+                    Task { await prepareAudioForExport() }
+                  }
+                  .disabled(isPreparingAudio)
                 }
-                .disabled(isPreparingAudio)
+              } label: {
+                Label("Export", systemImage: "square.and.arrow.up")
               }
-            } label: {
-              Label("Export", systemImage: "square.and.arrow.up")
             }
           }
         }
       }
-    }
-    .sheet(isPresented: $showPromoteSheet) {
-      PromoteToProjectSheet(item: item) { _ in
-        showPromoteSheet = false
-      }
-    }
-    .sheet(isPresented: $showConnectSheet) {
-      connectToItemSheet
-    }
-    .sheet(isPresented: $showTranscribeSheet) {
-      transcribeLanguageSheet
-    }
-    .alert("Re-process Item", isPresented: $showReprocessWarning) {
-      Button("Cancel", role: .cancel) {}
-      Button("Continue") {
-        Task {
-          await reprocessItem(
-            mode: pendingReprocessMode, confirmed: true, engine: pendingReprocessEngine)
+      .sheet(isPresented: $showPromoteSheet) {
+        PromoteToProjectSheet(item: item) { _ in
+          showPromoteSheet = false
         }
       }
-    } message: {
-      Text(
-        "You have manually edited this item's content. Re-processing will re-analyze it. Your edits will be protected and AI may suggest changes for your review instead of overwriting them."
-      )
-    }
-    .alert("Whisper Requires Configuration", isPresented: $showWhisperKeyAlert) {
-      Button("Open Settings") {
-        NotificationCenter.default.post(name: .openSettings, object: nil)
+      .sheet(isPresented: $showConnectSheet) {
+        connectToItemSheet
       }
-      Button("OK", role: .cancel) {}
-    } message: {
-      Text(
-        "Whisper transcription needs an OpenAI-compatible provider configured with a Base URL and API key. Go to Settings → AI Services to add one."
-      )
-    }
-    .onAppear {
-      chatState.context = .item(item.id)
-      analysisAvailable = AIConfigService.shared.isProviderConfigured(context: modelContext)
-      // Load scanned pages ONCE to avoid blocking main thread on re-renders
-      if item.type == .image, scannedPages.isEmpty {
-        scannedPages = loadScannedPages(count: item.imagePageCount ?? 1)
+      .sheet(isPresented: $showTranscribeSheet) {
+        transcribeLanguageSheet
       }
-      Task { @MainActor in
-        await Task.yield()
-        await resolveAudioAsset()
-        loadRawAnalysisJSON()
-        loadData()
+      .alert("Re-process Item", isPresented: $showReprocessWarning) {
+        Button("Cancel", role: .cancel) {}
+        Button("Continue") {
+          Task {
+            await reprocessItem(
+              mode: pendingReprocessMode, confirmed: true, engine: pendingReprocessEngine)
+          }
+        }
+      } message: {
+        Text(
+          "You have manually edited this item's content. Re-processing will re-analyze it. Your edits will be protected and AI may suggest changes for your review instead of overwriting them."
+        )
       }
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .activeProviderChanged)) { _ in
-      analysisAvailable = AIConfigService.shared.isProviderConfigured(context: modelContext)
-      loadData()
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .pipelineCompleted)) { n in
-      if n.object as? String == item.id.uuidString {
-        pipelineStage = ""
-        isTranscribing = false
-        transcriptionProgress = nil
-        transcriptionError = nil
-        // CRITICAL: refresh the item from the view's own ModelContext.
-        // The pipeline updates item.status in a different context, and
-        // SwiftUI may not auto-refresh without an explicit refresh().
-        modelContext.refresh(item)
-        refreshID = UUID()
+      .alert("Whisper Requires Configuration", isPresented: $showWhisperKeyAlert) {
+        Button("Open Settings") {
+          NotificationCenter.default.post(name: .openSettings, object: nil)
+        }
+        Button("OK", role: .cancel) {}
+      } message: {
+        Text(
+          "Whisper transcription needs an OpenAI-compatible provider configured with a Base URL and API key. Go to Settings → AI Services to add one."
+        )
+      }
+      .onAppear {
+        chatState.context = .item(item.id)
+        analysisAvailable = AIConfigService.shared.isProviderConfigured(context: modelContext)
+        // Load scanned pages ONCE to avoid blocking main thread on re-renders
+        if item.type == .image, scannedPages.isEmpty {
+          scannedPages = loadScannedPages(count: item.imagePageCount ?? 1)
+        }
         Task { @MainActor in
+          await Task.yield()
+          await resolveAudioAsset()
           loadRawAnalysisJSON()
           loadData()
         }
       }
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .contentPipelineStageChanged)) { n in
-      guard n.object as? String == item.id.uuidString else { return }
-      // Pipeline is now driving the UI — clear local progress overrides
-      // so the pipeline stage text takes priority.
-      transcriptionProgress = nil
-      // Priority: explicit stage message > tool result summary > tool name
-      if let stage = n.userInfo?["stage"] as? String {
-        pipelineStage = stage.capitalized
-      } else if let summary = n.userInfo?["summary"] as? String, !summary.isEmpty {
-        pipelineStage = summary
-      } else if let tool = n.userInfo?["tool"] as? String {
-        pipelineStage = "Agent: \(tool)"
-      }
-      if let phase = n.userInfo?["phase"] as? String {
-        pipelineStage = phase == "completed" ? "Analysis complete" : pipelineStage
-      }
-      if let events = n.userInfo?["events"] as? [PipelineAgentEvent] {
-        agentEvents = events
-      }
-      if let thinking = n.userInfo?["thinking"] as? Bool {
-        isAgentThinking = thinking
-      }
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .transcriptReady)) { n in
-      guard n.object as? String == item.id.uuidString else { return }
-      Task { @MainActor in
-        transcript = try? fileStore.readArtifact(
-          Transcript.self, fileName: "transcript.json", meetingId: item.id)
-        isTranscribing = false
-        transcriptionProgress = nil
-      }
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .analysisReady)) { n in
-      guard n.object as? String == item.id.uuidString else { return }
-      Task { @MainActor in
-        analysis = try? fileStore.readArtifact(
-          MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id)
-        loadRawAnalysisJSON()
-        isAnalyzing = false
+      .onReceive(NotificationCenter.default.publisher(for: .activeProviderChanged)) { _ in
+        analysisAvailable = AIConfigService.shared.isProviderConfigured(context: modelContext)
         loadData()
       }
-    }
+      .onReceive(NotificationCenter.default.publisher(for: .pipelineCompleted)) { n in
+        if n.object as? String == item.id.uuidString {
+          pipelineStage = ""
+          isTranscribing = false
+          transcriptionProgress = nil
+          transcriptionError = nil
+          // CRITICAL: refresh the item from the view's own ModelContext.
+          // The pipeline updates item.status in a different context, and
+          // SwiftUI may not auto-refresh without an explicit refresh().
+          // Note: ModelContext.refresh was removed in iOS 26 SDK.
+          // SwiftUI now handles cross-context updates automatically.
+          refreshID = UUID()
+          Task { @MainActor in
+            loadRawAnalysisJSON()
+            loadData()
+          }
+        }
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .contentPipelineStageChanged)) { n in
+        guard n.object as? String == item.id.uuidString else { return }
+        // Pipeline is now driving the UI — clear local progress overrides
+        // so the pipeline stage text takes priority.
+        transcriptionProgress = nil
+        // Priority: explicit stage message > tool result summary > tool name
+        if let stage = n.userInfo?["stage"] as? String {
+          pipelineStage = stage.capitalized
+        } else if let summary = n.userInfo?["summary"] as? String, !summary.isEmpty {
+          pipelineStage = summary
+        } else if let tool = n.userInfo?["tool"] as? String {
+          pipelineStage = "Agent: \(tool)"
+        }
+        if let phase = n.userInfo?["phase"] as? String {
+          pipelineStage = phase == "completed" ? "Analysis complete" : pipelineStage
+        }
+        if let events = n.userInfo?["events"] as? [PipelineAgentEvent] {
+          agentEvents = events
+        }
+        if let thinking = n.userInfo?["thinking"] as? Bool {
+          isAgentThinking = thinking
+        }
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .transcriptReady)) { n in
+        guard n.object as? String == item.id.uuidString else { return }
+        Task { @MainActor in
+          transcript = try? fileStore.readArtifact(
+            Transcript.self, fileName: "transcript.json", meetingId: item.id)
+          isTranscribing = false
+          transcriptionProgress = nil
+        }
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .analysisReady)) { n in
+        guard n.object as? String == item.id.uuidString else { return }
+        Task { @MainActor in
+          analysis = try? fileStore.readArtifact(
+            MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id)
+          loadRawAnalysisJSON()
+          isAnalyzing = false
+          loadData()
+        }
+      }
   }
 
   // MARK: - Header

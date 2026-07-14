@@ -200,9 +200,15 @@ final class ProcessingQueueService: ObservableObject {
     }
 
     // Fetch item status before dispatching to pipeline
-    let preCtx = ModelContext(self.pipeline?.container ?? DatabaseManager.shared)
+    let container = self.pipeline?.container
+    guard let container else {
+      AppLog.provider.error("ProcessingQueue: pipeline not configured, cannot create context")
+      return
+    }
+    let preCtx = ModelContext(container)
+    let nextItemID = next.itemID
     let preDesc = FetchDescriptor<KnowledgeItem>(
-      predicate: #Predicate<KnowledgeItem> { $0.id == next.itemID })
+      predicate: #Predicate { $0.id == nextItemID })
     let preStatus = (try? preCtx.fetch(preDesc).first)?.statusRaw ?? "unknown"
     AppLog.event(
       "pipeline",
@@ -231,8 +237,9 @@ final class ProcessingQueueService: ObservableObject {
         let ctx = await MainActor.run { self?.pipeline?.container }
         if let container = ctx {
           let checkCtx = ModelContext(container)
+          let checkItemID = itemID
           let descriptor = FetchDescriptor<KnowledgeItem>(
-            predicate: #Predicate<KnowledgeItem> { $0.id == itemID })
+            predicate: #Predicate { $0.id == checkItemID })
           if let item = try? checkCtx.fetch(descriptor).first {
             let isTerminal =
               item.statusRaw == "analyzed" || item.statusRaw == "failed"

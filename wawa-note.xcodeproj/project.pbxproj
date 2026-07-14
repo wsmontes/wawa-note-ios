@@ -105,6 +105,7 @@
 		6EA4032C7498B05715111A9D /* AppStatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83D7DD93B7943C9055C6DA48 /* AppStatusBadge.swift */; };
 		6F1292520FAF393C3AC49E34 /* OnThisDayService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03B10D7BF3F62D9D5DFB362A /* OnThisDayService.swift */; };
 		70F438F2662A7C7BB748093D /* ContentPipelineService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10E922845D97CA92A333D30 /* ContentPipelineService.swift */; };
+		7D5D25BE2FC01865FDECEEF2 /* TranscriptionPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBA8F87B7E1E2EBA31A3AD47 /* TranscriptionPipeline.swift */; };
 		713050E0181E790C57AA4BDA /* ProjectPeopleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C40DF74BC24D3CB27D1E6A3E /* ProjectPeopleView.swift */; };
 		71F424E87284F023B5314CCE /* WatchMessageTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4242425358FD99838CC0F8F /* WatchMessageTypes.swift */; };
 		723D59F50CF7F70E0ACE9ED7 /* ImportFormView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8024D386B7BE5CEE54AC9B23 /* ImportFormView.swift */; };
@@ -468,6 +469,7 @@
 		C10E922845D97CA92A333D30 /* ContentPipelineService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentPipelineService.swift; sourceTree = "<group>"; };
 		C1346F947CAF8521E4037122 /* ContentExtractionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentExtractionService.swift; sourceTree = "<group>"; };
 		C3136430A5FDBA2E5E31FF07 /* CoreServicesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreServicesTests.swift; sourceTree = "<group>"; };
+		EBA8F87B7E1E2EBA31A3AD47 /* TranscriptionPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionPipeline.swift; sourceTree = "<group>"; };
 		C3440B611D4BCA33FCBEB669 /* ContextWindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextWindowManager.swift; sourceTree = "<group>"; };
 		C40DF74BC24D3CB27D1E6A3E /* ProjectPeopleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectPeopleView.swift; sourceTree = "<group>"; };
 		C48D1FC04BFC948B6E6D1E18 /* DaySummaryBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaySummaryBuilder.swift; sourceTree = "<group>"; };
@@ -1124,6 +1126,7 @@
 				59B28514DF0915986DB29C28 /* ChatService.swift */,
 				91863F18655F6D2D447F3EB6 /* ConfigProjectService.swift */,
 				C1346F947CAF8521E4037122 /* ContentExtractionService.swift */,
+				EBA8F87B7E1E2EBA31A3AD47 /* TranscriptionPipeline.swift */,
 				C10E922845D97CA92A333D30 /* ContentPipelineService.swift */,
 				ED7FFF6AB4CEFED6B9B9B104 /* ProcessingQueueService.swift */,
 				B2AB7A55355C419C1BA41F79 /* DeviceContextService.swift */,
@@ -1449,6 +1452,7 @@
 				2C04D6013E4B7FC8464BCC9C /* ChatViewModel.swift in Sources */,
 				885001E1C0E3BDE6ABA19E12 /* ConfigProjectService.swift in Sources */,
 				BE4943566D2D92552C4E1B5C /* ContentExtractionService.swift in Sources */,
+				7D5D25BE2FC01865FDECEEF2 /* TranscriptionPipeline.swift in Sources */,
 				70F438F2662A7C7BB748093D /* ContentPipelineService.swift in Sources */,
 				E3FC4791B8A4B80DDF8AF0DA /* ProcessingQueueService.swift in Sources */,
 				C3F9BD71B219914B8AAE0ABE /* ContentView.swift in Sources */,

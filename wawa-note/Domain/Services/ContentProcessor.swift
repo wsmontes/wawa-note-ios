@@ -8,6 +8,7 @@ import WawaNoteCore
 
 /// Extracts text from a KnowledgeItem. Each content type (audio, image,
 /// text) has its own processor conforming to this protocol.
+@MainActor
 protocol ContentProcessor {
   /// Extracts text from the item. MUST set item.status = .failed and
   /// item.lastErrorRaw on failure before returning nil.
