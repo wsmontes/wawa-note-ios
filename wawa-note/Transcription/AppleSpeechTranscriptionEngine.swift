@@ -570,6 +570,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
         guard
           tryResume({
+            timeoutWorkItem.cancel()
             let transcript = self.buildTranscript(
               from: accumulatedSegments, recognizer: recognizer, meetingId: meetingId)
             AppLog.transcription.info(
