@@ -245,7 +245,38 @@ final class ContentPipelineService: ObservableObject {
         modelContext: modelContext, fileStore: fileStore, preferredLocale: preferredLocale)
 
       if AutomationSettings.shared.autoTranscribe {
-        if item.type == .audio, item.transcriptionEngineId == nil {
+        // Re-transcribe when: (a) never transcribed, or (b) engine/locale changed
+        let needsTranscription: Bool
+        if item.transcriptionEngineId == nil {
+          needsTranscription = true
+        } else {
+          // Engine changed? (e.g., Apple -> Whisper)
+          let currentEngine =
+            TranscriptionSettings.shared.mode == .whisper
+            ? "remote-whisper" : "apple-speech"
+          let engineChanged =
+            item.transcriptionEngineId != currentEngine
+            && item.transcriptionEngineId != "apple-cloud"  // cloud fallback variant
+          // Locale changed? (different locale = different transcript)
+          let localeChanged =
+            item.languageCode != preferredLocale
+            && preferredLocale != nil
+          needsTranscription = engineChanged || localeChanged
+        }
+
+        if item.type == .audio, needsTranscription {
+          if item.transcriptionEngineId != nil {
+            // Clear old transcript before re-transcription
+            let meetingDir = fileStore.meetingDirectoryURL(for: itemID)
+            try? FileManager.default.removeItem(
+              at: meetingDir.appendingPathComponent(AppFileConstants.transcriptFileName))
+            try? FileManager.default.removeItem(
+              at: meetingDir.appendingPathComponent(AppFileConstants.checkpointFileName))
+            AppLog.transcription.info(
+              "Re-transcribing item \(itemID.uuidString.prefix(8)) — engine/locale changed, old transcript cleared"
+            )
+          }
+
           pipelineStatus = PipelineProgress(
             itemId: itemID, itemTitle: item.title,
             itemType: item.type.rawValue, phase: "transcribing",
@@ -862,9 +893,24 @@ final class ContentPipelineService: ObservableObject {
       }
       process(itemID, using: ctx)
       // Polling fallback: every 5s, check if item reached terminal state
-      // without a notification being fired. Hard timeout at 120s.
+      // without a notification being fired. Dynamic timeout scales with audio.
       Task { @MainActor in
-        let maxAttempts = 24  // 24 × 5s = 120s total
+        // Fetch the item to get its duration for timeout calculation.
+        let fetchCtx = ModelContext(container)
+        let fetchDesc = FetchDescriptor<KnowledgeItem>(
+          predicate: #Predicate<KnowledgeItem> { $0.id == itemID })
+        let knownDuration = (try? fetchCtx.fetch(fetchDesc).first)?.durationSeconds
+        // Dynamic timeout: on-device transcription is CPU-bound, ~2× real-time
+        // on iPhone 14 Plus. Remote Whisper is network-bound, ~0.1-0.3× real-time.
+        // Base: 120s minimum. Scale: 2× audio duration for on-device, 0.5× for remote.
+        let audioDuration = knownDuration ?? 60
+        let isOnDevice = TranscriptionSettings.shared.mode == .apple
+        let scaleFactor = isOnDevice ? 2.0 : 0.5
+        let timeoutSeconds = max(120, audioDuration * scaleFactor)
+        let maxAttempts = max(24, Int(timeoutSeconds / 5.0))  // Poll every 5s
+        AppLog.transcription.info(
+          "processEntry polling: timeout=\(Int(timeoutSeconds))s attempts=\(maxAttempts) duration=\(Int(audioDuration))s onDevice=\(isOnDevice)"
+        )
         for _ in 0..<maxAttempts {
           try? await Task.sleep(for: .seconds(5))
           guard !resumed else { return }
@@ -896,7 +942,7 @@ final class ContentPipelineService: ObservableObject {
         guard !resumed else { return }
         AppLog.warn(
           "pipeline",
-          "processEntry hard timeout (120s) for \(itemID.uuidString.prefix(8)) — resuming"
+          "processEntry hard timeout (\(Int(timeoutSeconds))s) for \(itemID.uuidString.prefix(8)) — resuming"
         )
         resumed = true
         if let t = token { NotificationCenter.default.removeObserver(t) }
