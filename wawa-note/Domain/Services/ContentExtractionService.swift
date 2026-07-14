@@ -49,7 +49,11 @@ final class ContentExtractionService {
   /// Never returns nil as long as a transcript exists on disk — extraction failure
   /// falls back to the existing transcript instead of blocking Phase 3.
   func extractTextFromAudio(_ item: KnowledgeItem) async -> String? {
-    guard !Task.isCancelled else { return nil }
+    guard !Task.isCancelled else {
+      item.status = .failed
+      modelContext.safeSave(context: "extraction-cancelled-before-start", itemId: item.id)
+      return nil
+    }
     let startTime = Date()
     let id = item.id
     AppLog.provider.info(
@@ -240,7 +244,11 @@ final class ContentExtractionService {
       return nil
     }
 
-    guard !Task.isCancelled else { return nil }
+    guard !Task.isCancelled else {
+      item.status = .failed
+      modelContext.safeSave(context: "transcription-cancelled-before-engine", itemId: item.id)
+      return nil
+    }
 
     let engineOpt = resolveTranscriptionEngine()
     guard let engine = engineOpt else {

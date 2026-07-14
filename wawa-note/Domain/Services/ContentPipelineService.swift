@@ -367,7 +367,7 @@ final class ContentPipelineService: ObservableObject {
           // silently hides transcription failures and discards user review state.
           let isTerminal =
             fresh.status == .failed || fresh.status == .pendingReview
-            || fresh.status == .analyzed
+            || fresh.status == .analyzed || fresh.status == .transcribing
           if !isTerminal {
             fresh.status = fresh.transcriptionEngineId != nil ? .transcribed : .recorded
           }
