@@ -376,12 +376,18 @@ final class AudioFileWriter: @unchecked Sendable {
     //   16 kHz → ~7 MB/min   | 44.1 kHz → ~5.3 MB/min
     //   1-hour recording at 44.1 kHz ≈ 318 MB
     let ext = "wav"
+    // Build settings from the actual audio format, not hardcoded values.
+    // The previous code hardcoded Int16 while the capture engine produces
+    // Float32 — the WAV header claimed "16-bit PCM integer" but sample data
+    // was 32-bit float. AVAssetExportSession (M4A concat) and AVAudioFile
+    // both reject files with header/data format mismatches.
+    let isFloat = format.commonFormat == .pcmFormatFloat32
     let settings: [String: Any] = [
       AVFormatIDKey: kAudioFormatLinearPCM,
       AVSampleRateKey: sampleRate,
       AVNumberOfChannelsKey: 1,
-      AVLinearPCMBitDepthKey: 16,
-      AVLinearPCMIsFloatKey: false,
+      AVLinearPCMBitDepthKey: isFloat ? 32 : 16,
+      AVLinearPCMIsFloatKey: isFloat,
       AVLinearPCMIsBigEndianKey: false,
     ]
 
