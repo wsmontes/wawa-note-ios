@@ -300,6 +300,17 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
             || (500...599).contains(http.statusCode)
           {
             lastError = TranscriptionError.recognitionFailed("HTTP \(http.statusCode)")
+            // For rate limits, respect the Retry-After header if present.
+            // OpenAI Whisper rate limits are per-minute — 2-4s exponential
+            // backoff is insufficient. The header gives the exact wait time.
+            if http.statusCode == 429,
+              let retryAfter = (http.allHeaderFields["Retry-After"] as? String)
+                .flatMap(TimeInterval.init)
+            {
+              AppLog.transcription.warning(
+                "Rate limited — waiting \(Int(retryAfter))s per Retry-After header")
+              try? await Task.sleep(nanoseconds: UInt64(retryAfter * 1_000_000_000))
+            }
             continue
           }
           throw TranscriptionError.recognitionFailed(
