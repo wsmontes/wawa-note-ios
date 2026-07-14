@@ -463,8 +463,6 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         // After the first successful resume, no more callers will pass the
         // !hasResumed guard. The lock is no longer needed — deallocate it to
         // prevent the (tiny) per-call leak of the heap-allocated os_unfair_lock.
-        continuationLock.deinitialize(count: 1)
-        continuationLock.deallocate()
         return true
       }
 
