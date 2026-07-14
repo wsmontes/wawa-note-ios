@@ -502,15 +502,16 @@ final class RecordingCoordinator: ObservableObject {
         // 4. Mark as queued so the detail view shows the right status
         updateItemStatus(itemId: itemId, to: .queuedForTranscription)
 
-        // 4. Route through ProcessingQueue when available
-        if let queue = processingQueue {
-          AppLog.event(
-            "audio", "Enqueuing item \(itemId.uuidString.prefix(8)) into ProcessingQueue")
-          queue.enqueue(itemID: itemId, trigger: .newCapture)
-        } else if let pipeline = contentPipeline {
-          AppLog.event("audio", "Pipeline (direct) for item \(itemId.uuidString.prefix(8))")
-          pipeline.process(itemId, using: modelContext)
+        // 4. Route through ProcessingQueue (mandatory — no direct pipeline fallback)
+        guard let queue = processingQueue else {
+          AppLog.audio.error(
+            "No processing queue configured — cannot process item \(itemId.uuidString.prefix(8))")
+          updateItemStatus(itemId: itemId, to: .failed)
+          return
         }
+        AppLog.event(
+          "audio", "Enqueuing item \(itemId.uuidString.prefix(8)) into ProcessingQueue")
+        queue.enqueue(itemID: itemId, trigger: .newCapture)
       }
     }
   }
@@ -995,11 +996,12 @@ final class RecordingCoordinator: ObservableObject {
               AppLog.audio.info(
                 "Cleared stale checkpoint for recovered item \(itemId.uuidString.prefix(8))")
             }
-            if let queue = capturedQueue {
-              queue.enqueue(itemID: itemId, trigger: .newCapture)
-            } else if let pipeline = capturedPipeline {
-              pipeline.process(itemId, using: capturedContext)
+            guard let queue = capturedQueue else {
+              AppLog.audio.error(
+                "No processing queue — cannot recover item \(itemId.uuidString.prefix(8))")
+              continue
             }
+            queue.enqueue(itemID: itemId, trigger: .newCapture)
           }
         }
       }

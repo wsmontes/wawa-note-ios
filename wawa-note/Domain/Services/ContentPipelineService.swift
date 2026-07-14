@@ -943,63 +943,11 @@ final class ContentPipelineService: ObservableObject {
         resumed = true
         continuation.resume()
       }
+      // Phase 2 terminal state guarantee ensures .pipelineCompleted fires
+      // on every exit path. No polling fallback needed.
       process(itemID, using: ctx)
-      // Polling fallback: every 5s, check if item reached terminal state
-      // without a notification being fired. Dynamic timeout scales with audio.
-      Task { @MainActor in
-        // Fetch the item to get its duration for timeout calculation.
-        let fetchCtx = ModelContext(container)
-        let fetchDesc = FetchDescriptor<KnowledgeItem>(
-          predicate: #Predicate<KnowledgeItem> { $0.id == itemID })
-        let knownDuration = (try? fetchCtx.fetch(fetchDesc).first)?.durationSeconds
-        // Dynamic timeout: on-device transcription is CPU-bound, ~2× real-time
-        // on iPhone 14 Plus. Remote Whisper is network-bound, ~0.1-0.3× real-time.
-        // Base: 120s minimum. Scale: 2× audio duration for on-device, 0.5× for remote.
-        let audioDuration = knownDuration ?? 60
-        let isOnDevice = TranscriptionSettings.shared.mode == .apple
-        let scaleFactor = isOnDevice ? 2.0 : 0.5
-        let timeoutSeconds = max(120, audioDuration * scaleFactor)
-        let maxAttempts = max(24, Int(timeoutSeconds / 5.0))  // Poll every 5s
-        AppLog.transcription.info(
-          "processEntry polling: timeout=\(Int(timeoutSeconds))s attempts=\(maxAttempts) duration=\(Int(audioDuration))s onDevice=\(isOnDevice)"
-        )
-        for _ in 0..<maxAttempts {
-          try? await Task.sleep(for: .seconds(5))
-          guard !resumed else { return }
-          // Check if item is in a terminal state
-          let checkCtx = ModelContext(container)
-          let descriptor = FetchDescriptor<KnowledgeItem>(
-            predicate: #Predicate<KnowledgeItem> { $0.id == itemID })
-          if let item = try? checkCtx.fetch(descriptor).first {
-            let status = item.statusRaw
-            // NOTE: .transcribed is NOT terminal during pipeline flow — the item
-            // transitions through .transcribed on its way to .analyzing. Including it
-            // would prematurely resume the continuation before analysis starts.
-            let isTerminal =
-              status == "analyzed" || status == "failed"
-              || status == "pendingReview"
-            if isTerminal {
-              AppLog.warn(
-                "pipeline",
-                "processEntry polling detected terminal state '\(status)' for \(itemID.uuidString.prefix(8)) — resuming without notification"
-              )
-              if let t = token { NotificationCenter.default.removeObserver(t) }
-              resumed = true
-              continuation.resume()
-              return
-            }
-          }
-        }
-        // Final hard timeout
-        guard !resumed else { return }
-        AppLog.warn(
-          "pipeline",
-          "processEntry hard timeout (\(Int(timeoutSeconds))s) for \(itemID.uuidString.prefix(8)) — resuming"
-        )
-        resumed = true
-        if let t = token { NotificationCenter.default.removeObserver(t) }
-        continuation.resume()
-      }
+      // Polling fallback removed — terminal state guarantee in process()
+      // ensures .pipelineCompleted notification fires on every exit path.
     }
   }
 
