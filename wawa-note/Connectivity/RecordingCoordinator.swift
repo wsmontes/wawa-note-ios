@@ -780,21 +780,83 @@ final class RecordingCoordinator: ObservableObject {
     // This is a read-delete-save driven by app init, not user interaction.
     do {
       let bgContext = ModelContext(modelContext.container)
+      // Recover items stuck in any non-terminal pipeline state after a crash.
+      // .recording: recording was in progress
+      // .queuedForTranscription: was enqueued but never started
+      // .transcribing: transcription was in progress
+      // .preparingAudio: concatenation was in progress
+      // .analyzing: analysis was in progress
+      let recoverableStates = [
+        "recording", "queuedForTranscription", "transcribing",
+        "preparingAudio", "analyzing",
+      ]
       let descriptor = FetchDescriptor<KnowledgeItem>(
-        predicate: #Predicate { $0.statusRaw == "recording" })
+        predicate: #Predicate { recoverableStates.contains($0.statusRaw) })
       guard let orphans = try? bgContext.fetch(descriptor), !orphans.isEmpty else { return }
 
-      AppLog.audio.info("Found \(orphans.count) interrupted recording(s) — recovering")
+      AppLog.audio.info("Found \(orphans.count) stuck pipeline item(s) — recovering")
       var recoveredIds: [UUID] = []
       for item in orphans {
-        AppLog.audio.info("Recovering interrupted recording: \(item.id)")
-        item.status = .recorded
+        AppLog.audio.info("Recovering stuck item: \(item.id) state=\(item.statusRaw)")
         let store = FileArtifactStore()
+
+        // Items stuck in .transcribing: transcription was interrupted.
+        // Reset to .recorded — the pipeline will restart transcription.
+        // If transcript_checkpoint.json exists, ContentExtractionService
+        // will resume from the last successful chunk.
+        if item.statusRaw == "transcribing" {
+          guard store.audioFileExists(for: item.id) || store.recordingManifestExists(for: item.id)
+          else {
+            item.status = .failed
+            continue
+          }
+          item.status = .recorded
+          item.audioFileRelativePath = AppFileConstants.audioFileName
+          recoveredIds.append(item.id)
+          continue
+        }
+
+        // Items stuck in .queuedForTranscription: never started.
+        // Reset to .recorded — same as above.
+        if item.statusRaw == "queuedForTranscription" {
+          guard store.audioFileExists(for: item.id) || store.recordingManifestExists(for: item.id)
+          else {
+            item.status = .failed
+            continue
+          }
+          item.status = .recorded
+          item.audioFileRelativePath = AppFileConstants.audioFileName
+          recoveredIds.append(item.id)
+          continue
+        }
+
+        // Items stuck in .preparingAudio: concatenation was interrupted.
+        // AudioSegmentConcatenator may have left a broken M4A.
+        if item.statusRaw == "preparingAudio" {
+          guard store.recordingManifestExists(for: item.id) else {
+            item.status = .failed
+            continue
+          }
+          item.status = .recorded
+          recoveredIds.append(item.id)
+          continue
+        }
+
+        // Items stuck in .analyzing: analysis was interrupted.
+        // Keep .transcribed state so the pipeline re-runs analysis only.
+        if item.statusRaw == "analyzing" {
+          item.status = .transcribed
+          recoveredIds.append(item.id)
+          continue
+        }
+
+        // Items stuck in .recording: original recovery logic
         guard store.audioFileExists(for: item.id) || store.recordingManifestExists(for: item.id)
         else {
           item.status = .failed
           continue
         }
+        item.status = .recorded
         item.audioFileRelativePath = AppFileConstants.audioFileName
         recoveredIds.append(item.id)
       }
@@ -834,6 +896,16 @@ final class RecordingCoordinator: ObservableObject {
               manifest: manifest, meetingId: itemId)
             if ok {
               AppLog.audio.info("Repaired broken M4A for item \(itemId.uuidString.prefix(8))")
+              // Clear any stale checkpoint from the previous transcription attempt.
+              // The repaired audio.m4a may differ in duration from the original,
+              // making the old checkpoint indices invalid.
+              let checkpointURL = store.meetingDirectoryURL(for: itemId)
+                .appendingPathComponent("transcript_checkpoint.json")
+              if FileManager.default.fileExists(atPath: checkpointURL.path) {
+                try? FileManager.default.removeItem(at: checkpointURL)
+                AppLog.audio.info(
+                  "Cleared stale checkpoint for repaired item \(itemId.uuidString.prefix(8))")
+              }
               capturedQueue?.enqueue(itemID: itemId, trigger: .backgroundBackfill)
               NotificationCenter.default.post(
                 name: .pipelineCompleted, object: itemId.uuidString)
@@ -868,6 +940,16 @@ final class RecordingCoordinator: ObservableObject {
             // Concatenate segments first (essential for multi-segment recordings)
             if let m = try? FileArtifactStore().readRecordingManifest(for: itemId) {
               await AudioSegmentConcatenator.concatenate(manifest: m, meetingId: itemId)
+            }
+            // Clear any stale checkpoint from the previous transcription attempt.
+            // The repaired/restored audio may differ in duration from the original,
+            // making the old checkpoint indices invalid.
+            let checkpointURL = FileArtifactStore().meetingDirectoryURL(for: itemId)
+              .appendingPathComponent("transcript_checkpoint.json")
+            if FileManager.default.fileExists(atPath: checkpointURL.path) {
+              try? FileManager.default.removeItem(at: checkpointURL)
+              AppLog.audio.info(
+                "Cleared stale checkpoint for recovered item \(itemId.uuidString.prefix(8))")
             }
             if let queue = capturedQueue {
               queue.enqueue(itemID: itemId, trigger: .newCapture)
