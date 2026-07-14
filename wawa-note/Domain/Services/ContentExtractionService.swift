@@ -261,6 +261,9 @@ final class ContentExtractionService {
       )
       // Tell engine to skip already-transcribed chunks
       eng.resumeFromChunk = checkpoint.completedChunks
+      // Seed previousText so deduplicateStart removes the chunk overlap
+      // at the resume boundary.
+      eng.resumePreviousText = checkpoint.segments.map(\.text).joined(separator: " ")
     }
 
     // Wire up checkpoint persistence: save partial transcript after each chunk.

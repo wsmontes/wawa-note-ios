@@ -76,6 +76,11 @@ protocol TranscriptionEngine: Sendable {
   /// are already done, start from chunk N.
   var resumeFromChunk: Int { get set }
 
+  /// Text of the last checkpoint segment(s), used to seed previousText on
+  /// resume so deduplicateStart correctly removes the chunk overlap at the
+  /// resume boundary. Set before transcribeFile() alongside resumeFromChunk.
+  var resumePreviousText: String { get set }
+
   /// Called by the orchestrator after transcribeFile() completes successfully
   /// to signal no more checkpoints will be emitted. The engine MUST nil out
   /// its onCheckpoint reference to prevent late checkpoints from racing with
@@ -127,6 +132,11 @@ extension TranscriptionEngine {
 
   var resumeFromChunk: Int {
     get { 0 }
+    set { /* no-op for engines without resume support */  }
+  }
+
+  var resumePreviousText: String {
+    get { "" }
     set { /* no-op for engines without resume support */  }
   }
 

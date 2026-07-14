@@ -16,6 +16,9 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
   /// Index of the last successfully transcribed chunk (0-based).
   /// Set by ContentExtractionService from a persisted checkpoint to enable resume.
   var resumeFromChunk: Int = 0
+  /// Last checkpoint segment text, seeded by ContentExtractionService so
+  /// deduplicateStart correctly removes the chunk overlap at the resume boundary.
+  var resumePreviousText: String = ""
   private(set) var isCancelled = false
 
   var capabilities: TranscriptionCapabilities {
@@ -108,12 +111,20 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
     let chunks = try await chunker.splitAudio(url: audioFileURL)
     defer { chunker.cleanup() }
 
-    var previousText = ""
+    // Resume support: skip already-transcribed chunks from a previous attempt.
+    let startIndex = min(resumeFromChunk, chunks.count)
+
+    // Seed previousText from resumePreviousText so deduplicateStart correctly
+    // removes the chunk overlap at the resume boundary.
+    var previousText: String
+    if startIndex > 0, !resumePreviousText.isEmpty {
+      previousText = resumePreviousText
+    } else {
+      previousText = ""
+    }
     var allSegments: [TranscriptSegment] = []
     var languageCode: String?
 
-    // Resume support: skip already-transcribed chunks from a previous attempt.
-    let startIndex = min(resumeFromChunk, chunks.count)
     if startIndex > 0 {
       AppLog.transcription.info(
         "Resuming remote transcription from chunk \(startIndex + 1)/\(chunks.count)")

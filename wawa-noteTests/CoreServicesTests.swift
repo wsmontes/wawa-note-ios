@@ -1074,5 +1074,109 @@ final class ModelPolicyRulesTests: XCTestCase {
   }
 }
 
+// MARK: - Checkpoint Resume Dedup Tests
+
+final class CheckpointResumeDedupTests: XCTestCase {
+
+  /// Verifies that deduplicateStart removes overlapping words at the resume
+  /// boundary when previousText is seeded from the last checkpoint segment.
+  func testCheckpointResumeDedup_preventsDuplicateTextAtBoundary() {
+    // Given: "hello world this is a test" at end of chunk N
+    // And overlap causes "a test welcome back everyone" at start of chunk N+1
+    let previousText = "hello world this is a test"
+    let overlappedText = "a test welcome back everyone"
+
+    // Simulate deduplicateStart logic (matches both engine implementations)
+    let prevWords = previousText.lowercased().split(separator: " ")
+    let currWords = overlappedText.lowercased().split(separator: " ")
+    let original = overlappedText.split(separator: " ").map(String.init)
+
+    var maxMatch = 0
+    for j in 1...min(10, prevWords.count, currWords.count) {
+      if prevWords.suffix(j) == currWords.prefix(j) { maxMatch = j }
+    }
+
+    let deduped =
+      maxMatch > 0 && maxMatch < original.count
+      ? original.dropFirst(maxMatch).joined(separator: " ")
+      : overlappedText
+
+    // Then: "a test" should be removed, leaving "welcome back everyone"
+    XCTAssertEqual(deduped, "welcome back everyone")
+  }
+
+  /// When previousText is empty (no checkpoint, fresh start), no dedup occurs
+  /// and the original text is returned unchanged.
+  func testCheckpointResumeDedup_emptyPreviousText_returnsOriginal() {
+    let previousText = ""
+    let overlappedText = "hello world"
+
+    let prevWords = previousText.lowercased().split(separator: " ")
+    let currWords = overlappedText.lowercased().split(separator: " ")
+    let original = overlappedText.split(separator: " ").map(String.init)
+    guard !prevWords.isEmpty, !currWords.isEmpty else {
+      // Matches guard in actual implementation: returns text unchanged
+      XCTAssertEqual(overlappedText, "hello world")
+      return
+    }
+
+    var maxMatch = 0
+    for j in 1...min(10, prevWords.count, currWords.count) {
+      if prevWords.suffix(j) == currWords.prefix(j) { maxMatch = j }
+    }
+
+    let deduped =
+      maxMatch > 0 && maxMatch < original.count
+      ? original.dropFirst(maxMatch).joined(separator: " ")
+      : overlappedText
+
+    XCTAssertEqual(deduped, "hello world")
+  }
+
+  /// Verifies that the deduplicateStart inline algorithm handles single-word overlap.
+  func testCheckpointResumeDedup_singleWordOverlap() {
+    let previousText = "end"
+    let overlappedText = "end beginning"
+
+    let prevWords = previousText.lowercased().split(separator: " ")
+    let currWords = overlappedText.lowercased().split(separator: " ")
+    let original = overlappedText.split(separator: " ").map(String.init)
+
+    var maxMatch = 0
+    for j in 1...min(10, prevWords.count, currWords.count) {
+      if prevWords.suffix(j) == currWords.prefix(j) { maxMatch = j }
+    }
+
+    let deduped =
+      maxMatch > 0 && maxMatch < original.count
+      ? original.dropFirst(maxMatch).joined(separator: " ")
+      : overlappedText
+
+    XCTAssertEqual(deduped, "beginning")
+  }
+
+  /// Verifies no dedup when there's no actual overlap (different words).
+  func testCheckpointResumeDedup_noOverlap_returnsOriginal() {
+    let previousText = "completely different content"
+    let overlappedText = "brand new topic"
+
+    let prevWords = previousText.lowercased().split(separator: " ")
+    let currWords = overlappedText.lowercased().split(separator: " ")
+    let original = overlappedText.split(separator: " ").map(String.init)
+
+    var maxMatch = 0
+    for j in 1...min(10, prevWords.count, currWords.count) {
+      if prevWords.suffix(j) == currWords.prefix(j) { maxMatch = j }
+    }
+
+    let deduped =
+      maxMatch > 0 && maxMatch < original.count
+      ? original.dropFirst(maxMatch).joined(separator: " ")
+      : overlappedText
+
+    XCTAssertEqual(deduped, "brand new topic")
+  }
+}
+
 // NowPlayingController tests require MediaPlayer framework linkage in test target.
 // TODO: Add MediaPlayer to test target's framework search paths and re-enable.

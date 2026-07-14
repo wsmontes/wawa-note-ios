@@ -37,9 +37,9 @@ public struct FieldProvenance: Codable, Sendable {
 
   public struct Entry: Codable, Sendable {
 
-    let origin: FieldOrigin
+    public let origin: FieldOrigin
 
-    let modifiedAt: Date
+    public let modifiedAt: Date
 
     var scopeRaw: String?
 
