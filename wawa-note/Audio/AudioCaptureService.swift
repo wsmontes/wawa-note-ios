@@ -541,10 +541,15 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
   /// forced built-in mic recovery. When `forceBuiltInMic` is true, sets the
   /// preferred input to the built-in microphone before building the engine.
   private func rebuildEngineForCurrentRoute(forceBuiltInMic: Bool, reason: String) async {
-    // Serialize rebuilds: cancel any in-progress rebuild before starting
-    // a new one. Bluetooth handoffs emit multiple notifications (route change
-    // + engine config change) that would otherwise start overlapping rebuilds.
-    rebuildTask?.cancel()
+    // Serialize ALL rebuilds through a single unstructured Task tree.
+    // Cancelling the previous Task is insufficient — Task.cancel() is
+    // cooperative, and both the old and new rebuild can execute concurrently.
+    // Instead, wait for any in-progress rebuild to complete naturally,
+    // then start the new one. This guarantees at most one engine rebuild
+    // executes at any time.
+    if let existing = rebuildTask {
+      await existing.value  // Wait for completion, don't cancel
+    }
     rebuildTask = Task { [weak self] in
       await self?._rebuildEngineForCurrentRoute(forceBuiltInMic: forceBuiltInMic, reason: reason)
     }
@@ -556,6 +561,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     guard state == .recording || state == .paused else {
       AppLog.audio.warning(
         "rebuildEngine(\(reason)): unexpected state \(String(describing: self.state))")
+      return
+    }
+    guard rebuildTask?.isCancelled != true else {
+      AppLog.audio.warning("rebuildEngine(\(reason)): cancelled before start")
       return
     }
     guard let meetingId = currentMeetingId else {
@@ -668,8 +677,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
   /// already cleared the tap but the session is still valid. Deactivating
   /// during Bluetooth HFP handoff would kill the SCO link.
   private func rebuildEngineLightweight(reason: String) async {
-    // Serialize with full rebuilds — same Task chain prevents overlap.
-    rebuildTask?.cancel()
+    if let existing = rebuildTask {
+      await existing.value  // Wait, don't cancel
+    }
     rebuildTask = Task { [weak self] in
       await self?._rebuildEngineLightweight(reason: reason)
     }
@@ -681,6 +691,10 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     guard state == .recording || state == .paused else {
       AppLog.audio.warning(
         "rebuildEngineLightweight(\(reason)): unexpected state \(String(describing: self.state))")
+      return
+    }
+    guard rebuildTask?.isCancelled != true else {
+      AppLog.audio.warning("rebuildEngineLightweight(\(reason)): cancelled before start")
       return
     }
 
