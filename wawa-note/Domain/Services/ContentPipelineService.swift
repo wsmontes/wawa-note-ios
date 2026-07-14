@@ -148,6 +148,13 @@ final class ContentPipelineService: ObservableObject {
     self.modelContainer = modelContainer
   }
 
+  // MARK: - Off-MainActor I/O
+
+  /// Reads file data off the MainActor to avoid blocking the main thread with large I/O.
+  private nonisolated func readFileData(at url: URL) async -> Data? {
+    await Task.detached { try? Data(contentsOf: url) }.value
+  }
+
   /// Builds the catalog prompt that teaches the agent how to choose schema + skill
   /// based on content. Lists available schemas and skills compactly.
   static func buildCatalogPrompt() -> String {
@@ -636,7 +643,7 @@ final class ContentPipelineService: ObservableObject {
               let framework = FrameworkService.shared.resolve(for: project)
               let fileURL = store.itemDirectoryURL(for: itemID).appendingPathComponent(
                 "analysis.json")
-              if let data = try? Data(contentsOf: fileURL),
+              if let data = await readFileData(at: fileURL),
                 let validationErrors = FrameworkService.validateAnalysis(
                   data: data, against: framework)
               {
@@ -649,8 +656,8 @@ final class ContentPipelineService: ObservableObject {
             }
             // Create DynamicAnalysis from the raw JSON (any keys work)
             if !failed,
-              let data = try? Data(
-                contentsOf: store.itemDirectoryURL(for: itemID).appendingPathComponent(
+              let data = await readFileData(
+                at: store.itemDirectoryURL(for: itemID).appendingPathComponent(
                   "analysis.json")),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             {
@@ -685,7 +692,7 @@ final class ContentPipelineService: ObservableObject {
                 // (handles both camelCase and snake_case key formats).
                 let analysisJSONURL = store.itemDirectoryURL(for: itemID)
                   .appendingPathComponent("analysis.json")
-                if let jsonData = try? Data(contentsOf: analysisJSONURL),
+                if let jsonData = await readFileData(at: analysisJSONURL),
                   let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
                 {
                   // ── Suggested title (from snake_case or camelCase) ──
@@ -829,10 +836,16 @@ final class ContentPipelineService: ObservableObject {
   }
 
   /// Process a queue entry with async completion gate.
+  ///
+  /// Uses NotificationCenter to detect pipeline completion, with a polling
+  /// fallback every 5s that checks if the item reached a terminal state.
+  /// This guards against missed notifications (e.g., a code path that skips
+  /// posting `.pipelineCompleted`). Hard timeout remains at 120s.
   func processEntry(itemID: UUID, projectID: UUID? = nil, using modelContext: ModelContext? = nil)
     async
   {
     let ctx = modelContext ?? ModelContext(modelContainer)
+    let container = self.modelContainer
     await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
       var resumed = false
       var token: NSObjectProtocol?
@@ -848,10 +861,39 @@ final class ContentPipelineService: ObservableObject {
         continuation.resume()
       }
       process(itemID, using: ctx)
-      // Safety timeout: if notification never fires, resume after 120s
+      // Polling fallback: every 5s, check if item reached terminal state
+      // without a notification being fired. Hard timeout at 120s.
       Task { @MainActor in
-        try? await Task.sleep(for: .seconds(120))
+        let maxAttempts = 24  // 24 × 5s = 120s total
+        for _ in 0..<maxAttempts {
+          try? await Task.sleep(for: .seconds(5))
+          guard !resumed else { return }
+          // Check if item is in a terminal state
+          let checkCtx = ModelContext(container)
+          let descriptor = FetchDescriptor<KnowledgeItem>(
+            predicate: #Predicate<KnowledgeItem> { $0.id == itemID })
+          if let item = try? checkCtx.fetch(descriptor).first {
+            let status = item.statusRaw
+            let isTerminal = status == "analyzed" || status == "failed"
+              || status == "pendingReview" || status == "transcribed"
+            if isTerminal {
+              AppLog.warn(
+                "pipeline",
+                "processEntry polling detected terminal state '\(status)' for \(itemID.uuidString.prefix(8)) — resuming without notification"
+              )
+              if let t = token { NotificationCenter.default.removeObserver(t) }
+              resumed = true
+              continuation.resume()
+              return
+            }
+          }
+        }
+        // Final hard timeout
         guard !resumed else { return }
+        AppLog.warn(
+          "pipeline",
+          "processEntry hard timeout (120s) for \(itemID.uuidString.prefix(8)) — resuming"
+        )
         resumed = true
         if let t = token { NotificationCenter.default.removeObserver(t) }
         continuation.resume()

@@ -97,53 +97,63 @@ final class RecordingCoordinator: ObservableObject {
     self.modelContext = context
     self.annotationService = AnnotationService(context: context)
 
-    // Route change → new segment created by AudioCaptureService
+    // Route change → new segment created by AudioCaptureService.
+    // SAFETY: AudioCaptureService may invoke this from an audio session thread.
+    // RecordingCoordinator is @MainActor-isolated, so all manifest mutations
+    // MUST dispatch to MainActor. The Task { @MainActor in } below guarantees
+    // serial, race-free access to `self.manifest`.
     captureService.onSegmentCreated = { [weak self] closedInfo, newSegment in
-      guard let self, var m = self.manifest else { return }
-      // Finalize previous segment with accurate metadata from the writer
-      if let info = closedInfo, let lastIdx = m.segments.indices.last {
-        m.segments[lastIdx].endedAt = info.endedAt
-        m.segments[lastIdx].fileSize = info.fileSize
-      }
-      m.segments.append(newSegment)
-      self.manifest = m
-      if let itemId = self.savedItemId {
-        self.saveManifest(m, meetingId: itemId)
+      Task { @MainActor [weak self] in
+        guard let self, var m = self.manifest else { return }
+        // Finalize previous segment with accurate metadata from the writer
+        if let info = closedInfo, let lastIdx = m.segments.indices.last {
+          m.segments[lastIdx].endedAt = info.endedAt
+          m.segments[lastIdx].fileSize = info.fileSize
+        }
+        m.segments.append(newSegment)
+        self.manifest = m
+        if let itemId = self.savedItemId {
+          self.saveManifest(m, meetingId: itemId)
+        }
       }
     }
 
     // Interruption began → segment closed without opening a new one.
+    // SAFETY: Same as onSegmentCreated — called from audio session thread,
+    // must dispatch to MainActor for race-free manifest access.
     // Finalize the CLOSED segment's metadata by its index, not blindly
     // the last segment. Recovery attempts open/close segments that were
     // never added to the manifest via onSegmentCreated — updating
     // segments[lastIdx] would overwrite an unrelated segment's data.
     captureService.onSegmentClosed = { [weak self] closedInfo in
-      guard let self, var m = self.manifest else { return }
-      if let idx = m.segments.firstIndex(where: { $0.index == closedInfo.index }) {
-        m.segments[idx].endedAt = closedInfo.endedAt
-        m.segments[idx].fileSize = closedInfo.fileSize
-      } else {
-        // Orphan segment from a failed recovery attempt — never
-        // registered via onSegmentCreated. Add it now so its audio
-        // (even if partial/silent) is tracked and transcribable.
-        let orphan = RecordingSegment(
-          id: UUID(), index: closedInfo.index,
-          fileName: closedInfo.fileName,
-          startedAt: Date(),
-          inputPortName: "",
-          inputPortType: "unknown",
-          routeChangeReason: "recovery-orphan",
-          sampleRate: nil
-        )
-        m.segments.append(orphan)
-        if let lastIdx = m.segments.indices.last {
-          m.segments[lastIdx].endedAt = closedInfo.endedAt
-          m.segments[lastIdx].fileSize = closedInfo.fileSize
+      Task { @MainActor [weak self] in
+        guard let self, var m = self.manifest else { return }
+        if let idx = m.segments.firstIndex(where: { $0.index == closedInfo.index }) {
+          m.segments[idx].endedAt = closedInfo.endedAt
+          m.segments[idx].fileSize = closedInfo.fileSize
+        } else {
+          // Orphan segment from a failed recovery attempt — never
+          // registered via onSegmentCreated. Add it now so its audio
+          // (even if partial/silent) is tracked and transcribable.
+          let orphan = RecordingSegment(
+            id: UUID(), index: closedInfo.index,
+            fileName: closedInfo.fileName,
+            startedAt: Date(),
+            inputPortName: "",
+            inputPortType: "unknown",
+            routeChangeReason: "recovery-orphan",
+            sampleRate: nil
+          )
+          m.segments.append(orphan)
+          if let lastIdx = m.segments.indices.last {
+            m.segments[lastIdx].endedAt = closedInfo.endedAt
+            m.segments[lastIdx].fileSize = closedInfo.fileSize
+          }
         }
-      }
-      self.manifest = m
-      if let itemId = self.savedItemId {
-        self.saveManifest(m, meetingId: itemId)
+        self.manifest = m
+        if let itemId = self.savedItemId {
+          self.saveManifest(m, meetingId: itemId)
+        }
       }
     }
 
@@ -807,25 +817,29 @@ final class RecordingCoordinator: ObservableObject {
             "Found broken M4A for item \(item.id.uuidString.prefix(8)) — re-concatenating from WAV segments"
           )
           repairedIds.append(item.id)
-          // Re-concatenate from WAV segments if manifest exists.
-          // Use Task because concatenate() is async but cleanupOrphanedRecordings is sync.
-          if let manifest = try? store.readRecordingManifest(for: item.id) {
-            let itemId = item.id
-            let capturedQueue = processingQueue
-            Task { @MainActor in
-              let ok = await AudioSegmentConcatenator.concatenate(
-                manifest: manifest, meetingId: itemId)
-              if ok {
-                AppLog.audio.info("Repaired broken M4A for item \(itemId.uuidString.prefix(8))")
-                // Re-enqueue for pipeline processing
-                capturedQueue?.enqueue(itemID: itemId, trigger: .backgroundBackfill)
-                // Notify views so they can refresh to show the repaired item
-                NotificationCenter.default.post(
-                  name: .pipelineCompleted, object: itemId.uuidString)
-              } else {
-                AppLog.audio.error(
-                  "Failed to repair broken M4A for item \(itemId.uuidString.prefix(8))")
-              }
+        }
+      }
+
+      // Process broken M4A repairs sequentially to avoid unbounded Task spawning.
+      // Previous implementation spawned one Task per broken file with no concurrency
+      // limit — this could overwhelm the system with dozens of concurrent FFmpeg/AVAsset
+      // operations. Sequential processing is safe here since this runs at app init.
+      if !repairedIds.isEmpty {
+        let capturedQueue = processingQueue
+        Task { @MainActor in
+          for itemId in repairedIds {
+            let store = FileArtifactStore()
+            guard let manifest = try? store.readRecordingManifest(for: itemId) else { continue }
+            let ok = await AudioSegmentConcatenator.concatenate(
+              manifest: manifest, meetingId: itemId)
+            if ok {
+              AppLog.audio.info("Repaired broken M4A for item \(itemId.uuidString.prefix(8))")
+              capturedQueue?.enqueue(itemID: itemId, trigger: .backgroundBackfill)
+              NotificationCenter.default.post(
+                name: .pipelineCompleted, object: itemId.uuidString)
+            } else {
+              AppLog.audio.error(
+                "Failed to repair broken M4A for item \(itemId.uuidString.prefix(8))")
             }
           }
         }
@@ -839,21 +853,26 @@ final class RecordingCoordinator: ObservableObject {
       // Trigger pipeline for successfully recovered items so they get
       // transcribed and analyzed. Without this, crash-recovered items
       // remain stuck in .recorded state forever.
+      // Process sequentially in a single Task to limit concurrency —
+      // spawning one Task per item could overwhelm audio concatenation
+      // with dozens of simultaneous AVAssetExportSession operations.
       if !recoveredIds.isEmpty {
-        for itemId in recoveredIds {
-          AppLog.event(
-            "audio",
-            "Enqueuing recovered item \(itemId.uuidString.prefix(8)) for pipeline processing")
-          // Use Task to avoid blocking app init — pipeline runs async.
-          Task { @MainActor in
+        let capturedQueue = processingQueue
+        let capturedPipeline = contentPipeline
+        let capturedContext = modelContext
+        Task { @MainActor in
+          for itemId in recoveredIds {
+            AppLog.event(
+              "audio",
+              "Enqueuing recovered item \(itemId.uuidString.prefix(8)) for pipeline processing")
             // Concatenate segments first (essential for multi-segment recordings)
             if let m = try? FileArtifactStore().readRecordingManifest(for: itemId) {
               await AudioSegmentConcatenator.concatenate(manifest: m, meetingId: itemId)
             }
-            if let queue = processingQueue {
+            if let queue = capturedQueue {
               queue.enqueue(itemID: itemId, trigger: .newCapture)
-            } else if let pipeline = contentPipeline {
-              pipeline.process(itemId, using: modelContext)
+            } else if let pipeline = capturedPipeline {
+              pipeline.process(itemId, using: capturedContext)
             }
           }
         }

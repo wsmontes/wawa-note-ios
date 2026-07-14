@@ -79,6 +79,9 @@ struct WawaNoteApp: App {
     ProjectService.migrateFieldProvenance(context: migrationContext)
     ProjectService.migrateToProjectDerivedItems(context: migrationContext)
 
+    // Apply file protection to the shared database
+    SharedContainer.ensureProtection()
+
     // Setup notifications
     setupNotifications()
 

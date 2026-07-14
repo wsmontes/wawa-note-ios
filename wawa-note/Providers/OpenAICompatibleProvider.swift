@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+import UIKit
 
 // MARK: - Chat Completions API
 
@@ -551,21 +552,58 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
   // MARK: - Image helpers
 
   /// Converts a local file:// URL to a base64 data URL the remote API can read.
+  /// Resizes images exceeding 2048px on the longest side to reduce memory usage.
   /// Returns nil if the file cannot be read or is not a local file.
   static func base64DataURL(from url: URL) -> String? {
     guard url.isFileURL else { return nil }
-    guard let data = try? Data(contentsOf: url), !data.isEmpty else { return nil }
-    let mime: String = {
-      switch url.pathExtension.lowercased() {
-      case "jpg", "jpeg": return "image/jpeg"
-      case "png": return "image/png"
-      case "gif": return "image/gif"
-      case "webp": return "image/webp"
-      case "heic", "heif": return "image/heic"
-      default: return "image/jpeg"
+    guard let originalData = try? Data(contentsOf: url), !originalData.isEmpty else { return nil }
+
+    // Resize large images to max 2048px on longest side, encode as JPEG
+    let maxDimension: CGFloat = 2048
+    let imageData: Data
+    let mime: String
+
+    if let image = UIImage(data: originalData) {
+      let size = image.size
+      if size.width > maxDimension || size.height > maxDimension {
+        let scale = maxDimension / max(size.width, size.height)
+        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        let resized = renderer.image { _ in
+          image.draw(in: CGRect(origin: .zero, size: newSize))
+        }
+        imageData = resized.jpegData(compressionQuality: 0.8) ?? originalData
+        mime = "image/jpeg"
+      } else {
+        // Image is small enough — use original data with original mime type
+        imageData = originalData
+        mime = {
+          switch url.pathExtension.lowercased() {
+          case "jpg", "jpeg": return "image/jpeg"
+          case "png": return "image/png"
+          case "gif": return "image/gif"
+          case "webp": return "image/webp"
+          case "heic", "heif": return "image/heic"
+          default: return "image/jpeg"
+          }
+        }()
       }
-    }()
-    let base64 = data.base64EncodedString()
+    } else {
+      // Cannot decode as UIImage — fall back to raw data
+      imageData = originalData
+      mime = {
+        switch url.pathExtension.lowercased() {
+        case "jpg", "jpeg": return "image/jpeg"
+        case "png": return "image/png"
+        case "gif": return "image/gif"
+        case "webp": return "image/webp"
+        case "heic", "heif": return "image/heic"
+        default: return "image/jpeg"
+        }
+      }()
+    }
+
+    let base64 = imageData.base64EncodedString()
     return "data:\(mime);base64,\(base64)"
   }
 }

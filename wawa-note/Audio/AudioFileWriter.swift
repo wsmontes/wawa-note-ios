@@ -155,11 +155,17 @@ final class AudioFileWriter: @unchecked Sendable {
     }
   }
 
-  /// Write an already-constructed PCM buffer. Used when the caller already
-  /// has a buffer (e.g., concatenation, testing).
+  /// Write a PCM buffer from an audio tap. The buffer is retained (single
+  /// atomic increment — NOT a heap allocation) and written directly on the
+  /// writer's queue. This eliminates the Array + AVAudioPCMBuffer allocations
+  /// that previously occurred on the real-time audio thread.
+  ///
+  /// Core Audio reuses tap buffers after the callback returns, but only if
+  /// no strong references remain. By capturing `buffer` in the async closure,
+  /// ARC keeps the backing memory alive until the write completes.
   func write(buffer: AVAudioPCMBuffer) {
     queueDepth &+= 1
-    queue.async { [weak self] in
+    queue.async { [weak self, buffer] in
       defer { self?.queueDepth &-= 1 }
       guard let self, let file = self._audioFile else { return }
       self._writeWithRetry(buffer: buffer, file: file)

@@ -963,9 +963,9 @@ enum ShellInterpreter {
     if let execCmd = cmd.flags["exec"] {
       var outputs: [String] = []
       for item in results.prefix(limit) {
+        let sanitizedTitle = sanitizeForExec(item.title.replacingOccurrences(of: " ", with: "_"))
         let expanded = execCmd.replacingOccurrences(of: "{id}", with: item.id.uuidString)
-          .replacingOccurrences(
-            of: "{title}", with: item.title.replacingOccurrences(of: " ", with: "_"))
+          .replacingOccurrences(of: "{title}", with: sanitizedTitle)
         let batchCmd = ShellCommand(
           name: expanded.components(separatedBy: " ").first ?? "", args: [], flags: [:],
           redirectTarget: nil, redirectBody: nil)
@@ -1439,6 +1439,14 @@ enum ShellInterpreter {
     case .projectTask(_, _, let taskID):
       guard let task = try? TaskService(context: ctx.modelContext).fetch(id: taskID) else {
         return shellErr("rm: task not found")
+      }
+      // Security: require --force flag to delete tasks (irreversible).
+      // Without it, the agent must use ask_user first to confirm with the user.
+      let hasForce = cmd.flags["force"] != nil
+      if !hasForce {
+        return shellErr(
+          "rm: deleting task '\(task.title)' is permanent and cannot be undone. "
+          + "Use ask_user to confirm with the user first, then retry with: rm <path> --force")
       }
       try? TaskService(context: ctx.modelContext).deleteTask(task)
       return ok("Deleted task '\(task.title)'. This is permanent.")
@@ -2510,6 +2518,16 @@ enum ShellInterpreter {
 
   private static func formattedDate(_ date: Date) -> String {
     dateFormatter.string(from: date)
+  }
+
+  /// Sanitize a string before interpolating into an --exec command template.
+  /// Strips shell-dangerous characters that could allow command injection via item titles.
+  private static func sanitizeForExec(_ s: String) -> String {
+    var result = s
+    for dangerous in [";", "&&", "||", "|", "\n", "\r", "`", "$", "(", ")"] {
+      result = result.replacingOccurrences(of: dangerous, with: "_")
+    }
+    return result
   }
 
   private static func ok(_ content: String, blocks: [ChatBlock]? = nil) -> ToolResult {

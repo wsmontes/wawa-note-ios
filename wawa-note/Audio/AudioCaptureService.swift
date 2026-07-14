@@ -147,10 +147,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
       self.updateAudioLevel(from: buffer)
 
-      guard let ch = buffer.floatChannelData else { return }
-      let n = Int(buffer.frameLength)
-      let samples = Array(UnsafeBufferPointer(start: ch[0], count: n))
-      self.fileWriter.write(samples: samples, frameLength: n, format: buffer.format)
+      // Pass the buffer directly to the writer — no Array allocation on the
+      // real-time audio thread. The writer's queue handles any copying needed.
+      self.fileWriter.write(buffer: buffer)
     }
 
     engine.prepare()
@@ -722,10 +721,9 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
       [weak self] buffer, _ in
       guard let self else { return }
       self.updateAudioLevel(from: buffer)
-      guard let ch = buffer.floatChannelData else { return }
-      let n = Int(buffer.frameLength)
-      let samples = Array(UnsafeBufferPointer(start: ch[0], count: n))
-      self.fileWriter.write(samples: samples, frameLength: n, format: buffer.format)
+      // Pass the buffer directly to the writer — no Array allocation on the
+      // real-time audio thread. The writer's queue handles any copying needed.
+      self.fileWriter.write(buffer: buffer)
     }
 
     engine.prepare()

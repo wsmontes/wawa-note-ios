@@ -335,6 +335,16 @@ final class ContentExtractionService {
         """)
       // ── End diagnostics ───────────────────────────────────
 
+      // RELIABILITY: Nil out the checkpoint callback BEFORE writing the final
+      // transcript. This prevents a race where the engine fires one last
+      // onCheckpoint concurrently with the final writeArtifact below —
+      // both writing to the same meeting directory simultaneously.
+      if let apple = engine as? AppleSpeechTranscriptionEngine {
+        apple.onCheckpoint = nil
+      } else if let remote = engine as? RemoteTranscriptionEngine {
+        remote.onCheckpoint = nil
+      }
+
       try fileStore.createMeetingDirectory(for: item.id)
       try fileStore.writeArtifact(result, fileName: "transcript.json", meetingId: item.id)
 
@@ -372,12 +382,12 @@ final class ContentExtractionService {
     let savedAt: Date
   }
 
-  private func checkpointURL(for itemID: UUID) -> URL {
+  nonisolated private func checkpointURL(for itemID: UUID) -> URL {
     fileStore.meetingDirectoryURL(for: itemID)
       .appendingPathComponent("transcript_checkpoint.json")
   }
 
-  private func loadTranscriptionCheckpoint(for itemID: UUID) -> CheckpointData? {
+  nonisolated private func loadTranscriptionCheckpoint(for itemID: UUID) -> CheckpointData? {
     let url = checkpointURL(for: itemID)
     guard FileManager.default.fileExists(atPath: url.path) else { return nil }
     do {
@@ -400,7 +410,7 @@ final class ContentExtractionService {
     }
   }
 
-  private func removeTranscriptionCheckpoint(for itemID: UUID) {
+  nonisolated private func removeTranscriptionCheckpoint(for itemID: UUID) {
     try? FileManager.default.removeItem(at: checkpointURL(for: itemID))
   }
 

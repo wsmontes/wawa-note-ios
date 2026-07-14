@@ -333,6 +333,19 @@ final class AgentLoop: @unchecked Sendable {
           // intermittent fail-succeed-fail patterns from avoiding the breaker.
           consecutiveFailures = max(0, consecutiveFailures - 1)
         }
+
+        // ── Sliding window: cap in-memory messages ──────────────────
+        // The messages array grows each iteration (assistant + tool calls +
+        // tool results). For long pipelines with large tool outputs (20K+
+        // chars), this can reach 50-200MB. We physically remove old messages,
+        // keeping the first message (initial prompt/system context) plus the
+        // most recent ~20 messages (roughly the last 10 iterations).
+        let maxTailMessages = 20
+        if messages.count > maxTailMessages + 1 {
+          let firstMessage = messages[0]
+          let tail = Array(messages.suffix(maxTailMessages))
+          messages = [firstMessage] + tail
+        }
       } else {
         AppLog.event("agent", "Response (no tool calls): \(fullContent.prefix(300))")
         // Extract a one-line summary for the processing UI

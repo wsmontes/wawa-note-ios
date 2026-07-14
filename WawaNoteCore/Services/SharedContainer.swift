@@ -78,4 +78,16 @@ public enum SharedContainer {
     }
     return Int64(capacity)
   }
+
+  /// Apply NSFileProtection to the database file. Call once at app startup.
+  /// Uses `.completeUntilFirstUserAuthentication` which protects the file at rest
+  /// while still allowing background access after the first unlock (needed for
+  /// background transcription and sync pipelines).
+  public static func ensureProtection() {
+    let url = databaseURL
+    guard FileManager.default.fileExists(atPath: url.path) else { return }
+    try? FileManager.default.setAttributes(
+      [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+      ofItemAtPath: url.path)
+  }
 }

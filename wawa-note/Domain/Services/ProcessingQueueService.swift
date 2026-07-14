@@ -183,6 +183,12 @@ final class ProcessingQueueService: ObservableObject {
       AppLog.error(
         "pipeline",
         "Pipeline not set — aborting queue. \(pending.count) items will be marked failed.")
+      #if DEBUG
+      assertionFailure(
+        "ProcessingQueueService.processNext() called before setPipeline(). "
+        + "Fix initialization order in WawaNoteApp.init() — pipeline must be set before any enqueue."
+      )
+      #endif
       for entry in pending where entry.status == .queued {
         entry.status = .failed
         entry.completedAt = Date()

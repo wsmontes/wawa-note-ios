@@ -272,6 +272,17 @@ final class ShareExtensionViewModel: ObservableObject {
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension(url.pathExtension)
           do {
+            // Check file size BEFORE copying — reject files > 500 MB
+            let maxBytes: Int64 = 500 * 1024 * 1024  // 500 MB
+            let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
+            let fileSize = (attrs[.size] as? Int64) ?? 0
+            if fileSize > maxBytes {
+              let sizeMB = Int(fileSize / (1024 * 1024))
+              let fileName = url.lastPathComponent
+              continuation.resume(
+                throwing: ImportError.fileTooLarge(fileName: fileName, sizeMB: sizeMB))
+              return
+            }
             try FileManager.default.copyItem(at: url, to: tempURL)
             continuation.resume(returning: tempURL)
           } catch {
@@ -342,6 +353,7 @@ enum ImportError: LocalizedError {
   case unsupportedType([String])
   case diskFull
   case timeout
+  case fileTooLarge(fileName: String, sizeMB: Int)
 
   var errorDescription: String? {
     switch self {
@@ -351,6 +363,8 @@ enum ImportError: LocalizedError {
       "Not enough storage space. Please free up space and try again."
     case .timeout:
       "Import took too long. The item may be incomplete."
+    case .fileTooLarge(let fileName, let sizeMB):
+      "File '\(fileName)' is too large (\(sizeMB) MB). Maximum allowed size is 500 MB."
     }
   }
 }
