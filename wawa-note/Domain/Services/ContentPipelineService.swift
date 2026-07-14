@@ -257,10 +257,12 @@ final class ContentPipelineService: ObservableObject {
           let engineChanged =
             item.transcriptionEngineId != currentEngine
             && item.transcriptionEngineId != "apple-cloud"  // cloud fallback variant
-          // Locale changed? (different locale = different transcript)
-          let localeChanged =
-            item.languageCode != preferredLocale
-            && preferredLocale != nil
+          // Locale changed? Compare the locale used for the LAST transcription
+          // against the current best-guess. The item's languageCode is the
+          // locale that was used (nil = auto-detect via bestGuessLocale).
+          let lastUsedLocale = item.languageCode ?? TranscriptionLocaleProvider.bestGuessLocale
+          let currentLocale = TranscriptionLocaleProvider.bestGuessLocale
+          let localeChanged = lastUsedLocale != currentLocale
           needsTranscription = engineChanged || localeChanged
         }
 
