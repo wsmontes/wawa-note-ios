@@ -110,6 +110,16 @@ final class RecordingCoordinator: ObservableObject {
           m.segments[lastIdx].endedAt = info.endedAt
           m.segments[lastIdx].fileSize = info.fileSize
         }
+        // Validate that the writer's index matches what the manifest expects.
+        // After removing auto-adjustment in AudioFileWriter, a mismatch indicates a bug.
+        if let info = closedInfo {
+          let expectedNextIndex = (m.segments.map(\.index).max() ?? -1) + 1
+          if info.index != expectedNextIndex {
+            AppLog.audio.error(
+              "Segment index mismatch: writer returned \(info.index), manifest expected \(expectedNextIndex). This indicates a stale nextSegmentIndexProvider value."
+            )
+          }
+        }
         m.segments.append(newSegment)
         self.manifest = m
         if let itemId = self.savedItemId {
@@ -703,28 +713,47 @@ final class RecordingCoordinator: ObservableObject {
       return false
     }
 
-    // Save the current manifest with the last known segment index
+    // Build manifest from actual segment files on disk, not a contiguous range.
+    // AudioFileWriter previously auto-adjusted indices during overwrite avoidance,
+    // so disk segments may have gaps (e.g., 0, 1, 5 instead of 0, 1, 2).
+    let store = FileArtifactStore()
+    let segmentsDir = store.segmentsDirectoryURL(for: meetingId)
+    let existingSegments: [RecordingSegment] =
+      (try? FileManager.default
+        .contentsOfDirectory(at: segmentsDir, includingPropertiesForKeys: [.fileSizeKey])
+        .filter { $0.pathExtension == "wav" }
+        .compactMap { url -> RecordingSegment? in
+          let name = url.lastPathComponent
+          // Parse "segment-003.wav" → index 3
+          guard
+            let indexStr = name.components(separatedBy: "-").last?
+              .components(separatedBy: ".").first,
+            let index = Int(indexStr)
+          else { return nil }
+          let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+          guard size > 0 else { return nil }
+          return RecordingSegment(
+            id: UUID(), index: index, fileName: name,
+            startedAt: item.createdAt,
+            inputPortName: "recovered", inputPortType: "recovered",
+            routeChangeReason: "crash_recovery",
+            sampleRate: sampleRate)
+        }
+        .sorted(by: { $0.index < $1.index })) ?? []
+
+    let segments =
+      existingSegments.isEmpty
+      ? []  // No segments found — empty manifest, will be handled downstream
+      : existingSegments
+
     var manifest = RecordingManifest(
       recordingId: meetingId,
       title: item.title,
       startedAt: item.createdAt,
-      segments: (0...segmentIndex).map { i in
-        RecordingSegment(
-          id: UUID(),
-          index: i,
-          fileName: String(format: "segment-%03d.wav", i),
-          startedAt: item.createdAt.addingTimeInterval(Double(i) * 60),
-          endedAt: nil,
-          inputPortName: "recovered",
-          inputPortType: "recovered",
-          routeChangeReason: "crash_recovery",
-          sampleRate: sampleRate
-        )
-      }
+      segments: segments
     )
     item.status = .recorded
     item.audioFileRelativePath = AppFileConstants.audioFileName
-    let store = FileArtifactStore()
     saveManifest(manifest, meetingId: meetingId)
 
     // Attempt concatenation to produce a playable audio.m4a.

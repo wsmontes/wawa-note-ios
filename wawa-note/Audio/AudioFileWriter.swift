@@ -40,8 +40,6 @@ final class AudioFileWriter: @unchecked Sendable {
   private static let maxRetries = 3
   /// Backoff delays for retries 1, 2, 3 (retry 4 = final attempt, no delay).
   private static let retryDelays: [TimeInterval] = [0.1, 0.2, 0.4]
-  /// Maximum indices to scan forward when avoiding segment overwrite.
-  private static let maxOverwriteScanIndices = 10
 
   /// Diagnostic counter: number of queued writes waiting to be processed.
   /// Incremented before dispatch, decremented after completion. A value >5
@@ -390,67 +388,27 @@ final class AudioFileWriter: @unchecked Sendable {
     let fileName = String(format: "segment-%03d.\(ext)", self._segmentIndex)
     let fileURL = segmentsDir.appendingPathComponent(fileName)
 
-    // CRITICAL: never overwrite an existing segment file. Once a segment is
-    // closed and checkpointed, its audio belongs to the user. Overwriting it
-    // is irreversible data loss. If the file already exists with data, scan
-    // forward up to maxOverwriteScanIndices to find a free index.
+    // The manifest is the source of truth for segment indices. The writer
+    // must NOT auto-adjust indices — that creates divergence between the
+    // file system and the manifest. If a segment file already exists at the
+    // requested index, the caller (RecordingCoordinator) passed a wrong index
+    // and must be corrected before calling this method.
     if fileManager.fileExists(atPath: fileURL.path) {
       let existingSize =
         (try? fileManager.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0
       if existingSize > 0 {
-        let segIdx = self._segmentIndex
-        AppLog.audio.warning(
-          "Segment \(segIdx): \(fileName) already exists (\(existingSize) bytes) — refusing to overwrite"
+        AppLog.audio.error(
+          "Segment \(self._segmentIndex): \(fileName) already exists (\(existingSize) bytes) — manifest index collision. This is a bug in the caller — the manifest should have provided the next free index via nextSegmentIndexProvider."
         )
-        var nextIdx = segIdx + 1
-        var found = false
-        let scanLimit = segIdx + Self.maxOverwriteScanIndices
-        while nextIdx <= scanLimit {
-          let nextName = String(format: "segment-%03d.\(ext)", nextIdx)
-          let nextURL = segmentsDir.appendingPathComponent(nextName)
-          if !self.fileManager.fileExists(atPath: nextURL.path) {
-            found = true
-            break
-          }
-          let sz =
-            (try? self.fileManager.attributesOfItem(atPath: nextURL.path)[.size] as? Int64) ?? 0
-          if sz == 0 {
-            // 0-byte file: safe to reuse ONLY if not referenced in manifest
-            found = true
-            break
-          }
-          nextIdx += 1
-        }
-
-        guard found else {
-          AppLog.audio.error(
-            "Segment: cannot find free index within \(Self.maxOverwriteScanIndices) slots — aborting"
-          )
-          throw AudioFileWriterError.fileCreationFailed
-        }
-
-        AppLog.audio.warning(
-          "Segment: skipping from index \(segIdx) to \(nextIdx) to avoid overwrite")
-        self._segmentIndex = nextIdx
-        let finalName = String(format: "segment-%03d.\(ext)", self._segmentIndex)
-        let finalURL = segmentsDir.appendingPathComponent(finalName)
-        self._audioFile = try AVAudioFile(
-          forWriting: finalURL, settings: settings, commonFormat: format.commonFormat,
-          interleaved: format.isInterleaved)
-        self._currentFileURL = finalURL
-        AppLog.audio.info(
-          "Segment \(self._segmentIndex): \(finalName) \(sampleRate)Hz PCM (index adjusted)")
-        return
+        // DO NOT auto-adjust. The caller must fix the manifest-to-writer index sync.
+        throw AudioFileWriterError.fileCreationFailed
       }
       AppLog.audio.info(
         "Segment \(self._segmentIndex): \(fileName) exists but is 0 bytes — safe to reuse")
     }
     self._audioFile = try AVAudioFile(
-      forWriting: fileURL,
-      settings: settings,
-      commonFormat: format.commonFormat,
-      interleaved: format.isInterleaved
-    )
+      forWriting: fileURL, settings: settings,
+      commonFormat: format.commonFormat, interleaved: format.isInterleaved)
     self._currentFileURL = fileURL
     AppLog.audio.info("Segment \(self._segmentIndex): \(fileName) \(sampleRate)Hz PCM")
   }
