@@ -122,6 +122,11 @@ public enum ItemStatus: String, Codable, CaseIterable {
 
   }
 
+  /// True if this status is terminal — no automatic transitions out.
+  public var isTerminal: Bool {
+    self == .failed || self == .analyzed || self == .archived
+  }
+
   /// Human-readable label for UI badges and status bars.
 
   public var label: String {
@@ -293,6 +298,15 @@ public final class KnowledgeItem {
 
   public var statusRaw: String
 
+  /// The last error message when the item entered .failed state.
+  /// Read by the UI to show actionable recovery information.
+  public var lastErrorRaw: String?
+
+  public var isTerminal: Bool {
+    let s = status
+    return s == .failed || s == .analyzed || s == .archived
+  }
+
   // [String] is NOT supported as a direct SwiftData attribute — CoreData
 
   // cannot materialize "Array<String>" (crash: "Could not materialize
@@ -462,47 +476,57 @@ public final class KnowledgeItem {
     set {
       let old = ItemStatus(rawValue: statusRaw) ?? .draft
       statusRaw = newValue.rawValue
-      if old == .recording && newValue == .recorded {
+      // Log every transition for audit trail. Non-terminal→non-terminal
+      // transitions that AREN'T the happy path are flagged as warnings.
+      if !old.isTerminal, !newValue.isTerminal,
+        old != newValue,
+        // Happy path: recording→preparingAudio→queuedForTranscription→transcribing→transcribed
+        !(old == .recording && newValue == .preparingAudio),
+        !(old == .preparingAudio && newValue == .queuedForTranscription),
+        !(old == .queuedForTranscription && newValue == .transcribing),
+        !(old == .transcribing && newValue == .transcribed),
+        !(old == .transcribed && newValue == .pendingReview),
+        !(old == .pendingReview && newValue == .analyzing),
+        !(old == .analyzing && newValue == .analyzed),
+        !(old == .recorded && newValue == .queuedForTranscription),
+        !(old == .recorded && newValue == .transcribing)
+      {
         Logger(subsystem: "com.wawa.note", category: "status-trace")
-          .warning(
-            "🔴 STATUS TRACE: .recording → .recorded for item — callstack: \(Thread.callStackSymbols.prefix(6).joined(separator: "\n"))"
-          )
+          .warning("⚠️ SUSPICIOUS TRANSITION: \(old.label) → \(newValue.label)")
       }
-      if newValue == .recorded && old != newValue {
+      if newValue == .failed {
         Logger(subsystem: "com.wawa.note", category: "status-trace")
-          .warning(
-            "🔴 STATUS TRACE: set .recorded (was \(old.label)) — callstack: \(Thread.callStackSymbols.prefix(6).joined(separator: "\n"))"
-          )
+          .info("🔴 FAILED: item entering .failed from \(old.label)")
       }
     }
 
   }
 
-  /// Transition to a new status with validation. Logs a warning if the
-
-  /// transition is illegal per the state machine, but still allows it
-
-  /// for backwards compatibility. Prefer this over direct `status = ...`.
-
+  /// Transition to a new status with validation.
+  /// In DEBUG: illegal transitions trigger assertionFailure (catches bugs early).
+  /// In RELEASE: illegal transitions are logged as critical errors but still
+  /// allowed for backward compatibility during migration.
+  /// Prefer this over direct `status = ...` wherever possible.
   public func transitionStatus(to next: ItemStatus, reason: String) {
     let current = self.status
 
     guard current.canTransition(to: next) else {
-
-      log.warning(
-
-        "⚠️ Illegal state transition: \(current.rawValue) → \(next.rawValue) — \(reason). Fix the call site."
-
-      )
-
+      let msg = "ILLEGAL TRANSITION: \(current.label) → \(next.label) (\(reason))"
+      #if DEBUG
+        assertionFailure(msg)
+      #else
+        Logger(subsystem: "com.wawa.note", category: "status-trace")
+          .critical("\(msg)")
+      #endif
+      // Still allow in RELEASE for backward compat
       self.status = next
-
       return
-
     }
 
     self.status = next
-
+    if next == .failed {
+      lastErrorRaw = reason
+    }
   }
 
   public init(
