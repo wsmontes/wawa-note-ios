@@ -2102,32 +2102,25 @@ struct KnowledgeDetailView: View {
     }
 
     isTranscribing = true
-    transcriptionProgress = "Transcribing..."
     transcriptionError = nil
 
-    // Delegate to canonical transcription service (handles manifest + legacy).
-    // Pass selectedLocale so the user's language choice is honoured.
-    let extractionSvc = ContentExtractionService(
-      modelContext: modelContext, fileStore: fileStore, preferredLocale: selectedLocale)
-    if let text = await extractionSvc.extractTextFromAudio(item) {
-      transcript = try? fileStore.readArtifact(
-        Transcript.self, fileName: "transcript.json", meetingId: item.id)
-      isTranscribing = false
-      transcriptionProgress = nil
-      item.status = .transcribed
-      modelContext.safeSave(context: "transcription-complete", itemId: item.id)
+    // Route through the pipeline instead of calling extractTextFromAudio
+    // directly. The pipeline owns status transitions, checkpoint/resume,
+    // error handling, and provider resolution. Direct calls bypass all of
+    // that and leave items stuck in .recorded on failure.
+    let queue = processingQueue
+    transcriptionProgress = "Queued for transcription..."
 
-      // Auto-run pipeline (agent-based) after transcription
-      if (try? ProviderRouter.resolveActive(context: modelContext)) != nil {
-        processingQueue.enqueue(itemID: item.id, trigger: .directUserAction)
-      }
-      return
-    }
+    // Reset to .recorded so the pipeline picks it up (same as manual retry)
+    item.transcriptionEngineId = nil
+    item.status = .recorded
+    modelContext.safeSave(context: "manual-transcribe-enqueue", itemId: item.id)
 
-    // extractionSvc.extractTextFromAudio returned nil — transcription failed
-    transcriptionError = "No speech detected or recognition failed."
-    isTranscribing = false
-    transcriptionProgress = nil
+    queue.enqueue(itemID: item.id, projectID: item.projectID, trigger: .directUserAction)
+
+    // The pipeline posts .contentPipelineStageChanged + .pipelineCompleted
+    // notifications. This view already observes both to update
+    // transcriptionProgress and isTranscribing state.
   }
 
   // MARK: - Helpers
@@ -2328,33 +2321,17 @@ struct KnowledgeDetailView: View {
     modelContext.safeSave(context: "prepare-analysis", itemId: item.id)
 
     // ── Run ────────────────────────────────────────────────────
-    if doTranscribe && !doAnalyze {
-      // Extraction-only: run directly with visible progress indicator.
-      // The queue would also run Phase 2 (analysis) which we don't want.
-      isTranscribing = true
-      let extractionSvc = ContentExtractionService(
-        modelContext: modelContext, fileStore: fileStore, preferredLocale: selectedLocale)
-      if item.type == .audio {
-        _ = await extractionSvc.extractTextFromAudio(item)
-      } else if item.type == .image {
-        _ = await extractionSvc.extractTextFromImage(item)
-      }
-      isTranscribing = false
-      let fetchedItem = try? KnowledgeItemService(context: modelContext).fetchItem(id: item.id)
-      AppLog.provider.info(
-        "🔍 reprocessItem: extraction done — bodyText=\(fetchedItem?.bodyText?.count ?? 0) chars, hasVision=\(fetchedItem?.bodyText?.contains("VISUAL ANALYSIS") ?? false)"
-      )
-      refreshID = UUID()
-      loadData()
-    } else {
-      // Analysis or full reprocess: enqueue for pipeline processing.
-      // The queue handles both extraction + analysis with full progress tracking.
-      processingQueue.enqueue(
-        itemID: item.id, projectID: item.projectID,
-        trigger: .directUserAction)
-      AppLog.provider.info(
-        "🔍 reprocessItem: enqueued mode=\(mode) for \(item.id.uuidString.prefix(8))")
-    }
+    // All paths now route through the ProcessingQueue + ContentPipeline.
+    // Direct calls to extractTextFromAudio/extractTextFromImage bypass
+    // status management, checkpoint/resume, and error handling. The
+    // pipeline owns the canonical transcription + analysis flow.
+    let trigger: QueueTrigger =
+      (doTranscribe && !doAnalyze) ? .directUserAction : .directUserAction
+    processingQueue.enqueue(itemID: item.id, projectID: item.projectID, trigger: trigger)
+    isTranscribing = true
+    transcriptionProgress = "Queued for processing..."
+    AppLog.provider.info(
+      "🔍 reprocessItem: enqueued mode=\(mode) for \(item.id.uuidString.prefix(8))")
   }
 
   // MARK: - Backlinks

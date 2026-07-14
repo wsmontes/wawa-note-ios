@@ -184,8 +184,18 @@ final class ContentExtractionService {
 
   /// Resolve which transcription engine to use based on settings and provider config.
   private func resolveTranscriptionEngine() -> (any TranscriptionEngine)? {
+    Self.resolveEngine(context: modelContext, preferredLocale: preferredLocale)
+  }
+
+  /// Shared engine resolution — usable from views and other services without
+  /// a ContentExtractionService instance. Centralises provider check, mode
+  /// selection, and API key loading so ChatView and other direct callers get
+  /// the same engine configuration as the pipeline.
+  static func resolveEngine(
+    context: ModelContext, preferredLocale: String? = nil
+  ) -> (any TranscriptionEngine)? {
     let settings = TranscriptionSettings.shared
-    let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext)
+    let config = ActiveProviderManager.shared.getActiveProvider(context: context)
 
     let canUseRemoteWhisper: Bool = {
       guard let config, config.baseURL != nil else { return false }
@@ -204,7 +214,7 @@ final class ContentExtractionService {
       return RemoteTranscriptionEngine(baseURL: baseURL, apiKey: apiKey)
     }
     AppLog.transcription.info(
-      "🔤 ContentExtraction: creating AppleSpeech engine with preferredLocale=\(self.preferredLocale ?? "nil")"
+      "🔤 ContentExtraction: creating AppleSpeech engine with preferredLocale=\(preferredLocale ?? "nil")"
     )
     return AppleSpeechTranscriptionEngine(preferredLocale: preferredLocale)
   }

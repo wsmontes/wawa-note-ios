@@ -677,60 +677,33 @@ struct ChatView: View {
     }
   }
 
+  /// Transcribe audio for chat dictation. Routes through the shared engine
+  /// resolver so chat gets the same engine configuration (mode, API key,
+  /// locale) as the recording pipeline. No KnowledgeItem needed — chat
+  /// dictation only needs the raw text.
   private func transcribeAudio(_ audioURL: URL) async -> String? {
-    // Try Whisper first
-    if let result = await transcribeViaWhisperWithFile(audioURL) {
-      return result
-    }
-    // Fallback: Apple on-device with the same file
     guard !Task.isCancelled else { return nil }
-    return await recognizeFile(audioURL)
-  }
-
-  private func transcribeViaWhisperWithFile(_ audioURL: URL) async -> String? {
-    guard let config = ActiveProviderManager.shared.getActiveProvider(context: modelContext),
-      let baseURL = config.baseURL
+    guard
+      let engine = ContentExtractionService.resolveEngine(
+        context: modelContext)
     else { return nil }
-    // Only use remote if the provider actually supports audio transcription
-    let supportsTranscription =
-      AIConfigService.shared.supportsAudioTranscription(for: config.providerConfigId)
-      || AIConfigService.shared.supportsAudioTranscription(for: config.typeRaw)
-    guard supportsTranscription else { return nil }
-    guard !Task.isCancelled else { return nil }
 
-    var apiKey = ""
-    if let keyId = config.apiKeyKeychainIdentifier {
-      apiKey = (try? SecureKeyStore().loadAPIKey(for: keyId)) ?? ""
+    // Check availability before attempting transcription
+    let availability = engine.checkAvailability()
+    guard case .available = availability else {
+      AppLog.transcription.warning(
+        "Chat transcription: engine not available — \(String(describing: availability))")
+      return nil
     }
-    guard !apiKey.isEmpty else { return nil }
 
-    let engine = RemoteTranscriptionEngine(baseURL: baseURL, apiKey: apiKey)
     do {
+      try await engine.prepareIfNeeded()
       let transcript = try await engine.transcribeFile(audioURL, meetingId: UUID())
       guard !Task.isCancelled else { return nil }
       return transcript.segments.map(\.text).joined(separator: " ")
-    } catch { return nil }
-  }
-
-  private func recognizeFile(_ url: URL) async -> String? {
-    guard let recognizer = SFSpeechRecognizer(), recognizer.isAvailable else { return nil }
-    let request = SFSpeechURLRecognitionRequest(url: url)
-    request.shouldReportPartialResults = false
-    return await withCheckedContinuation { continuation in
-      var resumed = false
-      recognizer.recognitionTask(with: request) { result, error in
-        if error != nil || result?.isFinal == true {
-          guard !resumed else { return }
-          resumed = true
-          continuation.resume(returning: result?.bestTranscription.formattedString)
-        }
-      }
-      Task {
-        try? await Task.sleep(nanoseconds: 10_000_000_000)
-        guard !resumed else { return }
-        resumed = true
-        continuation.resume(returning: nil)
-      }
+    } catch {
+      AppLog.transcription.warning("Chat transcription failed: \(error.localizedDescription)")
+      return nil
     }
   }
 
