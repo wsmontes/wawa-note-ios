@@ -1076,7 +1076,7 @@ struct KnowledgeDetailView: View {
         HStack(spacing: 8) {
           Button {
             item.status = .analyzing
-            try? modelContext.save()
+            modelContext.safeSave(context: "approve-and-analyze", itemId: item.id)
             // Re-queue for analysis now that user approved
             processingQueue.enqueue(
               itemID: item.id, projectID: item.projectID, trigger: .directUserAction)
@@ -1091,7 +1091,7 @@ struct KnowledgeDetailView: View {
             let dir = fileStore.itemDirectoryURL(for: item.id)
             try? FileManager.default.removeItem(at: dir.appendingPathComponent("transcript.json"))
             item.status = .recorded
-            try? modelContext.save()
+            modelContext.safeSave(context: "re-extract-item", itemId: item.id)
             processingQueue.enqueue(
               itemID: item.id, projectID: item.projectID, trigger: .newCapture)
           } label: {
@@ -1930,7 +1930,7 @@ struct KnowledgeDetailView: View {
     // Update metadata
     item.imagePageCount = count - 1
     if index == 0 { item.imageFileRelativePath = count > 1 ? "scan_0.jpg" : nil }
-    try? modelContext.save()
+    modelContext.safeSave(context: "delete-scanned-page", itemId: item.id)
 
     // Reload
     if currentPage >= count - 1 { currentPage = max(0, count - 2) }
@@ -2115,7 +2115,7 @@ struct KnowledgeDetailView: View {
       isTranscribing = false
       transcriptionProgress = nil
       item.status = .transcribed
-      try? modelContext.save()
+      modelContext.safeSave(context: "transcription-complete", itemId: item.id)
 
       // Auto-run pipeline (agent-based) after transcription
       if (try? ProviderRouter.resolveActive(context: modelContext)) != nil {
@@ -2233,7 +2233,7 @@ struct KnowledgeDetailView: View {
     prov.mark(field: "title", origin: .user)
     if !editedBody.isEmpty { prov.mark(field: "bodyText", origin: .user) }
     item.fieldProvenanceJSON = prov.encode()
-    try? modelContext.save()
+    modelContext.safeSave(context: "save-item-edits", itemId: item.id)
     isEditing = false
   }
 
@@ -2325,7 +2325,7 @@ struct KnowledgeDetailView: View {
     }
     // Prevent autoProcessPendingItems from double-processing.
     item.inboxDate = nil
-    try? modelContext.save()
+    modelContext.safeSave(context: "prepare-analysis", itemId: item.id)
 
     // ── Run ────────────────────────────────────────────────────
     if doTranscribe && !doAnalyze {
@@ -2505,7 +2505,7 @@ struct KnowledgeDetailView: View {
 
     // Enqueue re-analysis with confirmation context
     item.analysisProviderId = nil
-    try? modelContext.save()
+    modelContext.safeSave(context: "confirm-speaker-reanalysis", itemId: item.id)
     processingQueue.enqueue(
       itemID: item.id, projectID: item.projectID,
       trigger: .directUserAction)

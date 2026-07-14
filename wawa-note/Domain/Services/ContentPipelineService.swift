@@ -130,6 +130,8 @@ final class ContentPipelineService: ObservableObject {
   private let ingestionPipeline: ProjectIngestionPipeline
   private let ingestionState: ProjectIngestionState
   private let modelContainer: ModelContainer
+  /// Exposed for ProcessingQueueService to check item status after pipeline completes.
+  var container: ModelContainer { modelContainer }
 
   @Published var pipelineStatus: PipelineProgress?
 
@@ -271,7 +273,7 @@ final class ContentPipelineService: ObservableObject {
         if item.type == .image, item.bodyText == nil {
           let pageCount = item.imagePageCount ?? 1
           item.status = .transcribing
-          try? modelContext.save()
+          modelContext.safeSave(context: "pipeline-start-transcribing", itemId: itemID)
           pipelineStatus = PipelineProgress(
             itemId: itemID, itemTitle: item.title,
             itemType: item.type.rawValue, phase: "recognizing",
@@ -425,7 +427,7 @@ final class ContentPipelineService: ObservableObject {
         AppLog.provider.error("ContentPipeline: no available model for analysis — skipping")
         if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
           fresh.status = .transcribed
-          try? modelContext.save()
+          modelContext.safeSave(context: "pipeline-transcribed", itemId: itemID)
         }
         return
       }
@@ -436,7 +438,7 @@ final class ContentPipelineService: ObservableObject {
       // roll back to .transcribed so the item doesn't get stuck.
       if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
         fresh.status = .analyzing
-        try? modelContext.save()
+        modelContext.safeSave(context: "pipeline-start-analyzing", itemId: itemID)
       }
       var didComplete = false
       defer {
@@ -445,7 +447,7 @@ final class ContentPipelineService: ObservableObject {
             fresh.status == .analyzing
           {
             fresh.status = .transcribed
-            try? modelContext.save()
+            modelContext.safeSave(context: "pipeline-rollback-to-transcribed", itemId: itemID)
             AppLog.provider.warning(
               "ContentPipeline: item \(itemID) exited analysis without reaching terminal state — rolled back to .transcribed"
             )
@@ -479,7 +481,7 @@ final class ContentPipelineService: ObservableObject {
         if item.status != .failed, item.status != .transcribed, item.status != .analyzed {
           if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
             fresh.status = .failed
-            try? modelContext.save()
+            modelContext.safeSave(context: "pipeline-no-text-failed", itemId: itemID)
           }
         }
         return
@@ -871,7 +873,7 @@ final class ContentPipelineService: ObservableObject {
     if let item = try? KnowledgeItemService(context: ctx).fetchItem(id: itemID) {
       if item.status == .analyzing { item.status = .transcribed }
       if item.status == .transcribing { item.status = .recorded }
-      try? ctx.save()
+      ctx.safeSave(context: "pipeline-cancelled-rollback", itemId: itemID)
     }
     // Notify observers so UI refreshes immediately
     NotificationCenter.default.post(name: .pipelineCompleted, object: itemID.uuidString)
@@ -1781,7 +1783,7 @@ enum ProjectHealthEngine {
     p.healthScore = Double(r.score)
     p.healthStatus = r.status
     p.lastActivityAt = Date()
-    try? context.save()
+    context.safeSave(context: "project-health-update", itemId: pid)
   }
 }
 
@@ -2647,7 +2649,7 @@ final class WawaJSBridge: NSObject, WawaJSExports {
     let pid = projectId.flatMap(UUID.init(uuidString:))
     let task = TaskItem(projectID: pid, title: title, ownerName: owner, dueAt: dueDate)
     modelContext.insert(task)
-    try? modelContext.save()
+    modelContext.safeSave(context: "js-bridge-create-task", itemId: task.id)
     return ["id": task.id.uuidString, "title": task.title, "status": "todo"]
   }
 
@@ -3129,20 +3131,20 @@ final class SignalResolutionService {
   func markSeen(_ signal: AgentSuggestion) {
     guard signal.status == "visible" else { return }
     signal.status = "seen"
-    try? context.save()
+    context.safeSave(context: "signal-mark-seen")
   }
 
   func markAcknowledged(_ signal: AgentSuggestion) {
     guard ["visible", "seen"].contains(signal.status) else { return }
     signal.status = "acknowledged"
-    try? context.save()
+    context.safeSave(context: "signal-mark-acknowledged")
   }
 
   func approve(_ signal: AgentSuggestion) {
     signal.status = "approved"
     signal.resolvedAt = Date()
     signal.resolvedByRaw = "user"
-    try? context.save()
+    context.safeSave(context: "signal-approve")
   }
 
   func reject(_ signal: AgentSuggestion, reason: String? = nil) {
@@ -3150,7 +3152,7 @@ final class SignalResolutionService {
     signal.resolvedAt = Date()
     signal.resolvedByRaw = "user"
     signal.resolutionReason = reason
-    try? context.save()
+    context.safeSave(context: "signal-reject")
     AgentMemoryStore.shared.write(
       pattern: "rejected_\(signal.type)",
       strategy: "User rejected: \(signal.title.prefix(60))",
@@ -3162,7 +3164,7 @@ final class SignalResolutionService {
     signal.resolvedAt = Date()
     signal.resolvedByRaw = "user"
     signal.resolutionReason = reason
-    try? context.save()
+    context.safeSave(context: "signal-archive")
   }
 
   func autoArchive(_ signal: AgentSuggestion, reason: String) {
@@ -3170,7 +3172,7 @@ final class SignalResolutionService {
     signal.resolvedAt = Date()
     signal.resolvedByRaw = "system"
     signal.resolutionReason = reason
-    try? context.save()
+    context.safeSave(context: "signal-auto-archive")
   }
 
   func transformToTask(_ signal: AgentSuggestion, projectID: UUID? = nil) -> TaskItem? {
@@ -3188,7 +3190,7 @@ final class SignalResolutionService {
     signal.resolvedAt = Date()
     signal.resolvedByRaw = "user"
     signal.resolutionReason = "Transformed into task: \(task.id.uuidString)"
-    try? context.save()
+    context.safeSave(context: "signal-transform-to-task")
     return task
   }
 
@@ -3203,7 +3205,7 @@ final class SignalResolutionService {
     signal.resolvedAt = Date()
     signal.resolvedByRaw = "user"
     signal.resolutionReason = "Transformed into project: \(project.id.uuidString)"
-    try? context.save()
+    context.safeSave(context: "signal-transform-to-project")
     return project
   }
 
@@ -3212,7 +3214,7 @@ final class SignalResolutionService {
     signal.resolvedAt = Date()
     signal.resolvedByRaw = "user"
     signal.resolutionReason = reason
-    try? context.save()
+    context.safeSave(context: "signal-ignore")
   }
 
   /// Auto-archive contradictions when new information resolves them.
@@ -3262,7 +3264,7 @@ final class VersioningService {
         createSnapshot(projectID: pid, trigger: .auto_milestone, context: context)
       }
     }
-    try? context.save()
+    context.safeSave(context: "record-change", itemId: projectID)
   }
 
   func createSnapshot(
@@ -3277,7 +3279,7 @@ final class VersioningService {
     context.insert(snapshot)
     for record in unassigned { record.snapshotID = snapshot.id }
     changeCounts[projectID] = 0
-    try? context.save()
+    context.safeSave(context: "create-snapshot", itemId: projectID)
   }
 
   func changes(
@@ -3366,7 +3368,7 @@ final class VersioningService {
       }
     default: break
     }
-    try? context.save()
+    context.safeSave(context: "field-update-\(field)", itemId: entityID)
     recordChange(
       entityType: entityType, entityID: entityID, projectID: projectID,
       field: field, previousValue: nil, newValue: value, origin: .system, context: context)

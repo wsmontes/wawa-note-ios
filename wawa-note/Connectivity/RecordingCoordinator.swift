@@ -365,7 +365,7 @@ final class RecordingCoordinator: ObservableObject {
       item.inboxDate = nil
     }
     context.insert(item)
-    try? context.save()
+    context.safeSave(context: "create-recording-item", itemId: item.id)
     return item
   }
 
@@ -717,7 +717,10 @@ final class RecordingCoordinator: ObservableObject {
     let store = FileArtifactStore()
     saveManifest(manifest, meetingId: meetingId)
 
-    // Attempt concatenation to produce a playable audio.m4a
+    // Attempt concatenation to produce a playable audio.m4a.
+    // CRITICAL: Do NOT clear the checkpoint until concatenation confirms success.
+    // Previous bug: checkpoint was cleared synchronously while concatenation ran
+    // in a fire-and-forget Task — if the app died again, segments were orphaned.
     Task {
       let concatOK = await AudioSegmentConcatenator.concatenate(
         manifest: manifest, meetingId: meetingId)
@@ -725,17 +728,22 @@ final class RecordingCoordinator: ObservableObject {
         AppLog.audio.info(
           "Crash recovery: concatenation succeeded for \(meetingId.uuidString.prefix(8))")
         item.status = .recorded
-        try? bgContext.save()
+        if bgContext.safeSave(context: "crash-recovery-concat-ok", itemId: meetingId) {
+          // Only clear checkpoint AFTER both concatenation and save succeed.
+          AudioFileWriter.clearCrashCheckpoint()
+        }
       } else {
         AppLog.audio.warning(
           "Crash recovery: concatenation failed — segments are still available as WAV")
-        // Don't fail the item — WAV segments are still usable
-        try? bgContext.save()
+        // Don't fail the item — WAV segments are still usable.
+        // Save status (.recorded set above) but keep checkpoint for next attempt.
+        bgContext.safeSave(context: "crash-recovery-concat-failed", itemId: meetingId)
       }
     }
 
-    try? bgContext.save()
-    AudioFileWriter.clearCrashCheckpoint()
+    // Initial save: persist the manifest and .recorded status.
+    // Checkpoint is NOT cleared here — it stays until the Task above confirms success.
+    bgContext.safeSave(context: "crash-recovery-initial", itemId: meetingId)
     AppLog.event(
       "audio",
       "Crash checkpoint recovered: \(meetingId.uuidString.prefix(8)) segment=\(segmentIndex)")
@@ -1048,7 +1056,7 @@ final class RecordingCoordinator: ObservableObject {
           }
         }
         if !enrichments.isEmpty {
-          try? ctx.save()
+          ctx.safeSave(context: "context-enrichment", itemId: itemId)
         }
       }
     }
@@ -1101,7 +1109,7 @@ final class RecordingCoordinator: ObservableObject {
     let descriptor = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.id == itemId })
     guard let item = try? modelContext.fetch(descriptor).first else { return }
     item.status = status
-    try? modelContext.save()
+    modelContext.safeSave(context: "update-item-status-\(status)", itemId: itemId)
   }
 
   private func updateItemOnStop(

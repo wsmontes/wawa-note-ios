@@ -109,7 +109,7 @@ struct ProviderDetailView: View {
       try? keychain.deleteAPIKey(for: keyId)
     }
     modelContext.delete(provider)
-    try? modelContext.save()
+    modelContext.safeSave(context: "delete-provider")
     dismiss()
   }
 }

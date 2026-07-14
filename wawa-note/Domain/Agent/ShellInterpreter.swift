@@ -1311,7 +1311,7 @@ enum ShellInterpreter {
       {
         project.status = status
       }
-      try? ctx.modelContext.save()
+      ctx.modelContext.safeSave(context: "shell-update-project")
       return ok("Updated project \(slug)")
 
     case .agentPrompts:
@@ -1519,7 +1519,7 @@ enum ShellInterpreter {
       try? ProjectService(context: ctx.modelContext).removeItem(itemID)
       if let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: itemID) {
         item.inboxDate = Date()
-        try? ctx.modelContext.save()
+        ctx.modelContext.safeSave(context: "shell-move-to-inbox", itemId: itemID)
       }
       return ok("Moved item back to inbox from /projects/\(slug)/")
 
@@ -1782,7 +1782,7 @@ enum ShellInterpreter {
     }
     if item.originalTitle == nil { item.originalTitle = item.title }
     item.title = title
-    try? ctx.modelContext.save()
+    ctx.modelContext.safeSave(context: "shell-rename-item")
     return ToolResult(content: "Title set to: \(title)", displaySummary: "Renamed")
   }
 
@@ -2087,7 +2087,7 @@ enum ShellInterpreter {
     // Set flag: mark item as ready for analysis by setting analysisProviderId to "pending"
     if item.analysisProviderId == nil {
       item.analysisProviderId = "pending"
-      try? ctx.modelContext.save()
+      ctx.modelContext.safeSave(context: "shell-flag-for-analysis")
     }
     return ok(
       "Item '\(item.title)' flagged for analysis. The pipeline will process it in the background. To check status: cat items/\(idStr.prefix(8)).json"

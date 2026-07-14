@@ -45,7 +45,7 @@ final class ProjectService {
     for project in needColor {
       project.colorHex = service.assignColor()
     }
-    try? context.save()
+    context.safeSave(context: "migrate-project-colors")
   }
 
   /// One-time migration: set defaults for field provenance and task ownership.
@@ -76,7 +76,7 @@ final class ProjectService {
       }
     }
 
-    try? context.save()
+    context.safeSave(context: "migrate-field-provenance")
     UserDefaults.standard.set(true, forKey: key)
   }
 

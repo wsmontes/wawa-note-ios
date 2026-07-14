@@ -144,7 +144,7 @@ struct NoteEditorView: View {
       // If journal, add mood tag. Preserve existing non-mood tags.
       if type == .journalEntry, let moodTag = initialTag {
         item.tags = TagNormalizer.replace(prefix: "mood/", with: moodTag, in: item.tags)
-        try? modelContext.save()
+        modelContext.safeSave(context: "save-mood-tag", itemId: item.id)
       }
 
       // Trigger pipeline for analysis if there's content
@@ -167,7 +167,7 @@ struct NoteEditorView: View {
         prov.mark(field: "bodyText", origin: .user)
       }
       item.fieldProvenanceJSON = prov.encode()
-      try? modelContext.save()
+      modelContext.safeSave(context: "save-note-edits", itemId: item.id)
     }
 
     dismiss()

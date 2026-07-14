@@ -203,7 +203,7 @@ struct ProjectHomeView: View {
       let result = try await importer.importFromURL(url)
       let item = result.knowledgeItem
       modelContext.insert(item)
-      try? modelContext.save()
+      modelContext.safeSave(context: "import-to-project", itemId: item.id)
       try? ProjectService(context: modelContext).addItem(item.id, to: project.id)
     } catch {
       AppLog.general.error("Import failed: \(error.localizedDescription)")

@@ -133,7 +133,7 @@ final class ContentExtractionService {
       AppLog.audio.error("Transcription validation FAILED: final audio missing — marking as failed")
       if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: item.id) {
         fresh.status = .failed
-        try? modelContext.save()
+        modelContext.safeSave(context: "transcription-validation-no-audio", itemId: item.id)
       }
       return nil
     }
@@ -142,7 +142,7 @@ final class ContentExtractionService {
         "Transcription validation FAILED: audio too small (\(audioSize) bytes) — marking as failed")
       if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: item.id) {
         fresh.status = .failed
-        try? modelContext.save()
+        modelContext.safeSave(context: "transcription-validation-too-small", itemId: item.id)
       }
       return nil
     }
@@ -152,7 +152,7 @@ final class ContentExtractionService {
       )
       if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: item.id) {
         fresh.status = .failed
-        try? modelContext.save()
+        modelContext.safeSave(context: "transcription-validation-too-short", itemId: item.id)
       }
       return nil
     }
@@ -216,6 +216,11 @@ final class ContentExtractionService {
 
   /// Transcribe the consolidated audio.m4a (AAC) via the selected engine.
   /// Apple engines decode AAC→WAV internally; Whisper sends AAC directly.
+  ///
+  /// Checkpoint & Resume: after each chunk, a partial transcript is persisted to
+  /// `transcript_checkpoint.json`. If the job fails and ProcessingQueueService
+  /// retries it, the engine resumes from the last checkpoint instead of restarting
+  /// from scratch. This is critical for 1h+ recordings on bad connections.
   private func transcribeSingleFile(item: KnowledgeItem) async -> String? {
     // Prefer sandbox path; fall back to App Group shared container (Share Extension imports)
     let sandboxURL = fileStore.audioFileURL(for: item.id)
@@ -231,7 +236,7 @@ final class ContentExtractionService {
     guard FileManager.default.fileExists(atPath: audioURL.path) else {
       AppLog.provider.warning("ContentExtraction: no audio file for item \(item.id)")
       item.status = .failed
-      try? modelContext.save()
+      modelContext.safeSave(context: "transcription-no-audio-file", itemId: item.id)
       return nil
     }
 
@@ -240,8 +245,55 @@ final class ContentExtractionService {
     let engine = resolveTranscriptionEngine()
     guard let engine else {
       item.status = .failed
-      try? modelContext.save()
+      modelContext.safeSave(context: "transcription-no-engine", itemId: item.id)
       return nil
+    }
+
+    // ── Checkpoint resume: load previous progress if available ──────
+    let checkpoint = loadTranscriptionCheckpoint(for: item.id)
+    if let checkpoint {
+      AppLog.transcription.info(
+        "Found checkpoint for \(item.id.uuidString.prefix(8)): \(checkpoint.completedChunks) chunks done"
+      )
+      // Tell engine to skip already-transcribed chunks
+      if let apple = engine as? AppleSpeechTranscriptionEngine {
+        apple.resumeFromChunk = checkpoint.completedChunks
+      } else if let remote = engine as? RemoteTranscriptionEngine {
+        remote.resumeFromChunk = checkpoint.completedChunks
+      }
+    }
+
+    // Wire up checkpoint persistence: save partial transcript after each chunk.
+    // The closure is called from the engine's async context (not MainActor),
+    // but saveTranscriptionCheckpoint only does file I/O — no modelContext access.
+    let itemID = item.id
+    let fileStoreRef = fileStore
+    let checkpointSaver: (Transcript, Int) -> Void = { partialTranscript, completedChunks in
+      let checkpoint = ContentExtractionService.CheckpointData(
+        completedChunks: completedChunks,
+        segments: partialTranscript.segments,
+        languageCode: partialTranscript.languageCode,
+        savedAt: Date()
+      )
+      do {
+        try fileStoreRef.createMeetingDirectory(for: itemID)
+        let data = try JSONEncoder().encode(checkpoint)
+        let url = fileStoreRef.meetingDirectoryURL(for: itemID)
+          .appendingPathComponent("transcript_checkpoint.json")
+        try data.write(to: url, options: .atomic)
+        AppLog.transcription.info(
+          "Checkpoint saved: \(itemID.uuidString.prefix(8)) chunk \(completedChunks) (\(partialTranscript.segments.count) segments)"
+        )
+      } catch {
+        AppLog.transcription.warning(
+          "Failed to save checkpoint for \(itemID.uuidString.prefix(8)): \(error.localizedDescription)"
+        )
+      }
+    }
+    if let apple = engine as? AppleSpeechTranscriptionEngine {
+      apple.onCheckpoint = checkpointSaver
+    } else if let remote = engine as? RemoteTranscriptionEngine {
+      remote.onCheckpoint = checkpointSaver
     }
 
     // Propagate parent task cancellation to the transcription engine.
@@ -257,6 +309,18 @@ final class ContentExtractionService {
     do {
       var result = try await engine.transcribeFile(audioURL, meetingId: item.id)
 
+      // ── Merge with checkpoint segments if resuming ────────
+      if let checkpoint, !checkpoint.segments.isEmpty {
+        var merged = checkpoint.segments
+        merged.append(contentsOf: result.segments)
+        result = Transcript(
+          meetingId: item.id,
+          languageCode: result.languageCode ?? checkpoint.languageCode,
+          segments: merged,
+          sourceEngineId: result.sourceEngineId
+        )
+      }
+
       // ── Post-transcription diagnostics ────────────────────
       let transcriptChars = result.segments.map(\.text).joined(separator: " ").count
       let langCode = result.languageCode ?? "nil"
@@ -267,11 +331,15 @@ final class ContentExtractionService {
         • transcriptSegments: \(result.segments.count)
         • transcriptTextLength: \(transcriptChars) chars
         • languageCode: \(langCode)
+        • resumedFromChunk: \(checkpoint?.completedChunks ?? 0)
         """)
       // ── End diagnostics ───────────────────────────────────
 
       try fileStore.createMeetingDirectory(for: item.id)
       try fileStore.writeArtifact(result, fileName: "transcript.json", meetingId: item.id)
+
+      // Clean up checkpoint file — transcription is complete
+      removeTranscriptionCheckpoint(for: item.id)
 
       item.status = .transcribed
       item.transcriptionEngineId = resolvedEngineId(engine)
@@ -286,12 +354,54 @@ final class ContentExtractionService {
       let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
       AppLog.provider.error("ContentExtraction: transcription failed for item \(item.id): \(msg)")
       item.status = .failed
-      try? modelContext.save()
+      modelContext.safeSave(context: "transcription-failed", itemId: item.id)
       if let fallback = loadExistingTranscriptText(for: item.id) {
         return fallback
       }
       return nil
     }
+  }
+
+  // MARK: - Transcription Checkpoint Persistence
+
+  /// Persisted checkpoint state for cross-attempt resume.
+  struct CheckpointData: Codable {
+    let completedChunks: Int
+    let segments: [TranscriptSegment]
+    let languageCode: String?
+    let savedAt: Date
+  }
+
+  private func checkpointURL(for itemID: UUID) -> URL {
+    fileStore.meetingDirectoryURL(for: itemID)
+      .appendingPathComponent("transcript_checkpoint.json")
+  }
+
+  private func loadTranscriptionCheckpoint(for itemID: UUID) -> CheckpointData? {
+    let url = checkpointURL(for: itemID)
+    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+    do {
+      let data = try Data(contentsOf: url)
+      let checkpoint = try JSONDecoder().decode(CheckpointData.self, from: data)
+      // Reject stale checkpoints (older than 24 hours)
+      if Date().timeIntervalSince(checkpoint.savedAt) > 86400 {
+        AppLog.transcription.info(
+          "Discarding stale checkpoint for \(itemID.uuidString.prefix(8)) (>24h old)")
+        removeTranscriptionCheckpoint(for: itemID)
+        return nil
+      }
+      return checkpoint
+    } catch {
+      AppLog.transcription.warning(
+        "Failed to load checkpoint for \(itemID.uuidString.prefix(8)): \(error.localizedDescription)"
+      )
+      removeTranscriptionCheckpoint(for: itemID)
+      return nil
+    }
+  }
+
+  private func removeTranscriptionCheckpoint(for itemID: UUID) {
+    try? FileManager.default.removeItem(at: checkpointURL(for: itemID))
   }
 
   /// Reads transcript text from an already-saved transcript.json, if it exists.
@@ -392,7 +502,7 @@ final class ContentExtractionService {
         // Save enriched text to body
         if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: item.id) {
           fresh.bodyText = combined
-          try? modelContext.save()
+          modelContext.safeSave(context: "image-vision-text", itemId: item.id)
         }
         return combined
       }
@@ -403,7 +513,7 @@ final class ContentExtractionService {
       let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: item.id)
     {
       fresh.bodyText = ocrText
-      try? modelContext.save()
+      modelContext.safeSave(context: "image-ocr-text", itemId: item.id)
     }
     return ocrText
   }
@@ -525,17 +635,29 @@ final class ContentExtractionService {
       NotificationCenter.default.post(name: .analysisReady, object: item.id.uuidString)
       await EmbeddingPipelineService().ensureEmbedding(for: item, using: provider)
       return true
-    } catch let error as TranscriptionError {
-      // Permanent errors: model not found, invalid API key — don't retry
+    } catch let error as ProviderError where !error.isRetryable {
+      // Permanent provider errors: invalid API key (401), unauthorized (403),
+      // missing key, decoding failure, provider not found, context window exceeded.
+      // These will NEVER succeed on retry — mark as failed immediately.
       AppLog.provider.error(
-        "ContentExtraction.analyze: PERMANENT failure for item \(item.id): \(error.localizedDescription)"
+        "ContentExtraction.analyze: PERMANENT provider failure for item \(item.id): \(error.localizedDescription)"
       )
       try? fileStore.createMeetingDirectory(for: item.id)
       item.status = .failed
-      try? modelContext.save()
+      modelContext.safeSave(context: "analysis-permanent-failure", itemId: item.id)
+      return false
+    } catch let error as TranscriptionError {
+      // TranscriptionError during analysis is unexpected but non-retryable
+      AppLog.provider.error(
+        "ContentExtraction.analyze: PERMANENT transcription error for item \(item.id): \(error.localizedDescription)"
+      )
+      try? fileStore.createMeetingDirectory(for: item.id)
+      item.status = .failed
+      modelContext.safeSave(context: "analysis-transcription-error", itemId: item.id)
       return false
     } catch {
-      // Transient errors: network timeout, rate limit, server error — retryable
+      // Transient errors: network timeout, rate limit (429), server error (5xx).
+      // These are retryable — throw so ProcessingQueueService can retry with backoff.
       AppLog.provider.error(
         "ContentExtraction.analyze: TRANSIENT failure for item \(item.id): \(error.localizedDescription)"
       )

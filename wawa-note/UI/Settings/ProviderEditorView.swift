@@ -90,7 +90,7 @@ final class ProviderEditorViewModel: ObservableObject {
       update(provider: provider)
     }
 
-    try? context.save()
+    context.safeSave(context: "save-provider-config")
   }
 
   private func update(provider: AIProviderConfigModel) {

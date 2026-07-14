@@ -13,6 +13,9 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
 
   var onProgress: ((TranscriptionProgress) -> Void)?
   var onCheckpoint: ((Transcript, Int) -> Void)?
+  /// Index of the last successfully transcribed chunk (0-based).
+  /// Set by ContentExtractionService from a persisted checkpoint to enable resume.
+  var resumeFromChunk: Int = 0
   private(set) var isCancelled = false
 
   var capabilities: TranscriptionCapabilities {
@@ -20,16 +23,29 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
       supportsLive: false,
       supportsFile: true,
       isOnDevice: false,
-      maxDuration: 3600,
+      maxDuration: 7200,  // 2 hours
       supportedLocales: [],
       hasModelDownload: false
     )
   }
 
-  init(baseURL: URL, apiKey: String = "", session: URLSession = .shared) {
+  init(baseURL: URL, apiKey: String = "", session: URLSession? = nil) {
     self.baseURL = baseURL
     self.apiKey = apiKey
-    self.session = session
+    // Custom session with generous timeouts for large uploads on bad connections.
+    // timeoutIntervalForRequest: time waiting for *any* data from server (between packets).
+    // timeoutIntervalForResource: total wall-clock time for the entire transfer.
+    if let session {
+      self.session = session
+    } else {
+      let config = URLSessionConfiguration.default
+      config.timeoutIntervalForRequest = 120   // 2 min between any server response
+      config.timeoutIntervalForResource = 600  // 10 min total per chunk upload+process
+      config.waitsForConnectivity = true       // Wait for network instead of failing immediately
+      config.allowsExpensiveNetworkAccess = true
+      config.allowsConstrainedNetworkAccess = true
+      self.session = URLSession(configuration: config)
+    }
   }
 
   func cancel() {
@@ -37,7 +53,6 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
   }
 
   func checkAvailability() -> LocalTranscriptionAvailability {
-    // Remote engine is always "available" — it doesn't use on-device models
     .available(localeIdentifier: "auto")
   }
 
@@ -91,25 +106,78 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
     var allSegments: [TranscriptSegment] = []
     var languageCode: String?
 
+    // Resume support: skip already-transcribed chunks from a previous attempt.
+    let startIndex = min(resumeFromChunk, chunks.count)
+    if startIndex > 0 {
+      AppLog.transcription.info(
+        "Resuming remote transcription from chunk \(startIndex + 1)/\(chunks.count)")
+    }
+
     for (i, chunk) in chunks.enumerated() {
+      // Skip chunks already persisted in a previous checkpoint
+      if i < startIndex { continue }
+
       try Task.checkCancellation()
       if isCancelled { throw TranscriptionError.cancelled }
 
       onProgress?(.transcribing(chunk: i + 1, totalChunks: chunks.count))
-      let prompt = i > 0 ? String(previousText.suffix(500)) : nil
+      let prompt = i > 0 || startIndex > 0 ? String(previousText.suffix(500)) : nil
       AppLog.transcription.info("Chunk \(i+1)/\(chunks.count)")
 
-      let transcript = try await transcribeSingle(
-        url: chunk.url, prompt: prompt, meetingId: meetingId)
-      languageCode = transcript.languageCode ?? languageCode
+      // Per-chunk retry with adaptive backoff for bad networks.
+      var transcript: Transcript?
+      var lastChunkError: Error?
+      for attempt in 0...Self.maxRetriesPerChunk {
+        if attempt > 0 {
+          // Adaptive backoff: 3s, 9s, 27s — longer delays for flaky connections
+          let baseDelay = pow(3.0, Double(attempt))
+          let jitter = Double.random(in: -0.25...0.25)
+          let delay = UInt64(max(1, baseDelay * (1 + jitter))) * 1_000_000_000
+          AppLog.transcription.info(
+            "Remote chunk \(i+1) retry \(attempt)/\(Self.maxRetriesPerChunk) — waiting \(delay / 1_000_000_000)s"
+          )
+          try await Task.sleep(nanoseconds: delay)
+        }
+        do {
+          transcript = try await transcribeSingle(
+            url: chunk.url, prompt: prompt, meetingId: meetingId)
+          lastChunkError = nil
+          break
+        } catch TranscriptionError.cancelled {
+          throw TranscriptionError.cancelled
+        } catch TranscriptionError.fileTooLarge {
+          // Non-retryable: server rejected the file size
+          throw TranscriptionError.fileTooLarge
+        } catch {
+          lastChunkError = error
+          AppLog.transcription.warning(
+            "Remote chunk \(i+1) attempt \(attempt+1) failed: \(error.localizedDescription)")
+        }
+      }
 
-      let chunkText = transcript.segments.map(\.text).joined(separator: " ")
+      guard let chunkTranscript = transcript else {
+        // All retries exhausted. Save checkpoint so next ProcessingQueue retry resumes here.
+        if !allSegments.isEmpty {
+          let partial = Transcript(
+            meetingId: allSegments.first?.meetingId,
+            languageCode: languageCode,
+            segments: allSegments,
+            sourceEngineId: id
+          )
+          onCheckpoint?(partial, i)
+        }
+        throw lastChunkError ?? TranscriptionError.recognitionFailed(
+          "Chunk \(i+1)/\(chunks.count) failed after \(Self.maxRetriesPerChunk + 1) attempts")
+      }
 
-      for segment in transcript.segments {
+      languageCode = chunkTranscript.languageCode ?? languageCode
+      let chunkText = chunkTranscript.segments.map(\.text).joined(separator: " ")
+
+      for segment in chunkTranscript.segments {
         let adjustedStart = segment.startTime + chunk.startTime
         let adjustedEnd = segment.endTime.map { $0 + chunk.startTime }
         var text = segment.text
-        if i > 0 { text = deduplicateStart(text, against: previousText) }
+        if i > 0 || startIndex > 0 { text = deduplicateStart(text, against: previousText) }
 
         allSegments.append(
           TranscriptSegment(
@@ -126,7 +194,7 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
       }
       previousText = chunkText
 
-      // Checkpoint after each chunk
+      // Checkpoint after each chunk (cross-attempt resume)
       let partial = Transcript(
         meetingId: allSegments.first?.meetingId,
         languageCode: languageCode,
@@ -147,10 +215,13 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
     )
   }
 
-  // MARK: - Single chunk (with exponential backoff)
+  // MARK: - Single chunk (with exponential backoff + network resilience)
 
-  private static let maxRetries = 3
-  private static let baseDelayMs: UInt64 = 1_000_000_000  // 1 second
+  /// Maximum retries at the chunk level (handled by transcribeFile loop).
+  /// This is the per-HTTP-request retry for transient server/network errors.
+  private static let maxRetriesPerChunk = 3
+  private static let maxHTTPRetries = 2
+  private static let baseDelayNs: UInt64 = 2_000_000_000  // 2 seconds
 
   private func transcribeSingle(url: URL, prompt: String?, meetingId: UUID) async throws
     -> Transcript
@@ -159,7 +230,7 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
     let boundary = UUID().uuidString
     let model = AIConfigService.shared.modelFor(feature: "transcription")
 
-    // Build multipart body once (memory-efficient)
+    // Build multipart body to a temp file (avoids loading entire audio into RAM).
     let tempDir = FileManager.default.temporaryDirectory
     let bodyURL = tempDir.appendingPathComponent("transcription_\(UUID().uuidString).body")
     defer { try? FileManager.default.removeItem(at: bodyURL) }
@@ -167,21 +238,23 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
       audioURL: url, prompt: prompt, model: model, boundary: boundary, outputURL: bodyURL)
 
     var lastError: Error?
-    for attempt in 0...Self.maxRetries {
+    for attempt in 0...Self.maxHTTPRetries {
       if attempt > 0 {
-        // Exponential backoff: 1s, 2s, 4s with ±25% jitter
-        let baseNs = Self.baseDelayMs << (attempt - 1)
+        // Exponential backoff: 2s, 4s with ±25% jitter
+        let baseNs = Self.baseDelayNs << (attempt - 1)
         let jitter = Int64(Double(baseNs) * Double.random(in: -0.25...0.25))
         let delay = UInt64(max(0, Int64(baseNs) + jitter))
         AppLog.transcription.info(
-          "Retry \(attempt)/\(Self.maxRetries) — waiting \(delay / 1_000_000)ms")
+          "HTTP retry \(attempt)/\(Self.maxHTTPRetries) — waiting \(delay / 1_000_000_000)s")
         try await Task.sleep(nanoseconds: delay)
       }
 
       do {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
-        request.timeoutInterval = 120
+        // Per-request timeout: generous for large file uploads on bad connections.
+        // The session-level timeoutIntervalForResource (600s) is the ultimate backstop.
+        request.timeoutInterval = 300
         request.setValue(
           "multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         if !apiKey.isEmpty {
@@ -198,8 +271,10 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
           let body = String(data: resData, encoding: .utf8) ?? "<no body>"
           AppLog.transcription.error("API returned \(http.statusCode): \(body.prefix(300))")
           if http.statusCode == 413 { throw TranscriptionError.fileTooLarge }
-          // Retry on server errors (5xx) and rate limits (429)
-          if http.statusCode == 429 || (500...599).contains(http.statusCode) {
+          // Retry on server errors (5xx), rate limits (429), and request timeout (408)
+          if http.statusCode == 429 || http.statusCode == 408
+            || (500...599).contains(http.statusCode)
+          {
             lastError = TranscriptionError.recognitionFailed("HTTP \(http.statusCode)")
             continue
           }
@@ -214,10 +289,7 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
             "Transcription failed — could not parse response")
         }
 
-        // Parse verbose_json segments when available (whisper-1 with
-        // response_format=verbose_json + timestamp_granularities=[segment]).
-        // Falls back to plain text response for models that don't support
-        // verbose_json (gpt-4o-transcribe, etc.).
+        // Parse verbose_json segments when available
         if let rawSegments = json["segments"] as? [[String: Any]], !rawSegments.isEmpty {
           let segments: [TranscriptSegment] = rawSegments.compactMap { seg in
             guard let text = seg["text"] as? String else { return nil }
@@ -264,20 +336,34 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
         lastError = error
         if case .fileTooLarge = error { throw error }  // don't retry
         if case .cancelled = error { throw error }  // don't retry
+      } catch let error as URLError {
+        lastError = error
+        // Network errors are retryable: timeout, connection lost, not connected
+        let retryableCodes: Set<URLError.Code> = [
+          .timedOut, .networkConnectionLost, .notConnectedToInternet,
+          .cannotConnectToHost, .dnsLookupFailed, .cannotFindHost,
+          .secureConnectionFailed, .dataNotAllowed,
+        ]
+        if retryableCodes.contains(error.code) {
+          AppLog.transcription.warning(
+            "Network error (attempt \(attempt+1)): \(error.code.rawValue) — \(error.localizedDescription)")
+        } else {
+          // Non-retryable URL error
+          throw error
+        }
       } catch {
         lastError = error
-        // Network errors are retryable
         AppLog.transcription.warning(
-          "Network error (attempt \(attempt+1)): \(error.localizedDescription)")
+          "Unexpected error (attempt \(attempt+1)): \(error.localizedDescription)")
       }
     }
 
     throw lastError
       ?? TranscriptionError.recognitionFailed(
-        "Remote transcription failed after \(Self.maxRetries + 1) attempts")
+        "Remote transcription failed after \(Self.maxHTTPRetries + 1) attempts")
   }
 
-  // MARK: - Multipart to temp file
+  // MARK: - Multipart to temp file (streaming — no full-file RAM load)
 
   private func buildBodyFile(
     audioURL: URL, prompt: String?, model: String, boundary: String, outputURL: URL
@@ -298,19 +384,11 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
         }
       }
     }
-    func writeData(_ d: Data) {
-      _ = d.withUnsafeBytes {
-        output.write($0.bindMemory(to: UInt8.self).baseAddress!, maxLength: d.count)
-      }
-    }
 
     write("--\(boundary)\(lb)")
     write("Content-Disposition: form-data; name=\"model\"\(lb)\(lb)")
     write("\(model)\(lb)")
 
-    // Request verbose_json with segment timestamps for subtitle-like display.
-    // Only works with whisper-1; gpt-4o-transcribe models ignore these fields
-    // and return plain json — the parser handles both formats.
     write("--\(boundary)\(lb)")
     write("Content-Disposition: form-data; name=\"response_format\"\(lb)\(lb)")
     write("verbose_json\(lb)")
@@ -337,9 +415,32 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
     write("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\(lb)")
     write("Content-Type: \(mimeType)\(lb)\(lb)")
 
-    // Stream audio file data into the body
-    let audioData = try Data(contentsOf: audioURL)
-    writeData(audioData)
+    // Stream audio file data in 64 KB chunks to avoid RAM spikes on large files.
+    // A 10-min M4A can be 15-25 MB; loading it all at once wastes memory
+    // and risks jetsam on constrained devices.
+    guard let input = InputStream(url: audioURL) else {
+      throw NSError(
+        domain: "body", code: -2,
+        userInfo: [NSLocalizedDescriptionKey: "Cannot open audio file for reading"])
+    }
+    input.open()
+    defer { input.close() }
+
+    let bufferSize = 65_536  // 64 KB
+    var buffer = [UInt8](repeating: 0, count: bufferSize)
+    while input.hasBytesAvailable {
+      let bytesRead = input.read(&buffer, maxLength: bufferSize)
+      if bytesRead > 0 {
+        output.write(buffer, maxLength: bytesRead)
+      } else if bytesRead < 0 {
+        throw input.streamError ?? NSError(
+          domain: "body", code: -3,
+          userInfo: [NSLocalizedDescriptionKey: "Error reading audio file"])
+      } else {
+        break  // EOF
+      }
+    }
+
     write("\(lb)")
     write("--\(boundary)--\(lb)")
   }

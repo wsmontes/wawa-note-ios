@@ -18,8 +18,29 @@ final class ProcessingQueueService: ObservableObject {
   private var backgroundTaskCount = 0
   private var pipeline: ContentPipelineService?
 
+  /// Maximum completed/failed entries to keep before auto-pruning.
+  private let maxRetainedEntries = 50
+
   func setPipeline(_ pipeline: ContentPipelineService) {
     self.pipeline = pipeline
+    registerMemoryPressure()
+  }
+
+  // MARK: - Memory Pressure
+
+  private func registerMemoryPressure() {
+    MemoryPressureHandler.shared.register("ProcessingQueue: pause + prune") { [weak self] in
+      guard let self else { return }
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        // Under memory pressure: pause queue, cancel non-active jobs, prune history
+        if !self.isPaused {
+          self.isPaused = true
+          AppLog.warn("pipeline", "Memory pressure — pausing queue and pruning entries")
+        }
+        self.autoPrune()
+      }
+    }
   }
 
   // MARK: - Enqueue
@@ -125,6 +146,23 @@ final class ProcessingQueueService: ObservableObject {
     entries.removeAll { $0.status == .failed }
   }
 
+  /// Auto-prune: removes terminal entries (done/failed/cancelled) when the
+  /// total count exceeds `maxRetainedEntries`. Keeps the most recent ones.
+  /// Called automatically after each job finishes and on memory pressure.
+  private func autoPrune() {
+    let terminal = entries.filter {
+      $0.status == .done || $0.status == .failed || $0.status == .cancelled
+    }
+    guard terminal.count > maxRetainedEntries else { return }
+    // Sort by completion date, remove oldest
+    let sorted = terminal.sorted {
+      ($0.completedAt ?? .distantPast) < ($1.completedAt ?? .distantPast)
+    }
+    let toRemove = Set(sorted.prefix(terminal.count - maxRetainedEntries).map(\.id))
+    entries.removeAll { toRemove.contains($0.id) }
+    AppLog.debug("pipeline", "Auto-pruned \(toRemove.count) terminal entries")
+  }
+
   // MARK: - Processing
 
   private func processNext() {
@@ -174,6 +212,30 @@ final class ProcessingQueueService: ObservableObject {
           itemID: itemID,
           projectID: next.projectID
         )
+        // processEntry() never throws — it uses withCheckedContinuation<Void, Never>.
+        // Check item status to detect pipeline failures that need retry.
+        // Permanent failures (.failed) should NOT retry — the pipeline already
+        // classified them. Items stuck in intermediate states (.transcribing,
+        // .analyzing) indicate transient failures that rolled back.
+        let ctx = await MainActor.run { self?.pipeline?.container }
+        if let container = ctx {
+          let checkCtx = ModelContext(container)
+          let descriptor = FetchDescriptor<KnowledgeItem>(
+            predicate: #Predicate<KnowledgeItem> { $0.id == itemID })
+          if let item = try? checkCtx.fetch(descriptor).first {
+            let isTerminal = item.statusRaw == "analyzed" || item.statusRaw == "failed"
+              || item.statusRaw == "pendingReview"
+            if !isTerminal {
+              // Item didn't reach a terminal state — treat as transient failure for retry.
+              await MainActor.run { [weak self] in
+                self?.finishJob(
+                  entryID, failed: true,
+                  error: "Pipeline completed but item still in '\(item.statusRaw)' state")
+              }
+              return
+            }
+          }
+        }
         await MainActor.run { [weak self] in
           self?.finishJob(entryID, failed: false, error: nil)
         }
@@ -232,6 +294,7 @@ final class ProcessingQueueService: ObservableObject {
     activeJobCount = max(0, activeJobCount - 1)
     endBackgroundTask()
     sortEntries()
+    autoPrune()
     processNext()
   }
 

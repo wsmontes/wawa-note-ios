@@ -281,7 +281,7 @@ final class ProviderConnectViewModel: ObservableObject {
         savedProvider.defaultModel = firstModel
       }
       savedProvider.availableModels = models
-      try? context.save()
+      context.safeSave(context: "update-provider-models")
 
       // Auto-populate AI settings with this provider's models.
       // The user just connected a provider — its models should immediately
@@ -324,7 +324,7 @@ final class ProviderConnectViewModel: ObservableObject {
   func updateModel(context: ModelContext) {
     guard let provider = savedProvider else { return }
     provider.defaultModel = selectedModel
-    try? context.save()
+    context.safeSave(context: "update-default-model")
   }
 }
 

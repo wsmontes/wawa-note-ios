@@ -151,7 +151,7 @@ struct TaskEditorView: View {
       )
       task.bodyJSON = finalNotes.isEmpty ? nil : finalNotes
       task.sourceItemID = sourceID
-      try? modelContext.save()
+      modelContext.safeSave(context: "save-task")
     }
 
     dismiss()

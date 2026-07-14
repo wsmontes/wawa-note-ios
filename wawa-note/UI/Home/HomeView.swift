@@ -184,7 +184,7 @@ final class HomeViewModel: ObservableObject {
       }
 
       ctx.insert(item)
-      try? ctx.save()
+      ctx.safeSave(context: "import-pending-item", itemId: item.id)
 
       queue.enqueue(itemID: item.id, trigger: .newCapture)
       try? FileManager.default.removeItem(at: jsonURL)
@@ -296,7 +296,7 @@ final class HomeViewModel: ObservableObject {
       let item = result.knowledgeItem
       await MainActor.run {
         modelContext.insert(item)
-        try? modelContext.save()
+        modelContext.safeSave(context: "import-from-url", itemId: item.id)
         if let t = targetProjectForImport {
           try? ProjectService(context: modelContext).addItem(item.id, to: t.id)
         }
@@ -357,13 +357,13 @@ final class HomeViewModel: ObservableObject {
     try? data.write(to: destURL)
     item.imageFileRelativePath = "scan_0.jpg"
     item.imagePageCount = 1
-    try? modelContext.save()
+    modelContext.safeSave(context: "scan-import-image", itemId: item.id)
     // Run OCR + vision
     let extractionSvc = ContentExtractionService(
       modelContext: modelContext, fileStore: FileArtifactStore())
     if let text = await extractionSvc.extractTextFromImage(item) {
       item.bodyText = text
-      try? modelContext.save()
+      modelContext.safeSave(context: "scan-ocr-text", itemId: item.id)
     }
     // Clean up source
     if deleteSource { try? FileManager.default.removeItem(at: url) }
@@ -992,7 +992,7 @@ struct HomeView: View {
         }
       }
     }
-    try? modelContext.save()
+    modelContext.safeSave(context: "import-field-provenance", itemId: item.id)
     return [item]
   }
 
@@ -1276,7 +1276,7 @@ struct ProjectPickerForItemView: View {
       )
       newItem.projectID = project.id
       modelContext.insert(newItem)
-      try? modelContext.save()
+      modelContext.safeSave(context: "assign-item-to-project", itemId: newItem.id)
     }
     processingQueue.enqueue(itemID: item.id, projectID: project.id, trigger: .projectAssignment)
   }

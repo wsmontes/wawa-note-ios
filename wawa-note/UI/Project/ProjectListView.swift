@@ -123,7 +123,7 @@ struct ProjectListView: View {
         .swipeActions(edge: .trailing) {
           Button {
             project.status = project.status == .archived ? .active : .archived
-            try? modelContext.save()
+            modelContext.safeSave(context: "toggle-project-archive", itemId: project.id)
           } label: {
             Label(
               project.status == .archived ? "Restore" : "Archive",

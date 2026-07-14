@@ -79,79 +79,66 @@ public enum AppDirectoryNames {
 
 public final class FileArtifactStore: @unchecked Sendable {
 
+  // MARK: - Singleton
+
+  /// Shared instance. Use this instead of creating new instances.
+  /// Each `FileArtifactStore()` init performs ~15 filesystem operations
+  /// (directory creation, protection attrs, sentinel write/delete).
+  /// With 82+ call sites, that's hundreds of redundant disk ops per session.
+  public static let shared = FileArtifactStore(_performValidation: true)
+
+  /// Legacy convenience init for backward compatibility.
+  /// Returns a new instance that shares the same baseURL resolution but
+  /// skips expensive validation (already done by `shared`).
+  ///
+  /// Migration note: callers should migrate to `.shared` directly.
+  /// This init exists only to avoid a 82-file change in one PR.
+  public init(fileManager: FileManager = .default) {
+    self.fileManager = fileManager
+
+    if let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+      .first
+    {
+      self.baseURL = appSupport.appendingPathComponent(AppDirectoryNames.base, isDirectory: true)
+    } else {
+      self.baseURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        .appendingPathComponent(AppDirectoryNames.base, isDirectory: true)
+    }
+    // Skip validation — shared instance already did it at app launch.
+    // This makes repeated FileArtifactStore() calls essentially free
+    // (just URL resolution, no disk I/O).
+  }
+
+  /// Designated init for the shared singleton — performs full validation once.
+  private init(_performValidation: Bool) {
+    self.fileManager = .default
+
+    if let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+      .first
+    {
+      self.baseURL = appSupport.appendingPathComponent(AppDirectoryNames.base, isDirectory: true)
+    } else {
+      self.baseURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        .appendingPathComponent(AppDirectoryNames.base, isDirectory: true)
+    }
+
+    let locationCategory = baseURL.path.contains("Caches") ? "caches" : "applicationSupport"
+    UserDefaults.standard.set(locationCategory, forKey: AppDirectoryNames.storeLocationKey)
+    if locationCategory == "caches" {
+      logger.warning(
+        "Config data stored in cachesDirectory — may be purged by system.")
+    }
+    applyBaseProtection()
+    validateWriteAccess()
+    ensureStandardDirectories()
+    logger.info("FileArtifactStore: initialized — \(self.baseURL.path)")
+  }
+
   private let fileManager: FileManager
 
   private let baseURL: URL
 
   private let logger = Logger(subsystem: "com.wawa-note.core", category: "FileArtifactStore")
-
-  public init(fileManager: FileManager = .default) {
-
-    self.fileManager = fileManager
-
-    // Resolve base URL with validated fallback.
-
-    // applicationSupportDirectory can theoretically be empty in sandboxed
-
-    // environments or during very early boot. Guard against crash and fall
-
-    // back to caches rather than force-unwrapping .first.
-
-    if let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-
-      .first
-
-    {
-
-      self.baseURL = appSupport.appendingPathComponent(AppDirectoryNames.base, isDirectory: true)
-
-      logger.info(
-
-        "FileArtifactStore: using applicationSupportDirectory — \(self.baseURL.path)")
-
-    } else {
-
-      logger.error(
-
-        "FileArtifactStore: applicationSupportDirectory unavailable, using caches fallback")
-
-      self.baseURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
-
-        .appendingPathComponent(AppDirectoryNames.base, isDirectory: true)
-
-    }
-
-    // Persist the chosen location so future sessions can detect a switch
-
-    // (e.g., if a backup-restore changes sandbox availability).
-
-    let locationCategory = baseURL.path.contains("Caches") ? "caches" : "applicationSupport"
-
-    UserDefaults.standard.set(locationCategory, forKey: AppDirectoryNames.storeLocationKey)
-
-    if locationCategory == "caches" {
-
-      logger.warning(
-
-        "Config data stored in cachesDirectory — may be purged by system. Consider freeing device storage."
-
-      )
-
-    }
-
-    // Ensure base directory exists and validate write access with a sentinel.
-
-    applyBaseProtection()
-
-    validateWriteAccess()
-
-    // Create all standard subdirectories upfront so no service ever writes
-
-    // to a non-existent directory. Idempotent — safe to call repeatedly.
-
-    ensureStandardDirectories()
-
-  }
 
   // MARK: - Directory initialization & protection
 

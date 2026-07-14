@@ -42,7 +42,7 @@ struct ProviderPickerView: View {
                 get: { active.defaultModel },
                 set: { newModel in
                   active.defaultModel = newModel
-                  try? modelContext.save()
+                  modelContext.safeSave(context: "update-active-model")
                   syncActiveSelection()
                 }
               )

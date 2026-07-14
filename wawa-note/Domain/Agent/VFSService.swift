@@ -1381,7 +1381,7 @@ enum VFSService {
     if let v = json["importSourceURL"] as? String { item.importSourceURL = v }
 
     item.updatedAt = Date()
-    try? context.modelContext.save()
+    context.modelContext.safeSave(context: "vfs-update-item-json")
   }
 
   static func updateTaskFromJSON(_ task: TaskItem, jsonText: String, context: ToolContext) throws {

@@ -78,9 +78,28 @@ final class AudioChunker: @unchecked Sendable {
 
     let totalChunks = descriptors.count
 
-    // Sequential export with progress reporting
+    // Sequential export with progress reporting.
+    // Skip chunks that already exist on disk (resume after crash/retry).
     var chunks: [AudioChunk] = []
     for desc in descriptors {
+      try Task.checkCancellation()
+
+      let fileExists = FileManager.default.fileExists(atPath: desc.url.path)
+      if fileExists {
+        // Chunk already exported (previous attempt). Validate it's non-empty.
+        let attrs = try? FileManager.default.attributesOfItem(atPath: desc.url.path)
+        let size = attrs?[.size] as? Int64 ?? 0
+        if size > 1024 {
+          // Valid existing chunk — skip export
+          chunks.append(
+            AudioChunk(url: desc.url, startTime: desc.start, duration: desc.end - desc.start))
+          onProgress?(chunks.count, totalChunks)
+          continue
+        }
+        // Corrupt/empty chunk — re-export
+        try? FileManager.default.removeItem(at: desc.url)
+      }
+
       try await exportChunk(
         asset: asset, audioTrack: audioTrack, start: desc.start, end: desc.end, url: desc.url)
       chunks.append(

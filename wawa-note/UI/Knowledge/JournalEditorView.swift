@@ -204,7 +204,7 @@ struct JournalEditorView: View {
         if item.bodyText != nil { prov.mark(field: "bodyText", origin: .user) }
         if !tags.isEmpty { prov.mark(field: "tags", origin: .user) }
         item.fieldProvenanceJSON = prov.encode()
-        try? modelContext.save()
+        modelContext.safeSave(context: "create-journal-entry", itemId: item.id)
         if item.bodyText != nil {
           processingQueue.enqueue(itemID: item.id, trigger: .newCapture)
         }
@@ -232,7 +232,7 @@ struct JournalEditorView: View {
       }
       prov.mark(field: "tags", origin: .user)
       item.fieldProvenanceJSON = prov.encode()
-      try? modelContext.save()
+      modelContext.safeSave(context: "edit-journal-entry", itemId: item.id)
     }
 
     dismiss()

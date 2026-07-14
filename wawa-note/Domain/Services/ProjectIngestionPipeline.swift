@@ -280,7 +280,7 @@ final class ProjectIngestionPipeline: ObservableObject {
         )
         context.insert(annotation)
       }
-      try? context.save()
+      context.safeSave(context: "ingestion-graph-hypotheses", itemId: projectID)
       AppLog.provider.info(
         "ProjectIngestion: graph analysis found \(hypotheses.count) hypotheses for project \(projectID)"
       )
@@ -599,7 +599,7 @@ final class ProjectIngestionPipeline: ObservableObject {
         )
         context.insert(annotation)
       }
-      try? context.save()
+      context.safeSave(context: "ingestion-annotations")
     }
 
     // Signals — create AgentSuggestions for detected signals
@@ -635,7 +635,7 @@ final class ProjectIngestionPipeline: ObservableObject {
         )
         context.insert(suggestion)
       }
-      try? context.save()
+      context.safeSave(context: "ingestion-signals")
     }
 
     // Project summary update — use snapshot to avoid race condition
@@ -826,7 +826,7 @@ final class SuggestionGatingService {
       payloadJSON: payloadJSON
     )
     context.insert(suggestion)
-    try? context.save()
+    context.safeSave(context: "ingestion-propose-suggestion")
   }
 
   func proposeTaskUpdate(

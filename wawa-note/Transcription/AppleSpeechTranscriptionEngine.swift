@@ -74,7 +74,14 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
   var usedCloudFallback = false
 
   static let maxLocalDuration: TimeInterval = 50
-  static let maxFileDuration: TimeInterval = 3600  // 1 hour max
+  static let maxFileDuration: TimeInterval = 7200  // 2 hours max
+  private static let maxRetriesPerChunk = 2
+  /// Dynamic timeout: base 180s, scales with chunk duration. On-device recognition
+  /// can be slow on older hardware; a fixed 120s timeout was causing failures on
+  /// recordings > 30 min where even one slow chunk kills the whole transcription.
+  private static func timeoutForChunk(duration: TimeInterval) -> TimeInterval {
+    max(180, duration * 5)
+  }
 
   private let candidateLocales: [Locale]
   private let chunker: AudioChunker
@@ -85,6 +92,9 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
   var onProgress: ((TranscriptionProgress) -> Void)?
   var onCheckpoint: ((Transcript, Int) -> Void)?
+  /// Index of the last successfully transcribed chunk (0-based).
+  /// Set by ContentExtractionService from a persisted checkpoint to enable resume.
+  var resumeFromChunk: Int = 0
   private(set) var isCancelled = false
 
   /// Domain-specific terms for the current session.
@@ -274,24 +284,73 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
     var allSegments: [TranscriptSegment] = []
     var languageCode: String?
 
+    // Resume support: skip already-transcribed chunks from a previous attempt.
+    let startIndex = min(resumeFromChunk, chunks.count)
+    if startIndex > 0 {
+      AppLog.transcription.info(
+        "Resuming on-device transcription from chunk \(startIndex + 1)/\(chunks.count)")
+    }
+
     for (i, chunk) in chunks.enumerated() {
+      // Skip chunks already persisted in a previous checkpoint
+      if i < startIndex { continue }
+
       try Task.checkCancellation()
       if isCancelled { throw TranscriptionError.cancelled }
 
       onProgress?(.transcribing(chunk: i + 1, totalChunks: chunks.count))
       AppLog.transcription.info("On-device chunk \(i+1)/\(chunks.count)")
 
-      let transcript = try await transcribeDirect(
-        url: chunk.url, recognizer: recognizer, meetingId: meetingId)
-      languageCode = transcript.languageCode ?? languageCode
+      // Per-chunk retry with exponential backoff.
+      // A single slow chunk should not kill a 1-hour transcription.
+      var transcript: Transcript?
+      var lastChunkError: Error?
+      for attempt in 0...Self.maxRetriesPerChunk {
+        if attempt > 0 {
+          let delay = UInt64(pow(2.0, Double(attempt))) * 1_000_000_000  // 2s, 4s
+          AppLog.transcription.info(
+            "On-device chunk \(i+1) retry \(attempt)/\(Self.maxRetriesPerChunk) — waiting \(delay / 1_000_000_000)s"
+          )
+          try await Task.sleep(nanoseconds: delay)
+        }
+        do {
+          transcript = try await transcribeDirect(
+            url: chunk.url, recognizer: recognizer, meetingId: meetingId)
+          lastChunkError = nil
+          break
+        } catch TranscriptionError.cancelled {
+          throw TranscriptionError.cancelled
+        } catch {
+          lastChunkError = error
+          AppLog.transcription.warning(
+            "On-device chunk \(i+1) attempt \(attempt+1) failed: \(error.localizedDescription)")
+        }
+      }
 
-      let chunkText = transcript.segments.map(\.text).joined(separator: " ")
+      guard let chunkTranscript = transcript else {
+        // All retries exhausted for this chunk. Emit checkpoint with what we have
+        // so a future retry can resume from here, then propagate the error.
+        if !allSegments.isEmpty {
+          let partial = Transcript(
+            meetingId: allSegments.first?.meetingId,
+            languageCode: languageCode,
+            segments: allSegments,
+            sourceEngineId: id
+          )
+          onCheckpoint?(partial, i)
+        }
+        throw lastChunkError ?? TranscriptionError.recognitionFailed(
+          "Chunk \(i+1)/\(chunks.count) failed after \(Self.maxRetriesPerChunk + 1) attempts")
+      }
 
-      for segment in transcript.segments {
+      languageCode = chunkTranscript.languageCode ?? languageCode
+      let chunkText = chunkTranscript.segments.map(\.text).joined(separator: " ")
+
+      for segment in chunkTranscript.segments {
         let adjustedStart = segment.startTime + chunk.startTime
         let adjustedEnd = segment.endTime.map { $0 + chunk.startTime }
         var text = segment.text
-        if i > 0 { text = deduplicateStart(text, against: previousText) }
+        if i > 0 || startIndex > 0 { text = deduplicateStart(text, against: previousText) }
 
         allSegments.append(
           TranscriptSegment(
@@ -308,7 +367,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
       }
       previousText = chunkText
 
-      // Checkpoint after each chunk (crash recovery)
+      // Checkpoint after each chunk (crash recovery + cross-attempt resume)
       let partial = Transcript(
         meetingId: allSegments.first?.meetingId,
         languageCode: languageCode,
@@ -378,14 +437,17 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
       // (known iOS behavior with certain audio formats or durations > 5 min).
       // Using DispatchWorkItem for timeout to avoid Sendable issues with
       // non-Sendable CheckedContinuation in unstructured Tasks.
+      // Dynamic timeout scales with audio duration to handle slow devices.
+      let chunkDuration = Self.maxLocalDuration
+      let timeout = Self.timeoutForChunk(duration: chunkDuration)
       let timeoutWorkItem = DispatchWorkItem {
         guard !hasResumed else { return }
         hasResumed = true
         recognitionTask?.cancel()
         continuation.resume(
-          throwing: TranscriptionError.recognitionFailed("Recognition timed out after 120s"))
+          throwing: TranscriptionError.recognitionFailed("Recognition timed out after \(Int(timeout))s"))
       }
-      DispatchQueue.main.asyncAfter(deadline: .now() + 120, execute: timeoutWorkItem)
+      DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: timeoutWorkItem)
 
       recognitionTask = recognizer.recognitionTask(with: request) { result, error in
         guard !hasResumed else { return }

@@ -93,7 +93,7 @@ enum ContextBridgeService {
     }
 
     if changed > 0 {
-      try? modelContext.save()
+      modelContext.safeSave(context: "context-bridge-apply", itemId: itemID)
       AppLog.event(
         "context",
         "ContextBridge: applied \(changed) field(s) to item \(itemID.uuidString.prefix(8))")

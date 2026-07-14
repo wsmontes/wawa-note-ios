@@ -168,7 +168,7 @@ struct CreationSheetView: View {
     prov.mark(field: "name", origin: .user)
     project.fieldProvenanceJSON = prov.encode()
     modelContext.insert(project)
-    try? modelContext.save()
+    modelContext.safeSave(context: "create-project", itemId: project.id)
     newProjectName = ""
     dismiss()
   }
@@ -187,7 +187,7 @@ struct CreationSheetView: View {
     )
     if let item {
       item.importSourceURL = url
-      try? modelContext.save()
+      modelContext.safeSave(context: "create-bookmark", itemId: item.id)
     }
     bookmarkURL = ""
     bookmarkTitle = ""

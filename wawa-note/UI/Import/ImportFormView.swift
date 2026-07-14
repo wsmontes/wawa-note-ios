@@ -304,7 +304,7 @@ struct ImportFormView: View {
 
         await MainActor.run {
           modelContext.insert(item)
-          try? modelContext.save()
+          modelContext.safeSave(context: "import-conversion-complete", itemId: item.id)
 
           isConverting = false
           conversionPhase = nil

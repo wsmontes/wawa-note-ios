@@ -86,7 +86,7 @@ final class KnowledgeItemService {
     descriptor.fetchLimit = 1000
     if let items = try? context.fetch(descriptor), !items.isEmpty {
       for item in items { item.typeRaw = "audio" }
-      try? context.save()
+      context.safeSave(context: "migration-fix-type-raw")
     }
     UserDefaults.standard.set(true, forKey: key)
   }
