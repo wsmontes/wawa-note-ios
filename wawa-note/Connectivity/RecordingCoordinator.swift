@@ -49,6 +49,7 @@ final class RecordingCoordinator: ObservableObject {
   private var observationTimer: Timer?
   private var nowPlayingTimer: Timer?
   private var cancellables = Set<AnyCancellable>()
+  private var manifestSaveTask: Task<Void, Never>?
 
   // Segmented recording manifest (segments managed by AudioCaptureService)
   private var manifest: RecordingManifest?
@@ -122,9 +123,6 @@ final class RecordingCoordinator: ObservableObject {
         }
         m.segments.append(newSegment)
         self.manifest = m
-        if let itemId = self.savedItemId {
-          self.saveManifest(m, meetingId: itemId)
-        }
       }
     }
 
@@ -161,9 +159,6 @@ final class RecordingCoordinator: ObservableObject {
           }
         }
         self.manifest = m
-        if let itemId = self.savedItemId {
-          self.saveManifest(m, meetingId: itemId)
-        }
       }
     }
 
@@ -286,6 +281,7 @@ final class RecordingCoordinator: ObservableObject {
     state = .recording
     UIApplication.shared.isIdleTimerDisabled = true
     startObservation()
+    startPeriodicManifestSave()
     activateLockScreenControls()
     notifyStatusChange()
 
@@ -458,6 +454,7 @@ final class RecordingCoordinator: ObservableObject {
     nowPlayingTimer?.invalidate()
     nowPlayingTimer = nil
     pauseTimeoutTimer?.invalidate()
+    stopPeriodicManifestSave()
 
     // Finalize manifest — capture a copy so the pipeline closure below
     // can still access it after the if-var scope closes.
@@ -533,6 +530,22 @@ final class RecordingCoordinator: ObservableObject {
         "RecordingCoordinator: saveManifest failed — \(meetingId.uuidString): \(error.localizedDescription)"
       )
     }
+  }
+
+  private func startPeriodicManifestSave() {
+    manifestSaveTask?.cancel()
+    manifestSaveTask = Task { @MainActor [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(nanoseconds: 30_000_000_000)  // 30s
+        guard let self, let m = self.manifest, let itemId = self.savedItemId else { continue }
+        self.saveManifest(m, meetingId: itemId)
+      }
+    }
+  }
+
+  private func stopPeriodicManifestSave() {
+    manifestSaveTask?.cancel()
+    manifestSaveTask = nil
   }
 
   func returnToIdle() {
