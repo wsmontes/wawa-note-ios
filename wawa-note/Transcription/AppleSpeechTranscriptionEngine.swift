@@ -706,6 +706,67 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
       throw TranscriptionError.recognitionFailed("Cannot create output format")
     }
 
+    guard let converter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
+      throw TranscriptionError.recognitionFailed("Cannot create converter")
+    }
+
+    // Read and convert in segments to avoid loading the entire file into RAM.
+    // A 1-hour AAC file decoded to 16kHz mono Int16 is ~115 MB — manageable
+    // as a single output, but the intermediate Float32 buffer at the source
+    // sample rate can be 4-8x larger. Process in 30-second segments.
+    let segmentDuration: AVAudioFramePosition = AVAudioFramePosition(inputFormat.sampleRate * 30)
+    inputFile.framePosition = 0
+
+    var totalOutputFrames: AVAudioFrameCount = 0
+    var outputBuffers: [AVAudioPCMBuffer] = []
+
+    while inputFile.framePosition < inputFile.length {
+      let remaining = inputFile.length - inputFile.framePosition
+      let framesToRead = AVAudioFrameCount(min(segmentDuration, remaining))
+
+      guard
+        let inputBuf = AVAudioPCMBuffer(
+          pcmFormat: inputFormat, frameCapacity: framesToRead)
+      else {
+        throw TranscriptionError.recognitionFailed("Cannot allocate input buffer")
+      }
+      try inputFile.read(into: inputBuf)
+
+      let ratio = outputFormat.sampleRate / inputFormat.sampleRate
+      let outputCapacity = AVAudioFrameCount(Double(inputBuf.frameLength) * ratio)
+      guard
+        let outputBuf = AVAudioPCMBuffer(
+          pcmFormat: outputFormat, frameCapacity: outputCapacity)
+      else {
+        throw TranscriptionError.recognitionFailed("Cannot allocate output buffer")
+      }
+
+      var provided = false
+      var convertError: NSError?
+      let status = converter.convert(to: outputBuf, error: &convertError) { _, outStatus in
+        if !provided {
+          provided = true
+          outStatus.pointee = .haveData
+          return inputBuf
+        }
+        outStatus.pointee = .noDataNow
+        return nil
+      }
+
+      if let convertError { throw convertError }
+      guard outputBuf.frameLength > 0 else {
+        throw TranscriptionError.recognitionFailed("Decode segment produced empty output")
+      }
+
+      outputBuffers.append(outputBuf)
+      totalOutputFrames += outputBuf.frameLength
+    }
+
+    guard totalOutputFrames > 0 else {
+      throw TranscriptionError.recognitionFailed("Decode produced empty output")
+    }
+
+    // Write all converted segments to a single output file
     let tempURL = FileManager.default.temporaryDirectory
       .appendingPathComponent("pcm_\(UUID().uuidString).wav")
     let outputFile = try AVAudioFile(
@@ -714,48 +775,12 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
       commonFormat: .pcmFormatInt16,
       interleaved: false)
 
-    guard let converter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
-      throw TranscriptionError.recognitionFailed("Cannot create converter")
+    for buffer in outputBuffers {
+      try outputFile.write(from: buffer)
     }
 
-    // Read the entire input file into a single buffer.
-    // AVAudioFile handles AAC decoding internally.
-    inputFile.framePosition = 0
-    let inputLength = AVAudioFrameCount(inputFile.length)
-    guard let inputBuf = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: inputLength) else {
-      throw TranscriptionError.recognitionFailed("Cannot allocate input buffer")
-    }
-    try inputFile.read(into: inputBuf)
-
-    // Allocate output buffer. Sample rate ratio determines frame count.
-    let ratio = outputFormat.sampleRate / inputFormat.sampleRate
-    let outputCapacity = AVAudioFrameCount(Double(inputBuf.frameLength) * ratio)
-    guard let outputBuf = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputCapacity)
-    else {
-      throw TranscriptionError.recognitionFailed("Cannot allocate output buffer")
-    }
-
-    // Convert. The callback provides the input buffer once, then nil.
-    var provided = false
-    var convertError: NSError?
-    converter.convert(to: outputBuf, error: &convertError) { _, outStatus in
-      if !provided {
-        provided = true
-        outStatus.pointee = .haveData
-        return inputBuf
-      }
-      outStatus.pointee = .noDataNow
-      return nil
-    }
-
-    if let convertError { throw convertError }
-    guard outputBuf.frameLength > 0 else {
-      throw TranscriptionError.recognitionFailed("Decode produced empty output")
-    }
-
-    try outputFile.write(from: outputBuf)
     AppLog.transcription.info(
-      "PCM decode complete: \(outputBuf.frameLength) frames @ \(Int(outputFormat.sampleRate))Hz → \(tempURL.lastPathComponent)"
+      "PCM decode complete: \(totalOutputFrames) frames @ \(Int(outputFormat.sampleRate))Hz → \(tempURL.lastPathComponent)"
     )
     return tempURL
   }
