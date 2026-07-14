@@ -5,6 +5,9 @@ struct AudioChunk {
   let url: URL
   let startTime: TimeInterval
   let duration: TimeInterval
+  /// When non-zero, the first `overlapStart` seconds of this chunk overlap
+  /// with the previous chunk and should be deduplicated.
+  var overlapStart: TimeInterval = 0
 }
 
 final class AudioChunker: @unchecked Sendable {
@@ -66,13 +69,17 @@ final class AudioChunker: @unchecked Sendable {
     var descriptors: [ChunkDescriptor] = []
     var currentStart: TimeInterval = 0
     var idx = 0
+    // overlap == 0 for remote engine (no dedup needed), >0 for on-device
+    let effectiveOverlap = overlap > 0 && totalSeconds > chunkDuration ? overlap : 0
 
     while currentStart < totalSeconds {
       let chunkEnd = min(currentStart + chunkDuration, totalSeconds)
       let outputURL = tempDir.appendingPathComponent("chunk_\(idx).m4a")
       descriptors.append(
         ChunkDescriptor(index: idx, start: currentStart, end: chunkEnd, url: outputURL))
-      currentStart = chunkEnd
+      // Advance by chunkDuration minus overlap so the next chunk includes
+      // `overlap` seconds of context from the end of this chunk.
+      currentStart = chunkEnd - effectiveOverlap
       idx += 1
     }
 
@@ -91,8 +98,12 @@ final class AudioChunker: @unchecked Sendable {
         let size = attrs?[.size] as? Int64 ?? 0
         if size > 1024 {
           // Valid existing chunk — skip export
+          let hasOverlap = effectiveOverlap > 0 && desc.index > 0
           chunks.append(
-            AudioChunk(url: desc.url, startTime: desc.start, duration: desc.end - desc.start))
+            AudioChunk(
+              url: desc.url, startTime: desc.start,
+              duration: desc.end - desc.start,
+              overlapStart: hasOverlap ? effectiveOverlap : 0))
           onProgress?(chunks.count, totalChunks)
           continue
         }
@@ -102,8 +113,12 @@ final class AudioChunker: @unchecked Sendable {
 
       try await exportChunk(
         asset: asset, audioTrack: audioTrack, start: desc.start, end: desc.end, url: desc.url)
+      let hasOverlap = effectiveOverlap > 0 && desc.index > 0
       chunks.append(
-        AudioChunk(url: desc.url, startTime: desc.start, duration: desc.end - desc.start))
+        AudioChunk(
+          url: desc.url, startTime: desc.start,
+          duration: desc.end - desc.start,
+          overlapStart: hasOverlap ? effectiveOverlap : 0))
       onProgress?(chunks.count, totalChunks)
     }
 

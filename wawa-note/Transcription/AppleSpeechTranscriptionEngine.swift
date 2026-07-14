@@ -368,8 +368,14 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
       for segment in chunkTranscript.segments {
         let adjustedStart = segment.startTime + chunk.startTime
         let adjustedEnd = segment.endTime.map { $0 + chunk.startTime }
+        // When the chunk has overlap, only dedup segments within the overlap window
+        let isOverlapSegment =
+          chunk.overlapStart > 0
+          && segment.startTime < chunk.overlapStart
         var text = segment.text
-        if i > 0 || startIndex > 0 { text = deduplicateStart(text, against: previousText) }
+        if isOverlapSegment && (i > 0 || startIndex > 0) {
+          text = deduplicateStart(text, against: previousText)
+        }
 
         allSegments.append(
           TranscriptSegment(
