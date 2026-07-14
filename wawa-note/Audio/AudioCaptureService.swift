@@ -67,8 +67,13 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
   private var observers: [NSObjectProtocol] = []
   private var levelSmoothTask: Task<Void, Never>?
   private var rebuildTask: Task<Void, Never>?  // Serializes engine rebuilds
-  private var rawLevel: Float = 0
-  private let levelLock = NSLock()
+  /// Audio level from real-time thread — Int32 bitPattern of Float.
+  /// Written via lock-free CAS (OSAtomicCompareAndSwap32) from the audio
+  /// tap callback, read via OSAtomicAdd32(0) from the level-smoothing Task.
+  private var _atomicLevel: Int32 = 0
+  /// Adaptive gain, updated from the level-smoothing Task (not the audio thread).
+  /// Read atomically in the tap callback.
+  private var _adaptiveGain: Float = 4.0
 
   // MARK: Constants
 
@@ -145,7 +150,21 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
       [weak self] buffer, _ in
       guard let self else { return }
 
-      self.updateAudioLevel(from: buffer)
+      // Level: atomic peak update only — no heap allocation, no locks.
+      // vDSP_maxmgv operates on the buffer's floatChannelData directly
+      // (no copy). The CAS store via OSAtomicCompareAndSwap32 is lock-free
+      // on ARM64.
+      if let ch = buffer.floatChannelData {
+        var peak: Float = 0
+        vDSP_maxmgv(ch[0], 1, &peak, vDSP_Length(buffer.frameLength))
+        let normalized = min(1.0, peak * self._adaptiveGain)
+        // Lock-free CAS store — safe on real-time audio thread.
+        let newBits = Int32(bitPattern: normalized.bitPattern)
+        var oldBits = OSAtomicAdd32(0, &self._atomicLevel)
+        while !OSAtomicCompareAndSwap32(oldBits, newBits, &self._atomicLevel) {
+          oldBits = OSAtomicAdd32(0, &self._atomicLevel)
+        }
+      }
 
       // Copy samples on the audio thread — Core Audio reuses the tap buffer's
       // backing memory after the callback returns. An Array copy is a fast memcpy
@@ -242,63 +261,41 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
   // MARK: - Audio level
 
-  /// Adaptive gain factor for audio level normalization. Slowly adjusts to
-  /// target ~0.7 peak for normal speech, clamped between 1.0x and 8.0x.
-  /// Bluetooth HFP (8kHz) and USB mics have widely different gain profiles
-  /// — a fixed 4.0x multiplier produces either near-silence or constant
-  /// clipping for non-built-in inputs.
-  private var adaptiveGain: Float = 4.0
-  private var silenceConsecutiveSeconds: Double = 0
-
-  private func updateAudioLevel(from buffer: AVAudioPCMBuffer) {
-    guard let ch = buffer.floatChannelData else { return }
-    var peak: Float = 0
-    vDSP_maxmgv(ch[0], 1, &peak, vDSP_Length(buffer.frameLength))
-
-    let normalized = min(1.0, peak * adaptiveGain)
-
-    // Adaptive gain: slowly move toward target peak of 0.7 for normal speech.
-    // Adjusts by ±2% per buffer (~90ms convergence) — fast enough to adapt
-    // within a few seconds of speech, slow enough to not oscillate on pauses.
-    if normalized > 0.01 && normalized < 1.0 {
-      if normalized > 0.85 {
-        adaptiveGain = max(1.0, adaptiveGain * 0.98)  // Reduce gain (too hot)
-      } else if normalized < 0.25 && peak > 0.001 {
-        adaptiveGain = min(8.0, adaptiveGain * 1.02)  // Boost gain (too quiet)
-      }
-    }
-
-    // Silence detection: track consecutive seconds below threshold.
-    // After 60s of silence, set silenceDetected for UI indication.
-    if normalized < 0.015 {
-      self.silenceConsecutiveSeconds += Double(buffer.frameLength) / buffer.format.sampleRate
-    } else {
-      if self.silenceConsecutiveSeconds >= 60 {
-        AppLog.audio.info(
-          "Silence ended after \(self.silenceConsecutiveSeconds)s — was the mic muted?")
-      }
-      self.silenceConsecutiveSeconds = 0
-    }
-    let isSilent = self.silenceConsecutiveSeconds >= 60.0
-
-    levelLock.withLock {
-      rawLevel = normalized
-    }
-    // Update silenceDetected on main actor (it's @Published)
-    if silenceDetected != isSilent {
-      DispatchQueue.main.async { [weak self] in
-        self?.silenceDetected = isSilent
-      }
-    }
-  }
-
   private func startLevelSmoothing() {
     levelSmoothTask?.cancel()
     levelSmoothTask = Task { @MainActor [weak self] in
+      var silenceSeconds: Double = 0
       while !Task.isCancelled {
-        try? await Task.sleep(nanoseconds: 66_000_000)
+        try? await Task.sleep(nanoseconds: 66_000_000)  // ~15 Hz
         guard let self else { return }
-        self.audioLevel = self.levelLock.withLock { self.rawLevel }
+
+        // Read atomic level (lock-free — OSAtomicAdd32(0) is an atomic load)
+        let rawBits = OSAtomicAdd32(0, &self._atomicLevel)
+        let raw = Float(bitPattern: UInt32(bitPattern: rawBits))
+        self.audioLevel = raw
+
+        // Adaptive gain — on MainActor, safe to do math
+        if raw > 0.01 && raw < 1.0 {
+          if raw > 0.85 {
+            self._adaptiveGain = max(1.0, self._adaptiveGain * 0.98)
+          } else if raw < 0.25 && raw > 0.001 {
+            self._adaptiveGain = min(8.0, self._adaptiveGain * 1.02)
+          }
+        }
+
+        // Silence detection
+        if raw < 0.015 {
+          silenceSeconds += 0.066
+        } else {
+          if silenceSeconds >= 60 {
+            AppLog.audio.info("Silence ended after \(Int(silenceSeconds))s")
+          }
+          silenceSeconds = 0
+        }
+        let isSilent = silenceSeconds >= 60
+        if self.silenceDetected != isSilent {
+          self.silenceDetected = isSilent
+        }
       }
     }
   }
@@ -724,7 +721,23 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
     inputNode.installTap(onBus: 0, bufferSize: Self.captureBufferSize, format: nil) {
       [weak self] buffer, _ in
       guard let self else { return }
-      self.updateAudioLevel(from: buffer)
+
+      // Level: atomic peak update only — no heap allocation, no locks.
+      // vDSP_maxmgv operates on the buffer's floatChannelData directly
+      // (no copy). The CAS store via OSAtomicCompareAndSwap32 is lock-free
+      // on ARM64.
+      if let ch = buffer.floatChannelData {
+        var peak: Float = 0
+        vDSP_maxmgv(ch[0], 1, &peak, vDSP_Length(buffer.frameLength))
+        let normalized = min(1.0, peak * self._adaptiveGain)
+        // Lock-free CAS store — safe on real-time audio thread.
+        let newBits = Int32(bitPattern: normalized.bitPattern)
+        var oldBits = OSAtomicAdd32(0, &self._atomicLevel)
+        while !OSAtomicCompareAndSwap32(oldBits, newBits, &self._atomicLevel) {
+          oldBits = OSAtomicAdd32(0, &self._atomicLevel)
+        }
+      }
+
       // Copy samples on the audio thread — Core Audio reuses the tap buffer's
       // backing memory after the callback returns. An Array copy is a fast memcpy
       // and the only safe way to retain the PCM data for async writing.
