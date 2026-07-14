@@ -474,6 +474,9 @@ struct KnowledgeDetailView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentPipelineStageChanged)) { n in
       guard n.object as? String == item.id.uuidString else { return }
+      // Pipeline is now driving the UI — clear local progress overrides
+      // so the pipeline stage text takes priority.
+      transcriptionProgress = nil
       // Priority: explicit stage message > tool result summary > tool name
       if let stage = n.userInfo?["stage"] as? String {
         pipelineStage = stage.capitalized
@@ -2108,8 +2111,9 @@ struct KnowledgeDetailView: View {
     // directly. The pipeline owns status transitions, checkpoint/resume,
     // error handling, and provider resolution. Direct calls bypass all of
     // that and leave items stuck in .recorded on failure.
+    // The pipeline will drive the UI via .contentPipelineStageChanged
+    // and .pipelineCompleted notifications.
     let queue = processingQueue
-    transcriptionProgress = "Queued for transcription..."
 
     // Reset to .recorded so the pipeline picks it up (same as manual retry)
     item.transcriptionEngineId = nil
@@ -2328,8 +2332,7 @@ struct KnowledgeDetailView: View {
     let trigger: QueueTrigger =
       (doTranscribe && !doAnalyze) ? .directUserAction : .directUserAction
     processingQueue.enqueue(itemID: item.id, projectID: item.projectID, trigger: trigger)
-    isTranscribing = true
-    transcriptionProgress = "Queued for processing..."
+    // Pipeline will drive the UI via .contentPipelineStageChanged notification
     AppLog.provider.info(
       "🔍 reprocessItem: enqueued mode=\(mode) for \(item.id.uuidString.prefix(8))")
   }
