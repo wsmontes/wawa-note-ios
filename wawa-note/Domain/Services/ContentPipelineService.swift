@@ -362,7 +362,15 @@ final class ContentPipelineService: ObservableObject {
         AppLog.provider.error(
           "ContentPipeline: no active provider configured — transcription-only mode")
         if let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) {
-          fresh.status = fresh.transcriptionEngineId != nil ? .transcribed : .recorded
+          // Only override non-terminal states. Items already in .failed (transcription
+          // error) or .pendingReview (user review gate) must NOT be destroyed — doing so
+          // silently hides transcription failures and discards user review state.
+          let isTerminal =
+            fresh.status == .failed || fresh.status == .pendingReview
+            || fresh.status == .analyzed
+          if !isTerminal {
+            fresh.status = fresh.transcriptionEngineId != nil ? .transcribed : .recorded
+          }
           do { try modelContext.save() } catch {
             AppLog.provider.error(
               "ContentPipeline: critical save failed (transcription-only): \(error.localizedDescription)"
