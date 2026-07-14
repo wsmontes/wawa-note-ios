@@ -948,7 +948,7 @@ final class ContentPipelineService: ObservableObject {
       }
       // Phase 2 terminal state guarantee ensures .pipelineCompleted fires
       // on every exit path. No polling fallback needed.
-      process(itemID, using: ctx)
+      Task { await TranscriptionPipeline.shared.run(itemID: itemID, context: ctx) }
       // Polling fallback removed — terminal state guarantee in process()
       // ensures .pipelineCompleted notification fires on every exit path.
     }

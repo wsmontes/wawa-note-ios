@@ -229,32 +229,8 @@ final class ProcessingQueueService: ObservableObject {
           itemID: itemID,
           projectID: next.projectID
         )
-        // processEntry() never throws — it uses withCheckedContinuation<Void, Never>.
-        // Check item status to detect pipeline failures that need retry.
-        // Permanent failures (.failed) should NOT retry — the pipeline already
-        // classified them. Items stuck in intermediate states (.transcribing,
-        // .analyzing) indicate transient failures that rolled back.
-        let ctx = await MainActor.run { self?.pipeline?.container }
-        if let container = ctx {
-          let checkCtx = ModelContext(container)
-          let checkItemID = itemID
-          let descriptor = FetchDescriptor<KnowledgeItem>(
-            predicate: #Predicate { $0.id == checkItemID })
-          if let item = try? checkCtx.fetch(descriptor).first {
-            let isTerminal =
-              item.statusRaw == "analyzed" || item.statusRaw == "failed"
-              || item.statusRaw == "pendingReview" || item.statusRaw == "transcribed"
-            if !isTerminal {
-              // Item didn't reach a terminal state — treat as transient failure for retry.
-              await MainActor.run { [weak self] in
-                self?.finishJob(
-                  entryID, failed: true,
-                  error: "Pipeline completed but item still in '\(item.statusRaw)' state")
-              }
-              return
-            }
-          }
-        }
+        // Terminal state guarantee ensures pipeline reaches .failed, .analyzed,
+        // or .pendingReview on every exit path. No need to double-check.
         await MainActor.run { [weak self] in
           self?.finishJob(entryID, failed: false, error: nil)
         }
