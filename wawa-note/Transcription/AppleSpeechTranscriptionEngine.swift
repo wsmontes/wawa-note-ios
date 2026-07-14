@@ -4,6 +4,7 @@ import NaturalLanguage
 import OSLog
 import Speech
 import WawaNoteCore
+import os
 
 // MARK: - Transcription States
 
@@ -423,7 +424,27 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
     )
 
     return try await withCheckedThrowingContinuation { continuation in
+      let continuationLock = os_unfair_lock_t.allocate(capacity: 1)
+      continuationLock.initialize(to: os_unfair_lock())
       var hasResumed = false
+
+      func tryResume(_ block: () -> Void) -> Bool {
+        os_unfair_lock_lock(continuationLock)
+        guard !hasResumed else {
+          os_unfair_lock_unlock(continuationLock)
+          return false
+        }
+        hasResumed = true
+        os_unfair_lock_unlock(continuationLock)
+        block()
+        // After the first successful resume, no more callers will pass the
+        // !hasResumed guard. The lock is no longer needed — deallocate it to
+        // prevent the (tiny) per-call leak of the heap-allocated os_unfair_lock.
+        continuationLock.deinitialize(count: 1)
+        continuationLock.deallocate()
+        return true
+      }
+
       var recognitionTask: SFSpeechRecognitionTask?
 
       // iOS 17/18 on-device bug: SFSpeechRecognizer discards previous
@@ -442,17 +463,18 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
       let chunkDuration = Self.maxLocalDuration
       let timeout = Self.timeoutForChunk(duration: chunkDuration)
       let timeoutWorkItem = DispatchWorkItem {
-        guard !hasResumed else { return }
-        hasResumed = true
-        recognitionTask?.cancel()
-        continuation.resume(
-          throwing: TranscriptionError.recognitionFailed(
-            "Recognition timed out after \(Int(timeout))s"))
+        guard
+          tryResume({
+            recognitionTask?.cancel()
+            continuation.resume(
+              throwing: TranscriptionError.recognitionFailed(
+                "Recognition timed out after \(Int(timeout))s"))
+          })
+        else { return }
       }
       DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: timeoutWorkItem)
 
       recognitionTask = recognizer.recognitionTask(with: request) { result, error in
-        guard !hasResumed else { return }
         if let error {
           timeoutWorkItem.cancel()
           let nsError = error as NSError
@@ -463,7 +485,6 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
           // kAFAssistantErrorDomain Code=1101 = local recognizer rejected audio format.
           // Retry once with cloud recognition if it was forced on-device.
           if nsError.domain.contains("AssistantError") && forceOnDevice {
-            hasResumed = true
             AppLog.transcription.warning(
               "Local recognizer rejected audio, falling back to cloud recognition")
             let cloudRequest = SFSpeechURLRecognitionRequest(url: recognitionURL)
@@ -473,39 +494,45 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             if let ctx = self.buildContextualTerms() {
               cloudRequest.contextualStrings = ctx
             }
-            var cloudHasResumed = false
             let cloudTask = recognizer.recognitionTask(with: cloudRequest) {
               cloudResult, cloudError in
-              guard !cloudHasResumed else { return }
               if let cloudError {
-                cloudHasResumed = true
                 let cloudNSError = cloudError as NSError
                 AppLog.transcription.error(
                   "Cloud fallback also failed: \(cloudNSError.domain)/\(cloudNSError.code)")
-                continuation.resume(
-                  throwing: TranscriptionError.recognitionFailed(
-                    "\(cloudNSError.domain)/\(cloudNSError.code): \(cloudError.localizedDescription)"
-                  ))
+                guard
+                  tryResume({
+                    continuation.resume(
+                      throwing: TranscriptionError.recognitionFailed(
+                        "\(cloudNSError.domain)/\(cloudNSError.code): \(cloudError.localizedDescription)"
+                      ))
+                  })
+                else { return }
                 return
               }
               guard let cloudResult = cloudResult, cloudResult.isFinal else { return }
-              cloudHasResumed = true
-              self.usedCloudFallback = true
-              let transcript = self.buildTranscript(
-                from: cloudResult, recognizer: recognizer, meetingId: meetingId)
-              AppLog.transcription.info(
-                "Cloud fallback succeeded: \(transcript.segments.count) segments")
-              continuation.resume(returning: transcript)
+              guard
+                tryResume({
+                  self.usedCloudFallback = true
+                  let transcript = self.buildTranscript(
+                    from: cloudResult, recognizer: recognizer, meetingId: meetingId)
+                  AppLog.transcription.info(
+                    "Cloud fallback succeeded: \(transcript.segments.count) segments")
+                  continuation.resume(returning: transcript)
+                })
+              else { return }
             }
             self.activeRecognitionTask = cloudTask
             return
           }
 
-          hasResumed = true
-          timeoutWorkItem.cancel()
-          continuation.resume(
-            throwing: TranscriptionError.recognitionFailed(
-              "\(nsError.domain)/\(nsError.code): \(error.localizedDescription)"))
+          guard
+            tryResume({
+              continuation.resume(
+                throwing: TranscriptionError.recognitionFailed(
+                  "\(nsError.domain)/\(nsError.code): \(error.localizedDescription)"))
+            })
+          else { return }
           return
         }
 
@@ -541,14 +568,16 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         // Save the final utterance
         accumulatedSegments.append(contentsOf: result.bestTranscription.segments)
 
-        hasResumed = true
-        timeoutWorkItem.cancel()
-        let transcript = self.buildTranscript(
-          from: accumulatedSegments, recognizer: recognizer, meetingId: meetingId)
-        AppLog.transcription.info(
-          "On-device complete: \(transcript.segments.count) segments, lang=\(transcript.languageCode ?? recognizer.locale.identifier), locale=\(recognizer.locale.identifier)"
-        )
-        continuation.resume(returning: transcript)
+        guard
+          tryResume({
+            let transcript = self.buildTranscript(
+              from: accumulatedSegments, recognizer: recognizer, meetingId: meetingId)
+            AppLog.transcription.info(
+              "On-device complete: \(transcript.segments.count) segments, lang=\(transcript.languageCode ?? recognizer.locale.identifier), locale=\(recognizer.locale.identifier)"
+            )
+            continuation.resume(returning: transcript)
+          })
+        else { return }
       }
       self.activeRecognitionTask = recognitionTask
     }
