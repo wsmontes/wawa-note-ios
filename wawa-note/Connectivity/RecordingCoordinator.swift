@@ -765,6 +765,8 @@ final class RecordingCoordinator: ObservableObject {
       startedAt: item.createdAt,
       segments: segments
     )
+    AppLog.audio.error(
+      "🪵 TRACE: set .recorded at crash-recovery-initial for \(meetingId.uuidString.prefix(8))")
     item.status = .recorded
     item.audioFileRelativePath = AppFileConstants.audioFileName
     saveManifest(manifest, meetingId: meetingId)

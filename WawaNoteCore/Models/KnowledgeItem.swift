@@ -459,7 +459,22 @@ public final class KnowledgeItem {
 
     get { ItemStatus(rawValue: statusRaw) ?? .draft }
 
-    set { statusRaw = newValue.rawValue }
+    set {
+      let old = ItemStatus(rawValue: statusRaw) ?? .draft
+      statusRaw = newValue.rawValue
+      if old == .recording && newValue == .recorded {
+        Logger(subsystem: "com.wawa.note", category: "status-trace")
+          .warning(
+            "🔴 STATUS TRACE: .recording → .recorded for item — callstack: \(Thread.callStackSymbols.prefix(6).joined(separator: "\n"))"
+          )
+      }
+      if newValue == .recorded && old != newValue {
+        Logger(subsystem: "com.wawa.note", category: "status-trace")
+          .warning(
+            "🔴 STATUS TRACE: set .recorded (was \(old.label)) — callstack: \(Thread.callStackSymbols.prefix(6).joined(separator: "\n"))"
+          )
+      }
+    }
 
   }
 
