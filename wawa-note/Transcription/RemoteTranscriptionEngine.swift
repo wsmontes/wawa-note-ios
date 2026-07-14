@@ -314,6 +314,7 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
             AppLog.transcription.info(
               "Whisper verbose_json: \(segments.count) segments with timestamps")
             return Transcript(
+              meetingId: meetingId,
               languageCode: json["language"] as? String,
               segments: segments,
               sourceEngineId: id
@@ -329,6 +330,7 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
         }
         AppLog.transcription.info("Whisper plain text: \(text.count) chars (no timestamps)")
         return Transcript(
+          meetingId: meetingId,
           languageCode: json["language"] as? String,
           segments: [
             TranscriptSegment(
@@ -385,29 +387,49 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
     defer { output.close() }
 
     let lb = "\r\n"
-    func write(_ s: String) {
-      if let d = s.data(using: .utf8) {
-        _ = d.withUnsafeBytes {
-          output.write($0.bindMemory(to: UInt8.self).baseAddress!, maxLength: d.count)
+
+    enum BodyWriteError: Error, LocalizedError {
+      case writeFailed(Int)
+      case partialWrite(expected: Int, actual: Int)
+      var errorDescription: String? {
+        switch self {
+        case .writeFailed(let code): return "OutputStream write failed with code \(code)"
+        case .partialWrite(let expected, let actual):
+          return "OutputStream partial write: \(actual)/\(expected) bytes"
         }
       }
     }
 
-    write("--\(boundary)\(lb)")
-    write("Content-Disposition: form-data; name=\"model\"\(lb)\(lb)")
-    write("\(model)\(lb)")
+    func write(_ s: String) throws {
+      guard let d = s.data(using: .utf8) else { return }
+      let written = try d.withUnsafeBytes { ptr -> Int in
+        let result = output.write(
+          ptr.bindMemory(to: UInt8.self).baseAddress!, maxLength: d.count)
+        if result < 0 {
+          throw BodyWriteError.writeFailed(result)
+        }
+        return result
+      }
+      if written != d.count {
+        throw BodyWriteError.partialWrite(expected: d.count, actual: written)
+      }
+    }
 
-    write("--\(boundary)\(lb)")
-    write("Content-Disposition: form-data; name=\"response_format\"\(lb)\(lb)")
-    write("verbose_json\(lb)")
-    write("--\(boundary)\(lb)")
-    write("Content-Disposition: form-data; name=\"timestamp_granularities[]\"\(lb)\(lb)")
-    write("segment\(lb)")
+    try write("--\(boundary)\(lb)")
+    try write("Content-Disposition: form-data; name=\"model\"\(lb)\(lb)")
+    try write("\(model)\(lb)")
+
+    try write("--\(boundary)\(lb)")
+    try write("Content-Disposition: form-data; name=\"response_format\"\(lb)\(lb)")
+    try write("verbose_json\(lb)")
+    try write("--\(boundary)\(lb)")
+    try write("Content-Disposition: form-data; name=\"timestamp_granularities[]\"\(lb)\(lb)")
+    try write("segment\(lb)")
 
     if let prompt, !prompt.isEmpty {
-      write("--\(boundary)\(lb)")
-      write("Content-Disposition: form-data; name=\"prompt\"\(lb)\(lb)")
-      write("\(prompt)\(lb)")
+      try write("--\(boundary)\(lb)")
+      try write("Content-Disposition: form-data; name=\"prompt\"\(lb)\(lb)")
+      try write("\(prompt)\(lb)")
     }
 
     let filename = audioURL.lastPathComponent
@@ -419,9 +441,9 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
       default: return "audio/mp4"
       }
     }()
-    write("--\(boundary)\(lb)")
-    write("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\(lb)")
-    write("Content-Type: \(mimeType)\(lb)\(lb)")
+    try write("--\(boundary)\(lb)")
+    try write("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\(lb)")
+    try write("Content-Type: \(mimeType)\(lb)\(lb)")
 
     // Stream audio file data in 64 KB chunks to avoid RAM spikes on large files.
     // A 10-min M4A can be 15-25 MB; loading it all at once wastes memory
@@ -439,7 +461,13 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
     while input.hasBytesAvailable {
       let bytesRead = input.read(&buffer, maxLength: bufferSize)
       if bytesRead > 0 {
-        output.write(buffer, maxLength: bytesRead)
+        let written = output.write(buffer, maxLength: bytesRead)
+        if written < 0 {
+          throw BodyWriteError.writeFailed(written)
+        }
+        if written != bytesRead {
+          throw BodyWriteError.partialWrite(expected: bytesRead, actual: written)
+        }
       } else if bytesRead < 0 {
         throw input.streamError
           ?? NSError(
@@ -450,8 +478,8 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
       }
     }
 
-    write("\(lb)")
-    write("--\(boundary)--\(lb)")
+    try write("\(lb)")
+    try write("--\(boundary)--\(lb)")
   }
 
   // MARK: - Dedup
