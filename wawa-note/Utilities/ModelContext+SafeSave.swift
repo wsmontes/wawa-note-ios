@@ -31,17 +31,20 @@ extension ModelContext {
       AppLog.storage.error("\(msg)")
       AppLog.error("storage", msg)
 
-      // Attempt to surface to user via notification (non-blocking).
-      // UI can observe this to show a toast/banner.
-      NotificationCenter.default.post(
-        name: .persistenceError,
-        object: nil,
-        userInfo: [
-          "context": label,
-          "itemId": itemId as Any,
-          "error": error.localizedDescription,
-        ]
-      )
+      // Attempt to surface to user via notification.
+      // Dispatch to MainActor so UI observers can safely update state.
+      // Observers MUST be registered on the main thread.
+      DispatchQueue.main.async {
+        NotificationCenter.default.post(
+          name: .persistenceError,
+          object: nil,
+          userInfo: [
+            "context": label,
+            "itemId": itemId as Any,
+            "error": error.localizedDescription,
+          ]
+        )
+      }
       return false
     }
   }

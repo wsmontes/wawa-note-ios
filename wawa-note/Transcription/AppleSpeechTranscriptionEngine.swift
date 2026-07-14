@@ -339,8 +339,9 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
           )
           onCheckpoint?(partial, i)
         }
-        throw lastChunkError ?? TranscriptionError.recognitionFailed(
-          "Chunk \(i+1)/\(chunks.count) failed after \(Self.maxRetriesPerChunk + 1) attempts")
+        throw lastChunkError
+          ?? TranscriptionError.recognitionFailed(
+            "Chunk \(i+1)/\(chunks.count) failed after \(Self.maxRetriesPerChunk + 1) attempts")
       }
 
       languageCode = chunkTranscript.languageCode ?? languageCode
@@ -445,7 +446,8 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         hasResumed = true
         recognitionTask?.cancel()
         continuation.resume(
-          throwing: TranscriptionError.recognitionFailed("Recognition timed out after \(Int(timeout))s"))
+          throwing: TranscriptionError.recognitionFailed(
+            "Recognition timed out after \(Int(timeout))s"))
       }
       DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: timeoutWorkItem)
 

@@ -184,10 +184,10 @@ final class ProcessingQueueService: ObservableObject {
         "pipeline",
         "Pipeline not set — aborting queue. \(pending.count) items will be marked failed.")
       #if DEBUG
-      assertionFailure(
-        "ProcessingQueueService.processNext() called before setPipeline(). "
-        + "Fix initialization order in WawaNoteApp.init() — pipeline must be set before any enqueue."
-      )
+        assertionFailure(
+          "ProcessingQueueService.processNext() called before setPipeline(). "
+            + "Fix initialization order in WawaNoteApp.init() — pipeline must be set before any enqueue."
+        )
       #endif
       for entry in pending where entry.status == .queued {
         entry.status = .failed
@@ -229,8 +229,9 @@ final class ProcessingQueueService: ObservableObject {
           let descriptor = FetchDescriptor<KnowledgeItem>(
             predicate: #Predicate<KnowledgeItem> { $0.id == itemID })
           if let item = try? checkCtx.fetch(descriptor).first {
-            let isTerminal = item.statusRaw == "analyzed" || item.statusRaw == "failed"
-              || item.statusRaw == "pendingReview"
+            let isTerminal =
+              item.statusRaw == "analyzed" || item.statusRaw == "failed"
+              || item.statusRaw == "pendingReview" || item.statusRaw == "transcribed"
             if !isTerminal {
               // Item didn't reach a terminal state — treat as transient failure for retry.
               await MainActor.run { [weak self] in

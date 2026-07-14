@@ -1446,7 +1446,7 @@ enum ShellInterpreter {
       if !hasForce {
         return shellErr(
           "rm: deleting task '\(task.title)' is permanent and cannot be undone. "
-          + "Use ask_user to confirm with the user first, then retry with: rm <path> --force")
+            + "Use ask_user to confirm with the user first, then retry with: rm <path> --force")
       }
       try? TaskService(context: ctx.modelContext).deleteTask(task)
       return ok("Deleted task '\(task.title)'. This is permanent.")

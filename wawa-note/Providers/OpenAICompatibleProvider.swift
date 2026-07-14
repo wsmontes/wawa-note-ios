@@ -1,6 +1,6 @@
 import Foundation
 import OSLog
-import UIKit
+@preconcurrency import UIKit
 
 // MARK: - Chat Completions API
 

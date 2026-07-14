@@ -39,9 +39,9 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
       self.session = session
     } else {
       let config = URLSessionConfiguration.default
-      config.timeoutIntervalForRequest = 120   // 2 min between any server response
+      config.timeoutIntervalForRequest = 120  // 2 min between any server response
       config.timeoutIntervalForResource = 600  // 10 min total per chunk upload+process
-      config.waitsForConnectivity = true       // Wait for network instead of failing immediately
+      config.waitsForConnectivity = true  // Wait for network instead of failing immediately
       config.allowsExpensiveNetworkAccess = true
       config.allowsConstrainedNetworkAccess = true
       self.session = URLSession(configuration: config)
@@ -166,8 +166,9 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
           )
           onCheckpoint?(partial, i)
         }
-        throw lastChunkError ?? TranscriptionError.recognitionFailed(
-          "Chunk \(i+1)/\(chunks.count) failed after \(Self.maxRetriesPerChunk + 1) attempts")
+        throw lastChunkError
+          ?? TranscriptionError.recognitionFailed(
+            "Chunk \(i+1)/\(chunks.count) failed after \(Self.maxRetriesPerChunk + 1) attempts")
       }
 
       languageCode = chunkTranscript.languageCode ?? languageCode
@@ -346,7 +347,8 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
         ]
         if retryableCodes.contains(error.code) {
           AppLog.transcription.warning(
-            "Network error (attempt \(attempt+1)): \(error.code.rawValue) — \(error.localizedDescription)")
+            "Network error (attempt \(attempt+1)): \(error.code.rawValue) — \(error.localizedDescription)"
+          )
         } else {
           // Non-retryable URL error
           throw error
@@ -433,9 +435,10 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
       if bytesRead > 0 {
         output.write(buffer, maxLength: bytesRead)
       } else if bytesRead < 0 {
-        throw input.streamError ?? NSError(
-          domain: "body", code: -3,
-          userInfo: [NSLocalizedDescriptionKey: "Error reading audio file"])
+        throw input.streamError
+          ?? NSError(
+            domain: "body", code: -3,
+            userInfo: [NSLocalizedDescriptionKey: "Error reading audio file"])
       } else {
         break  // EOF
       }

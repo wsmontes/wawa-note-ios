@@ -147,9 +147,13 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
 
       self.updateAudioLevel(from: buffer)
 
-      // Pass the buffer directly to the writer — no Array allocation on the
-      // real-time audio thread. The writer's queue handles any copying needed.
-      self.fileWriter.write(buffer: buffer)
+      // Copy samples on the audio thread — Core Audio reuses the tap buffer's
+      // backing memory after the callback returns. An Array copy is a fast memcpy
+      // and the only safe way to retain the PCM data for async writing.
+      guard let ch = buffer.floatChannelData else { return }
+      let n = Int(buffer.frameLength)
+      let samples = Array(UnsafeBufferPointer(start: ch[0], count: n))
+      self.fileWriter.write(samples: samples, frameLength: n, format: buffer.format)
     }
 
     engine.prepare()
@@ -721,9 +725,13 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
       [weak self] buffer, _ in
       guard let self else { return }
       self.updateAudioLevel(from: buffer)
-      // Pass the buffer directly to the writer — no Array allocation on the
-      // real-time audio thread. The writer's queue handles any copying needed.
-      self.fileWriter.write(buffer: buffer)
+      // Copy samples on the audio thread — Core Audio reuses the tap buffer's
+      // backing memory after the callback returns. An Array copy is a fast memcpy
+      // and the only safe way to retain the PCM data for async writing.
+      guard let ch = buffer.floatChannelData else { return }
+      let n = Int(buffer.frameLength)
+      let samples = Array(UnsafeBufferPointer(start: ch[0], count: n))
+      self.fileWriter.write(samples: samples, frameLength: n, format: buffer.format)
     }
 
     engine.prepare()

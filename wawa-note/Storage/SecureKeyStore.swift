@@ -33,12 +33,12 @@ final class SecureKeyStore: @unchecked Sendable {
   // MARK: - API Key
 
   /// Save an API key to the Keychain.
-  /// - Parameter accessLevel: Controls key accessibility. Default `.whenUnlocked` for stronger security.
-  ///   Use `.afterFirstUnlock` explicitly for keys that need background pipeline access (e.g., transcription).
+  /// - Parameter accessLevel: Controls key accessibility. Default `.afterFirstUnlock` for background pipeline access.
+  ///   Use `.whenUnlocked` explicitly for keys that don't need background access (e.g., chat-only providers).
   ///   NOTE: Changing this default does NOT affect existing stored keys — they retain their
   ///   original access level until deleted and re-saved. This only applies to newly saved keys.
   func saveAPIKey(
-    _ key: String, for identifier: String, accessLevel: KeychainAccessLevel = .whenUnlocked
+    _ key: String, for identifier: String, accessLevel: KeychainAccessLevel = .afterFirstUnlock
   ) throws {
     guard let data = key.data(using: .utf8) else {
       throw SecureKeyStoreError.saveFailed

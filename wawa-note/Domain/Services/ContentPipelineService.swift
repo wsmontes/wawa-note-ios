@@ -874,8 +874,12 @@ final class ContentPipelineService: ObservableObject {
             predicate: #Predicate<KnowledgeItem> { $0.id == itemID })
           if let item = try? checkCtx.fetch(descriptor).first {
             let status = item.statusRaw
-            let isTerminal = status == "analyzed" || status == "failed"
-              || status == "pendingReview" || status == "transcribed"
+            // NOTE: .transcribed is NOT terminal during pipeline flow — the item
+            // transitions through .transcribed on its way to .analyzing. Including it
+            // would prematurely resume the continuation before analysis starts.
+            let isTerminal =
+              status == "analyzed" || status == "failed"
+              || status == "pendingReview"
             if isTerminal {
               AppLog.warn(
                 "pipeline",
