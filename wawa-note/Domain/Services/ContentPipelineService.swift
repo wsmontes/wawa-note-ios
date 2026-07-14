@@ -297,7 +297,10 @@ final class ContentPipelineService: ObservableObject {
           let transcriptURL = meetingDir.appendingPathComponent(AppFileConstants.transcriptFileName)
           let backupURL = meetingDir.appendingPathComponent("transcript.json.bak")
           let checkpointURL = meetingDir.appendingPathComponent(AppFileConstants.checkpointFileName)
-          let isReTranscribing = item.transcriptionEngineId != nil
+          // Detect re-transcription by checking if a transcript already exists,
+          // NOT by checking transcriptionEngineId. The UI sets engineId=nil before
+          // enqueuing, so engineId is always nil when we get here.
+          let isReTranscribing = FileManager.default.fileExists(atPath: transcriptURL.path)
 
           if isReTranscribing {
             try? FileManager.default.moveItem(at: transcriptURL, to: backupURL)

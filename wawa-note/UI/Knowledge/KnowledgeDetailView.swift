@@ -493,6 +493,9 @@ struct KnowledgeDetailView: View {
     .onReceive(NotificationCenter.default.publisher(for: .pipelineCompleted)) { n in
       if n.object as? String == item.id.uuidString {
         pipelineStage = ""
+        isTranscribing = false
+        transcriptionProgress = nil
+        transcriptionError = nil
         // Force SwiftUI to re-render with fresh data — the managed object
         // may have been updated in another context.
         refreshID = UUID()
