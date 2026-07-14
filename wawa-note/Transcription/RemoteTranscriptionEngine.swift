@@ -52,6 +52,12 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
     isCancelled = true
   }
 
+  func finalize() {
+    onCheckpoint = nil
+    onProgress = nil
+    isCancelled = false
+  }
+
   func checkAvailability() -> LocalTranscriptionAvailability {
     .available(localeIdentifier: "auto")
   }

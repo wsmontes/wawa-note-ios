@@ -219,6 +219,12 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
     activeRecognitionTask?.cancel()
   }
 
+  func finalize() {
+    onCheckpoint = nil
+    onProgress = nil
+    isCancelled = false
+  }
+
   func requestAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {
     await withCheckedContinuation { continuation in
       SFSpeechRecognizer.requestAuthorization { status in

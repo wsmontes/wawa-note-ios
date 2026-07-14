@@ -242,12 +242,16 @@ final class ContentExtractionService {
 
     guard !Task.isCancelled else { return nil }
 
-    let engine = resolveTranscriptionEngine()
-    guard let engine else {
+    let engineOpt = resolveTranscriptionEngine()
+    guard let engine = engineOpt else {
       item.status = .failed
       modelContext.safeSave(context: "transcription-no-engine", itemId: item.id)
       return nil
     }
+    // Mutable protocol reference for settable properties (onProgress, onCheckpoint, resumeFromChunk, finalize()).
+    // The let-bind from guard is copied into a var so the compiler allows setter access through
+    // the existential. Both engine constants reference the same class instance (reference types).
+    var eng: any TranscriptionEngine = engine
 
     // ── Checkpoint resume: load previous progress if available ──────
     let checkpoint = loadTranscriptionCheckpoint(for: item.id)
@@ -256,11 +260,7 @@ final class ContentExtractionService {
         "Found checkpoint for \(item.id.uuidString.prefix(8)): \(checkpoint.completedChunks) chunks done"
       )
       // Tell engine to skip already-transcribed chunks
-      if let apple = engine as? AppleSpeechTranscriptionEngine {
-        apple.resumeFromChunk = checkpoint.completedChunks
-      } else if let remote = engine as? RemoteTranscriptionEngine {
-        remote.resumeFromChunk = checkpoint.completedChunks
-      }
+      eng.resumeFromChunk = checkpoint.completedChunks
     }
 
     // Wire up checkpoint persistence: save partial transcript after each chunk.
@@ -290,24 +290,20 @@ final class ContentExtractionService {
         )
       }
     }
-    if let apple = engine as? AppleSpeechTranscriptionEngine {
-      apple.onCheckpoint = checkpointSaver
-    } else if let remote = engine as? RemoteTranscriptionEngine {
-      remote.onCheckpoint = checkpointSaver
-    }
+    eng.onCheckpoint = checkpointSaver
 
     // Propagate parent task cancellation to the transcription engine.
     // When ProcessingQueueService cancels the active Task, this monitor
     // detects it and calls engine.cancel(), stopping the underlying
     // SFSpeechRecognitionTask or HTTP stream promptly.
-    let monitor = Task { [engine] in
+    let monitor = Task { [eng] in
       while !Task.isCancelled { try? await Task.sleep(nanoseconds: 200_000_000) }
-      engine.cancel()
+      eng.cancel()
     }
     defer { monitor.cancel() }
 
     do {
-      var result = try await engine.transcribeFile(audioURL, meetingId: item.id)
+      var result = try await eng.transcribeFile(audioURL, meetingId: item.id)
 
       // ── Merge with checkpoint segments if resuming ────────
       if let checkpoint, !checkpoint.segments.isEmpty {
@@ -327,7 +323,7 @@ final class ContentExtractionService {
       AppLog.audio.info(
         """
         Transcription result for \(item.id.uuidString.prefix(8)):
-        • engine: \(self.resolvedEngineId(engine))
+        • engine: \(self.resolvedEngineId(eng))
         • transcriptSegments: \(result.segments.count)
         • transcriptTextLength: \(transcriptChars) chars
         • languageCode: \(langCode)
@@ -339,11 +335,7 @@ final class ContentExtractionService {
       // transcript. This prevents a race where the engine fires one last
       // onCheckpoint concurrently with the final writeArtifact below —
       // both writing to the same meeting directory simultaneously.
-      if let apple = engine as? AppleSpeechTranscriptionEngine {
-        apple.onCheckpoint = nil
-      } else if let remote = engine as? RemoteTranscriptionEngine {
-        remote.onCheckpoint = nil
-      }
+      eng.finalize()
 
       try fileStore.createMeetingDirectory(for: item.id)
       try fileStore.writeArtifact(result, fileName: "transcript.json", meetingId: item.id)
@@ -352,7 +344,7 @@ final class ContentExtractionService {
       removeTranscriptionCheckpoint(for: item.id)
 
       item.status = .transcribed
-      item.transcriptionEngineId = resolvedEngineId(engine)
+      item.transcriptionEngineId = resolvedEngineId(eng)
       try modelContext.save()
 
       NotificationCenter.default.post(name: .transcriptReady, object: item.id.uuidString)

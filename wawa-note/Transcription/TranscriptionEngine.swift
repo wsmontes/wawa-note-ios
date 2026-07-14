@@ -62,6 +62,25 @@ protocol TranscriptionEngine: Sendable {
   /// Ensure prerequisites are met (model download, permission, etc).
   /// Called before transcription starts.
   func prepareIfNeeded() async throws
+
+  /// Progress callback — fired during chunking and per-chunk transcription.
+  var onProgress: ((TranscriptionProgress) -> Void)? { get set }
+
+  /// Checkpoint callback — fired after each successfully transcribed chunk.
+  /// Engine calls this with the cumulative transcript so far and the 1-based
+  /// index of the last completed chunk.
+  var onCheckpoint: ((Transcript, Int) -> Void)? { get set }
+
+  /// Resume offset — set before transcribeFile() to skip already-completed
+  /// chunks from a previous attempt. 0-based: value N means chunks 0..<N
+  /// are already done, start from chunk N.
+  var resumeFromChunk: Int { get set }
+
+  /// Called by the orchestrator after transcribeFile() completes successfully
+  /// to signal no more checkpoints will be emitted. The engine MUST nil out
+  /// its onCheckpoint reference to prevent late checkpoints from racing with
+  /// the final transcript write.
+  mutating func finalize()
 }
 
 // MARK: - Default implementations
@@ -90,6 +109,30 @@ extension TranscriptionEngine {
     case .failed(let message):
       throw TranscriptionError.recognitionFailed(message)
     }
+  }
+}
+
+// MARK: - Default implementations for progress, checkpoint, resume
+
+extension TranscriptionEngine {
+  var onProgress: ((TranscriptionProgress) -> Void)? {
+    get { nil }
+    set { /* no-op for engines that don't report progress */  }
+  }
+
+  var onCheckpoint: ((Transcript, Int) -> Void)? {
+    get { nil }
+    set { /* no-op for engines without checkpoint support */  }
+  }
+
+  var resumeFromChunk: Int {
+    get { 0 }
+    set { /* no-op for engines without resume support */  }
+  }
+
+  mutating func finalize() {
+    onCheckpoint = nil
+    onProgress = nil
   }
 }
 
