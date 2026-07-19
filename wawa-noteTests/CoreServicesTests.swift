@@ -1,10 +1,11 @@
+import AVFoundation
 import SwiftData
 import WawaNoteCore
 import XCTest
 
 @testable import Wawa_Note
 
-// Related JIRA: KAN-152, KAN-533, KAN-534, KAN-537, KAN-538, KAN-539, KAN-543
+// Related JIRA: KAN-152, KAN-533, KAN-534, KAN-537, KAN-538, KAN-539, KAN-543, KAN-545
 
 @MainActor
 final class SemanticSearchServiceTests: XCTestCase {
@@ -1014,6 +1015,40 @@ final class AgentLoopCompletionTests: XCTestCase {
 
 @MainActor
 final class ContentExtractionValidationTests: XCTestCase {
+
+  func testM4ARepairCheckAcceptsPlayableM4A() throws {
+    let url = FileManager.default.temporaryDirectory
+      .appendingPathComponent("wawa-valid-\(UUID().uuidString).m4a")
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
+    let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1_024)!
+    buffer.frameLength = 1_024
+    // End the writer's scope before reopening the file for validation so the
+    // M4A trailer has been finalized.
+    do {
+      let file = try AVAudioFile(
+        forWriting: url,
+        settings: [
+          AVFormatIDKey: kAudioFormatMPEG4AAC,
+          AVSampleRateKey: 44_100,
+          AVNumberOfChannelsKey: 1,
+        ]
+      )
+      try file.write(from: buffer)
+    }
+
+    XCTAssertFalse(RecordingCoordinator.m4aNeedsRepair(at: url))
+  }
+
+  func testM4ARepairCheckRejectsUnreadableFile() throws {
+    let url = FileManager.default.temporaryDirectory
+      .appendingPathComponent("wawa-invalid-\(UUID().uuidString).m4a")
+    defer { try? FileManager.default.removeItem(at: url) }
+    try Data("not audio".utf8).write(to: url)
+
+    XCTAssertTrue(RecordingCoordinator.m4aNeedsRepair(at: url))
+  }
 
   /// Audio duration helper computes valid durations.
   func testAudioDurationHelper() {

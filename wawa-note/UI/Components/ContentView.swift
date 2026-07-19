@@ -2,7 +2,7 @@ import SwiftData
 import SwiftUI
 import WawaNoteCore
 
-// Related JIRA: KAN-70, KAN-533
+// Related JIRA: KAN-70, KAN-533, KAN-545
 
 extension Notification.Name {
   static let switchToInboxTab = Notification.Name("SwitchToInboxTab")
@@ -184,7 +184,7 @@ struct ContentView: View {
           "pipeline",
           "Auto-transcribing \(needsTranscription.count) pending audio item(s)")
         for item in needsTranscription.prefix(5) {
-          processingQueue.enqueue(
+          _ = processingQueue.enqueue(
             itemID: item.id, projectID: item.projectID, trigger: .backgroundBackfill)
         }
       }
@@ -207,7 +207,7 @@ struct ContentView: View {
     AppLog.event(
       "pipeline", "Auto-processing \(needsAnalysis.count) pending item(s) for analysis")
     for item in needsAnalysis.prefix(5) {
-      processingQueue.enqueue(
+      _ = processingQueue.enqueue(
         itemID: item.id, projectID: item.projectID, trigger: .backgroundBackfill)
     }
   }

@@ -2,6 +2,8 @@ import Foundation
 import OSLog
 import SwiftData
 
+// Related JIRA: KAN-545
+
 private let log = Logger(subsystem: "com.wawa-note.core", category: "models")
 
 public enum ItemStatus: String, Codable, CaseIterable {
@@ -489,7 +491,9 @@ public final class KnowledgeItem {
         !(old == .pendingReview && newValue == .analyzing),
         !(old == .analyzing && newValue == .analyzed),
         !(old == .recorded && newValue == .queuedForTranscription),
-        !(old == .recorded && newValue == .transcribing)
+        !(old == .recorded && newValue == .transcribing),
+        // A recorded item can legitimately fail validation or transcription.
+        !(old == .recorded && newValue == .failed)
       {
         Logger(subsystem: "com.wawa.note", category: "status-trace")
           .warning("⚠️ SUSPICIOUS TRANSITION: \(old.label) → \(newValue.label)")

@@ -3,6 +3,8 @@ import OSLog
 import UIKit
 import WawaNoteCore
 
+// Related JIRA: KAN-545
+
 // MARK: - Segment concatenator (non-MainActor)
 
 /// Concatenates recording segments into a single audio.m4a (AAC).
@@ -37,7 +39,13 @@ enum AudioSegmentConcatenator {
     }
 
     let destURL = store.audioFileURL(for: meetingId)
-    _ = try? FileManager.default.removeItem(at: destURL)
+    // Export to a sibling temporary file. A recovery may be running against an
+    // existing playable M4A, and a failed export must never destroy that source
+    // artifact before its replacement has been validated.
+    let temporaryURL = destURL.deletingLastPathComponent()
+      .appendingPathComponent("audio-rebuilding-\(UUID().uuidString).m4a")
+    _ = try? FileManager.default.removeItem(at: temporaryURL)
+    defer { try? FileManager.default.removeItem(at: temporaryURL) }
 
     // Request background execution time so iOS doesn't kill us mid-export.
     // Large WAV files (300MB+) can take 10-30s to encode.
@@ -67,14 +75,13 @@ enum AudioSegmentConcatenator {
         AppLog.audio.error("SegmentConcatenator: single-segment export session creation failed")
         return false
       }
-      export.outputURL = destURL
+      export.outputURL = temporaryURL
       export.outputFileType = .m4a
       await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
         export.exportAsynchronously { c.resume() }
       }
       if export.status == .completed {
-        AppLog.event("audio", "Single segment exported → audio.m4a")
-        return true
+        return replaceAudio(at: destURL, with: temporaryURL, description: "Single segment exported")
       } else {
         AppLog.audio.error(
           "SegmentConcatenator: single-segment export failed — status=\(export.status.rawValue) error=\(export.error?.localizedDescription ?? "nil")"
@@ -125,13 +132,18 @@ enum AudioSegmentConcatenator {
       AppLog.audio.error("SegmentConcatenator: multi-segment export session creation failed")
       return false
     }
-    export.outputURL = destURL
+    export.outputURL = temporaryURL
     export.outputFileType = .m4a
     await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
       export.exportAsynchronously { c.resume() }
     }
     if export.status == .completed {
-      AppLog.event("audio", "Segments concatenated → audio.m4a (\(urls.count) segments)")
+      guard
+        replaceAudio(
+          at: destURL, with: temporaryURL,
+          description: "Segments concatenated (\(urls.count) segments)"
+        )
+      else { return false }
       if skippedCount > 0 {
         AppLog.audio.warning(
           "SegmentConcatenator: \(skippedCount)/\(urls.count) segments skipped during concat")
@@ -140,6 +152,29 @@ enum AudioSegmentConcatenator {
     } else {
       AppLog.audio.error(
         "SegmentConcatenator: multi-segment export failed — status=\(export.status.rawValue) error=\(export.error?.localizedDescription ?? "nil")"
+      )
+      return false
+    }
+  }
+
+  /// Replaces the consolidated artifact only after AVFoundation has completed
+  /// a valid export. This preserves the previous recording if a retry fails.
+  private static func replaceAudio(
+    at destinationURL: URL, with temporaryURL: URL, description: String
+  ) -> Bool {
+    do {
+      if FileManager.default.fileExists(atPath: destinationURL.path) {
+        _ = try FileManager.default.replaceItemAt(
+          destinationURL, withItemAt: temporaryURL, backupItemName: nil,
+          options: .usingNewMetadataOnly)
+      } else {
+        try FileManager.default.moveItem(at: temporaryURL, to: destinationURL)
+      }
+      AppLog.event("audio", "\(description) → audio.m4a")
+      return true
+    } catch {
+      AppLog.audio.error(
+        "SegmentConcatenator: could not commit consolidated audio — \(error.localizedDescription)"
       )
       return false
     }
