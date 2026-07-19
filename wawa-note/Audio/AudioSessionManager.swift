@@ -1,6 +1,7 @@
 import AVFoundation
 import OSLog
-import UIKit
+
+// Related JIRA: KAN-542
 
 enum AudioSessionError: Error {
   case configurationFailed
@@ -167,7 +168,7 @@ final class AudioSessionManager {
       try session.setCategory(
         .playAndRecord, mode: .default,
         options: [
-          .allowBluetooth,
+          .allowBluetoothHFP,
           .defaultToSpeaker,
         ])
       if let preferredInput = bestAvailableInput {
@@ -198,7 +199,7 @@ final class AudioSessionManager {
       try session.setCategory(
         .playAndRecord, mode: mode,
         options: [
-          .allowBluetooth,
+          .allowBluetoothHFP,
           .defaultToSpeaker,
         ])
       AppLog.audio.info("Session adapted to route: mode=\(mode.rawValue) \(snapshot)")
@@ -351,7 +352,7 @@ final class AudioSessionManager {
     }
     switch input.portType {
     case .builtInMic, .builtInReceiver:
-      return UIDevice.current.model  // "iPhone", "iPad", etc.
+      return input.portName.isEmpty ? "Built-in Microphone" : input.portName
     case .headsetMic, .headphones:
       return "Wired Headset"
     case .bluetoothHFP, .bluetoothA2DP, .bluetoothLE:

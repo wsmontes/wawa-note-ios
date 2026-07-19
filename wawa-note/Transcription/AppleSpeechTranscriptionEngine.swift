@@ -6,6 +6,35 @@ import Speech
 import WawaNoteCore
 import os
 
+// Related JIRA: KAN-542
+
+/// AVAudioConverter's input callback is `@Sendable`, even though conversion is
+/// synchronous. Keep its one-shot state behind a lock so the callback never
+/// captures mutable stack state or a non-Sendable buffer directly.
+private final class AudioConverterInputState: @unchecked Sendable {
+  private let buffer: AVAudioPCMBuffer
+  private let lock = NSLock()
+  private var didProvideBuffer = false
+
+  init(buffer: AVAudioPCMBuffer) {
+    self.buffer = buffer
+  }
+
+  func nextBuffer(status: UnsafeMutablePointer<AVAudioConverterInputStatus>) -> AVAudioBuffer? {
+    lock.lock()
+    defer { lock.unlock() }
+
+    guard !didProvideBuffer else {
+      status.pointee = .noDataNow
+      return nil
+    }
+
+    didProvideBuffer = true
+    status.pointee = .haveData
+    return buffer
+  }
+}
+
 // MARK: - Transcription States
 
 /// Explicit availability states for local transcription.
@@ -663,7 +692,6 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
     //    returning an empty transcript.
     let filtered = segments.filter { $0.confidence > 0 }
 
-    var seenRanges = Set<String>()
     let deduped: [SFTranscriptionSegment]
     if filtered.isEmpty {
       // Safety: never return empty transcript when segments exist
@@ -767,19 +795,16 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         throw TranscriptionError.recognitionFailed("Cannot allocate output buffer")
       }
 
-      var provided = false
+      let inputState = AudioConverterInputState(buffer: inputBuf)
       var convertError: NSError?
       let status = converter.convert(to: outputBuf, error: &convertError) { _, outStatus in
-        if !provided {
-          provided = true
-          outStatus.pointee = .haveData
-          return inputBuf
-        }
-        outStatus.pointee = .noDataNow
-        return nil
+        inputState.nextBuffer(status: outStatus)
       }
 
       if let convertError { throw convertError }
+      guard status != .error else {
+        throw TranscriptionError.recognitionFailed("Audio conversion failed")
+      }
       guard outputBuf.frameLength > 0 else {
         throw TranscriptionError.recognitionFailed("Decode segment produced empty output")
       }
@@ -818,90 +843,86 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
   func transcribeLive(from audioFileURL: URL) -> LiveTranscriptionStream {
     LiveTranscriptionStream { continuation in
       let task = Task {
-        do {
-          let availability = checkAvailability()
-          guard case .available = availability else {
-            continuation.finish(throwing: TranscriptionError.onDeviceUnavailable)
-            return
-          }
-          guard let recognizer = firstAvailableRecognizer() else {
-            continuation.finish(throwing: TranscriptionError.noSupportedLocale)
-            return
-          }
-          guard recognizer.supportsOnDeviceRecognition else {
-            continuation.finish(throwing: TranscriptionError.onDeviceUnavailable)
-            return
-          }
-
-          let request = SFSpeechURLRecognitionRequest(url: audioFileURL)
-          request.shouldReportPartialResults = true
-          request.addsPunctuation = true
-          request.requiresOnDeviceRecognition = !UserDefaults.standard.bool(
-            forKey: "transcription_allow_cloud")
-          if let terms = contextualTerms, !terms.isEmpty {
-            request.contextualStrings = terms
-          }
-          request.taskHint = .dictation
-
-          AppLog.transcription.info(
-            "Live transcription started — locale=\(recognizer.locale.identifier)")
-
-          // Track seen segment indices to avoid duplicates
-          var lastReportedSegmentCount = 0
-
-          let recognitionTask = recognizer.recognitionTask(with: request) { result, error in
-            guard !Task.isCancelled else {
-              continuation.finish()
-              return
-            }
-
-            if let error {
-              AppLog.transcription.error("Live recognition error: \(error.localizedDescription)")
-              continuation.finish(
-                throwing: TranscriptionError.recognitionFailed(error.localizedDescription))
-              return
-            }
-
-            guard let result = result else { return }
-
-            let segments = result.bestTranscription.segments
-            let isFinal = result.isFinal
-
-            // Only emit new segments (incremental)
-            if segments.count > lastReportedSegmentCount || isFinal {
-              let newSegments = Array(segments[lastReportedSegmentCount...])
-              lastReportedSegmentCount = segments.count
-
-              let transcriptSegments = newSegments.map { seg in
-                TranscriptSegment(
-                  meetingId: UUID(),
-                  startTime: seg.timestamp,
-                  endTime: seg.timestamp + seg.duration,
-                  text: seg.substring,
-                  confidence: Double(seg.confidence),
-                  languageCode: recognizer.locale.identifier,
-                  sourceEngineId: "apple-speech"
-                )
-              }
-
-              let liveResult = LiveTranscriptionResult(
-                text: result.bestTranscription.formattedString,
-                segments: transcriptSegments,
-                isFinal: isFinal,
-                confidence: nil
-              )
-              continuation.yield(liveResult)
-
-              if isFinal {
-                AppLog.transcription.info("Live transcription final: \(segments.count) segments")
-                continuation.finish()
-              }
-            }
-          }
-          self.activeRecognitionTask = recognitionTask
-        } catch {
-          continuation.finish(throwing: error)
+        let availability = checkAvailability()
+        guard case .available = availability else {
+          continuation.finish(throwing: TranscriptionError.onDeviceUnavailable)
+          return
         }
+        guard let recognizer = firstAvailableRecognizer() else {
+          continuation.finish(throwing: TranscriptionError.noSupportedLocale)
+          return
+        }
+        guard recognizer.supportsOnDeviceRecognition else {
+          continuation.finish(throwing: TranscriptionError.onDeviceUnavailable)
+          return
+        }
+
+        let request = SFSpeechURLRecognitionRequest(url: audioFileURL)
+        request.shouldReportPartialResults = true
+        request.addsPunctuation = true
+        request.requiresOnDeviceRecognition = !UserDefaults.standard.bool(
+          forKey: "transcription_allow_cloud")
+        if let terms = contextualTerms, !terms.isEmpty {
+          request.contextualStrings = terms
+        }
+        request.taskHint = .dictation
+
+        AppLog.transcription.info(
+          "Live transcription started — locale=\(recognizer.locale.identifier)")
+
+        // Track seen segment indices to avoid duplicates
+        var lastReportedSegmentCount = 0
+
+        let recognitionTask = recognizer.recognitionTask(with: request) { result, error in
+          guard !Task.isCancelled else {
+            continuation.finish()
+            return
+          }
+
+          if let error {
+            AppLog.transcription.error("Live recognition error: \(error.localizedDescription)")
+            continuation.finish(
+              throwing: TranscriptionError.recognitionFailed(error.localizedDescription))
+            return
+          }
+
+          guard let result = result else { return }
+
+          let segments = result.bestTranscription.segments
+          let isFinal = result.isFinal
+
+          // Only emit new segments (incremental)
+          if segments.count > lastReportedSegmentCount || isFinal {
+            let newSegments = Array(segments.dropFirst(lastReportedSegmentCount))
+            lastReportedSegmentCount = segments.count
+
+            let transcriptSegments = newSegments.map { seg in
+              TranscriptSegment(
+                meetingId: UUID(),
+                startTime: seg.timestamp,
+                endTime: seg.timestamp + seg.duration,
+                text: seg.substring,
+                confidence: Double(seg.confidence),
+                languageCode: recognizer.locale.identifier,
+                sourceEngineId: "apple-speech"
+              )
+            }
+
+            let liveResult = LiveTranscriptionResult(
+              text: result.bestTranscription.formattedString,
+              segments: transcriptSegments,
+              isFinal: isFinal,
+              confidence: nil
+            )
+            continuation.yield(liveResult)
+
+            if isFinal {
+              AppLog.transcription.info("Live transcription final: \(segments.count) segments")
+              continuation.finish()
+            }
+          }
+        }
+        self.activeRecognitionTask = recognitionTask
       }
 
       continuation.onTermination = { _ in

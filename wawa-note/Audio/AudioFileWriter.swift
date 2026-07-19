@@ -2,6 +2,8 @@ import AVFoundation
 import OSLog
 import WawaNoteCore
 
+// Related JIRA: KAN-542
+
 enum AudioFileWriterError: Error {
   case fileCreationFailed
   case writeFailed
@@ -20,9 +22,8 @@ struct ClosedSegmentInfo: Sendable {
 /// are serialized through a single internal queue. This prevents races between
 /// the audio tap's write callbacks and lifecycle operations (route change, stop).
 ///
-/// Write retries use `queue.asyncAfter` instead of `Thread.sleep` so the serial
-/// queue is never blocked — subsequent writes can still be processed while a
-/// previous write is retrying.
+/// A retry stays on the writer queue so later buffers can never overtake an
+/// earlier failed write.
 final class AudioFileWriter: @unchecked Sendable {
   private let fileManager: FileManager
   private let fileStore: FileArtifactStore
@@ -44,8 +45,10 @@ final class AudioFileWriter: @unchecked Sendable {
   /// Diagnostic counter: number of queued writes waiting to be processed.
   /// Incremented before dispatch, decremented after completion. A value >5
   /// indicates the write queue is saturated (disk may be slow or full).
-  /// Approximate — accessed without synchronization for hot-path performance.
-  private(set) nonisolated(unsafe) var queueDepth: Int32 = 0
+  /// Uses OSAtomic because this counter is updated from the real-time audio
+  /// callback, where taking a lock could cause an audible capture glitch.
+  private nonisolated(unsafe) var _queueDepth: Int32 = 0
+  var queueDepth: Int32 { OSAtomicAdd32(0, &_queueDepth) }
 
   /// Called on the writer's queue when a write fails after all retries.
   /// The capture service should close the current segment and alert the user.
@@ -138,10 +141,11 @@ final class AudioFileWriter: @unchecked Sendable {
   /// and appends to the current file. This is the single serialization point
   /// for all audio data — callers do NOT need their own write queue.
   func write(samples: [Float], frameLength: Int, format: AVAudioFormat) {
-    queueDepth &+= 1
+    OSAtomicIncrement32Barrier(&_queueDepth)
     queue.async { [weak self] in
-      defer { self?.queueDepth &-= 1 }
-      guard let self, let file = self._audioFile else { return }
+      guard let self else { return }
+      defer { OSAtomicDecrement32Barrier(&self._queueDepth) }
+      guard let file = self._audioFile else { return }
       guard
         let wb = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameLength))
       else { return }
@@ -150,23 +154,6 @@ final class AudioFileWriter: @unchecked Sendable {
         dest[0].initialize(from: samples, count: frameLength)
       }
       self._writeWithRetry(buffer: wb, file: file)
-    }
-  }
-
-  /// Write a PCM buffer from an audio tap. The buffer is retained (single
-  /// atomic increment — NOT a heap allocation) and written directly on the
-  /// writer's queue. This eliminates the Array + AVAudioPCMBuffer allocations
-  /// that previously occurred on the real-time audio thread.
-  ///
-  /// Core Audio reuses tap buffers after the callback returns, but only if
-  /// no strong references remain. By capturing `buffer` in the async closure,
-  /// ARC keeps the backing memory alive until the write completes.
-  func write(buffer: AVAudioPCMBuffer) {
-    queueDepth &+= 1
-    queue.async { [weak self, buffer] in
-      defer { self?.queueDepth &-= 1 }
-      guard let self, let file = self._audioFile else { return }
-      self._writeWithRetry(buffer: buffer, file: file)
     }
   }
 
@@ -288,50 +275,47 @@ final class AudioFileWriter: @unchecked Sendable {
 
   // MARK: - Private (must be called on `queue`)
 
-  /// Single retry-with-backoff write routine used by both `write(samples:)` and `write(buffer:)`.
+  /// Single retry-with-backoff write routine used by `write(samples:)`.
   /// Distinguishes permanent errors (disk full) from transient errors — disk full aborts
-  /// immediately without retry. Uses `queue.asyncAfter` to avoid blocking the serial queue.
-  private func _writeWithRetry(buffer: AVAudioPCMBuffer, file: AVAudioFile, attempt: Int = 0) {
-    do {
-      try file.write(from: buffer)
-      return
-    } catch {
-      // Permanent errors: disk full — abort immediately, no retry
-      if isDiskFullError(error) {
-        _writeErrorCount += 1
-        _lastWriteError = error
-        AppLog.error("audio", "Write failed — disk full (permanent): \(error.localizedDescription)")
-        onWriteFailure?(AudioFileWriterError.diskFull)
-        return
-      }
+  /// immediately without retry. It is deliberately synchronous on the serial
+  /// writer queue so no later buffer can be written before a retry completes.
+  private func _writeWithRetry(buffer: AVAudioPCMBuffer, file: AVAudioFile) {
+    var attempt = 0
 
-      // Transient errors: retry with backoff
-      if attempt >= Self.maxRetries {
-        _writeErrorCount += 1
-        _lastWriteError = error
-        AppLog.error(
-          "audio",
-          "Write failed #\(_writeErrorCount) after \(attempt) retries: \(error.localizedDescription)"
-        )
-        onWriteFailure?(error)
+    while true {
+      do {
+        try file.write(from: buffer)
         return
-      }
-
-      let delay = Self.retryDelays[attempt]
-      AppLog.warn(
-        "audio",
-        "Write attempt \(attempt + 1) failed — retrying in \(Int(delay * 1000))ms: \(error.localizedDescription)"
-      )
-      // Synchronous retry on the serial queue: use async with a sleep to
-      // keep writes ordered. Unlike asyncAfter, this ensures no later
-      // buffer can jump ahead of the retry.
-      queue.async { [weak self] in
-        Thread.sleep(forTimeInterval: delay)
-        guard let self, self._audioFile != nil else {
-          AppLog.error("audio", "Write retry dropped — recording stopped before retry fired")
+      } catch {
+        // Permanent errors: disk full — abort immediately, no retry
+        if isDiskFullError(error) {
+          _writeErrorCount += 1
+          _lastWriteError = error
+          AppLog.error(
+            "audio", "Write failed — disk full (permanent): \(error.localizedDescription)")
+          onWriteFailure?(AudioFileWriterError.diskFull)
           return
         }
-        self._writeWithRetry(buffer: buffer, file: file, attempt: attempt + 1)
+
+        // Transient errors: retry with backoff
+        if attempt >= Self.maxRetries {
+          _writeErrorCount += 1
+          _lastWriteError = error
+          AppLog.error(
+            "audio",
+            "Write failed #\(_writeErrorCount) after \(attempt) retries: \(error.localizedDescription)"
+          )
+          onWriteFailure?(error)
+          return
+        }
+
+        let delay = Self.retryDelays[attempt]
+        AppLog.warn(
+          "audio",
+          "Write attempt \(attempt + 1) failed — retrying in \(Int(delay * 1000))ms: \(error.localizedDescription)"
+        )
+        Thread.sleep(forTimeInterval: delay)
+        attempt += 1
       }
     }
   }
@@ -350,7 +334,7 @@ final class AudioFileWriter: @unchecked Sendable {
   }
 
   private func _closeCurrentSegment() -> ClosedSegmentInfo? {
-    guard _audioFile != nil, let meetingId = _currentMeetingId else { return nil }
+    guard _audioFile != nil, _currentMeetingId != nil else { return nil }
     let idx = _segmentIndex
     // Use the actual file name from _openSegment (may be .wav for low sample rates).
     let fileName = _currentFileURL?.lastPathComponent ?? String(format: "segment-%03d.wav", idx)

@@ -1,6 +1,8 @@
 @preconcurrency import AVFoundation
 import OSLog
 
+// Related JIRA: KAN-542
+
 struct AudioChunk {
   let url: URL
   let startTime: TimeInterval
@@ -212,31 +214,91 @@ final class AudioChunker: @unchecked Sendable {
     // We need to wait for the writer to finish on a non-MainActor thread
     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
       let queue = DispatchQueue(label: "chunk.passthrough.\(UUID().uuidString)")
+      let state = PassthroughExportState(
+        reader: reader,
+        readerOutput: readerOutput,
+        writer: writer,
+        writerInput: writerInput,
+        continuation: continuation
+      )
       writerInput.requestMediaDataWhenReady(on: queue) {
-        while writerInput.isReadyForMoreMediaData {
-          if let sample = readerOutput.copyNextSampleBuffer() {
-            writerInput.append(sample)
-          } else {
-            writerInput.markAsFinished()
-            writer.finishWriting {
-              if writer.status == .completed {
-                continuation.resume()
-              } else {
-                continuation.resume(
-                  throwing: writer.error
-                    ?? NSError(
-                      domain: "chunk", code: -8,
-                      userInfo: [NSLocalizedDescriptionKey: "Writer failed"]))
-              }
-            }
-            return
-          }
-        }
+        state.drain()
       }
     } as Void
   }
 
   func cleanup() {
     try? FileManager.default.removeItem(at: tempDir)
+  }
+}
+
+/// Owns the non-Sendable AVFoundation reader/writer graph. AVFoundation invokes
+/// `drain` only on the serial queue supplied to `requestMediaDataWhenReady`, and
+/// completion is guarded so the checked continuation is resumed exactly once.
+private final class PassthroughExportState: @unchecked Sendable {
+  private let reader: AVAssetReader
+  private let readerOutput: AVAssetReaderOutput
+  private let writer: AVAssetWriter
+  private let writerInput: AVAssetWriterInput
+  private let continuation: CheckedContinuation<Void, Error>
+  private let completionLock = NSLock()
+  private var didComplete = false
+
+  init(
+    reader: AVAssetReader,
+    readerOutput: AVAssetReaderOutput,
+    writer: AVAssetWriter,
+    writerInput: AVAssetWriterInput,
+    continuation: CheckedContinuation<Void, Error>
+  ) {
+    self.reader = reader
+    self.readerOutput = readerOutput
+    self.writer = writer
+    self.writerInput = writerInput
+    self.continuation = continuation
+  }
+
+  func drain() {
+    while writerInput.isReadyForMoreMediaData {
+      guard let sample = readerOutput.copyNextSampleBuffer() else {
+        writerInput.markAsFinished()
+        writer.finishWriting { [self] in
+          if writer.status == .completed {
+            complete(with: .success(()))
+          } else {
+            complete(
+              with: .failure(
+                writer.error
+                  ?? NSError(
+                    domain: "chunk", code: -8,
+                    userInfo: [NSLocalizedDescriptionKey: "Writer failed"])))
+          }
+        }
+        return
+      }
+
+      guard writerInput.append(sample) else {
+        reader.cancelReading()
+        writer.cancelWriting()
+        complete(
+          with: .failure(
+            writer.error
+              ?? NSError(
+                domain: "chunk", code: -9,
+                userInfo: [NSLocalizedDescriptionKey: "Writer rejected audio sample"])))
+        return
+      }
+    }
+  }
+
+  private func complete(with result: Result<Void, Error>) {
+    completionLock.lock()
+    guard !didComplete else {
+      completionLock.unlock()
+      return
+    }
+    didComplete = true
+    completionLock.unlock()
+    continuation.resume(with: result)
   }
 }

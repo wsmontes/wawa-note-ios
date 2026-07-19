@@ -3,6 +3,8 @@ import SwiftData
 import SwiftUI
 import WawaNoteCore
 
+// Related JIRA: KAN-542
+
 // MARK: - Barcode Scanner ViewModel
 
 @MainActor
@@ -13,14 +15,13 @@ final class BarcodeScannerViewModel: ObservableObject {
   @Published var error: String?
   @Published var flashOn = false
 
-  let session = AVCaptureSession()
-  private let output = AVCaptureMetadataOutput()
+  private let captureController = BarcodeCaptureController()
   private var scannedValues: Set<String> = []
   private var scanCooldown: [String: Date] = [:]
   private let cooldownInterval: TimeInterval = 3.0
+  private var isReady = false
 
-  // Must be held strongly or the delegate callback never fires
-  private var sessionDelegate: CaptureSessionDelegate?
+  var session: AVCaptureSession { captureController.session }
 
   // MARK: - Setup
 
@@ -41,43 +42,18 @@ final class BarcodeScannerViewModel: ObservableObject {
       return
     }
 
-    guard
-      let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
-    else {
-      error = "Camera not available"
-      return
+    do {
+      try await captureController.configure()
+      isReady = true
+    } catch {
+      self.error = error.localizedDescription
     }
-    guard let input = try? AVCaptureDeviceInput(device: device) else {
-      error = "Cannot create camera input"
-      return
-    }
-
-    session.beginConfiguration()
-    guard session.canAddInput(input) else {
-      error = "Cannot add camera input"
-      session.commitConfiguration()
-      return
-    }
-    session.addInput(input)
-
-    guard session.canAddOutput(output) else {
-      error = "Cannot add metadata output"
-      session.commitConfiguration()
-      return
-    }
-    session.addOutput(output)
-
-    output.metadataObjectTypes = [
-      .qr, .aztec, .code128, .code39, .code39Mod43, .code93,
-      .dataMatrix, .ean8, .ean13, .itf14, .pdf417, .upce,
-    ]
-
-    session.commitConfiguration()
   }
 
   // MARK: - Control
 
   func startScanning() {
+    guard isReady else { return }
     scannedCodes = []
     scannedValues = []
     scanCooldown = [:]
@@ -89,32 +65,20 @@ final class BarcodeScannerViewModel: ObservableObject {
         self?.handleDetection(value: value, symbology: symbology)
       }
     }
-    self.sessionDelegate = delegate
-    output.setMetadataObjectsDelegate(delegate, queue: DispatchQueue(label: "barcode.queue"))
-
-    // Capture session reference before async block
-    let s = session
-    DispatchQueue.global(qos: .userInitiated).async {
-      s.startRunning()
-      Task { @MainActor in }
-    }
+    captureController.start(delegate: delegate)
     isScanning = true
   }
 
   func stopScanning() {
-    session.stopRunning()
+    captureController.stop()
     isScanning = false
   }
 
   func toggleFlash() {
-    guard
-      let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
-      device.hasTorch
-    else { return }
-    try? device.lockForConfiguration()
-    flashOn.toggle()
-    device.torchMode = flashOn ? .on : .off
-    device.unlockForConfiguration()
+    let requestedState = !flashOn
+    Task {
+      flashOn = await captureController.setTorch(enabled: requestedState)
+    }
   }
 
   // MARK: - Detection
@@ -175,11 +139,133 @@ final class BarcodeScannerViewModel: ObservableObject {
   }
 }
 
+// MARK: - Capture Session Controller
+
+private enum BarcodeCaptureError: LocalizedError {
+  case cameraUnavailable
+  case inputUnavailable
+  case cannotAddInput
+  case cannotAddOutput
+
+  var errorDescription: String? {
+    switch self {
+    case .cameraUnavailable: "Camera not available"
+    case .inputUnavailable: "Cannot create camera input"
+    case .cannotAddInput: "Cannot add camera input"
+    case .cannotAddOutput: "Cannot add metadata output"
+    }
+  }
+}
+
+/// Owns all AVCaptureSession mutation on one serial queue. The preview layer may
+/// read `session`, but configuration, start/stop, delegate setup, and torch
+/// changes never race each other.
+private final class BarcodeCaptureController: @unchecked Sendable {
+  let session = AVCaptureSession()
+
+  private let output = AVCaptureMetadataOutput()
+  private let queue = DispatchQueue(label: "com.wawa-note.barcode.capture", qos: .userInitiated)
+  private var isConfigured = false
+  private var sessionDelegate: CaptureSessionDelegate?
+
+  func configure() async throws {
+    try await withCheckedThrowingContinuation { continuation in
+      queue.async { [self] in
+        do {
+          try configureIfNeeded()
+          continuation.resume()
+        } catch {
+          continuation.resume(throwing: error)
+        }
+      }
+    }
+  }
+
+  func start(delegate: CaptureSessionDelegate) {
+    queue.async { [self] in
+      sessionDelegate = delegate
+      output.setMetadataObjectsDelegate(delegate, queue: queue)
+      guard isConfigured, !session.isRunning else { return }
+      session.startRunning()
+    }
+  }
+
+  func stop() {
+    queue.async { [self] in
+      if session.isRunning {
+        session.stopRunning()
+      }
+      output.setMetadataObjectsDelegate(nil, queue: nil)
+      sessionDelegate = nil
+    }
+  }
+
+  func setTorch(enabled: Bool) async -> Bool {
+    await withCheckedContinuation { continuation in
+      queue.async {
+        guard
+          let device = AVCaptureDevice.default(
+            .builtInWideAngleCamera, for: .video, position: .back),
+          device.hasTorch
+        else {
+          continuation.resume(returning: false)
+          return
+        }
+
+        do {
+          try device.lockForConfiguration()
+          defer { device.unlockForConfiguration() }
+          device.torchMode = enabled ? .on : .off
+          continuation.resume(returning: device.torchMode == .on)
+        } catch {
+          continuation.resume(returning: false)
+        }
+      }
+    }
+  }
+
+  private func configureIfNeeded() throws {
+    guard !isConfigured else { return }
+    guard
+      let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+    else {
+      throw BarcodeCaptureError.cameraUnavailable
+    }
+
+    let input: AVCaptureDeviceInput
+    do {
+      input = try AVCaptureDeviceInput(device: device)
+    } catch {
+      throw BarcodeCaptureError.inputUnavailable
+    }
+
+    session.beginConfiguration()
+    defer { session.commitConfiguration() }
+
+    guard session.canAddInput(input) else { throw BarcodeCaptureError.cannotAddInput }
+    session.addInput(input)
+
+    guard session.canAddOutput(output) else { throw BarcodeCaptureError.cannotAddOutput }
+    session.addOutput(output)
+
+    let requestedTypes: [AVMetadataObject.ObjectType] = [
+      .qr, .aztec, .code128, .code39, .code39Mod43, .code93,
+      .dataMatrix, .ean8, .ean13, .itf14, .pdf417, .upce,
+    ]
+    output.metadataObjectTypes = requestedTypes.filter(output.availableMetadataObjectTypes.contains)
+    isConfigured = true
+  }
+}
+
 // MARK: - Delegate
 
-private final class CaptureSessionDelegate: NSObject, AVCaptureMetadataOutputObjectsDelegate {
-  let onDetection: (String, String) -> Void
-  init(onDetection: @escaping (String, String) -> Void) { self.onDetection = onDetection }
+private final class CaptureSessionDelegate: NSObject, AVCaptureMetadataOutputObjectsDelegate,
+  @unchecked Sendable
+{
+  let onDetection: @Sendable (String, String) -> Void
+  init(onDetection: @escaping @Sendable (String, String) -> Void) {
+    self.onDetection = onDetection
+  }
 
   func metadataOutput(
     _ output: AVCaptureMetadataOutput,

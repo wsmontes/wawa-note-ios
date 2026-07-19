@@ -5,6 +5,8 @@ import SwiftUI
 import Vision
 import WawaNoteCore
 
+// Related JIRA: KAN-542
+
 // MARK: - Motion State
 
 enum MotionState: String {
@@ -37,6 +39,12 @@ struct DocumentSection: Identifiable {
   var capturedAt: Date
 }
 
+private struct OCRCandidate: Sendable {
+  let normalizedRect: CGRect
+  let text: String
+  let confidence: Float
+}
+
 // MARK: - Live OCR ViewModel
 
 @MainActor
@@ -51,9 +59,10 @@ final class LiveOCRViewModel: ObservableObject {
   @Published var motionState: MotionState = .stable
   @Published var error: String?
 
-  let session = AVCaptureSession()
-  private let videoOutput = AVCaptureVideoDataOutput()
-  private var ocrDelegate: OCRVideoDelegate?
+  private let captureController = LiveOCRCaptureController()
+  private var isReady = false
+
+  var session: AVCaptureSession { captureController.session }
 
   // Tracking — accessed only on MainActor now
   private var trackedRegions: [TrackedRegion] = []
@@ -88,51 +97,18 @@ final class LiveOCRViewModel: ObservableObject {
       return
     }
 
-    guard
-      let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
-    else {
-      error = "Camera not available"
-      return
+    do {
+      try await captureController.configure()
+      isReady = true
+    } catch {
+      self.error = error.localizedDescription
     }
-    guard let input = try? AVCaptureDeviceInput(device: device) else {
-      error = "Cannot create camera input"
-      return
-    }
-
-    session.beginConfiguration()
-    session.sessionPreset = .high
-    guard session.canAddInput(input) else {
-      error = "Cannot add camera input"
-      session.commitConfiguration()
-      return
-    }
-    session.addInput(input)
-
-    videoOutput.videoSettings = [
-      kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
-    ]
-    videoOutput.alwaysDiscardsLateVideoFrames = true
-    guard session.canAddOutput(videoOutput) else {
-      error = "Cannot add video output"
-      session.commitConfiguration()
-      return
-    }
-    session.addOutput(videoOutput)
-
-    if device.isFocusModeSupported(.continuousAutoFocus) {
-      try? device.lockForConfiguration()
-      device.focusMode = .continuousAutoFocus
-      if device.isAutoFocusRangeRestrictionSupported { device.autoFocusRangeRestriction = .near }
-      device.unlockForConfiguration()
-    }
-
-    session.commitConfiguration()
-    startMotion()
   }
 
   // MARK: - Control
 
   func startScanning() {
+    guard isReady else { return }
     accumulatedText = ""
     sections = []
     wordCount = 0
@@ -148,18 +124,14 @@ final class LiveOCRViewModel: ObservableObject {
         self?.processFrame(observations)
       }
     }
-    self.ocrDelegate = delegate
-    videoOutput.setSampleBufferDelegate(
-      delegate, queue: DispatchQueue(label: "ocr.queue", qos: .userInitiated))
-
-    let s = session
-    DispatchQueue.global(qos: .userInitiated).async { s.startRunning() }
+    startMotion()
+    captureController.start(delegate: delegate)
     isScanning = true
   }
 
   func stopScanning() {
     motionManager.stopDeviceMotionUpdates()
-    session.stopRunning()
+    captureController.stop()
     isScanning = false
   }
 
@@ -200,19 +172,18 @@ final class LiveOCRViewModel: ObservableObject {
 
   // MARK: - Frame Processing (runs on MainActor via Task)
 
-  private func processFrame(_ observations: [VNRecognizedTextObservation]) {
+  private func processFrame(_ observations: [OCRCandidate]) {
     guard !isPaused else { return }
     let now = Date()
     guard now.timeIntervalSince(lastProcessTime) >= processInterval else { return }
     lastProcessTime = now
     frameCount += 1
 
-    let candidates: [TrackedRegion] = observations.compactMap { obs in
-      guard let top = obs.topCandidates(1).first, top.confidence > 0.3 else { return nil }
-      let text = top.string.trimmingCharacters(in: .whitespacesAndNewlines)
-      guard !text.isEmpty else { return nil }
+    let candidates: [TrackedRegion] = observations.map { observation in
       return TrackedRegion(
-        normalizedRect: obs.boundingBox, text: text, confidence: top.confidence,
+        normalizedRect: observation.normalizedRect,
+        text: observation.text,
+        confidence: observation.confidence,
         lastSeenFrame: frameCount, stabilityCount: 1)
     }
 
@@ -317,13 +288,121 @@ final class LiveOCRViewModel: ObservableObject {
   }
 }
 
+// MARK: - Capture Session Controller
+
+private enum LiveOCRCaptureError: LocalizedError {
+  case cameraUnavailable
+  case inputUnavailable
+  case cannotAddInput
+  case cannotAddOutput
+
+  var errorDescription: String? {
+    switch self {
+    case .cameraUnavailable: "Camera not available"
+    case .inputUnavailable: "Cannot create camera input"
+    case .cannotAddInput: "Cannot add camera input"
+    case .cannotAddOutput: "Cannot add video output"
+    }
+  }
+}
+
+/// Serializes every AVCaptureSession mutation and owns the video delegate for
+/// the lifetime of the running session.
+private final class LiveOCRCaptureController: @unchecked Sendable {
+  let session = AVCaptureSession()
+
+  private let videoOutput = AVCaptureVideoDataOutput()
+  private let queue = DispatchQueue(label: "com.wawa-note.ocr.capture", qos: .userInitiated)
+  private var isConfigured = false
+  private var ocrDelegate: OCRVideoDelegate?
+
+  func configure() async throws {
+    try await withCheckedThrowingContinuation { continuation in
+      queue.async { [self] in
+        do {
+          try configureIfNeeded()
+          continuation.resume()
+        } catch {
+          continuation.resume(throwing: error)
+        }
+      }
+    }
+  }
+
+  func start(delegate: OCRVideoDelegate) {
+    queue.async { [self] in
+      ocrDelegate = delegate
+      videoOutput.setSampleBufferDelegate(delegate, queue: queue)
+      guard isConfigured, !session.isRunning else { return }
+      session.startRunning()
+    }
+  }
+
+  func stop() {
+    queue.async { [self] in
+      if session.isRunning {
+        session.stopRunning()
+      }
+      videoOutput.setSampleBufferDelegate(nil, queue: nil)
+      ocrDelegate = nil
+    }
+  }
+
+  private func configureIfNeeded() throws {
+    guard !isConfigured else { return }
+    guard
+      let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+    else {
+      throw LiveOCRCaptureError.cameraUnavailable
+    }
+
+    let input: AVCaptureDeviceInput
+    do {
+      input = try AVCaptureDeviceInput(device: device)
+    } catch {
+      throw LiveOCRCaptureError.inputUnavailable
+    }
+
+    session.beginConfiguration()
+    defer { session.commitConfiguration() }
+    session.sessionPreset = .high
+
+    guard session.canAddInput(input) else { throw LiveOCRCaptureError.cannotAddInput }
+    session.addInput(input)
+
+    videoOutput.videoSettings = [
+      kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+    ]
+    videoOutput.alwaysDiscardsLateVideoFrames = true
+    guard session.canAddOutput(videoOutput) else { throw LiveOCRCaptureError.cannotAddOutput }
+    session.addOutput(videoOutput)
+
+    if device.isFocusModeSupported(.continuousAutoFocus) {
+      do {
+        try device.lockForConfiguration()
+        defer { device.unlockForConfiguration() }
+        device.focusMode = .continuousAutoFocus
+        if device.isAutoFocusRangeRestrictionSupported {
+          device.autoFocusRangeRestriction = .near
+        }
+      } catch {
+        // Focus tuning is optional; the capture session remains usable.
+      }
+    }
+
+    isConfigured = true
+  }
+}
+
 // MARK: - OCR Video Delegate
 
-private final class OCRVideoDelegate: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
-  let onObservations: ([VNRecognizedTextObservation]) -> Void
+private final class OCRVideoDelegate: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate,
+  @unchecked Sendable
+{
+  let onObservations: @Sendable ([OCRCandidate]) -> Void
   private var lastTime: TimeInterval = 0
 
-  init(onObservations: @escaping ([VNRecognizedTextObservation]) -> Void) {
+  init(onObservations: @escaping @Sendable ([OCRCandidate]) -> Void) {
     self.onObservations = onObservations
   }
 
@@ -340,7 +419,18 @@ private final class OCRVideoDelegate: NSObject, AVCaptureVideoDataOutputSampleBu
 
     let request = VNRecognizeTextRequest { [weak self] req, err in
       guard err == nil, let obs = req.results as? [VNRecognizedTextObservation] else { return }
-      self?.onObservations(obs)
+      let candidates = obs.compactMap { observation -> OCRCandidate? in
+        guard let top = observation.topCandidates(1).first, top.confidence > 0.3 else {
+          return nil
+        }
+        let text = top.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        return OCRCandidate(
+          normalizedRect: observation.boundingBox,
+          text: text,
+          confidence: top.confidence)
+      }
+      self?.onObservations(candidates)
     }
     request.recognitionLevel = .accurate
     request.usesLanguageCorrection = true
