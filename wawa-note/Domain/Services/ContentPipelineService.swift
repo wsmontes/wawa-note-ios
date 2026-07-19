@@ -6,6 +6,8 @@ import SwiftData
 import UIKit
 import WawaNoteCore
 
+// Related JIRA: KAN-533
+
 // MARK: - Pipeline Agent Templates
 
 /// Pipeline agent templates define the behavior, rules, and strategy
@@ -127,8 +129,6 @@ enum PipelineTemplate {
 /// The agent decides strategy based on content size, type, and complexity.
 @MainActor
 final class ContentPipelineService: ObservableObject {
-  private let ingestionPipeline: ProjectIngestionPipeline
-  private let ingestionState: ProjectIngestionState
   private let modelContainer: ModelContainer
   /// Exposed for ProcessingQueueService to check item status after pipeline completes.
   var container: ModelContainer { modelContainer }
@@ -139,12 +139,7 @@ final class ContentPipelineService: ObservableObject {
   private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
   private var backgroundTaskCount = 0
 
-  init(
-    ingestionPipeline: ProjectIngestionPipeline, ingestionState: ProjectIngestionState,
-    modelContainer: ModelContainer
-  ) {
-    self.ingestionPipeline = ingestionPipeline
-    self.ingestionState = ingestionState
+  init(modelContainer: ModelContainer) {
     self.modelContainer = modelContainer
   }
 
@@ -248,10 +243,6 @@ final class ContentPipelineService: ObservableObject {
         forceReanalysis || item.analysisProviderId == nil || !AutomationSettings.shared.autoAnalyze
       else {
         AppLog.provider.info("ContentPipeline: item \(itemID) already analyzed, skipping")
-        // Still run ingestion if needed
-        if let projectID = item.projectID {
-          await ingestionPipeline.ingest(itemID: itemID, projectID: projectID, using: modelContext)
-        }
         terminalStateReached = true  // .analyzed is terminal
         return
       }
@@ -877,8 +868,6 @@ final class ContentPipelineService: ObservableObject {
           )
         }
       }
-      // Update project health after agent completes
-      if let pid = item.projectID { ProjectHealthEngine.updateProject(pid, context: modelContext) }
       // Generate embedding for semantic search
       if lastError == nil,
         let fresh = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID)
@@ -893,31 +882,6 @@ final class ContentPipelineService: ObservableObject {
         SpotlightIndexService().indexItem(fresh)
       }
       // Keep status visible so user can see agent trace
-    }
-  }
-
-  /// Run only Phase 3 (project ingestion) for an item that has already been
-  /// extracted and analyzed. Use this when assigning a fully-processed item
-  /// to a project — avoids redundant re-transcription and re-analysis.
-  func ingestOnly(_ itemID: UUID, projectID: UUID, using modelContext: ModelContext) {
-    guard activeJobs[itemID] == nil else {
-      AppLog.provider.info(
-        "ContentPipeline: item \(itemID) already processing, deferring ingestion to running job")
-      return
-    }
-
-    activeJobs[itemID] = Task { @MainActor in
-      defer {
-        activeJobs[itemID] = nil
-        endBackgroundTask()
-        NotificationCenter.default.post(name: .pipelineCompleted, object: itemID.uuidString)
-      }
-      beginBackgroundTask()
-
-      NotificationCenter.default.post(
-        name: .contentPipelineStageChanged, object: itemID.uuidString,
-        userInfo: ["stage": PipelineStage.ingesting.rawValue])
-      await ingestionPipeline.ingest(itemID: itemID, projectID: projectID, using: modelContext)
     }
   }
 
@@ -1897,7 +1861,6 @@ enum FrameworkError: Error, LocalizedError {
 enum PipelineStage: String, Sendable {
   case extracting = "Extracting content..."
   case analyzing = "Analyzing..."
-  case ingesting = "Updating project..."
 }
 
 // MARK: - Pipeline progress (observable)
@@ -1923,7 +1886,7 @@ struct PipelineProgress: Sendable {
   let itemId: UUID
   let itemTitle: String
   let itemType: String
-  let phase: String  // "starting", "transcribing", "analyzing", "ingesting", "completed", "error"
+  let phase: String  // "starting", "transcribing", "analyzing", "completed", "error"
   let currentTool: String?
   let toolSummary: String?
   var toolLog: [String]  // ordered list of "tool_name: summary"

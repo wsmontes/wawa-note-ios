@@ -2,6 +2,8 @@ import SwiftData
 import SwiftUI
 import WawaNoteCore
 
+// Related JIRA: KAN-533
+
 private enum ReprocessMode: CustomStringConvertible {
   case transcribeOnly
   case analyzeOnly
@@ -36,7 +38,6 @@ struct KnowledgeDetailView: View {
   @Environment(\.modelContext) private var modelContext
   @EnvironmentObject private var contentPipeline: ContentPipelineService
   @EnvironmentObject private var processingQueue: ProcessingQueueService
-  @EnvironmentObject private var chatState: ChatOverlayState
   @State private var transcript: Transcript?
   @State private var analysis: MeetingAnalysis?
   @State private var annotations: [Annotation] = []
@@ -492,7 +493,6 @@ struct KnowledgeDetailView: View {
         )
       }
       .onAppear {
-        chatState.context = .item(item.id)
         analysisAvailable = AIConfigService.shared.isProviderConfigured(context: modelContext)
         // Load scanned pages ONCE to avoid blocking main thread on re-renders
         if item.type == .image, scannedPages.isEmpty {

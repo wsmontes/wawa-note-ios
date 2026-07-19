@@ -319,3 +319,35 @@ RecordingCoordinator already publishes state changes and elapsed time via a 1-se
 - RecordingActivityAttributes + start/update/stop methods in RecordingCoordinator.
 - @preconcurrency import ActivityKit required for Swift 6 Sendable compatibility.
 - No Info.plist changes needed.
+
+---
+
+## ADR-0013: V1 scope is Capture / Inbox / Explore with collection-only Projects
+
+**Date:** 2026-07-19
+
+**Status:** Accepted
+
+**Related JIRA:** KAN-533
+
+**Decision:** Ship v1 with three primary tabs—Capture, Inbox, and Explore. Remove Chat from the user-facing navigation and runtime initialization. Treat a Project as a user-named collection of source `KnowledgeItem` records, without project-level synthesis, ingestion, tasks, signals, health scoring, or graph UI.
+
+**Motivation:**
+
+The release audit found that the `mvp-v2` branch had reintroduced the global Chat tab and project-agent pipeline even though the prior v1 simplification was recorded as complete in KAN-518/KAN-519/KAN-523. Those surfaces add large, provider-dependent, weakly tested execution paths to the release-critical capture and review loop. The product must first prove that users can reliably capture, transcribe, analyze, organize, recover, and export source evidence.
+
+**Alternatives considered:**
+
+- Keep global Chat as a fourth tab. Rejected for v1 because it dilutes the capture-and-memory product and materially expands the test matrix.
+- Keep Chat only inside Projects. Rejected for v1 because it still requires project-scoped agent/VFS behavior and provider setup in the primary organization surface.
+- Keep automatic Project synthesis. Rejected because Projects need predictable collection semantics before derived multi-item intelligence can be trusted.
+- Remove all chat, graph, task, and derived-data models immediately. Rejected because deleting persisted schema at release time creates unnecessary migration and evidence-loss risk.
+
+**Consequences:**
+
+- ADR-0009 is superseded for v1 navigation; ADR-0010 remains an implemented post-v1 capability, not a shipping surface.
+- `ContentPipelineService` performs source extraction, transcription, analysis, embedding, and indexing only. It no longer initializes or calls `ProjectIngestionPipeline`.
+- Project screens list source items and support record, note, import, remove, and export operations.
+- Existing derived models and implementation files remain in the binary temporarily for data compatibility, but are unreachable from v1 UI and are not initialized.
+- Deleting a Project detaches and preserves its source items.
+- Sensitive permissions are requested only when the user invokes the related feature. Recording captures non-sensitive audio-route and battery metadata by default; it does not automatically access calendar, location, motion, or Focus status. The app does not request notification permission at launch.

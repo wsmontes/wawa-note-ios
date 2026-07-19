@@ -2,13 +2,13 @@ import SwiftData
 import SwiftUI
 import WawaNoteCore
 
+// Related JIRA: KAN-152, KAN-533
+
 struct InboxView: View {
   @Environment(\.modelContext) private var modelContext
   @Environment(ToastQueue.self) private var toastQueue
   @EnvironmentObject private var contentPipeline: ContentPipelineService
   @EnvironmentObject private var processingQueue: ProcessingQueueService
-  @EnvironmentObject private var chatState: ChatOverlayState
-  @EnvironmentObject private var chatViewModel: ChatViewModel
   @Query(sort: \KnowledgeItem.updatedAt, order: .reverse) private var allItems: [KnowledgeItem]
   @Query(sort: \Folder.name) private var folders: [Folder]
   @Query(sort: \Project.name) private var projects: [Project]
@@ -27,6 +27,10 @@ struct InboxView: View {
   @State private var navigateToProject: Project?
 
   private let searchService = SearchService()
+
+  private var visibleProjects: [Project] {
+    ProjectService.visibleProjects(in: projects)
+  }
 
   enum InboxFilter: String, CaseIterable {
     case needsReview = "Needs Review"
@@ -100,8 +104,6 @@ struct InboxView: View {
       }
     }
     .onAppear {
-      chatState.context = .inbox
-      chatViewModel.pregenerateGreeting(for: .inbox)
       loadTrashFolder()
     }
     .sheet(item: $showFolderPicker) { item in
@@ -542,7 +544,7 @@ struct InboxView: View {
     NavigationStack {
       List {
         Section("Projects") {
-          ForEach(projects) { project in
+          ForEach(visibleProjects) { project in
             Button {
               assignToProject(item, project: project)
               showFolderPicker = nil
@@ -551,7 +553,7 @@ struct InboxView: View {
                 .foregroundStyle(.brown)
             }
           }
-          if projects.isEmpty {
+          if visibleProjects.isEmpty {
             VStack(spacing: 8) {
               Text("No projects yet").font(.headline)
               Text("Promote a knowledge item from the Explore tab to create your first project.")

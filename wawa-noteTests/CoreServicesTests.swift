@@ -1,7 +1,10 @@
-import WawaNoteCore
+import SwiftData
 import XCTest
+import WawaNoteCore
 
 @testable import Wawa_Note
+
+// Related JIRA: KAN-152, KAN-533, KAN-534
 
 @MainActor
 final class SemanticSearchServiceTests: XCTestCase {
@@ -340,6 +343,99 @@ final class ProjectStatusTests: XCTestCase {
     XCTAssertTrue(all.contains(.active))
     XCTAssertTrue(all.contains(.archived))
     XCTAssertTrue(all.contains(.completed))
+  }
+}
+
+@MainActor
+final class ProjectCollectionServiceTests: XCTestCase {
+  private var container: ModelContainer!
+  private var context: ModelContext!
+  private var service: ProjectService!
+
+  override func setUp() async throws {
+    let schema = Schema([
+      Project.self,
+      KnowledgeItem.self,
+      TaskItem.self,
+      GraphEdge.self,
+    ])
+    let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+    container = try ModelContainer(for: schema, configurations: config)
+    context = container.mainContext
+    service = ProjectService(context: context)
+  }
+
+  override func tearDown() async throws {
+    service = nil
+    context = nil
+    container = nil
+  }
+
+  func testAddAndRemoveItemTreatsProjectAsCollection() throws {
+    let project = try service.create(name: "Launch")
+    project.updatedAt = .distantPast
+    let item = KnowledgeItem(type: .note, title: "Release checklist")
+    context.insert(item)
+    try context.save()
+
+    try service.addItem(item.id, to: project.id)
+
+    XCTAssertEqual(item.projectID, project.id)
+    XCTAssertNil(item.inboxDate)
+    XCTAssertGreaterThan(project.updatedAt, .distantPast)
+    XCTAssertEqual(try service.items(in: project.id).map(\.id), [item.id])
+
+    try service.removeItem(item.id)
+
+    XCTAssertNil(item.projectID)
+    XCTAssertTrue(try service.items(in: project.id).isEmpty)
+    XCTAssertNotNil(try KnowledgeItemService(context: context).fetchItem(id: item.id))
+  }
+
+  func testMovingItemUpdatesBothCollections() throws {
+    let source = try service.create(name: "Source")
+    let destination = try service.create(name: "Destination")
+    let item = KnowledgeItem(type: .note, title: "Shared evidence")
+    item.projectID = source.id
+    context.insert(item)
+    try context.save()
+    source.updatedAt = .distantPast
+    destination.updatedAt = .distantPast
+
+    try service.addItem(item.id, to: destination.id)
+
+    XCTAssertEqual(item.projectID, destination.id)
+    XCTAssertGreaterThan(source.updatedAt, .distantPast)
+    XCTAssertGreaterThan(destination.updatedAt, .distantPast)
+  }
+
+  func testDeletingProjectPreservesSourceItem() throws {
+    let project = try service.create(name: "Temporary Collection")
+    let item = KnowledgeItem(type: .note, title: "Keep me")
+    item.projectID = project.id
+    context.insert(item)
+    try context.save()
+
+    try service.deleteProject(project)
+
+    let savedItem = try XCTUnwrap(KnowledgeItemService(context: context).fetchItem(id: item.id))
+    XCTAssertNil(savedItem.projectID)
+    XCTAssertNil(try service.fetch(id: project.id))
+  }
+}
+
+@MainActor
+final class ProjectVisibilityTests: XCTestCase {
+  func testVisibleProjectsExcludeHiddenAndConfigProjects() {
+    let userProject = Project(name: "Launch")
+    let hiddenProject = Project(name: "Hidden")
+    hiddenProject.isHidden = true
+    let configProject = Project(name: ConfigProjectService.configProjectName)
+    configProject.slug = ConfigProjectService.configProjectSlug
+
+    let visible = ProjectService.visibleProjects(in: [userProject, hiddenProject, configProject])
+
+    XCTAssertEqual(visible.map(\.id), [userProject.id])
   }
 }
 
@@ -1180,3 +1276,12 @@ final class CheckpointResumeDedupTests: XCTestCase {
 
 // NowPlayingController tests require MediaPlayer framework linkage in test target.
 // TODO: Add MediaPlayer to test target's framework search paths and re-enable.
+
+final class ContextCapturePrivacyTests: XCTestCase {
+  func testDefaultRecordingContextUsesOnlyNonSensitiveSensors() {
+    XCTAssertEqual(
+      Set(ContextCaptureService.defaultSensorNames),
+      Set(["audio_route", "battery_state"])
+    )
+  }
+}

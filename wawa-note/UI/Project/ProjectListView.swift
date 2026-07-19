@@ -2,6 +2,8 @@ import SwiftData
 import SwiftUI
 import WawaNoteCore
 
+// Related JIRA: KAN-152, KAN-533
+
 enum ProjectSortOrder: CaseIterable { case recent, name, created }
 
 struct ProjectListView: View {
@@ -9,7 +11,6 @@ struct ProjectListView: View {
   @EnvironmentObject var recordingCoordinator: RecordingCoordinator
   @Query(sort: \Project.updatedAt, order: .reverse) private var projects: [Project]
   @Query(sort: \KnowledgeItem.updatedAt) private var allItems: [KnowledgeItem]
-  @Query(sort: \TaskItem.createdAt) private var allTasks: [TaskItem]
   @State private var showNewProject = false
   @State private var newProjectName = ""
   @State private var searchText = ""
@@ -18,17 +19,18 @@ struct ProjectListView: View {
   @FocusState private var isNameFieldFocused: Bool
   @State private var sortOrder: ProjectSortOrder = .recent
   @State private var itemCounts: [UUID: Int] = [:]
-  @State private var taskCounts: [UUID: Int] = [:]
-  @State private var openTaskCounts: [UUID: Int] = [:]
   @State private var showDeleteConfirmation = false
   @State private var projectToDelete: Project?
 
+  private var userProjects: [Project] {
+    ProjectService.visibleProjects(in: projects)
+  }
+
   private var sortedProjects: [Project] {
-    let nonConfig = projects.filter { !ConfigProjectService.isConfigProject($0) }
     let filtered =
       searchText.isEmpty
-      ? nonConfig
-      : nonConfig.filter {
+      ? userProjects
+      : userProjects.filter {
         $0.name.localizedCaseInsensitiveContains(searchText)
           || ($0.summary ?? "").localizedCaseInsensitiveContains(searchText)
       }
@@ -41,7 +43,7 @@ struct ProjectListView: View {
 
   var body: some View {
     Group {
-      if projects.isEmpty {
+      if userProjects.isEmpty {
         emptyState
       } else {
         listView
@@ -80,8 +82,7 @@ struct ProjectListView: View {
       // Rebuild list to force @Query refresh on tab switch
       listRefreshID = UUID()
     }
-    .onChange(of: allItems.count) { _ in computeCounts() }
-    .onChange(of: allTasks.count) { _ in computeCounts() }
+    .onChange(of: allItems.count) { computeCounts() }
   }
 
   private var emptyState: some View {
@@ -93,7 +94,7 @@ struct ProjectListView: View {
       Text("No projects yet")
         .font(.title3)
         .fontWeight(.medium)
-      Text("Capture audio, scan documents, or create notes — then promote them to projects.")
+      Text("Capture audio, scan documents, or create notes — then group related items into projects.")
         .font(.subheadline)
         .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
@@ -130,8 +131,8 @@ struct ProjectListView: View {
               systemImage: project.status == .archived ? "arrow.uturn.backward" : "archivebox")
           }.tint(.orange)
           Button(role: .destructive) {
-            let svc = ProjectService(context: modelContext)
-            try? svc.deleteProject(project)
+            projectToDelete = project
+            showDeleteConfirmation = true
           } label: {
             Label("Delete", systemImage: "trash")
           }
@@ -163,48 +164,31 @@ struct ProjectListView: View {
 
   private func projectRow(_ project: Project) -> some View {
     let itemCount = itemCounts[project.id] ?? 0
-    let taskCount = taskCounts[project.id] ?? 0
-    let openTasks = openTaskCounts[project.id] ?? 0
 
-    return VStack(alignment: .leading, spacing: AppSpacing.sm) {
-      HStack(spacing: AppSpacing.md) {
-        Image(systemName: project.iconName ?? "folder.fill")
-          .font(.title3)
-          .foregroundStyle(Color(hex: project.colorHex ?? ProjectPalette.allHexes.first!))
-          .frame(width: 32, height: 32)
-          .background(Color(hex: project.colorHex ?? ProjectPalette.allHexes.first!).opacity(0.1))
-          .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm))
+    return HStack(spacing: AppSpacing.md) {
+      Image(systemName: project.iconName ?? "folder.fill")
+        .font(.title3)
+        .foregroundStyle(Color(hex: project.colorHex ?? ProjectPalette.allHexes.first!))
+        .frame(width: 38, height: 38)
+        .background(Color(hex: project.colorHex ?? ProjectPalette.allHexes.first!).opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm))
 
-        VStack(alignment: .leading, spacing: 2) {
-          Text(project.name)
-            .font(.subheadline).fontWeight(.medium)
-          Text(project.updatedAt.formatted(date: .abbreviated, time: .omitted))
-            .font(.caption).foregroundStyle(.secondary)
-        }
+      VStack(alignment: .leading, spacing: 3) {
+        Text(project.name)
+          .font(.subheadline).fontWeight(.medium)
+        Text(
+          "\(itemCount) \(itemCount == 1 ? "item" : "items") · Updated \(project.updatedAt.formatted(date: .abbreviated, time: .omitted))"
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      }
 
-        Spacer()
+      Spacer()
 
-        Text(project.status.rawValue.capitalized)
+      if project.status == .archived {
+        Text("Archived")
           .font(.caption2)
-          .padding(.horizontal, 6).padding(.vertical, 2)
-          .background(statusColor(project.status).opacity(0.15))
-          .clipShape(Capsule())
-      }
-
-      if let summary = project.summary, !summary.isEmpty {
-        Text(summary)
-          .font(.caption).foregroundStyle(.secondary).lineLimit(2)
-      }
-
-      HStack(spacing: AppSpacing.md) {
-        Label("\(itemCount)", systemImage: "doc")
-          .font(.caption2).foregroundStyle(.secondary)
-        Label("\(taskCount)", systemImage: "checklist")
-          .font(.caption2).foregroundStyle(.secondary)
-        if openTasks > 0 {
-          Label("\(openTasks) open", systemImage: "circle")
-            .font(.caption2).foregroundStyle(.orange)
-        }
+          .foregroundStyle(.secondary)
       }
     }
     .padding(.horizontal, AppSpacing.lg)
@@ -214,20 +198,13 @@ struct ProjectListView: View {
   // MARK: Counts
 
   private func computeCounts() {
-    itemCounts = Dictionary(grouping: allItems, by: { $0.projectID ?? UUID() }).mapValues {
-      $0.count
+    var counts: [UUID: Int] = [:]
+    for item in allItems {
+      if let projectID = item.projectID {
+        counts[projectID, default: 0] += 1
+      }
     }
-    let taskGroups = Dictionary(grouping: allTasks, by: { $0.projectID ?? UUID() })
-    taskCounts = taskGroups.mapValues { $0.count }
-    openTaskCounts = taskGroups.mapValues { $0.filter { $0.statusRaw == "todo" }.count }
-  }
-
-  private func statusColor(_ status: ProjectStatus) -> Color {
-    switch status {
-    case .active: return .blue
-    case .archived: return .gray
-    case .completed: return .green
-    }
+    itemCounts = counts
   }
 
   private var newProjectSheet: some View {

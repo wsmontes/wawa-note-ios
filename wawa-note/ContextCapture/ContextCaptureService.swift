@@ -1,6 +1,8 @@
 import Foundation
 import OSLog
 
+// Related JIRA: KAN-534
+
 final class ContextCaptureService: @unchecked Sendable {
   private let sensors: [any ContextSensor]
 
@@ -12,13 +14,13 @@ final class ContextCaptureService: @unchecked Sendable {
 
   static func defaultSensors() -> [any ContextSensor] {
     [
-      CalendarContextSensor(),
       AudioRouteSensor(),
-      LocationContextSensor(),
       BatterySensor(),
-      MotionActivitySensor(),
-      FocusModeSensor(),
     ]
+  }
+
+  static var defaultSensorNames: [String] {
+    defaultSensors().map(\.sensorName)
   }
 
   func captureAll() async -> [CapturedAnnotation] {

@@ -2,6 +2,8 @@ import SwiftData
 import SwiftUI
 import WawaNoteCore
 
+// Related JIRA: KAN-533
+
 struct NoteEditorView: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(\.modelContext) private var modelContext
@@ -14,15 +16,17 @@ struct NoteEditorView: View {
   }
 
   let mode: Mode
+  let projectID: UUID?
 
   @State private var title: String
   @State private var bodyText: String
   @FocusState private var isBodyFocused: Bool
 
-  init(mode: Mode) {
+  init(mode: Mode, projectID: UUID? = nil) {
     self.mode = mode
+    self.projectID = projectID
     switch mode {
-    case .create(let type, _, _):
+    case .create:
       _title = State(initialValue: "")
       _bodyText = State(initialValue: "")
     case .edit(let item):
@@ -135,6 +139,12 @@ struct NoteEditorView: View {
         )
       else { return }
 
+      if let projectID {
+        item.projectID = projectID
+        item.inboxDate = nil
+        modelContext.safeSave(context: "create-project-note", itemId: item.id)
+      }
+
       // Mark as user-created
       var prov = item.provenance
       prov.mark(field: "title", origin: .user)
@@ -149,7 +159,8 @@ struct NoteEditorView: View {
 
       // Trigger pipeline for analysis if there's content
       if let body = item.bodyText, !body.isEmpty {
-        processingQueue.enqueue(itemID: item.id, trigger: .newCapture)
+        _ = processingQueue.enqueue(
+          itemID: item.id, projectID: projectID, trigger: .newCapture)
       }
 
     case .edit(let item):

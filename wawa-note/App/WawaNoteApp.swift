@@ -5,6 +5,8 @@ import SwiftUI
 import UserNotifications
 import WawaNoteCore
 
+// Related JIRA: KAN-533, KAN-534
+
 @main
 struct WawaNoteApp: App {
   private let modelContainer: ModelContainer
@@ -12,9 +14,7 @@ struct WawaNoteApp: App {
   private let calendarSyncService: CalendarSyncService
   private let sharedEventStore: EKEventStore
 
-  private let ingestionState: ProjectIngestionState
   private let contentPipeline: ContentPipelineService
-  private let ingestionPipeline: ProjectIngestionPipeline
   private let processingQueue: ProcessingQueueService
 
   @StateObject private var biometricGate = BiometricGateService()
@@ -47,11 +47,7 @@ struct WawaNoteApp: App {
       modelContainer = DatabaseManager.createModelContainer(schema: schema)
     }
 
-    ingestionState = ProjectIngestionState()
-    ingestionPipeline = ProjectIngestionPipeline(ingestionState: ingestionState)
-    contentPipeline = ContentPipelineService(
-      ingestionPipeline: ingestionPipeline, ingestionState: ingestionState,
-      modelContainer: modelContainer)
+    contentPipeline = ContentPipelineService(modelContainer: modelContainer)
     processingQueue = ProcessingQueueService()
     processingQueue.setPipeline(contentPipeline)
 
@@ -82,17 +78,11 @@ struct WawaNoteApp: App {
     // Apply file protection to the shared database
     SharedContainer.ensureProtection()
 
-    // Setup notifications
-    setupNotifications()
-
     // Initialize persistent file logging (survives crashes)
     let fileLog = FileLogService.shared
 
     // Clean up any recordings abandoned by a previous crash or force-quit
     coordinator.cleanupOrphanedRecordings()
-
-    // Request location permission early so it's ready when recording starts
-    LocationContextSensor().requestPermission()
 
     if fileLog.previousSessionCrashed {
       AppLog.warn(
@@ -159,14 +149,7 @@ struct WawaNoteApp: App {
     )
   }
 
-  // MARK: - Notifications & Badge
-
-  private func setupNotifications() {
-    let center = UNUserNotificationCenter.current()
-    center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-      AppLog.general.info("Notification permission: \(granted ? "granted" : "denied")")
-    }
-  }
+  // MARK: - Badge
 
   static func updateAppBadge(modelContext: ModelContext? = nil) {
     Task { @MainActor in
@@ -195,9 +178,7 @@ struct WawaNoteApp: App {
     .modelContainer(modelContainer)
     .environmentObject(recordingCoordinator)
     .environmentObject(calendarSyncService)
-    .environmentObject(ingestionState)
     .environmentObject(contentPipeline)
-    .environmentObject(ingestionPipeline)
     .environmentObject(processingQueue)
   }
 }

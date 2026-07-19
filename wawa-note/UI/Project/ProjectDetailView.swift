@@ -3,6 +3,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 import WawaNoteCore
 
+// Related JIRA: KAN-533
+
 // MARK: - Shared Signal Helpers
 
 private func signalColor(_ type: String) -> Color {
@@ -41,16 +43,13 @@ private func activitySignalColor(_ type: String) -> Color { signalColor(type) }
 /// Entry point for project navigation. Routes config projects to ConfigProjectBrowserView.
 struct ProjectDetailView: View {
   let project: Project
-  @EnvironmentObject private var chatState: ChatOverlayState
 
   var body: some View {
     if ConfigProjectService.isConfigProject(project) {
       ConfigProjectBrowserView(project: project)
-        .onAppear { chatState.context = .project(project.id) }
     } else {
       ProjectHomeView(project: project)
         .onAppear {
-          chatState.context = .project(project.id)
           AppLog.debug(
             "project",
             "ProjectDetailView appeared — project=\(project.name) id=\(project.id.uuidString.prefix(8)) status=\(project.status.rawValue) health=\(project.healthStatus ?? "nil")"
@@ -95,64 +94,36 @@ struct ProjectDetailLink: View {
   }
 }
 
-// MARK: - Project Home (Simplified)
-// NOTE: This is the simplified version with Synthesis | Files segments (2026-06-18).
-// The old ProjectHomeView with multiple tabs has been consolidated into this version.
-//
-// KNOWN DEAD CODE: BoardView (Kanban, line 510) and ProjectGraphView are defined
-// but have no navigation entry point from this view. The old multi-tab layout
-// (Items/Tasks/Graph/Kanban) was removed during consolidation. HealthRing (line 251)
-// is also unused.
-//
-// To restore: either add back the segmented tabs, or add toolbar buttons that
-// present BoardView/ProjectGraphView as sheets. The Kanban board supports
-// drag-and-drop and would be valuable for task management.
+// MARK: - Project Collection
+
+/// V1 projects are intentionally simple collections of source items.
+/// Derived intelligence stays attached to each source item and is not promoted
+/// to project-level synthesis, tasks, signals, or graph surfaces.
 
 struct ProjectHomeView: View {
   let project: Project
   @Environment(\.modelContext) private var modelContext
-  @EnvironmentObject private var chatState: ChatOverlayState
   @EnvironmentObject private var coordinator: RecordingCoordinator
-  @State private var selectedTab: ProjectTab = .synthesis
   @State private var showCaptureSheet = false
   @State private var showNoteEditor = false
   @State private var showFileImporter = false
 
-  enum ProjectTab: String, CaseIterable {
-    case synthesis = "Síntese"
-    case files = "Arquivos"
-  }
-
   var body: some View {
-    VStack(spacing: 0) {
-      // Segment control
-      Picker("View", selection: $selectedTab) {
-        ForEach(ProjectTab.allCases, id: \.rawValue) { tab in
-          Text(tab.rawValue).tag(tab)
-        }
-      }
-      .pickerStyle(.segmented)
-      .padding(.horizontal)
-      .padding(.top, 8)
-
-      // Content
-      switch selectedTab {
-      case .synthesis:
-        ProjectSynthesisView(project: project)
-      case .files:
-        ItemsView(projectID: project.id)
-      }
+    ProjectCollectionItemsView(projectID: project.id) {
+      showCaptureSheet = true
     }
     .navigationTitle(project.name)
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
+        Button {
+          showCaptureSheet = true
+        } label: {
+          Label("Add Item", systemImage: "plus")
+        }
+      }
+      ToolbarItem(placement: .topBarTrailing) {
         Menu {
-          Button {
-            showCaptureSheet = true
-          } label: {
-            Label("Add Item", systemImage: "plus")
-          }
           Button {
             exportMarkdown()
           } label: {
@@ -175,7 +146,8 @@ struct ProjectHomeView: View {
       Button("Cancel", role: .cancel) {}
     }
     .sheet(isPresented: $showNoteEditor) {
-      NoteEditorView(mode: .create(type: .note, folderID: nil, initialTag: nil))
+      NoteEditorView(
+        mode: .create(type: .note, folderID: nil, initialTag: nil), projectID: project.id)
     }
     .fileImporter(
       isPresented: $showFileImporter,
@@ -184,9 +156,6 @@ struct ProjectHomeView: View {
       if case .success(let url) = result {
         Task { await handleImportedFile(url) }
       }
-    }
-    .onAppear {
-      chatState.context = .project(project.id)
     }
   }
 
@@ -212,26 +181,9 @@ struct ProjectHomeView: View {
 
   private func exportMarkdown() {
     let items = (try? ProjectService(context: modelContext).items(in: project.id)) ?? []
-    let derivedTasks =
-      (try? ProjectDerivedItemService(context: modelContext).fetch(for: project.id, type: .task))
-      ?? []
-    let edges =
-      (try? GraphEdgeService(context: modelContext).neighborhood(of: project.id, radius: 2)) ?? []
     let exporter = ProjectExportService()
-
-    // Build task rows from ProjectDerivedItem, matching the TaskItem format
-    let taskRows = derivedTasks.map { t -> String in
-      let check = t.status == .done ? "x" : " "
-      var line = "- [\(check)] **\(t.title)**"
-      if let owner = t.ownerName { line += " — \(owner)" }
-      if let prio = t.priorityRaw, prio != "medium" { line += " · \(prio.capitalized)" }
-      if let due = t.dueAt {
-        line += " · Due: \(due.formatted(date: .abbreviated, time: .omitted))"
-      }
-      return line
-    }
-
-    let md = exporter.exportMarkdown(project: project, items: items, tasks: taskRows, edges: edges)
+    let md = exporter.exportMarkdown(
+      project: project, items: items, tasks: [String](), edges: [GraphEdge]())
     let vc = UIActivityViewController(activityItems: [md], applicationActivities: nil)
     if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
       let root = scene.windows.first?.rootViewController
@@ -252,6 +204,75 @@ struct ProjectHomeView: View {
     {
       root.present(vc, animated: true)
     }
+  }
+}
+
+private struct ProjectCollectionItemsView: View {
+  let projectID: UUID
+  let onAdd: () -> Void
+  @Environment(\.modelContext) private var modelContext
+  @Query private var items: [KnowledgeItem]
+
+  init(projectID: UUID, onAdd: @escaping () -> Void) {
+    self.projectID = projectID
+    self.onAdd = onAdd
+    _items = Query(
+      filter: #Predicate { $0.projectID == projectID },
+      sort: \KnowledgeItem.updatedAt, order: .reverse
+    )
+  }
+
+  var body: some View {
+    List {
+      if items.isEmpty {
+        ContentUnavailableView {
+          Label("No Items Yet", systemImage: "folder")
+        } description: {
+          Text("Add a recording, note, or imported file to this project.")
+        } actions: {
+          Button("Add Item", systemImage: "plus", action: onAdd)
+            .buttonStyle(.borderedProminent)
+        }
+        .listRowBackground(Color.clear)
+      } else {
+        ForEach(items) { item in
+          NavigationLink {
+            KnowledgeDetailView(item: item)
+          } label: {
+            HStack(spacing: 12) {
+              Image(systemName: item.type.icon)
+                .foregroundStyle(item.type.color)
+                .frame(width: 28)
+              VStack(alignment: .leading, spacing: 3) {
+                Text(item.title)
+                  .lineLimit(2)
+                HStack(spacing: 6) {
+                  Text(item.type.label)
+                  Text("·")
+                  Text(item.updatedAt.formatted(date: .abbreviated, time: .omitted))
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+              }
+            }
+            .padding(.vertical, 3)
+          }
+          .swipeActions(edge: .trailing) {
+            Button {
+              do {
+                try ProjectService(context: modelContext).removeItem(item.id)
+              } catch {
+                AppLog.general.error("Could not remove item from project: \(error)")
+              }
+            } label: {
+              Label("Remove", systemImage: "folder.badge.minus")
+            }
+            .tint(.orange)
+          }
+        }
+      }
+    }
+    .listStyle(.insetGrouped)
   }
 }
 

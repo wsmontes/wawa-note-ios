@@ -2,12 +2,18 @@ import Foundation
 import SwiftData
 import WawaNoteCore
 
+// Related JIRA: KAN-152, KAN-533
+
 @MainActor
 final class ProjectService {
   private let context: ModelContext
 
   init(context: ModelContext) {
     self.context = context
+  }
+
+  static func visibleProjects(in projects: [Project]) -> [Project] {
+    projects.filter { !$0.isHidden && !ConfigProjectService.isConfigProject($0) }
   }
 
   func create(name: String, summary: String? = nil, iconName: String? = nil) throws -> Project {
@@ -303,10 +309,20 @@ final class ProjectService {
       AppLog.provider.error("ProjectService.addItem: item \(itemID) not found in store")
       return
     }
+    let now = Date()
+    let previousProjectID = item.projectID
     item.projectID = projectID
-    item.updatedAt = Date()
+    item.updatedAt = now
     if item.inboxDate != nil {
       item.inboxDate = nil
+    }
+    if let previousProjectID, previousProjectID != projectID,
+      let previousProject = try fetch(id: previousProjectID)
+    {
+      previousProject.updatedAt = now
+    }
+    if let project = try fetch(id: projectID) {
+      project.updatedAt = now
     }
     try context.save()
     AppLog.provider.info("ProjectService.addItem: \(item.title) -> project \(projectID)")
@@ -314,8 +330,13 @@ final class ProjectService {
 
   func removeItem(_ itemID: UUID) throws {
     guard let item = try fetchItem(itemID) else { return }
+    let previousProjectID = item.projectID
+    let now = Date()
     item.projectID = nil
-    item.updatedAt = Date()
+    item.updatedAt = now
+    if let previousProjectID, let project = try fetch(id: previousProjectID) {
+      project.updatedAt = now
+    }
     try context.save()
   }
 

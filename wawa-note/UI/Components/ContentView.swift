@@ -1,7 +1,8 @@
-import Combine
 import SwiftData
 import SwiftUI
 import WawaNoteCore
+
+// Related JIRA: KAN-533
 
 extension Notification.Name {
   static let switchToInboxTab = Notification.Name("SwitchToInboxTab")
@@ -9,24 +10,13 @@ extension Notification.Name {
   static let openSettings = Notification.Name("OpenSettings")
 }
 
-@MainActor
-final class ChatOverlayState: ObservableObject {
-  @Published var isActive = false
-  @Published var context: ChatContext = .global
-}
-
 struct ContentView: View {
   @Environment(\.modelContext) private var modelContext
   @EnvironmentObject private var processingQueue: ProcessingQueueService
   @State private var showSettings = false
-  @State private var showChat = false
   @State private var showQueue = false
   @State private var selectedTab = 0
-  @State private var keyboardHeight: CGFloat = 0
-  @State private var safeAreaBottom: CGFloat = 0
   @State private var showOnboarding = false
-  @StateObject private var chatState = ChatOverlayState()
-  @StateObject private var chatViewModel = ChatViewModel()
   @State private var toastQueue = ToastQueue()
   @State private var networkMonitor = NetworkMonitorService()
   @Query(filter: #Predicate<KnowledgeItem> { $0.inboxDate != nil }) private var inboxItems:
@@ -36,22 +26,7 @@ struct ContentView: View {
 
   var body: some View {
     ZStack(alignment: .bottom) {
-      TabView(
-        selection: Binding(
-          get: { selectedTab },
-          set: { newValue in
-            if newValue == 3 {
-              showChat = true
-              chatState.isActive = true
-              chatViewModel.syncContextIfNeeded()
-            } else {
-              showChat = false
-              chatState.isActive = false
-              selectedTab = newValue
-            }
-          }
-        )
-      ) {
+      TabView(selection: $selectedTab) {
         NavigationStack {
           HomeView()
             .toolbar {
@@ -96,44 +71,9 @@ struct ContentView: View {
           .tabItem { Label("Explore", systemImage: "rectangle.grid.1x2") }
           .tag(2)
 
-        Color.clear
-          .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }
-          .tag(3)
       }
       .animation(.easeInOut(duration: 0.25), value: selectedTab)
       .ignoresSafeArea(.keyboard, edges: .bottom)
-
-      if showChat {
-        Color.black.opacity(0.3)
-          .ignoresSafeArea()
-          .onTapGesture {
-            showChat = false
-            chatState.isActive = false
-          }
-          .gesture(
-            DragGesture(minimumDistance: 20)
-              .onEnded { value in
-                if value.translation.height > 50, abs(value.translation.width) < 30 {
-                  showChat = false
-                  chatState.isActive = false
-                }
-              }
-          )
-          .transition(.opacity)
-
-        ChatView(
-          viewModel: chatViewModel, compact: true, autoFocus: true,
-          onDismiss: {
-            showChat = false
-            chatState.isActive = false
-          }
-        )
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .padding(.horizontal, 8)
-        .frame(maxHeight: UIScreen.main.bounds.height * 0.6, alignment: .bottom)
-        .padding(.bottom, max(0, keyboardHeight - safeAreaBottom))
-        .transition(.move(edge: .bottom).combined(with: .opacity))
-      }
 
       // -- Network status banner (top)
       VStack {
@@ -148,8 +88,6 @@ struct ContentView: View {
     }
     .ignoresSafeArea(.keyboard, edges: .bottom)
     .toastContainer()
-    .environmentObject(chatState)
-    .environmentObject(chatViewModel)
     .environment(toastQueue)
     .environment(networkMonitor)
     .sheet(isPresented: $showSettings) { SettingsView() }
@@ -157,7 +95,6 @@ struct ContentView: View {
     .fullScreenCover(isPresented: $showOnboarding) {
       OnboardingView()
     }
-    .onReceive(keyboardPublisher) { keyboardHeight = $0 }
     .onReceive(NotificationCenter.default.publisher(for: .pipelineCompleted)) { _ in
       WawaNoteApp.updateAppBadge(modelContext: modelContext)
     }
@@ -177,19 +114,11 @@ struct ContentView: View {
     .onAppear {
       networkMonitor.start()
       registerMemoryPressureHandlers()
-      chatViewModel.setup(modelContext: modelContext)
-      chatViewModel.observeContext(from: chatState)
       _ = ConfigProjectService.ensureConfigProject(context: modelContext)
       ConfigProjectService.syncConfigProject(context: modelContext)
       WawaNoteApp.updateAppBadge(modelContext: modelContext)
       checkFirstLaunchConfig()
       autoProcessPendingItems()
-      // Capture safe area bottom for keyboard positioning
-      if let window = UIApplication.shared.connectedScenes
-        .compactMap({ $0 as? UIWindowScene }).first?.windows.first
-      {
-        safeAreaBottom = window.safeAreaInsets.bottom
-      }
     }
   }
 
@@ -275,23 +204,9 @@ struct ContentView: View {
     }
   }
 
-  private var keyboardPublisher: AnyPublisher<CGFloat, Never> {
-    let show = NotificationCenter.default.publisher(
-      for: UIResponder.keyboardWillChangeFrameNotification
-    )
-    .map { n in
-      let frame = n.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect ?? .zero
-      return max(0, UIScreen.main.bounds.height - frame.minY)
-    }
-    let hide = NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)
-      .map { _ in CGFloat(0) }
-    return Publishers.Merge(show, hide).eraseToAnyPublisher()
-  }
 }
 
 struct ExploreView: View {
-  @EnvironmentObject private var chatState: ChatOverlayState
-  @EnvironmentObject private var chatViewModel: ChatViewModel
   @State private var selectedTab: ExploreTab = .projects
 
   enum ExploreTab: String, CaseIterable {
@@ -327,10 +242,6 @@ struct ExploreView: View {
       case .timeline:
         TimelineExplorerView()
       }
-    }
-    .onAppear {
-      chatState.context = .exploreProjects
-      chatViewModel.pregenerateGreeting(for: .exploreProjects)
     }
   }
 }
@@ -511,8 +422,8 @@ struct OnboardingView: View {
   enum UseCase: String, CaseIterable {
     case meetings = "Meetings & Calls"
     case journaling = "Journaling"
-    case projects = "Projects & Tasks"
-    case general = "General Knowledge"
+    case projects = "Projects"
+    case general = "Everything"
     var icon: String {
       switch self {
       case .meetings: "mic.fill"
@@ -523,10 +434,10 @@ struct OnboardingView: View {
     }
     var description: String {
       switch self {
-      case .meetings: "Record, transcribe, and analyze meetings with AI-powered summaries."
-      case .journaling: "Capture daily thoughts, ideas, and reflections with smart organization."
-      case .projects: "Manage projects with AI-synthesized overviews, tasks, and knowledge graphs."
-      case .general: "Use as a personal AI workspace — capture anything, let AI connect the dots."
+      case .meetings: "Record conversations and keep searchable transcripts and summaries."
+      case .journaling: "Capture daily thoughts, ideas, and reflections in one private workspace."
+      case .projects: "Keep related notes, recordings, documents, and imports together."
+      case .general: "Capture anything, review it in your inbox, and organize it when ready."
       }
     }
   }
@@ -585,7 +496,7 @@ struct OnboardingView: View {
       VStack(spacing: 8) {
         Text("Welcome to\nWawa Note").font(.largeTitle).fontWeight(.bold).multilineTextAlignment(
           .center)
-        Text("Your personal AI workspace.\nHow will you use it?").font(.body)
+        Text("Your private capture workspace.\nHow will you use it?").font(.body)
           .foregroundStyle(.secondary).multilineTextAlignment(.center)
       }
       VStack(spacing: 10) {
@@ -668,12 +579,8 @@ struct OnboardingView: View {
           desc: "Review and triage everything — search across all items.", color: .blue)
         TourCard(
           icon: "folder.fill", title: "Explore",
-          desc: "Browse projects, files, and timeline — your organized knowledge graph.",
+          desc: "Group related items into projects and browse your timeline.",
           color: .green)
-        TourCard(
-          icon: "bubble.left.and.bubble.right.fill", title: "Chat",
-          desc: "Ask your AI assistant anything — it has access to your entire workspace.",
-          color: .purple)
       }.padding(.horizontal, 24)
     }
   }

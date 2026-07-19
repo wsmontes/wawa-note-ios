@@ -8,6 +8,8 @@ import Vision
 import VisionKit
 import WawaNoteCore
 
+// Related JIRA: KAN-152, KAN-533
+
 extension Notification.Name {
   static let scannerDidFail = Notification.Name("ScannerDidFail")
 }
@@ -385,8 +387,6 @@ struct HomeView: View {
   @EnvironmentObject private var coordinator: RecordingCoordinator
   @EnvironmentObject private var contentPipeline: ContentPipelineService
   @EnvironmentObject private var processingQueue: ProcessingQueueService
-  @EnvironmentObject private var chatState: ChatOverlayState
-  @EnvironmentObject private var chatViewModel: ChatViewModel
   @Query(sort: \Project.updatedAt, order: .reverse) private var projects: [Project]
   @Query(
     filter: #Predicate<KnowledgeItem> { $0.inboxDate != nil }, sort: \KnowledgeItem.updatedAt,
@@ -410,6 +410,10 @@ struct HomeView: View {
   @State private var showPhotoSourceMenu = false
   @State private var capturedPhoto: UIImage?
   @State private var expandedProjectIDs: Set<UUID> = []
+
+  private var visibleProjects: [Project] {
+    ProjectService.visibleProjects(in: projects)
+  }
 
   var body: some View {
     ZStack {
@@ -563,8 +567,6 @@ struct HomeView: View {
       }
     }
     .onAppear {
-      chatState.context = .global
-      chatViewModel.pregenerateGreeting(for: .global)
       captureVM.bind(coordinator: coordinator)
       captureVM.modelContext = modelContext
       captureVM.contentPipeline = contentPipeline
@@ -590,8 +592,8 @@ struct HomeView: View {
       }
       .padding(.top, 0).padding(.bottom, 20)
 
-      if !projects.isEmpty {
-        let recentProjects = Array(projects.prefix(5))
+      if !visibleProjects.isEmpty {
+        let recentProjects = Array(visibleProjects.prefix(5))
         Text("Projects").font(.caption).foregroundStyle(.secondary).textCase(.uppercase)
           .frame(maxWidth: .infinity, alignment: .leading)
           .padding(.horizontal, 20).padding(.bottom, 6)
@@ -600,11 +602,12 @@ struct HomeView: View {
             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             .listRowBackground(Color(.systemBackground))
             .listRowSeparator(.hidden)
-          if projects.count > 5 {
+          if visibleProjects.count > 5 {
             Button {
               NotificationCenter.default.post(name: .switchToExploreTab, object: nil)
             } label: {
-              Text("See all \(projects.count) projects →").font(.caption).foregroundStyle(.blue)
+              Text("See all \(visibleProjects.count) projects →").font(.caption).foregroundStyle(
+                .blue)
             }
             .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
             .listRowBackground(Color(.systemBackground))
@@ -641,14 +644,13 @@ struct HomeView: View {
         .frame(minHeight: min(CGFloat(recentInbox.count) * 52, 260))
       }
 
-      if projects.isEmpty && inboxItems.isEmpty { Spacer() }
+      if visibleProjects.isEmpty && inboxItems.isEmpty { Spacer() }
     }
     .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { expandedProjectIDs = [] } }
     .safeAreaInset(edge: .bottom) {
-      if !chatState.isActive {
-        VStack(spacing: 0) {
-          Divider()
-          HStack(spacing: 10) {
+      VStack(spacing: 0) {
+        Divider()
+        HStack(spacing: 10) {
             Button(action: { captureVM.startRecording() }) {
               VStack(spacing: 2) {
                 Image(systemName: "record.circle.fill").font(.title3).symbolRenderingMode(
@@ -694,10 +696,9 @@ struct HomeView: View {
               }.foregroundStyle(.primary).frame(width: 60, height: 52)
                 .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
             }
-          }
-          .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 6).background(.bar)
-          .shadow(color: .black.opacity(0.08), radius: 4, y: -2)
         }
+        .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 6).background(.bar)
+        .shadow(color: .black.opacity(0.08), radius: 4, y: -2)
       }
     }
   }
@@ -741,18 +742,6 @@ struct HomeView: View {
         }
       }
       .background(Color(.systemBackground))
-      .swipeActions(edge: .leading) {
-        Button {
-          navigateToProject = project
-        } label: {
-          Label("Tasks", systemImage: "checklist")
-        }.tint(.green)
-        Button {
-          navigateToProject = project
-        } label: {
-          Label("Timeline", systemImage: "calendar.day.timeline.leading")
-        }.tint(.orange)
-      }
       .swipeActions(edge: .trailing) {
         Button {
           startRecordingFor(project)
@@ -1235,10 +1224,14 @@ struct ProjectPickerForItemView: View {
   @Environment(\.dismiss) private var dismiss
   @EnvironmentObject private var processingQueue: ProcessingQueueService
 
+  private var visibleProjects: [Project] {
+    ProjectService.visibleProjects(in: projects)
+  }
+
   var body: some View {
     NavigationStack {
       List {
-        ForEach(projects) { project in
+        ForEach(visibleProjects) { project in
           Button {
             assignToProject(item, project: project)
             dismiss()
@@ -1251,7 +1244,7 @@ struct ProjectPickerForItemView: View {
             }
           }
         }
-        if projects.isEmpty {
+        if visibleProjects.isEmpty {
           Text("No projects yet").foregroundStyle(.secondary)
         }
       }

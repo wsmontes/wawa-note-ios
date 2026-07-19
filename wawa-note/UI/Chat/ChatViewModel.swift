@@ -3,6 +3,8 @@ import SwiftData
 import SwiftUI
 import WawaNoteCore
 
+// Related JIRA: KAN-533
+
 @MainActor
 final class ChatViewModel: ObservableObject {
   @Published var messages: [ChatMessage] = []
@@ -37,9 +39,6 @@ final class ChatViewModel: ObservableObject {
     streamTask?.cancel()
     greetingTask?.cancel()
   }
-  private var cancellables = Set<AnyCancellable>()
-  private var hasObservedContext = false
-  private var pendingContext: ChatContext?
   private var projectColorCache: [UUID: String] = [:]
   private var greetingCache: [String: String] = [:]
   private var lastUserMessage: String = ""
@@ -67,47 +66,6 @@ final class ChatViewModel: ObservableObject {
   }
 
   // MARK: - Context
-
-  func observeContext(from overlay: ChatOverlayState) {
-    guard !hasObservedContext else { return }
-    hasObservedContext = true
-    // Handle the initial context synchronously.
-    switchToContext(overlay.context)
-
-    // Observe context changes: if the chat overlay is already visible the
-    // switch happens immediately; otherwise the change is deferred until
-    // syncContextIfNeeded() is called (e.g. when the user taps the Chat tab).
-    overlay.$context
-      .removeDuplicates()
-      .dropFirst()
-      .sink { [weak self] newContext in
-        guard let self else { return }
-        if overlay.isActive {
-          self.switchToContext(newContext)
-        } else {
-          self.pendingContext = newContext
-        }
-      }
-      .store(in: &cancellables)
-
-    // When the chat overlay becomes active, apply any pending context change.
-    overlay.$isActive
-      .removeDuplicates()
-      .sink { [weak self] isActive in
-        if isActive {
-          self?.syncContextIfNeeded()
-        }
-      }
-      .store(in: &cancellables)
-  }
-
-  /// Call when chat overlay opens to apply any pending context change.
-  func syncContextIfNeeded() {
-    if let pending = pendingContext, pending != activeContext {
-      switchToContext(pending)
-    }
-    pendingContext = nil
-  }
 
   private func switchToContext(_ context: ChatContext) {
     // Resolve the effective context: items that belong to a project redirect to
