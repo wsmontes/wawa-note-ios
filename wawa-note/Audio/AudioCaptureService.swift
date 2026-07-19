@@ -3,6 +3,8 @@ import Accelerate
 import OSLog
 import WawaNoteCore
 
+// Related JIRA: KAN-544
+
 // MARK: - State
 
 enum AudioCaptureState: Equatable {
@@ -501,14 +503,7 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
         AppLog.audio.warning(
           "Route change: category changed to \(self.sessionManager.session.category.rawValue) — reconfiguring for recording"
         )
-        do {
-          try self.sessionManager.adaptToRouteChange()
-        } catch {
-          AppLog.audio.error(
-            "Failed to adapt session after category change: \(error.localizedDescription)")
-          self.audioInterruptionReason = "Audio category changed by system."
-          self.stopRecording()
-        }
+        self.sessionManager.adaptToRouteChange()
       }
     default:
       break
@@ -726,7 +721,6 @@ final class AudioCaptureService: ObservableObject, @unchecked Sendable {
   /// Returns true on success. On failure, cleans up and calls stopRecording().
   @discardableResult
   private func buildAndStartEngine(reason: String) -> Bool {
-    let sampleRate = sessionManager.sampleRate > 0 ? sessionManager.sampleRate : 44100
     let engine = AVAudioEngine()
     self.engine = engine
     engine.reset()

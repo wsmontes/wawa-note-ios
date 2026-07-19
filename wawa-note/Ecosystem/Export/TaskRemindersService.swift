@@ -3,6 +3,8 @@ import Foundation
 import OSLog
 import WawaNoteCore
 
+// Related JIRA: KAN-544
+
 enum RemindersExportResult {
   case success(exported: Int)
   case partial(exported: Int, failed: Int)
@@ -46,7 +48,7 @@ final class TaskRemindersService {
 
   func requestPermission() async -> Bool {
     let status = EKEventStore.authorizationStatus(for: .reminder)
-    if status == .fullAccess || status == .authorized {
+    if status == .fullAccess {
       return true
     }
     if status == .denied || status == .restricted {

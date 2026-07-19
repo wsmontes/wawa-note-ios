@@ -1,6 +1,8 @@
 import Speech
 import SwiftUI
 
+// Related JIRA: KAN-544
+
 /// Shows on-device speech model availability and guides the user through download.
 ///
 /// Guideline: "Implemente uma etapa 'ensure model installed'. Antes de iniciar
@@ -17,7 +19,6 @@ struct ModelDownloadView: View {
 
   @State private var availability: LocalTranscriptionAvailability = .hardwareUnsupported
   @State private var isChecking = true
-  @State private var checkTimer: Timer?
 
   var body: some View {
     VStack(spacing: 20) {
@@ -139,15 +140,13 @@ struct ModelDownloadView: View {
     }
     .padding()
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .onAppear {
+    .task {
       checkAvailability()
-      // Auto-retry every 5 seconds for model download
-      checkTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .seconds(5))
+        guard !Task.isCancelled else { return }
         checkAvailability()
       }
-    }
-    .onDisappear {
-      checkTimer?.invalidate()
     }
   }
 

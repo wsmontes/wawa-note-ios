@@ -7,7 +7,7 @@ import UIKit
 import Vision
 import WawaNoteCore
 
-// Related JIRA: KAN-539
+// Related JIRA: KAN-539, KAN-544
 
 // MARK: - Text extraction from any content type
 
@@ -40,10 +40,13 @@ final class ContentExtractionService {
 
   // MARK: - Audio → text
 
-  /// Returns the duration of a local audio file using AVURLAsset.
+  /// Returns the duration of a local audio file using decoded frame metadata.
   /// Returns 0 when the file cannot be read or has no duration property.
   private static func audioDuration(url: URL) -> Double {
-    let secs = CMTimeGetSeconds(AVURLAsset(url: url).duration)
+    guard let file = try? AVAudioFile(forReading: url), file.processingFormat.sampleRate > 0 else {
+      return 0
+    }
+    let secs = Double(file.length) / file.processingFormat.sampleRate
     return (secs.isNaN || secs.isInfinite || secs <= 0) ? 0 : secs
   }
 

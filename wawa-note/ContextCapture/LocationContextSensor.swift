@@ -2,6 +2,8 @@ import CoreLocation
 import Foundation
 import OSLog
 
+// Related JIRA: KAN-544
+
 final class LocationContextSensor: ContextSensor, @unchecked Sendable {
   let sensorName = "location_context"
 
@@ -44,68 +46,17 @@ final class LocationContextSensor: ContextSensor, @unchecked Sendable {
       self.activeDelegate = delegate  // keep strong reference
       manager.delegate = delegate
 
-      let lock = OSAllocatedUnfairLock()
-      var resumed = false
+      let state = LocationCaptureState(continuation: continuation)
 
       // Timeout
       let timeoutWork = DispatchWorkItem {
-        lock.lock()
-        guard !resumed else {
-          lock.unlock()
-          return
-        }
-        resumed = true
-        lock.unlock()
-        continuation.resume(returning: [])
+        state.finish(location: nil, placemark: nil, error: nil)
       }
       DispatchQueue.global().asyncAfter(
         deadline: .now() + Self.timeoutSeconds, execute: timeoutWork)
 
       delegate.onResult = { location, placemark, error in
-        lock.lock()
-        guard !resumed else {
-          lock.unlock()
-          return
-        }
-        resumed = true
-        lock.unlock()
-        timeoutWork.cancel()
-
-        if let error {
-          AppLog.general.warning("LocationContextSensor: \(error.localizedDescription)")
-          continuation.resume(returning: [])
-          return
-        }
-        var annotations: [CapturedAnnotation] = []
-        if let location {
-          annotations.append(
-            CapturedAnnotation(
-              source: "location_context", key: "lat", value: String(location.coordinate.latitude)))
-          annotations.append(
-            CapturedAnnotation(
-              source: "location_context", key: "lon", value: String(location.coordinate.longitude)))
-          if location.horizontalAccuracy >= 0 {
-            annotations.append(
-              CapturedAnnotation(
-                source: "location_context", key: "accuracy",
-                value: String(format: "%.0f", location.horizontalAccuracy)))
-          }
-        }
-        if let placemark {
-          if let name = placemark.name {
-            annotations.append(
-              CapturedAnnotation(source: "location_context", key: "place_name", value: name))
-          }
-          if let locality = placemark.locality {
-            annotations.append(
-              CapturedAnnotation(source: "location_context", key: "city", value: locality))
-          }
-          if let country = placemark.country {
-            annotations.append(
-              CapturedAnnotation(source: "location_context", key: "country", value: country))
-          }
-        }
-        continuation.resume(returning: annotations)
+        state.finish(location: location, placemark: placemark, error: error)
       }
 
       manager.requestLocation()
@@ -113,15 +64,86 @@ final class LocationContextSensor: ContextSensor, @unchecked Sendable {
   }
 }
 
-private final class LocationDelegate: NSObject, CLLocationManagerDelegate {
-  var onResult: ((CLLocation?, CLPlacemark?, Error?) -> Void)?
+private final class LocationCaptureState: @unchecked Sendable {
+  private let lock = OSAllocatedUnfairLock()
+  private let continuation: CheckedContinuation<[CapturedAnnotation], Error>
+  private var didFinish = false
+
+  init(continuation: CheckedContinuation<[CapturedAnnotation], Error>) {
+    self.continuation = continuation
+  }
+
+  func finish(location: CLLocation?, placemark: CLPlacemark?, error: Error?) {
+    lock.lock()
+    guard !didFinish else {
+      lock.unlock()
+      return
+    }
+    didFinish = true
+    lock.unlock()
+
+    if let error {
+      AppLog.general.warning("LocationContextSensor: \(error.localizedDescription)")
+      continuation.resume(returning: [])
+      return
+    }
+
+    var annotations: [CapturedAnnotation] = []
+    if let location {
+      annotations.append(
+        CapturedAnnotation(
+          source: "location_context", key: "lat", value: String(location.coordinate.latitude)))
+      annotations.append(
+        CapturedAnnotation(
+          source: "location_context", key: "lon", value: String(location.coordinate.longitude)))
+      if location.horizontalAccuracy >= 0 {
+        annotations.append(
+          CapturedAnnotation(
+            source: "location_context", key: "accuracy",
+            value: String(format: "%.0f", location.horizontalAccuracy)))
+      }
+    }
+    if let placemark {
+      if let name = placemark.name {
+        annotations.append(
+          CapturedAnnotation(source: "location_context", key: "place_name", value: name))
+      }
+      if let locality = placemark.locality {
+        annotations.append(
+          CapturedAnnotation(source: "location_context", key: "city", value: locality))
+      }
+      if let country = placemark.country {
+        annotations.append(
+          CapturedAnnotation(source: "location_context", key: "country", value: country))
+      }
+    }
+    continuation.resume(returning: annotations)
+  }
+}
+
+private final class GeocodeResultState: @unchecked Sendable {
+  let location: CLLocation
+  let callback: @Sendable (CLLocation?, CLPlacemark?, Error?) -> Void
+
+  init(
+    location: CLLocation,
+    callback: @escaping @Sendable (CLLocation?, CLPlacemark?, Error?) -> Void
+  ) {
+    self.location = location
+    self.callback = callback
+  }
+}
+
+private final class LocationDelegate: NSObject, CLLocationManagerDelegate, @unchecked Sendable {
+  var onResult: (@Sendable (CLLocation?, CLPlacemark?, Error?) -> Void)?
 
   func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
     guard let location = locations.first, let callback = onResult else { return }
     onResult = nil
     let geocoder = CLGeocoder()
+    let state = GeocodeResultState(location: location, callback: callback)
     geocoder.reverseGeocodeLocation(location) { placemarks, error in
-      callback(location, placemarks?.first, error)
+      state.callback(state.location, placemarks?.first, error)
     }
   }
 

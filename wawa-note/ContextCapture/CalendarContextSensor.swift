@@ -2,6 +2,8 @@ import EventKit
 import Foundation
 import OSLog
 
+// Related JIRA: KAN-544
+
 final class CalendarContextSensor: ContextSensor, @unchecked Sendable {
   let sensorName = "calendar_context"
 
@@ -17,7 +19,7 @@ final class CalendarContextSensor: ContextSensor, @unchecked Sendable {
 
   func capture() async throws -> [CapturedAnnotation] {
     let status = EKEventStore.authorizationStatus(for: .event)
-    guard status == .authorized || status == .fullAccess else {
+    guard status == .fullAccess else {
       AppLog.general.info("CalendarContextSensor: not authorized")
       return []
     }

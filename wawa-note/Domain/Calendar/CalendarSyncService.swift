@@ -4,6 +4,8 @@ import OSLog
 import SwiftData
 import WawaNoteCore
 
+// Related JIRA: KAN-544
+
 extension EKEventStore {
   nonisolated(unsafe) static let shared = EKEventStore()
 }
@@ -38,7 +40,7 @@ final class CalendarSyncService: ObservableObject {
 
   var hasPermission: Bool {
     let status = EKEventStore.authorizationStatus(for: .event)
-    return status == .fullAccess || status == .authorized
+    return status == .fullAccess
   }
 
   // MARK: - Reactive updates
