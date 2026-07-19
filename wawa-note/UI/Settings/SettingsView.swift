@@ -4,7 +4,7 @@ import SwiftData
 import SwiftUI
 import WawaNoteCore
 
-// Related JIRA: KAN-71
+// Related JIRA: KAN-70, KAN-71
 
 struct SettingsView: View {
   @Environment(\.modelContext) private var modelContext
@@ -647,7 +647,7 @@ struct SettingsView: View {
   }
 }
 
-private struct PrivacyDataView: View {
+struct PrivacyDataView: View {
   @Query(sort: \AIProviderConfigModel.name) private var providers: [AIProviderConfigModel]
   @AppStorage("transcription_allow_cloud") private var allowAppleCloudSpeech = false
 

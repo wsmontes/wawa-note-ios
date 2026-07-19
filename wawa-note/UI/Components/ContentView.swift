@@ -2,7 +2,7 @@ import SwiftData
 import SwiftUI
 import WawaNoteCore
 
-// Related JIRA: KAN-533
+// Related JIRA: KAN-70, KAN-533
 
 extension Notification.Name {
   static let switchToInboxTab = Notification.Name("SwitchToInboxTab")
@@ -15,7 +15,7 @@ struct ContentView: View {
   @EnvironmentObject private var processingQueue: ProcessingQueueService
   @State private var showSettings = false
   @State private var showQueue = false
-  @State private var selectedTab = 0
+  @State private var selectedTab = Self.initialTab
   @State private var showOnboarding = false
   @State private var toastQueue = ToastQueue()
   @State private var networkMonitor = NetworkMonitorService()
@@ -23,6 +23,14 @@ struct ContentView: View {
     [KnowledgeItem]
 
   private var inboxPendingCount: Int { inboxItems.count }
+
+  private static var initialTab: Int {
+    #if DEBUG
+      if ProcessInfo.processInfo.arguments.contains("--screenshot-inbox") { return 1 }
+      if ProcessInfo.processInfo.arguments.contains("--screenshot-explore") { return 2 }
+    #endif
+    return 0
+  }
 
   var body: some View {
     ZStack(alignment: .bottom) {
