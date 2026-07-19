@@ -4,7 +4,7 @@ import SwiftData
 import SwiftUI
 import WawaNoteCore
 
-// Related JIRA: KAN-70, KAN-71
+// Related JIRA: KAN-70, KAN-71, KAN-543
 
 struct SettingsView: View {
   @Environment(\.modelContext) private var modelContext
@@ -658,6 +658,10 @@ struct PrivacyDataView: View {
     providers.filter { !$0.type.isLocal }
   }
 
+  private var localProviders: [AIProviderConfigModel] {
+    providers.filter(\.type.isLocal)
+  }
+
   var body: some View {
     List {
       Section("Stored on this iPhone") {
@@ -692,6 +696,23 @@ struct PrivacyDataView: View {
 
         Text(
           "An approved cloud AI provider may receive recordings, transcripts, notes, scans, images, imports, and derived text needed for the feature you use."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      }
+
+      Section("Models on your network") {
+        if localProviders.isEmpty {
+          Label("No local model configured", systemImage: "desktopcomputer")
+            .foregroundStyle(.secondary)
+        } else {
+          ForEach(localProviders) { provider in
+            Label(provider.name, systemImage: "desktopcomputer")
+          }
+        }
+
+        Text(
+          "Local Network access is requested only when you choose to find or connect a model running on a computer you control. Content is sent directly to that computer, not to a Wawa Note server."
         )
         .font(.caption)
         .foregroundStyle(.secondary)

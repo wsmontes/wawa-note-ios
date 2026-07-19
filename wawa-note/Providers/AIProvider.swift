@@ -2,7 +2,7 @@ import Foundation
 import Network
 import WawaNoteCore
 
-// Related JIRA: KAN-539
+// Related JIRA: KAN-539, KAN-543
 
 // MARK: - Provider protocol
 
@@ -820,13 +820,13 @@ final class LocalProviderScanner: @unchecked Sendable {
   private static let knownProviders: [LocalProviderDef] = [
     LocalProviderDef(
       id: "ollama", name: "Ollama", defaultPort: 11434, modelPath: "api/tags",
-      providerType: .openAICompatible),
+      providerType: .local),
     LocalProviderDef(
       id: "lmstudio", name: "LM Studio", defaultPort: 1234, modelPath: "v1/models",
-      providerType: .openAICompatible),
+      providerType: .local),
     LocalProviderDef(
       id: "localai", name: "LocalAI", defaultPort: 8080, modelPath: "v1/models",
-      providerType: .openAICompatible),
+      providerType: .local),
   ]
 
   private let scanQueue = DispatchQueue(label: "com.wawa.localproviderscanner", qos: .userInitiated)
@@ -946,7 +946,7 @@ final class LocalProviderScanner: @unchecked Sendable {
             results.append(
               DiscoveredProvider(
                 id: "bonjour-\(service.name)", name: service.name,
-                providerType: .openAICompatible, baseURL: baseURL, scanPath: modelPath,
+                providerType: .local, baseURL: baseURL, scanPath: modelPath,
                 category: .local, models: models, isReachable: isReachable,
                 latencyMs: isReachable ? nil : nil, bonjourName: service.name))
           }

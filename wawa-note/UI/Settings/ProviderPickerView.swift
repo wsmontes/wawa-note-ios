@@ -1,6 +1,8 @@
 import SwiftData
 import SwiftUI
 
+// Related JIRA: KAN-543
+
 struct ProviderPickerView: View {
   @Query(sort: \AIProviderConfigModel.name) private var providers: [AIProviderConfigModel]
   @Environment(\.modelContext) private var modelContext
@@ -213,11 +215,17 @@ struct ProviderPickerView: View {
   }
 
   private func findExistingConfig(for template: ProviderTemplate) -> AIProviderConfigModel? {
-    providers.first { $0.type == template.providerType && $0.baseURLString == template.baseURL }
+    providers.first {
+      $0.providerConfigId == template.id
+        || ($0.type == template.providerType && $0.baseURLString == template.baseURL)
+    }
   }
 
   private func isConnected(to template: ProviderTemplate) -> Bool {
-    providers.contains { $0.type == template.providerType && $0.baseURLString == template.baseURL }
+    providers.contains {
+      $0.providerConfigId == template.id
+        || ($0.type == template.providerType && $0.baseURLString == template.baseURL)
+    }
   }
 
   private func isDetected(_ template: ProviderTemplate) -> Bool {
@@ -230,30 +238,15 @@ struct ProviderPickerView: View {
     isScanningNetwork = true
     defer { isScanningNetwork = false }
     detectedLocalEndpoints.removeAll()
-    await withTaskGroup(of: (String, Bool).self) { group in
-      for template in ProviderTemplate.localTemplates {
-        guard template.scanPort != nil, let path = template.scanPath else { continue }
-        let baseURL = template.baseURL
-        group.addTask {
-          let found = await probeEndpoint(baseURL: baseURL, path: path)
-          return (template.id, found)
-        }
-      }
-      for await (id, found) in group where found {
-        detectedLocalEndpoints.insert(id)
+    let discovered = await LocalProviderScanner.shared.scan(includeNetworkScan: true)
+    for provider in discovered where provider.isReachable {
+      for template in ProviderTemplate.localTemplates
+      where provider.id == template.id
+        || provider.name.lowercased().contains(template.displayName.lowercased())
+      {
+        detectedLocalEndpoints.insert(template.id)
       }
     }
-  }
-
-  private func probeEndpoint(baseURL: String, path: String) async -> Bool {
-    guard let url = URL(string: baseURL)?.appendingPathComponent(path) else { return false }
-    var request = URLRequest(url: url)
-    request.httpMethod = "GET"
-    request.timeoutInterval = 3
-    do {
-      let (_, response) = try await URLSession.shared.data(for: request)
-      return (response as? HTTPURLResponse)?.statusCode == 200
-    } catch { return false }
   }
 }
 

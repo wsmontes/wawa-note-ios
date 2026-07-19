@@ -1,5 +1,7 @@
 import Foundation
 
+// Related JIRA: KAN-543
+
 // MARK: - Response adapter
 
 enum ProviderTactic {
@@ -34,7 +36,7 @@ final class ProviderAdapter: @unchecked Sendable {
 
   static func hint(for provider: any AIProvider) -> ProviderHint {
     switch provider.providerType {
-    case .openAI, .openAICompatible, .localNetwork, .appleLocal:
+    case .openAI, .openAICompatible, .localNetwork, .appleLocal, .local:
       return ProviderHint(tactic: .nativeJSON, supportsJSONSchema: true, supportsSystemPrompt: true)
     case .anthropic:
       return ProviderHint(
@@ -54,7 +56,7 @@ final class ProviderAdapter: @unchecked Sendable {
 
     var system = template.systemPrompt
     var user = template.userPrompt
-    var schema = template.responseSchema
+    let schema = template.responseSchema
 
     for (key, value) in variables {
       user = user.replacingOccurrences(of: "{\(key)}", with: value)
@@ -89,6 +91,7 @@ final class ProviderAdapter: @unchecked Sendable {
       switch provider.providerType {
       case .anthropic: return "claude-sonnet-4-6"
       case .gemini: return "gemini-2.5-flash"
+      case .local, .localNetwork, .appleLocal: return "llama-3.2-3b"
       default: return "gpt-5.5"
       }
     }()

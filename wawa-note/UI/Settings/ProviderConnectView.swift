@@ -1,7 +1,7 @@
 import SwiftData
 import SwiftUI
 
-// Related JIRA: KAN-539
+// Related JIRA: KAN-539, KAN-543
 
 // MARK: - View model
 
@@ -17,6 +17,7 @@ final class ProviderConnectViewModel: ObservableObject {
   @Published var isFetchingModels = false
   @Published var modelFetchError: String?
   @Published var dataSharingConsent = false
+  @Published var localBaseURLString = ""
 
   private let keychain = SecureKeyStore()
   private let router = ProviderRouter()
@@ -27,6 +28,15 @@ final class ProviderConnectViewModel: ObservableObject {
     if !selectedModel.isEmpty { return selectedModel }
     let m = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
     return m.isEmpty ? template.defaultModel : m
+  }
+
+  var localAddressPlaceholder: String {
+    template.baseURL.replacingOccurrences(of: "localhost", with: "192.168.1.10")
+  }
+
+  var hasValidLocalAddress: Bool {
+    guard let url = URL(string: localBaseURLString) else { return false }
+    return ProviderEndpointPolicy.isLocalNetworkURL(url)
   }
 
   enum ConnectionPhase: Equatable {
@@ -53,54 +63,79 @@ final class ProviderConnectViewModel: ObservableObject {
     connectionPhase = .scanningLocal
 
     Task {
-      // Use LocalProviderScanner for multi-port localhost probing
-      let discovered = await LocalProviderScanner.shared.quickScan()
+      // Probe known ports and Bonjour services only after the user opens a
+      // local-provider connection flow.
+      let discovered = await LocalProviderScanner.shared.scan(includeNetworkScan: true)
       if let match = discovered.first(where: {
-        $0.id == template.id || $0.name.lowercased() == template.id
+        $0.isReachable
+          && ($0.id == template.id
+            || $0.name.lowercased().contains(template.displayName.lowercased()))
       }) {
+        let resolvedURL = normalizedLocalBaseURL(match.baseURL)
         await MainActor.run {
-          connectionPhase = .localFound(endpoint: match.baseURL.absoluteString)
-          if !match.models.isEmpty {
-            let staticModels = AIConfigService.shared.availableModels(for: template.id)
-            var merged = Set(staticModels)
-            match.models.forEach { merged.insert($0) }
-            availableModels = Array(merged).sorted()
-            if let firstModel = availableModels.first {
-              selectedModel = firstModel
-            }
+          guard !match.models.isEmpty else {
+            connectionPhase = .failed(
+              "Found \(template.displayName), but it did not report an installed model.")
+            return
           }
+          localBaseURLString = resolvedURL.absoluteString
+          mergeDiscoveredModels(match.models)
+          connectionPhase = .localFound(endpoint: resolvedURL.absoluteString)
         }
       } else {
-        // Fallback: probe single endpoint as before
-        let found = await probeLocalEndpoint()
         await MainActor.run {
-          if found {
-            connectionPhase = .localFound(endpoint: template.baseURL)
-          } else {
-            connectionPhase = .localNotFound
-          }
+          connectionPhase = .localNotFound
         }
       }
     }
   }
 
-  private func probeLocalEndpoint() async -> Bool {
-    guard template.scanPort != nil, let path = template.scanPath else {
-      return false
-    }
-    guard let url = URL(string: template.baseURL)?.appendingPathComponent(path) else {
-      return false
+  func checkManualLocalAddress() async {
+    guard hasValidLocalAddress, let enteredURL = URL(string: localBaseURLString) else {
+      connectionPhase = .failed("Enter a valid local-network server address.")
+      return
     }
 
-    var request = URLRequest(url: url)
-    request.httpMethod = "GET"
-    request.timeoutInterval = 4
-
+    connectionPhase = .testing
+    let baseURL = normalizedLocalBaseURL(enteredURL)
     do {
-      let (_, response) = try await URLSession.shared.data(for: request)
-      return (response as? HTTPURLResponse)?.statusCode == 200
+      let models = try await LocalProviderScanner.shared.fetchModels(
+        from: baseURL,
+        scanPath: modelDiscoveryPath(for: baseURL))
+      guard !models.isEmpty else {
+        connectionPhase = .failed("The server responded but did not report an installed model.")
+        return
+      }
+      localBaseURLString = baseURL.absoluteString
+      mergeDiscoveredModels(models)
+      connectionPhase = .localFound(endpoint: baseURL.absoluteString)
     } catch {
-      return false
+      connectionPhase = .failed(
+        "Could not reach a compatible model server at that address.")
+    }
+  }
+
+  private func normalizedLocalBaseURL(_ url: URL) -> URL {
+    guard template.id == "lmstudio", !url.pathComponents.contains("v1") else { return url }
+    return url.appendingPathComponent("v1")
+  }
+
+  private func modelDiscoveryPath(for baseURL: URL) -> String? {
+    if template.id == "lmstudio", baseURL.pathComponents.contains("v1") {
+      return "models"
+    }
+    return template.scanPath?.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+  }
+
+  private func mergeDiscoveredModels(_ models: [String]) {
+    guard !models.isEmpty else { return }
+    let staticModels = AIConfigService.shared.availableModels(for: template.id)
+    var merged = Set(staticModels)
+    models.forEach { merged.insert($0) }
+    availableModels = Array(merged).sorted()
+    if let firstModel = models.sorted().first {
+      selectedModel = firstModel
+      modelName = firstModel
     }
   }
 
@@ -204,11 +239,14 @@ final class ProviderConnectViewModel: ObservableObject {
       }
     }
 
-    // Build a temporary config for testing.
-    guard let baseURL = URL(string: template.baseURL) else {
+    // Build a temporary config for testing. Local templates intentionally do
+    // not connect to their `localhost` development default on an iPhone.
+    let requestedBaseURL = template.category == .local ? localBaseURLString : template.baseURL
+    guard let enteredURL = URL(string: requestedBaseURL) else {
       connectionPhase = .failed("Invalid server address in template.")
       return
     }
+    let baseURL = template.category == .local ? normalizedLocalBaseURL(enteredURL) : enteredURL
 
     let testConfig = AIProviderConfigModel(
       name: template.displayName,
@@ -250,7 +288,9 @@ final class ProviderConnectViewModel: ObservableObject {
       let existingDescriptor = FetchDescriptor<AIProviderConfigModel>()
       if let existing = try? context.fetch(existingDescriptor) {
         for old in existing
-        where old.type == template.providerType && old.baseURLString == template.baseURL {
+        where old.providerConfigId == template.id
+          || (old.type == template.providerType && old.baseURLString == baseURL.absoluteString)
+        {
           if let oldKeyId = old.apiKeyKeychainIdentifier {
             try? keychain.deleteAPIKey(for: oldKeyId)
           }
@@ -646,6 +686,25 @@ struct ProviderConnectView: View {
         .multilineTextAlignment(.center)
       }
 
+      TextField(viewModel.localAddressPlaceholder, text: $viewModel.localBaseURLString)
+        .keyboardType(.URL)
+        .textInputAutocapitalization(.never)
+        .disableAutocorrection(true)
+        .textFieldStyle(.roundedBorder)
+
+      Text("Enter the server address shown by \(template.displayName) on your computer.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+
+      PrimaryActionButton(
+        title: "Check Address",
+        systemImage: "network"
+      ) {
+        Task { await viewModel.checkManualLocalAddress() }
+      }
+      .disabled(!viewModel.hasValidLocalAddress)
+
       PrimaryActionButton(
         title: "Scan Again",
         systemImage: "arrow.clockwise"
@@ -686,6 +745,11 @@ struct ProviderConnectView: View {
       ) {
         Task { await viewModel.connect(context: modelContext) }
       }
+
+      Button("Edit Server Address") {
+        viewModel.connectionPhase = .localNotFound
+      }
+      .buttonStyle(.bordered)
     }
   }
 

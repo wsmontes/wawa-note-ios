@@ -5,7 +5,7 @@ import SwiftUI
 import UserNotifications
 import WawaNoteCore
 
-// Related JIRA: KAN-70, KAN-533, KAN-534, KAN-535
+// Related JIRA: KAN-70, KAN-533, KAN-534, KAN-535, KAN-543
 
 @main
 struct WawaNoteApp: App {
@@ -74,6 +74,7 @@ struct WawaNoteApp: App {
     ProjectService.migrateProjectColors(context: migrationContext)
     ProjectService.migrateFieldProvenance(context: migrationContext)
     ProjectService.migrateToProjectDerivedItems(context: migrationContext)
+    AIProviderConfigModel.migrateBundledLocalProviderTypes(context: migrationContext)
 
     #if DEBUG
       if ProcessInfo.processInfo.arguments.contains("--screenshot-demo") {

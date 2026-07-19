@@ -33,6 +33,15 @@
 	<true/>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_http._tcp</string>
+	</array>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Wawa Note shows your calendar events so you can start recordings with the right meeting context.</string>
 	<key>NSCalendarsUsageDescription</key>
@@ -43,6 +52,8 @@
 	<string>Wawa Note matches meeting speakers with your contacts to enrich project context. Contact data stays on your device.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Wawa Note uses Face ID to protect your knowledge workspace.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Wawa Note finds and connects to AI models you choose to run on a computer on your local network.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Wawa Note uses the microphone to record meetings you choose to capture. Audio is saved on this iPhone.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>

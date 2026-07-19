@@ -2,7 +2,7 @@ import Foundation
 import OSLog
 import SwiftData
 
-// Related JIRA: KAN-539
+// Related JIRA: KAN-539, KAN-543
 
 final class ProviderRouter: Sendable {
   private let keychain: SecureKeyStore
@@ -81,6 +81,9 @@ final class ProviderRouter: Sendable {
       throw ProviderError.dataSharingConsentRequired(providerName: config.name)
     }
     guard let baseURL = config.baseURL else {
+      throw ProviderError.invalidBaseURL
+    }
+    guard !config.type.isLocal || ProviderEndpointPolicy.isLocalNetworkURL(baseURL) else {
       throw ProviderError.invalidBaseURL
     }
     let apiKey: String

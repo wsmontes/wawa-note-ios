@@ -1,6 +1,31 @@
 import Foundation
 import WawaNoteCore
 
+// Related JIRA: KAN-543
+
+enum ProviderEndpointPolicy {
+  static func isLocalNetworkURL(_ url: URL) -> Bool {
+    guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+      let rawHost = url.host?.lowercased()
+    else { return false }
+
+    let host = rawHost.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+    if host == "localhost" || host == "::1" || host.hasSuffix(".local") { return true }
+
+    let octets = host.split(separator: ".").compactMap { Int($0) }
+    if octets.count == 4, octets.allSatisfy({ (0...255).contains($0) }) {
+      if octets[0] == 10 || octets[0] == 127 { return true }
+      if octets[0] == 169 && octets[1] == 254 { return true }
+      if octets[0] == 172 && (16...31).contains(octets[1]) { return true }
+      if octets[0] == 192 && octets[1] == 168 { return true }
+      return false
+    }
+
+    guard host.contains(":") else { return false }
+    return host.hasPrefix("fe80:") || host.hasPrefix("fc") || host.hasPrefix("fd")
+  }
+}
+
 enum ProviderType: String, Codable, CaseIterable {
   case openAICompatible
   case openAI

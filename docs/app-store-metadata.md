@@ -126,6 +126,7 @@ Core functionality works without an API key. Apple Speech is set to on-device re
 The app requests permissions only from the feature that needs them:
 - Microphone and Speech Recognition when the reviewer starts recording/transcription.
 - Camera when the reviewer starts document scanning (camera is unavailable in Simulator).
+- Local Network when the reviewer chooses an on-computer AI service or taps Scan Network in AI Services.
 - Calendar, Reminders, Contacts, and Face ID only when the corresponding optional integration is used.
 
 Recording always begins from an explicit user action and displays an active recording interface. The app has no advertising, analytics, tracking, or Wawa Note backend. Optional cloud AI requests use a reviewer-supplied provider credential; no credential is included in the binary.

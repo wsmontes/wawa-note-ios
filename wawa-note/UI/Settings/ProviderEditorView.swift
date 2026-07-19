@@ -1,7 +1,7 @@
 import SwiftData
 import SwiftUI
 
-// Related JIRA: KAN-539
+// Related JIRA: KAN-539, KAN-543
 
 @MainActor
 final class ProviderEditorViewModel: ObservableObject {
@@ -65,8 +65,12 @@ final class ProviderEditorViewModel: ObservableObject {
       saveError = "Please enter a name for this provider."
       return
     }
-    guard !baseURLString.isEmpty, URL(string: baseURLString) != nil else {
+    guard !baseURLString.isEmpty, let baseURL = URL(string: baseURLString) else {
       saveError = "Please enter a valid server URL (e.g., https://api.openai.com/v1)."
+      return
+    }
+    guard !type.isLocal || ProviderEndpointPolicy.isLocalNetworkURL(baseURL) else {
+      saveError = "Local models must use a localhost, .local, or private-network address."
       return
     }
     guard type.isLocal || dataSharingConsent else {

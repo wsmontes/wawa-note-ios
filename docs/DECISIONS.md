@@ -392,3 +392,24 @@ The release audit found that the `mvp-v2` branch had reintroduced the global Cha
 - The generated-project specification no longer declares misleading iPhone/test dependencies on the Watch target.
 - The v1 App Store package contains the iPhone app, `WawaNoteCore.framework`, and the Share extension only.
 - `KAN-541` tracks correct Watch embedding, versioning, signing, App Store metadata, and paired-hardware validation for a post-v1 release.
+
+---
+
+## ADR-0016: Local AI uses explicit local-network scope
+
+**Date:** 2026-07-19
+
+**Status:** Accepted
+
+**Related JIRA:** KAN-543
+
+**Decision:** Represent LM Studio, Ollama, and other user-controlled network models as `.local` providers. Request iOS local-network access only when the user invokes discovery or connection, support manual server addresses when Bonjour discovery is unavailable, and permit non-TLS traffic only for local-network destinations through `NSAllowsLocalNetworking`.
+
+**Motivation:** The bundled templates were categorized as local in the UI but persisted as `.openAICompatible`, which made the consent and key requirements treat them as cloud providers. Their `localhost` defaults also pointed back to the iPhone rather than the user's computer. The missing privacy and ATS declarations could prevent otherwise valid local connections.
+
+**Consequences:**
+
+- Local providers do not require cloud content-sharing approval or an API key.
+- Bonjour `_http._tcp` discovery is declared, but users can enter the address shown by their model server when it does not advertise Bonjour.
+- Built-in cloud providers remain HTTPS-only; the app does not enable arbitrary remote HTTP.
+- Content sent to a local model travels directly between devices on the user's network and is disclosed in the privacy policy.

@@ -46,7 +46,7 @@ When you choose LM Studio, Ollama, or another local endpoint, content is sent ov
 
 ## Permissions
 
-Wawa Note requests system permission only when a related feature needs it. These permissions can include microphone, speech recognition, camera, contacts, calendar, reminders, and Face ID. Calendar, reminder, contact, and biometric data are processed on device unless content derived from them is deliberately included in material you approve for external processing.
+Wawa Note requests system permission only when a related feature needs it. These permissions can include microphone, speech recognition, camera, local network, contacts, calendar, reminders, and Face ID. Local-network access is requested only when you choose to find or connect a model running on a computer you control. Calendar, reminder, contact, and biometric data are processed on device unless content derived from them is deliberately included in material you approve for external processing.
 
 Recording is always initiated by an explicit user action and the app displays an active recording interface. You are responsible for obtaining any consent required to record other people.
 

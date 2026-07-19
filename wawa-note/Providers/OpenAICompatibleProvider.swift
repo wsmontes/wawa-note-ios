@@ -2,6 +2,8 @@ import Foundation
 import OSLog
 @preconcurrency import UIKit
 
+// Related JIRA: KAN-543
+
 // MARK: - Chat Completions API
 
 private struct ChatCompletionResponse: Decodable {
@@ -511,7 +513,7 @@ final class OpenAICompatibleProvider: AIProvider, @unchecked Sendable {
   func fetchModels() async throws -> [String] {
     // Ollama uses /api/tags, everyone else uses /models
     let path =
-      providerType == .localNetwork && baseURL.absoluteString.contains("11434")
+      providerType.isLocal && baseURL.absoluteString.contains("11434")
       ? "api/tags" : "models"
     let endpoint = baseURL.appendingPathComponent(path)
     var request = URLRequest(url: endpoint)

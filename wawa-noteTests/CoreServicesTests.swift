@@ -4,7 +4,7 @@ import XCTest
 
 @testable import Wawa_Note
 
-// Related JIRA: KAN-152, KAN-533, KAN-534, KAN-537, KAN-538, KAN-539
+// Related JIRA: KAN-152, KAN-533, KAN-534, KAN-537, KAN-538, KAN-539, KAN-543
 
 @MainActor
 final class SemanticSearchServiceTests: XCTestCase {
@@ -1315,6 +1315,96 @@ final class CloudAIConsentTests: XCTestCase {
     let config = AIProviderConfigModel(type: .local)
 
     XCTAssertTrue(config.allowsPersonalDataSharing)
+  }
+
+  func testBundledLocalTemplatesUseLocalProviderType() {
+    let templates = ProviderTemplate.localTemplates
+
+    XCTAssertFalse(templates.isEmpty)
+    XCTAssertTrue(templates.allSatisfy { $0.providerType.isLocal })
+    XCTAssertTrue(templates.allSatisfy { !$0.requiresAuth })
+  }
+
+  func testLocalEndpointPolicyAcceptsPrivateAddresses() {
+    XCTAssertTrue(
+      ProviderEndpointPolicy.isLocalNetworkURL(URL(string: "http://192.168.1.20:11434")!))
+    XCTAssertTrue(
+      ProviderEndpointPolicy.isLocalNetworkURL(URL(string: "http://studio-mac.local:1234/v1")!))
+    XCTAssertTrue(ProviderEndpointPolicy.isLocalNetworkURL(URL(string: "http://[fe80::1]:8080")!))
+  }
+
+  func testLocalEndpointPolicyRejectsPublicAddress() {
+    XCTAssertFalse(
+      ProviderEndpointPolicy.isLocalNetworkURL(URL(string: "https://models.example.com/v1")!))
+    XCTAssertFalse(ProviderEndpointPolicy.isLocalNetworkURL(URL(string: "https://fdown.com/v1")!))
+  }
+
+  func testLocalProviderCannotBypassCloudConsentWithPublicEndpoint() {
+    let config = AIProviderConfigModel(
+      name: "Misclassified cloud service",
+      type: .local,
+      baseURL: URL(string: "https://models.example.com/v1"),
+      defaultModel: "test-model"
+    )
+
+    XCTAssertThrowsError(try ProviderRouter().provider(for: config)) { error in
+      guard case ProviderError.invalidBaseURL = error else {
+        return XCTFail("Expected invalid URL error, received \(error)")
+      }
+    }
+  }
+
+  func testLocalConnectionFormAcceptsOnlyPrivateAddress() throws {
+    let template = try XCTUnwrap(ProviderTemplate.ollama)
+    let viewModel = ProviderConnectViewModel(template: template)
+
+    viewModel.localBaseURLString = "http://192.168.1.20:11434"
+    XCTAssertTrue(viewModel.hasValidLocalAddress)
+
+    viewModel.localBaseURLString = "https://models.example.com/v1"
+    XCTAssertFalse(viewModel.hasValidLocalAddress)
+  }
+
+  func testLegacyLocalTemplateMigrationRepairsProviderType() throws {
+    let schema = Schema([AIProviderConfigModel.self])
+    let store = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+    let container = try ModelContainer(for: schema, configurations: store)
+    let context = container.mainContext
+    let provider = AIProviderConfigModel(
+      name: "Ollama",
+      type: .openAICompatible,
+      providerConfigId: "ollama",
+      baseURL: URL(string: "http://192.168.1.20:11434"),
+      defaultModel: "llama3"
+    )
+    context.insert(provider)
+    try context.save()
+
+    AIProviderConfigModel.migrateBundledLocalProviderTypes(context: context)
+
+    XCTAssertEqual(provider.type, .local)
+    XCTAssertTrue(provider.allowsPersonalDataSharing)
+  }
+
+  func testLegacyLocalTemplateMigrationDoesNotExemptPublicEndpoint() throws {
+    let schema = Schema([AIProviderConfigModel.self])
+    let store = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+    let container = try ModelContainer(for: schema, configurations: store)
+    let context = container.mainContext
+    let provider = AIProviderConfigModel(
+      name: "Remote Ollama gateway",
+      type: .openAICompatible,
+      providerConfigId: "ollama",
+      baseURL: URL(string: "https://models.example.com/v1"),
+      defaultModel: "llama3"
+    )
+    context.insert(provider)
+    try context.save()
+
+    AIProviderConfigModel.migrateBundledLocalProviderTypes(context: context)
+
+    XCTAssertEqual(provider.type, .openAICompatible)
+    XCTAssertFalse(provider.allowsPersonalDataSharing)
   }
 }
 

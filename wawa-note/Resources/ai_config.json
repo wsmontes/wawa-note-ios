@@ -91,7 +91,7 @@
     "lmstudio": {
       "id": "lmstudio",
       "displayName": "LM Studio",
-      "type": "openAICompatible",
+      "type": "local",
       "baseURL": "http://localhost:1234/v1",
       "authType": "none",
       "helpURL": null,
@@ -108,7 +108,7 @@
     "ollama": {
       "id": "ollama",
       "displayName": "Ollama",
-      "type": "openAICompatible",
+      "type": "local",
       "baseURL": "http://localhost:11434",
       "authType": "none",
       "helpURL": null,

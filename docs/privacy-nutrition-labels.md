@@ -30,6 +30,8 @@ The following is not “collected” under Apple's definition when it stays enti
 - local search history and locally generated diagnostics;
 - content sent only to a model on a computer controlled by the user.
 
+Local-network permission is requested only when the user opens local-model discovery or connects a local endpoint. Local HTTP is allowed only through the scoped `NSAllowsLocalNetworking` ATS exception; arbitrary remote HTTP remains blocked.
+
 The app has no first-party analytics, advertising SDK, telemetry endpoint, Wawa Note account, or cloud backend. Debug logs leave the device only when the user explicitly exports and shares a copy.
 
 ## Manifest alignment

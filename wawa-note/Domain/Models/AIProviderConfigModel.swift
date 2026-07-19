@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 import WawaNoteCore
 
-// Related JIRA: KAN-539
+// Related JIRA: KAN-539, KAN-543
 
 @Model
 final class AIProviderConfigModel {
@@ -123,5 +123,33 @@ final class AIProviderConfigModel {
   func isAPIKeyPresent() -> Bool {
     guard let identifier = apiKeyKeychainIdentifier else { return false }
     return (try? SecureKeyStore().loadAPIKey(for: identifier)) != nil
+  }
+
+  /// Repairs local-model configurations created by older templates that used
+  /// `.openAICompatible`. Reclassify only known templates with a local address
+  /// so an arbitrary cloud endpoint can never gain the local consent exemption.
+  @MainActor
+  static func migrateBundledLocalProviderTypes(context: ModelContext) {
+    let knownLocalTemplateIDs = Set(["ollama", "lmstudio"])
+    guard let providers = try? context.fetch(FetchDescriptor<AIProviderConfigModel>()) else {
+      return
+    }
+
+    var changed = false
+    for provider in providers
+    where knownLocalTemplateIDs.contains(provider.providerConfigId)
+      && !provider.type.isLocal
+    {
+      guard let url = provider.baseURL, ProviderEndpointPolicy.isLocalNetworkURL(url) else {
+        continue
+      }
+      provider.type = .local
+      provider.dataSharingConsentAt = nil
+      changed = true
+    }
+
+    if changed {
+      try? context.save()
+    }
   }
 }
