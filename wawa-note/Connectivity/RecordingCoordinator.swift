@@ -5,6 +5,8 @@ import SwiftData
 import UIKit
 import WawaNoteCore
 
+// Related JIRA: KAN-535
+
 extension Notification.Name {
   /// Posted after crash-recovered orphaned recordings have been cleaned up
   /// and their pipeline processing has been triggered. Views observing this
@@ -221,7 +223,7 @@ final class RecordingCoordinator: ObservableObject {
 
     // Block early if mic permission is denied — avoids creating an item
     // that would be immediately rolled back when startRecording fails.
-    let micPermission = AVAudioSession.sharedInstance().recordPermission
+    let micPermission = AVAudioApplication.shared.recordPermission
     guard micPermission != .denied else {
       AppLog.warn("audio", "Recording blocked: microphone permission denied")
       errorMessage = "Microphone access is off. Turn it on in Settings to record audio."
@@ -399,10 +401,9 @@ final class RecordingCoordinator: ObservableObject {
     // Auto-stop after 5 minutes of inactivity to release the mic hardware
     pauseTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: false) {
       [weak self] _ in
-      guard let self, self.state == .paused else { return }
-      AppLog.audio.info("Pause timeout — auto-stopping recording after 5 min of inactivity")
-      self.errorMessage = "Recording was paused too long and was stopped automatically."
-      self.stopRecording()
+      Task { @MainActor [weak self] in
+        self?.handlePauseTimeout()
+      }
     }
     nowPlayingController.update(
       title: recordingTitle, elapsedTime: elapsedTime - pausedDuration, isPlaying: false)
@@ -511,7 +512,7 @@ final class RecordingCoordinator: ObservableObject {
         }
         AppLog.event(
           "audio", "Enqueuing item \(itemId.uuidString.prefix(8)) into ProcessingQueue")
-        queue.enqueue(itemID: itemId, trigger: .newCapture)
+        _ = queue.enqueue(itemID: itemId, trigger: .newCapture)
       }
     }
   }
@@ -760,7 +761,7 @@ final class RecordingCoordinator: ObservableObject {
       ? []  // No segments found — empty manifest, will be handled downstream
       : existingSegments
 
-    var manifest = RecordingManifest(
+    let manifest = RecordingManifest(
       recordingId: meetingId,
       title: item.title,
       startedAt: item.createdAt,
@@ -819,7 +820,7 @@ final class RecordingCoordinator: ObservableObject {
 
   func cleanupOrphanedRecordings() {
     // First, attempt crash checkpoint recovery
-    let recovered = attemptCrashCheckpointRecovery()
+    _ = attemptCrashCheckpointRecovery()
 
     // Use a fresh context isolated from the main context used by SwiftUI views.
     // This is a read-delete-save driven by app init, not user interaction.
@@ -951,7 +952,7 @@ final class RecordingCoordinator: ObservableObject {
                 AppLog.audio.info(
                   "Cleared stale checkpoint for repaired item \(itemId.uuidString.prefix(8))")
               }
-              capturedQueue?.enqueue(itemID: itemId, trigger: .backgroundBackfill)
+              _ = capturedQueue?.enqueue(itemID: itemId, trigger: .backgroundBackfill)
               NotificationCenter.default.post(
                 name: .pipelineCompleted, object: itemId.uuidString)
             } else {
@@ -975,8 +976,6 @@ final class RecordingCoordinator: ObservableObject {
       // with dozens of simultaneous AVAssetExportSession operations.
       if !recoveredIds.isEmpty {
         let capturedQueue = processingQueue
-        let capturedPipeline = contentPipeline
-        let capturedContext = modelContext
         Task { @MainActor in
           for itemId in recoveredIds {
             AppLog.event(
@@ -1001,7 +1000,7 @@ final class RecordingCoordinator: ObservableObject {
                 "No processing queue — cannot recover item \(itemId.uuidString.prefix(8))")
               continue
             }
-            queue.enqueue(itemID: itemId, trigger: .newCapture)
+            _ = queue.enqueue(itemID: itemId, trigger: .newCapture)
           }
         }
       }
@@ -1089,123 +1088,125 @@ final class RecordingCoordinator: ObservableObject {
     observationTimer?.invalidate()
     observationTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) {
       [weak self] _ in  // 10Hz — smooth enough for UI, half the CPU of 20Hz
-      guard let self else { return }
-      // Timer.scheduledTimer fires on main run loop — already on main thread.
-      if let start = self.recordingStartDate {
-        self.elapsedTime = Date().timeIntervalSince(start)
-        // Auto-stop after 2 hours to prevent runaway recordings filling storage
-        if self.elapsedTime > 7200, self.state == .recording {
-          AppLog.audio.warning("Max recording duration (2h) reached — auto-stopping")
-          self.errorMessage = "Recording reached the 2-hour maximum and was stopped."
-          self.stopRecording()
-          return
-        }
-      }
-      self.audioLevel = self.captureService.audioLevel
-      // Clipping detection (hysteresis: on at > 0.95, off at < 0.85)
-      let level = self.captureService.audioLevel
-      if level > 0.95 && !self.isClipping {
-        self.isClipping = true
-        self.clipCount += 1
-      } else if level < 0.85 && self.isClipping {
-        self.isClipping = false
-      }
-      // Sync input port info (may change on route switch)
-      // Segments are handled by onRouteChangeNewSegment callback
-      let portName = self.captureService.currentInputPortName
-      if self.currentInputPortName != portName, !portName.isEmpty {
-        self.currentInputPortName = portName
-        self.currentInputIcon = self.captureService.currentInputPortIcon
-      }
-      // Sync silence detection (from adaptive threshold in capture service)
-      let captureSilent = self.captureService.silenceDetected
-      if self.silenceDetected != captureSilent {
-        self.silenceDetected = captureSilent
-      }
-      // Refresh sample rate badge (may change on route switch)
-      self.updateSampleRateBadge()
-      if self.captureService.state == .stopped {
-        self.state = .stopped
-        self.nowPlayingController.deactivate()
-        self.observationTimer?.invalidate()
-        self.observationTimer = nil
-        self.nowPlayingTimer?.invalidate()
-        self.nowPlayingTimer = nil
-      } else if self.captureService.state == .paused && self.state != .paused {
-        self.state = .paused
-        self.pauseStartDate = Date()  // Freeze elapsed time
-        self.notifyStatusChange()
+      Task { @MainActor [weak self] in
+        self?.handleObservationTick()
       }
     }
 
     nowPlayingTimer?.invalidate()
     nowPlayingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-      guard let self else { return }
-      // Timer.scheduledTimer fires on main run loop — already on main thread.
-      guard self.state == .recording || self.state == .paused else { return }
-      let effective = self.elapsedTime - self.pausedDuration
-      self.nowPlayingController.update(
-        title: self.recordingTitle,
-        elapsedTime: effective,
-        isPlaying: self.state == .recording
-      )
+      Task { @MainActor [weak self] in
+        self?.handleNowPlayingTick()
+      }
     }
+  }
+
+  private func handlePauseTimeout() {
+    guard state == .paused else { return }
+    AppLog.audio.info("Pause timeout — auto-stopping recording after 5 min of inactivity")
+    errorMessage = "Recording was paused too long and was stopped automatically."
+    stopRecording()
+  }
+
+  private func handleObservationTick() {
+    guard state == .recording || state == .paused else { return }
+    if let start = recordingStartDate {
+      elapsedTime = Date().timeIntervalSince(start)
+      // Auto-stop after 2 hours to prevent runaway recordings filling storage
+      if elapsedTime > 7200, state == .recording {
+        AppLog.audio.warning("Max recording duration (2h) reached — auto-stopping")
+        errorMessage = "Recording reached the 2-hour maximum and was stopped."
+        stopRecording()
+        return
+      }
+    }
+    audioLevel = captureService.audioLevel
+    // Clipping detection (hysteresis: on at > 0.95, off at < 0.85)
+    let level = captureService.audioLevel
+    if level > 0.95 && !isClipping {
+      isClipping = true
+      clipCount += 1
+    } else if level < 0.85 && isClipping {
+      isClipping = false
+    }
+    // Sync input port info (may change on route switch).
+    let portName = captureService.currentInputPortName
+    if currentInputPortName != portName, !portName.isEmpty {
+      currentInputPortName = portName
+      currentInputIcon = captureService.currentInputPortIcon
+    }
+    let captureSilent = captureService.silenceDetected
+    if silenceDetected != captureSilent {
+      silenceDetected = captureSilent
+    }
+    updateSampleRateBadge()
+    if captureService.state == .stopped {
+      state = .stopped
+      nowPlayingController.deactivate()
+      observationTimer?.invalidate()
+      observationTimer = nil
+      nowPlayingTimer?.invalidate()
+      nowPlayingTimer = nil
+    } else if captureService.state == .paused && state != .paused {
+      state = .paused
+      pauseStartDate = Date()
+      notifyStatusChange()
+    }
+  }
+
+  private func handleNowPlayingTick() {
+    guard state == .recording || state == .paused else { return }
+    nowPlayingController.update(
+      title: recordingTitle,
+      elapsedTime: elapsedTime - pausedDuration,
+      isPlaying: state == .recording
+    )
   }
 
   // MARK: - Context capture
 
   private func captureContextSafely(for itemId: UUID) {
     let sensors = contextCaptureService
-    let annotSvc = annotationService
-    let deviceCtx = deviceContextService
     Task.detached { [weak self] in
       let captured = await sensors.captureAll()
       guard !captured.isEmpty else { return }
-      await MainActor.run { [weak self] in
-        guard let self else { return }
-        do {
-          try annotSvc.upsert(captured, itemID: itemId, source: "recording_context")
-          AppLog.general.info("Context: \(captured.count) annotations for item \(itemId)")
-        } catch {
-          AppLog.error("general", "Context capture save failed: \(error.localizedDescription)")
-        }
-        // Bridge annotations → KnowledgeItem typed context fields
-        ContextBridgeService.applyAnnotations(captured, to: itemId, context: self.modelContext)
-      }
+      await self?.applyCapturedContext(captured, to: itemId)
+    }
+  }
 
-      // Cross-reference with device context (calendar, contacts)
-      // Runs in Task.detached context — must use its own ModelContext fetch
-      await Task { @MainActor [weak self] in
-        guard let self else { return }
-        let ctx = self.modelContext
-        let descriptor = FetchDescriptor<KnowledgeItem>(
-          predicate: #Predicate { $0.id == itemId }
-        )
-        guard let item = try? ctx.fetch(descriptor).first else { return }
-        let enrichments = await deviceCtx.crossReference(item: item)
-        for enrichment in enrichments {
-          switch enrichment {
-          case .calendarEvent(let match):
-            item.calendarEventIdentifier = match.eventID
-            item.contextCalendarEventTitle = match.title
-            AppLog.event(
-              "context",
-              "Calendar match: \"\(match.title)\" for item \(itemId.uuidString.prefix(8))")
-          case .contact(let contact):
-            if (try? ensurePersonExists(contact, context: ctx)) != nil {
-              AppLog.event(
-                "context",
-                "Contact match: \"\(contact.displayName)\" for item \(itemId.uuidString.prefix(8))"
-              )
-            }
-          case .location:
-            break  // Already handled by ContextBridgeService
-          }
+  private func applyCapturedContext(_ captured: [CapturedAnnotation], to itemId: UUID) async {
+    do {
+      try annotationService.upsert(captured, itemID: itemId, source: "recording_context")
+      AppLog.general.info("Context: \(captured.count) annotations for item \(itemId)")
+    } catch {
+      AppLog.error("general", "Context capture save failed: \(error.localizedDescription)")
+    }
+    ContextBridgeService.applyAnnotations(captured, to: itemId, context: modelContext)
+
+    let descriptor = FetchDescriptor<KnowledgeItem>(predicate: #Predicate { $0.id == itemId })
+    guard let item = try? modelContext.fetch(descriptor).first else { return }
+    let enrichments = await deviceContextService.crossReference(item: item)
+    for enrichment in enrichments {
+      switch enrichment {
+      case .calendarEvent(let match):
+        item.calendarEventIdentifier = match.eventID
+        item.contextCalendarEventTitle = match.title
+        AppLog.event(
+          "context",
+          "Calendar match: \"\(match.title)\" for item \(itemId.uuidString.prefix(8))")
+      case .contact(let contact):
+        if (try? ensurePersonExists(contact, context: modelContext)) != nil {
+          AppLog.event(
+            "context",
+            "Contact match: \"\(contact.displayName)\" for item \(itemId.uuidString.prefix(8))"
+          )
         }
-        if !enrichments.isEmpty {
-          ctx.safeSave(context: "context-enrichment", itemId: itemId)
-        }
+      case .location:
+        break
       }
+    }
+    if !enrichments.isEmpty {
+      modelContext.safeSave(context: "context-enrichment", itemId: itemId)
     }
   }
 

@@ -5,7 +5,7 @@ import SwiftUI
 import UserNotifications
 import WawaNoteCore
 
-// Related JIRA: KAN-533, KAN-534
+// Related JIRA: KAN-533, KAN-534, KAN-535
 
 @main
 struct WawaNoteApp: App {
@@ -97,8 +97,10 @@ struct WawaNoteApp: App {
         object: nil,
         queue: .main
       ) { _ in
-        AppLog.event("general", "App will enter foreground")
-        coordinator.onAppForeground()
+        Task { @MainActor in
+          AppLog.event("general", "App will enter foreground")
+          coordinator.onAppForeground()
+        }
       }
     )
 
