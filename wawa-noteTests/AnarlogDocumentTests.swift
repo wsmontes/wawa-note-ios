@@ -2,6 +2,8 @@ import XCTest
 
 @testable import Wawa_Note
 
+// Related JIRA: KAN-532
+
 final class AnarlogDocumentTests: XCTestCase {
 
   // MARK: - Parse tests
@@ -180,6 +182,8 @@ final class AnarlogDocumentTests: XCTestCase {
 
     let doc = try AnarlogDocument.parse(from: input)
     let rendered = try doc.render()
+
+    XCTAssertTrue(rendered.contains("tags:\n  - sprint\n  - engineering"))
 
     // Parse again to verify fidelity
     let doc2 = try AnarlogDocument.parse(from: rendered)

@@ -1,6 +1,8 @@
 import Foundation
 import WawaNoteCore
 
+// Related JIRA: KAN-532
+
 // MARK: - Anarlog Frontmatter Types
 
 /// Full frontmatter structure for an anarlog session note.
@@ -297,11 +299,10 @@ private enum MinimalYAMLParser {
         return (result, index)
       }
 
-      // Array item at object level — shouldn't happen; arrays are values of keys
+      // An array item belongs to the caller that owns the array. Returning here
+      // also guarantees forward progress for malformed, unindented YAML.
       if trimmed.hasPrefix("- ") {
-        let (_, newIndex) = try parseArray(lines: lines, index: &index, baseIndent: indent)
-        index = newIndex
-        continue
+        return (result, index)
       }
 
       // Key-value pair
@@ -511,7 +512,7 @@ private enum MinimalYAMLSerializer {
             result += "\(keyLine) []\n"
           } else {
             result += "\(keyLine)\n"
-            result += serializeValue(nestedArr, indent: indent)
+            result += serializeValue(nestedArr, indent: indent + 2)
           }
         } else {
           let scalarStr = serializeScalar(val)
