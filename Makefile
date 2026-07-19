@@ -40,14 +40,16 @@ all: build install test  ## Build → Install → Test
 build:  ## Build for device (set DEVICE=15 for iPhone 15)
 ifeq ($(DEVICE),15)
 	@echo "🔨 Building for iPhone 15..."
-	@set -o pipefail; xcodebuild -project $(PROJECT) -scheme $(SCHEME) \
+	@xcodebuild -quiet -project $(PROJECT) -scheme $(SCHEME) \
 		-destination "platform=iOS,id=$(DEVICE_15)" \
-		-configuration Debug build 2>&1 | tail -5
+		-configuration Debug build
+	@echo "✅ Build succeeded"
 else
 	@echo "🔨 Building for iPhone 14 Plus..."
-	@set -o pipefail; xcodebuild -project $(PROJECT) -scheme $(SCHEME) \
+	@xcodebuild -quiet -project $(PROJECT) -scheme $(SCHEME) \
 		-destination "platform=iOS,id=$(DEVICE_14PLUS)" \
-		-configuration Debug build 2>&1 | tail -5
+		-configuration Debug build
+	@echo "✅ Build succeeded"
 endif
 
 install:  ## Install on device (set DEVICE=15 for iPhone 15)
