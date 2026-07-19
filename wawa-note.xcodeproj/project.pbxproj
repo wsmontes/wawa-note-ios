@@ -1683,7 +1683,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.wawa-note.tests";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/wawa-note.app/wawa-note";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Wawa Note.app/Wawa Note";
 			};
 			name = Debug;
 		};
@@ -1804,7 +1804,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.wawa-note.tests";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/wawa-note.app/wawa-note";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Wawa Note.app/Wawa Note";
 			};
 			name = Release;
 		};

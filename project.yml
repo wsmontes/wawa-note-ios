@@ -105,6 +105,8 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: "YES"
         PRODUCT_BUNDLE_IDENTIFIER: com.wawa-note.tests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Wawa Note.app/Wawa Note"
+        BUNDLE_LOADER: "$(TEST_HOST)"
 
   wawa-note-share:
     type: app-extension

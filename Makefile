@@ -10,6 +10,8 @@
 #   make bug-report device=14plus since=2h  Full bug report bundle + crashes
 #   make tail                               Last 100 lines from default device
 
+SHELL := /bin/bash
+
 SCRIPTS := $(shell cd "$(dir $(lastword $(MAKEFILE_LIST)))" && pwd)/scripts
 
 DEVICE_14PLUS := 00008110-00067D861486201E
@@ -38,12 +40,12 @@ all: build install test  ## Build → Install → Test
 build:  ## Build for device (set DEVICE=15 for iPhone 15)
 ifeq ($(DEVICE),15)
 	@echo "🔨 Building for iPhone 15..."
-	@xcodebuild -project $(PROJECT) -scheme $(SCHEME) \
+	@set -o pipefail; xcodebuild -project $(PROJECT) -scheme $(SCHEME) \
 		-destination "platform=iOS,id=$(DEVICE_15)" \
 		-configuration Debug build 2>&1 | tail -5
 else
 	@echo "🔨 Building for iPhone 14 Plus..."
-	@xcodebuild -project $(PROJECT) -scheme $(SCHEME) \
+	@set -o pipefail; xcodebuild -project $(PROJECT) -scheme $(SCHEME) \
 		-destination "platform=iOS,id=$(DEVICE_14PLUS)" \
 		-configuration Debug build 2>&1 | tail -5
 endif
@@ -51,12 +53,12 @@ endif
 install:  ## Install on device (set DEVICE=15 for iPhone 15)
 ifeq ($(DEVICE),15)
 	@echo "📱 Installing on iPhone 15..."
-	@xcrun devicectl device install app --device $(DEVICE_15) "$(APP_PATH)" 2>&1 \
-		| grep -E "App installed|error" || echo "⚠️  Install may have failed"
+	@set -o pipefail; xcrun devicectl device install app --device $(DEVICE_15) "$(APP_PATH)" 2>&1 \
+		| grep -E "App installed|error"
 else
 	@echo "📱 Installing on iPhone 14 Plus..."
-	@xcrun devicectl device install app --device $(DEVICE_14PLUS) "$(APP_PATH)" 2>&1 \
-		| grep -E "App installed|error" || echo "⚠️  Install may have failed"
+	@set -o pipefail; xcrun devicectl device install app --device $(DEVICE_14PLUS) "$(APP_PATH)" 2>&1 \
+		| grep -E "App installed|error"
 endif
 
 deploy: build install  ## Build + Install (no tests)
@@ -90,7 +92,7 @@ devices:  ## List configured test devices and connection status
 
 test:  ## Run unit tests on simulator
 	@echo "🧪 Running tests on $(SIM_DEVICE)..."
-	@xcodebuild test -project $(PROJECT) -scheme $(SCHEME) \
+	@set -o pipefail; xcodebuild test -project $(PROJECT) -scheme $(SCHEME) \
 		-destination "platform=iOS Simulator,name=$(SIM_DEVICE)" \
 		-only-testing:wawa-noteTests 2>&1 | tail -20
 
