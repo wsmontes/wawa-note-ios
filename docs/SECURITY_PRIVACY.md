@@ -1,4 +1,8 @@
-# Security and Privacy — AI Meeting Companion iOS
+# Security and Privacy — Wawa Note
+
+Updated: 2026-07-19
+
+Related JIRA: KAN-71, KAN-539
 
 ## 1. Privacy principle
 
@@ -24,10 +28,10 @@ Implement these concepts in the product model even if only some are available in
 | Remote transcription + remote analysis | Audio and transcript may leave device. |
 | Manual | User chooses engine per step. |
 
-MVP likely supports:
+V1 supports:
 
 ```text
-Local audio + Apple transcription + remote/local-network AI analysis
+Local audio + on-device Apple transcription by default + approved remote or local-network AI analysis
 ```
 
 ## 3. API keys
@@ -64,14 +68,15 @@ When raw audio is deleted:
 
 ## 6. Permissions
 
-Expected permissions:
+Feature-dependent permissions:
 
 - Microphone.
 - Speech recognition.
-- Local network for LAN providers.
-- Photos later for OCR attachments.
-- Calendar/Reminders later.
-- Contacts later.
+- Camera for document scans.
+- Calendar for timeline context and event creation.
+- Reminders for task export.
+- Contacts for optional speaker matching.
+- Face ID for the optional app gate.
 
 Permission text should be specific.
 
@@ -125,7 +130,7 @@ Logs must not include:
 
 Debug mode can preserve raw provider response to file only when explicitly needed.
 
-## 10. Network calls
+## 10. Network calls and consent
 
 For provider calls, show clear status:
 
@@ -133,7 +138,9 @@ For provider calls, show clear status:
 - local network
 - remote API
 
-The app should not silently send audio or transcript to remote services.
+The app must not silently send audio, images, transcripts, notes, imports, or derived text to remote services. Every cloud `AIProviderConfigModel` requires a provider-specific `dataSharingConsentAt` value before `ProviderRouter` can resolve it for content processing. Remote transcription applies the same gate.
+
+The public policy is `PRIVACY.md`. App Store Connect declarations are maintained in `docs/privacy-nutrition-labels.md` and must match `Resources/PrivacyInfo.xcprivacy`.
 
 ## 11. Apple Intelligence constraint
 

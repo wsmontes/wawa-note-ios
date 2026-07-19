@@ -4,6 +4,8 @@ import SwiftData
 import SwiftUI
 import WawaNoteCore
 
+// Related JIRA: KAN-71
+
 struct SettingsView: View {
   @Environment(\.modelContext) private var modelContext
   @Query(sort: \KnowledgeItem.updatedAt) private var allItems: [KnowledgeItem]
@@ -206,8 +208,15 @@ struct SettingsView: View {
             Text("On this iPhone")
               .foregroundStyle(.secondary)
           }
+          NavigationLink {
+            PrivacyDataView()
+          } label: {
+            Label("Privacy & Data Controls", systemImage: "hand.raised")
+          }
         } header: {
           Text("Privacy & Data")
+        } footer: {
+          Text("Cloud processing is off until you explicitly approve a named provider.")
         }
 
         // Data Export
@@ -635,5 +644,82 @@ struct SettingsView: View {
     let usable = available.filter { SFSpeechRecognizer(locale: $0)?.isAvailable == true }
     if usable.isEmpty { return [Locale(identifier: "en-US").identifier] }
     return usable.map(\.identifier)
+  }
+}
+
+private struct PrivacyDataView: View {
+  @Query(sort: \AIProviderConfigModel.name) private var providers: [AIProviderConfigModel]
+  @AppStorage("transcription_allow_cloud") private var allowAppleCloudSpeech = false
+
+  private static let privacyPolicyURL = URL(
+    string: "https://github.com/wsmontes/wawa-note-ios/blob/main/PRIVACY.md")!
+
+  private var cloudProviders: [AIProviderConfigModel] {
+    providers.filter { !$0.type.isLocal }
+  }
+
+  var body: some View {
+    List {
+      Section("Stored on this iPhone") {
+        Label("Recordings, notes, scans, projects, and AI results", systemImage: "iphone")
+        Label("API keys in the iOS Keychain", systemImage: "key")
+        Text("Wawa Note has no account, analytics, advertising, tracking, or cloud backend.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+
+      Section("Optional external processing") {
+        if cloudProviders.isEmpty {
+          Label("No cloud AI provider configured", systemImage: "checkmark.shield")
+            .foregroundStyle(.green)
+        } else {
+          ForEach(cloudProviders) { provider in
+            LabeledContent(provider.name) {
+              Label(
+                provider.allowsPersonalDataSharing ? "Approved" : "Blocked",
+                systemImage: provider.allowsPersonalDataSharing
+                  ? "checkmark.circle.fill" : "xmark.circle.fill"
+              )
+              .foregroundStyle(provider.allowsPersonalDataSharing ? .green : .secondary)
+            }
+          }
+        }
+
+        LabeledContent("Apple cloud speech") {
+          Text(allowAppleCloudSpeech ? "Allowed" : "Off")
+            .foregroundStyle(allowAppleCloudSpeech ? .orange : .secondary)
+        }
+
+        Text(
+          "An approved cloud AI provider may receive recordings, transcripts, notes, scans, images, imports, and derived text needed for the feature you use."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      }
+
+      Section {
+        NavigationLink {
+          ProviderPickerView()
+        } label: {
+          Label("Manage AI Services", systemImage: "brain.head.profile")
+        }
+
+        Link(destination: Self.privacyPolicyURL) {
+          Label("Read Privacy Policy", systemImage: "doc.text")
+        }
+
+        Link(destination: URL(string: "mailto:wawasoftbc@gmail.com")!) {
+          Label("Privacy Contact", systemImage: "envelope")
+        }
+      } header: {
+        Text("Controls")
+      } footer: {
+        Text(
+          "To revoke a provider, open AI Services, select it, then Edit its sharing approval or delete it. To permanently remove local items, use Inbox > Trash > Empty Trash. Provider-retained copies must be managed with that provider."
+        )
+      }
+    }
+    .navigationTitle("Privacy & Data")
+    .navigationBarTitleDisplayMode(.inline)
   }
 }

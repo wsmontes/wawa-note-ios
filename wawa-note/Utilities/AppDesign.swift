@@ -1,6 +1,8 @@
 import SwiftUI
 import WawaNoteCore
 
+// Related JIRA: KAN-71
+
 // MARK: - Color from Hex
 
 extension Color {
@@ -96,7 +98,7 @@ enum AppCopy {
   static let micPermission =
     "Wawa Note uses your microphone to record meetings you choose to capture. Audio stays on this iPhone."
   static let speechPermission =
-    "Your recordings are turned into searchable text right on this iPhone. Nothing is sent anywhere."
+    "Apple Speech runs on this iPhone by default. Audio leaves the device only if you enable a cloud transcription option."
 
   // MARK: - Privacy
   static let privacyLocalFirst =
@@ -115,7 +117,8 @@ enum AppCopy {
     "Connect an AI service to automatically find action items, decisions, and key points in your meetings."
   static let connectAIButton = "Connect an AI Service"
   static let notNow = "Not Now"
-  static let privacyReassurance = "Your recordings and transcripts stay on your iPhone."
+  static let privacyReassurance =
+    "Your library stays on this iPhone unless you explicitly approve external processing."
 
   // MARK: - In-Progress
   static let transcribing = "Transcribing your meeting..."
