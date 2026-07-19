@@ -1,10 +1,10 @@
 import SwiftData
-import XCTest
 import WawaNoteCore
+import XCTest
 
 @testable import Wawa_Note
 
-// Related JIRA: KAN-152, KAN-533, KAN-534, KAN-537, KAN-538
+// Related JIRA: KAN-152, KAN-533, KAN-534, KAN-537, KAN-538, KAN-539
 
 @MainActor
 final class SemanticSearchServiceTests: XCTestCase {
@@ -1288,6 +1288,33 @@ final class ContextCapturePrivacyTests: XCTestCase {
       Set(ContextCaptureService.defaultSensorNames),
       Set(["audio_route", "battery_state"])
     )
+  }
+}
+
+@MainActor
+final class CloudAIConsentTests: XCTestCase {
+  func testCloudProviderIsBlockedUntilUserApprovesDataSharing() throws {
+    let config = AIProviderConfigModel(
+      name: "Cloud Provider",
+      type: .openAI,
+      providerConfigId: "openai",
+      baseURL: URL(string: "https://api.openai.com/v1"),
+      defaultModel: "test-model"
+    )
+
+    XCTAssertFalse(config.allowsPersonalDataSharing)
+    XCTAssertThrowsError(try ProviderRouter().provider(for: config)) { error in
+      guard case ProviderError.dataSharingConsentRequired(let providerName) = error else {
+        return XCTFail("Expected consent error, received \(error)")
+      }
+      XCTAssertEqual(providerName, "Cloud Provider")
+    }
+  }
+
+  func testLocalProviderDoesNotRequireCloudDataSharingApproval() {
+    let config = AIProviderConfigModel(type: .local)
+
+    XCTAssertTrue(config.allowsPersonalDataSharing)
   }
 }
 

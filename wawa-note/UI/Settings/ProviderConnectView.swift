@@ -1,6 +1,8 @@
 import SwiftData
 import SwiftUI
 
+// Related JIRA: KAN-539
+
 // MARK: - View model
 
 @MainActor
@@ -14,6 +16,7 @@ final class ProviderConnectViewModel: ObservableObject {
   @Published var selectedModel: String = ""
   @Published var isFetchingModels = false
   @Published var modelFetchError: String?
+  @Published var dataSharingConsent = false
 
   private let keychain = SecureKeyStore()
   private let router = ProviderRouter()
@@ -131,7 +134,8 @@ final class ProviderConnectViewModel: ObservableObject {
           supportsEmbeddings: template.providerType == .openAI || template.providerType == .gemini,
           apiKeyKeychainIdentifier: template.requiresAuth ? fetchKeychainId : nil
         )
-        let provider = try router.provider(for: testConfig)
+        let provider = try router.provider(
+          for: testConfig, requiringDataSharingConsent: false)
         models = try await provider.fetchModels()
         // Cache the fetched models
         ModelCache.shared.cacheModels(models, for: template.id)
@@ -180,6 +184,11 @@ final class ProviderConnectViewModel: ObservableObject {
   // MARK: - Connect
 
   func connect(context: ModelContext) async {
+    guard template.category == .local || dataSharingConsent else {
+      connectionPhase = .failed(
+        "Approve cloud data sharing before connecting this service.")
+      return
+    }
     connectionPhase = .testing
 
     // Generate a keychain identifier for the API key.
@@ -216,7 +225,8 @@ final class ProviderConnectViewModel: ObservableObject {
     )
 
     do {
-      let provider = try router.provider(for: testConfig)
+      let provider = try router.provider(
+        for: testConfig, requiringDataSharingConsent: false)
       let request = AIRequest(
         model: effectiveModel,
         messages: [
@@ -260,7 +270,8 @@ final class ProviderConnectViewModel: ObservableObject {
         supportsTools: true,
         supportsEmbeddings: template.providerType == .openAI || template.providerType == .gemini,
         apiKeyKeychainIdentifier: template.requiresAuth ? keychainId : nil,
-        notes: nil
+        notes: nil,
+        dataSharingConsentAt: template.category == .cloud ? Date() : nil
       )
       context.insert(savedProvider)
       do {
@@ -448,6 +459,7 @@ struct ProviderConnectView: View {
         modelField
         modelPickerSection
         apiKeyLink
+        dataSharingConsentView
         connectButton
       }
     }
@@ -522,6 +534,25 @@ struct ProviderConnectView: View {
     .foregroundStyle(.secondary)
   }
 
+  private var dataSharingConsentView: some View {
+    VStack(alignment: .leading, spacing: AppSpacing.sm) {
+      Toggle(isOn: $viewModel.dataSharingConsent) {
+        Text("Allow content to be sent to \(template.displayName)")
+          .font(.subheadline)
+          .fontWeight(.semibold)
+      }
+
+      Text(
+        "When AI features run, Wawa Note may send recordings, transcripts, notes, scans, and imported text to \(template.displayName). The provider processes that content under its own terms and privacy policy. Wawa Note does not operate an intermediary server."
+      )
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      .fixedSize(horizontal: false, vertical: true)
+    }
+    .padding(AppSpacing.md)
+    .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: AppRadius.md))
+  }
+
   private var connectButton: some View {
     PrimaryActionButton(
       title: "Connect",
@@ -530,7 +561,10 @@ struct ProviderConnectView: View {
     ) {
       Task { await viewModel.connect(context: modelContext) }
     }
-    .disabled(viewModel.apiKey.isEmpty || viewModel.connectionPhase == .testing)
+    .disabled(
+      viewModel.apiKey.isEmpty || !viewModel.dataSharingConsent
+        || viewModel.connectionPhase == .testing
+    )
     .padding(.top, 4)
   }
 

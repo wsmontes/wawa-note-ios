@@ -2,6 +2,8 @@ import Foundation
 import OSLog
 import SwiftData
 
+// Related JIRA: KAN-539
+
 final class ProviderRouter: Sendable {
   private let keychain: SecureKeyStore
 
@@ -71,7 +73,13 @@ final class ProviderRouter: Sendable {
 
   // MARK: - Provider factory
 
-  func provider(for config: AIProviderConfigModel) throws -> any AIProvider {
+  func provider(
+    for config: AIProviderConfigModel,
+    requiringDataSharingConsent: Bool = true
+  ) throws -> any AIProvider {
+    if requiringDataSharingConsent && !config.allowsPersonalDataSharing {
+      throw ProviderError.dataSharingConsentRequired(providerName: config.name)
+    }
     guard let baseURL = config.baseURL else {
       throw ProviderError.invalidBaseURL
     }

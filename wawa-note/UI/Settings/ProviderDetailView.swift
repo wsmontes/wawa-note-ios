@@ -1,6 +1,8 @@
 import SwiftData
 import SwiftUI
 
+// Related JIRA: KAN-539
+
 struct ProviderDetailView: View {
   let provider: AIProviderConfigModel
   @Environment(\.dismiss) private var dismiss
@@ -61,6 +63,27 @@ struct ProviderDetailView: View {
         }
       } header: {
         Text("Capabilities")
+      }
+
+      if !provider.type.isLocal {
+        Section("Cloud Data Sharing") {
+          Label(
+            provider.allowsPersonalDataSharing ? "Approved" : "Approval required",
+            systemImage: provider.allowsPersonalDataSharing
+              ? "checkmark.shield.fill" : "exclamationmark.shield.fill"
+          )
+          .foregroundStyle(provider.allowsPersonalDataSharing ? .green : .orange)
+
+          if let consentDate = provider.dataSharingConsentAt {
+            Text("Approved \(consentDate.formatted(date: .abbreviated, time: .shortened))")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          } else {
+            Text("AI requests are blocked until you approve sharing in Edit.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
       }
 
       Section {

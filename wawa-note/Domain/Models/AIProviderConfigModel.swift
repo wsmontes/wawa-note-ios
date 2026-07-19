@@ -2,6 +2,8 @@ import Foundation
 import SwiftData
 import WawaNoteCore
 
+// Related JIRA: KAN-539
+
 @Model
 final class AIProviderConfigModel {
   @Attribute(.unique) var id: UUID
@@ -17,6 +19,9 @@ final class AIProviderConfigModel {
   var availableModelsJSON: String?
   var apiKeyKeychainIdentifier: String?
   var notes: String?
+  /// The user's explicit approval to send item content to this cloud provider.
+  /// Local providers do not require approval because content stays on the user's devices.
+  var dataSharingConsentAt: Date?
 
   var type: ProviderType {
     get { ProviderType(rawValue: typeRaw) ?? .openAICompatible }
@@ -43,6 +48,10 @@ final class AIProviderConfigModel {
     }
   }
 
+  var allowsPersonalDataSharing: Bool {
+    type.isLocal || dataSharingConsentAt != nil
+  }
+
   init(
     id: UUID = UUID(),
     name: String = "",
@@ -56,7 +65,8 @@ final class AIProviderConfigModel {
     supportsEmbeddings: Bool = false,
     availableModels: [String] = [],
     apiKeyKeychainIdentifier: String? = nil,
-    notes: String? = nil
+    notes: String? = nil,
+    dataSharingConsentAt: Date? = nil
   ) {
     self.id = id
     self.name = name
@@ -75,6 +85,7 @@ final class AIProviderConfigModel {
     }
     self.apiKeyKeychainIdentifier = apiKeyKeychainIdentifier
     self.notes = notes
+    self.dataSharingConsentAt = dataSharingConsentAt
   }
 
   // MARK: - Validation

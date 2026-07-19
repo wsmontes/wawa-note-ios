@@ -2,6 +2,8 @@ import Foundation
 import Network
 import WawaNoteCore
 
+// Related JIRA: KAN-539
+
 // MARK: - Provider protocol
 
 // MARK: - Model metadata
@@ -551,6 +553,7 @@ enum ProviderError: LocalizedError {
   case unauthorized
   case timeout
   case embeddingNotSupported
+  case dataSharingConsentRequired(providerName: String)
   /// Rate limited — retry after the given interval.
   case rateLimited(retryAfter: TimeInterval)
   /// Context window exceeded — the request's token count is too high.
@@ -609,6 +612,8 @@ enum ProviderError: LocalizedError {
       "The request took too long. The AI service may be busy. Try again in a moment."
     case .embeddingNotSupported:
       "This provider does not support embeddings. Choose a provider that supports embeddings (OpenAI, etc.) in Settings."
+    case .dataSharingConsentRequired(let providerName):
+      "Review and approve cloud data sharing for \(providerName) in Settings > AI Services before using it."
     case .rateLimited(let retryAfter):
       "Rate limited. Try again in \(Int(retryAfter)) seconds."
     case .contextWindowExceeded(let maxTokens):

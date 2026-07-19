@@ -1,6 +1,8 @@
 import SwiftData
 import SwiftUI
 
+// Related JIRA: KAN-539
+
 @MainActor
 final class ProviderEditorViewModel: ObservableObject {
   @Published var name = ""
@@ -13,6 +15,7 @@ final class ProviderEditorViewModel: ObservableObject {
   @Published var supportsTools = false
   @Published var supportsEmbeddings = false
   @Published var notes = ""
+  @Published var dataSharingConsent = false
 
   @Published var connectionStatus: ConnectionStatus = .notTested
   @Published var isSaving = false
@@ -48,6 +51,7 @@ final class ProviderEditorViewModel: ObservableObject {
     supportsTools = provider.supportsTools
     supportsEmbeddings = provider.supportsEmbeddings
     notes = provider.notes ?? ""
+    dataSharingConsent = provider.allowsPersonalDataSharing
 
     if let keyId = provider.apiKeyKeychainIdentifier {
       apiKey = (try? keychain.loadAPIKey(for: keyId)) ?? ""
@@ -63,6 +67,10 @@ final class ProviderEditorViewModel: ObservableObject {
     }
     guard !baseURLString.isEmpty, URL(string: baseURLString) != nil else {
       saveError = "Please enter a valid server URL (e.g., https://api.openai.com/v1)."
+      return
+    }
+    guard type.isLocal || dataSharingConsent else {
+      saveError = "Approve cloud data sharing before saving this provider."
       return
     }
 
@@ -104,6 +112,13 @@ final class ProviderEditorViewModel: ObservableObject {
     provider.supportsEmbeddings = supportsEmbeddings
     provider.notes = notes.nilIfEmpty
     provider.apiKeyKeychainIdentifier = keychainIdentifier
+    if type.isLocal {
+      provider.dataSharingConsentAt = nil
+    } else if dataSharingConsent && provider.dataSharingConsentAt == nil {
+      provider.dataSharingConsentAt = Date()
+    } else if !dataSharingConsent {
+      provider.dataSharingConsentAt = nil
+    }
 
     if !apiKey.isEmpty {
       try? keychain.saveAPIKey(apiKey, for: keychainIdentifier)
@@ -113,6 +128,10 @@ final class ProviderEditorViewModel: ObservableObject {
   }
 
   func testConnection() async {
+    guard type.isLocal || dataSharingConsent else {
+      connectionStatus = .failed("Approve cloud data sharing first.")
+      return
+    }
     connectionStatus = .testing
 
     guard let url = URL(string: baseURLString) else {
@@ -137,7 +156,8 @@ final class ProviderEditorViewModel: ObservableObject {
     )
 
     do {
-      let provider = try router.provider(for: testConfig)
+      let provider = try router.provider(
+        for: testConfig, requiringDataSharingConsent: false)
       let request = AIRequest(
         model: defaultModel.isEmpty ? "gpt-3.5-turbo" : defaultModel,
         messages: [
@@ -200,6 +220,17 @@ struct ProviderEditorView: View {
             TextField("Default model", text: $viewModel.defaultModel)
               .autocapitalization(.none)
               .disableAutocorrection(true)
+          }
+        }
+
+        if !viewModel.type.isLocal {
+          Section("Data Sharing") {
+            Toggle("Allow content to be sent to this service", isOn: $viewModel.dataSharingConsent)
+            Text(
+              "AI features may send recordings, transcripts, notes, scans, and imported text to this provider. The provider processes that content under its own terms and privacy policy."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
           }
         }
 

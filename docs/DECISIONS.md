@@ -351,3 +351,24 @@ The release audit found that the `mvp-v2` branch had reintroduced the global Cha
 - Existing derived models and implementation files remain in the binary temporarily for data compatibility, but are unreachable from v1 UI and are not initialized.
 - Deleting a Project detaches and preserves its source items.
 - Sensitive permissions are requested only when the user invokes the related feature. Recording captures non-sensitive audio-route and battery metadata by default; it does not automatically access calendar, location, motion, or Focus status. The app does not request notification permission at launch.
+
+---
+
+## ADR-0014: Cloud AI requires provider-specific content-sharing consent
+
+**Date:** 2026-07-19
+
+**Status:** Accepted
+
+**Related JIRA:** KAN-539
+
+**Decision:** A cloud AI provider cannot receive recordings, transcripts, notes, scans, imported text, images, or embeddings until the user explicitly approves content sharing for that provider. The approval timestamp is stored with `AIProviderConfigModel`; local providers are exempt because processing stays on user-controlled devices.
+
+**Motivation:** Adding an API key establishes authentication, but it does not clearly disclose or authorize transmission of personal content. App Review Guideline 5.1.2 requires clear disclosure and explicit permission before personal data is shared with a third-party AI service.
+
+**Consequences:**
+
+- Cloud provider connection and custom-provider editing include an off-by-default content-sharing control with provider-specific disclosure.
+- Provider resolution rejects unapproved cloud configurations, including configurations migrated from older app versions.
+- Remote transcription falls back to the on-device Apple engine when the active cloud provider has no approval.
+- Connection tests and model-list discovery may run without approval because they do not include the user's stored content.

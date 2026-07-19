@@ -7,6 +7,8 @@ import UIKit
 import Vision
 import WawaNoteCore
 
+// Related JIRA: KAN-539
+
 // MARK: - Text extraction from any content type
 
 /// Extracts text from content items. The single source of text for analysis,
@@ -199,6 +201,11 @@ final class ContentExtractionService {
 
     let canUseRemoteWhisper: Bool = {
       guard let config, config.baseURL != nil else { return false }
+      guard config.allowsPersonalDataSharing else {
+        AppLog.transcription.warning(
+          "Remote transcription blocked until cloud data sharing is approved")
+        return false
+      }
       let supportsTranscription = AIConfigService.shared.supportsAudioTranscription(
         for: config.providerConfigId)
       let typeSupports = AIConfigService.shared.supportsAudioTranscription(for: config.typeRaw)
