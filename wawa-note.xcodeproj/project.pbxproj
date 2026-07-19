@@ -1691,6 +1691,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 955573A4YH;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "wawa-note-watch-widget/Info.plist";
@@ -1699,6 +1700,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.wawa-note.watchkitapp.widget";
 				PRODUCT_NAME = "Wawa Note Widget";
 				SDKROOT = watchos;
@@ -1714,10 +1716,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 955573A4YH;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "com.wawa-note";
 				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = NO;
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.wawa-note.watchkitapp";
 				PRODUCT_NAME = "Wawa Note";
 				SDKROOT = watchos;
@@ -1813,7 +1817,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = "wawa-note-share/wawa-note-share.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 955573A4YH;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "wawa-note-share/Info.plist";
@@ -1837,10 +1841,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 955573A4YH;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "com.wawa-note";
 				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = NO;
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.wawa-note.watchkitapp";
 				PRODUCT_NAME = "Wawa Note";
 				SDKROOT = watchos;
@@ -1910,6 +1916,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 955573A4YH;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "wawa-note-watch-widget/Info.plist";
@@ -1918,6 +1925,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.wawa-note.watchkitapp.widget";
 				PRODUCT_NAME = "Wawa Note Widget";
 				SDKROOT = watchos;
@@ -1963,7 +1971,7 @@
 				CODE_SIGN_ENTITLEMENTS = "wawa-note/wawa-note.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 955573A4YH;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -1988,7 +1996,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = "wawa-note-share/wawa-note-share.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 955573A4YH;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "wawa-note-share/Info.plist";
@@ -2014,7 +2022,7 @@
 				CODE_SIGN_ENTITLEMENTS = "wawa-note/wawa-note.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 955573A4YH;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;

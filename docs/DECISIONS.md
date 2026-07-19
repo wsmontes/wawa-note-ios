@@ -372,3 +372,23 @@ The release audit found that the `mvp-v2` branch had reintroduced the global Cha
 - Provider resolution rejects unapproved cloud configurations, including configurations migrated from older app versions.
 - Remote transcription falls back to the on-device Apple engine when the active cloud provider has no approval.
 - Connection tests and model-list discovery may run without approval because they do not include the user's stored content.
+
+---
+
+## ADR-0015: V1 distribution excludes the unvalidated Watch companion
+
+**Date:** 2026-07-19
+
+**Status:** Accepted
+
+**Related JIRA:** KAN-540, KAN-541
+
+**Decision:** Ship the first App Store build as an iPhone app with its Share extension. Keep the Watch app and widget source targets in the repository, but do not embed or advertise them until their target graph and paired-device behavior have been validated.
+
+**Motivation:** The release archive audit proved that the current iPhone scheme does not embed either Watch bundle. Adding them at the release boundary would expand the signing, App Store metadata, lifecycle, connectivity, complication, and hardware test matrix without evidence that the companion is ready.
+
+**Consequences:**
+
+- The generated-project specification no longer declares misleading iPhone/test dependencies on the Watch target.
+- The v1 App Store package contains the iPhone app, `WawaNoteCore.framework`, and the Share extension only.
+- `KAN-541` tracks correct Watch embedding, versioning, signing, App Store metadata, and paired-hardware validation for a post-v1 release.
