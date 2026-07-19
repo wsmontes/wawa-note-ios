@@ -6,7 +6,7 @@ import SwiftData
 import UIKit
 import WawaNoteCore
 
-// Related JIRA: KAN-533
+// Related JIRA: KAN-533, KAN-538
 
 // MARK: - Pipeline Agent Templates
 
@@ -885,37 +885,12 @@ final class ContentPipelineService: ObservableObject {
     }
   }
 
-  /// Process a queue entry with async completion gate.
-  ///
-  /// Uses NotificationCenter to detect pipeline completion, with a polling
-  /// fallback every 5s that checks if the item reached a terminal state.
-  /// This guards against missed notifications (e.g., a code path that skips
-  /// posting `.pipelineCompleted`). Hard timeout remains at 120s.
+  /// Process a queue entry and return only after the underlying job reaches a terminal state.
   func processEntry(itemID: UUID, projectID: UUID? = nil, using modelContext: ModelContext? = nil)
     async
   {
     let ctx = modelContext ?? ModelContext(modelContainer)
-    let container = self.modelContainer
-    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-      var resumed = false
-      var token: NSObjectProtocol?
-      token = NotificationCenter.default.addObserver(
-        forName: .pipelineCompleted, object: nil, queue: .main
-      ) { note in
-        guard let completedID = note.object as? String, completedID == itemID.uuidString else {
-          return
-        }
-        if let t = token { NotificationCenter.default.removeObserver(t) }
-        guard !resumed else { return }
-        resumed = true
-        continuation.resume()
-      }
-      // Phase 2 terminal state guarantee ensures .pipelineCompleted fires
-      // on every exit path. No polling fallback needed.
-      Task { await TranscriptionPipeline.shared.run(itemID: itemID, context: ctx) }
-      // Polling fallback removed — terminal state guarantee in process()
-      // ensures .pipelineCompleted notification fires on every exit path.
-    }
+    await TranscriptionPipeline.shared.run(itemID: itemID, context: ctx)
   }
 
   var isProcessing: Bool { !activeJobs.isEmpty }
@@ -924,6 +899,7 @@ final class ContentPipelineService: ObservableObject {
   /// Cancels a direct pipeline job (bypassing the queue). Used by
   /// KnowledgeDetailView's stop button for transcribe-only mode.
   func cancelItem(_ itemID: UUID) {
+    TranscriptionPipeline.shared.cancel(itemID)
     activeJobs[itemID]?.cancel()
     activeJobs[itemID] = nil
     endBackgroundTask()

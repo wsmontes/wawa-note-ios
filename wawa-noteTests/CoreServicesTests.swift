@@ -4,7 +4,7 @@ import WawaNoteCore
 
 @testable import Wawa_Note
 
-// Related JIRA: KAN-152, KAN-533, KAN-534, KAN-537
+// Related JIRA: KAN-152, KAN-533, KAN-534, KAN-537, KAN-538
 
 @MainActor
 final class SemanticSearchServiceTests: XCTestCase {
@@ -1288,5 +1288,24 @@ final class ContextCapturePrivacyTests: XCTestCase {
       Set(ContextCaptureService.defaultSensorNames),
       Set(["audio_route", "battery_state"])
     )
+  }
+}
+
+@MainActor
+final class TranscriptionPipelineCompletionTests: XCTestCase {
+  func testProcessEntryReturnsAfterTerminalState() async throws {
+    let schema = Schema([KnowledgeItem.self, AIProviderConfigModel.self])
+    let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+    let container = try ModelContainer(for: schema, configurations: config)
+    let context = container.mainContext
+    let item = KnowledgeItem(type: .note, title: "Pipeline", bodyText: "Test content")
+    context.insert(item)
+    try context.save()
+
+    let pipeline = ContentPipelineService(modelContainer: container)
+    await pipeline.processEntry(itemID: item.id, using: context)
+
+    XCTAssertTrue(item.status.isTerminal)
+    XCTAssertFalse(TranscriptionPipeline.shared.isProcessing(item.id))
   }
 }

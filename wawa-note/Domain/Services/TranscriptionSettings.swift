@@ -1,5 +1,7 @@
 import Foundation
 
+// Related JIRA: KAN-538
+
 enum TranscriptionMode: String {
   case apple = "apple"
   case whisper = "whisper"
@@ -13,7 +15,7 @@ enum TranscriptionMode: String {
 }
 
 final class TranscriptionSettings: @unchecked Sendable {
-  nonisolated(unsafe) static let shared = TranscriptionSettings()
+  static let shared = TranscriptionSettings()
   private let defaults = UserDefaults.standard
   private let key = "transcription_mode"
 

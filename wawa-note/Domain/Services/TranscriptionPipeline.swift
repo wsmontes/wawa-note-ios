@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 import WawaNoteCore
 
-// Related JIRA: KAN-XX
+// Related JIRA: KAN-538
 
 // MARK: - Transcription Pipeline
 
@@ -47,8 +47,9 @@ final class TranscriptionPipeline {
     context: ModelContext,
     mode: Mode = .full
   ) async {
-    guard activeJobs[itemID] == nil else {
-      AppLog.provider.info("TranscriptionPipeline: item \(itemID) already active, skipping")
+    if let activeJob = activeJobs[itemID] {
+      AppLog.provider.info("TranscriptionPipeline: item \(itemID) already active, awaiting it")
+      await activeJob.value
       return
     }
 
@@ -152,6 +153,11 @@ final class TranscriptionPipeline {
       }
     }
     activeJobs[itemID] = task
+    await withTaskCancellationHandler {
+      await task.value
+    } onCancel: {
+      task.cancel()
+    }
   }
 
   /// Cancel a running pipeline job for the given item.
