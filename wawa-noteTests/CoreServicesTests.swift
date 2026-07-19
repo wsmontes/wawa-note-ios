@@ -4,7 +4,7 @@ import WawaNoteCore
 
 @testable import Wawa_Note
 
-// Related JIRA: KAN-152, KAN-533, KAN-534
+// Related JIRA: KAN-152, KAN-533, KAN-534, KAN-537
 
 @MainActor
 final class SemanticSearchServiceTests: XCTestCase {
@@ -395,7 +395,8 @@ final class ProjectCollectionServiceTests: XCTestCase {
   func testMovingItemUpdatesBothCollections() throws {
     let source = try service.create(name: "Source")
     let destination = try service.create(name: "Destination")
-    let item = KnowledgeItem(type: .note, title: "Shared evidence")
+    let item = KnowledgeItem(type: .audio, title: "Shared evidence", bodyText: "Transcript")
+    item.audioFileRelativePath = "audio.m4a"
     item.projectID = source.id
     context.insert(item)
     try context.save()
@@ -405,6 +406,10 @@ final class ProjectCollectionServiceTests: XCTestCase {
     try service.addItem(item.id, to: destination.id)
 
     XCTAssertEqual(item.projectID, destination.id)
+    XCTAssertEqual(item.type, .audio)
+    XCTAssertEqual(item.bodyText, "Transcript")
+    XCTAssertEqual(item.audioFileRelativePath, "audio.m4a")
+    XCTAssertEqual(try KnowledgeItemService(context: context).allItems().map(\.id), [item.id])
     XCTAssertGreaterThan(source.updatedAt, .distantPast)
     XCTAssertGreaterThan(destination.updatedAt, .distantPast)
   }

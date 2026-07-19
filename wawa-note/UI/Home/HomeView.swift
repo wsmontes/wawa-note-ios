@@ -8,7 +8,7 @@ import Vision
 import VisionKit
 import WawaNoteCore
 
-// Related JIRA: KAN-152, KAN-533
+// Related JIRA: KAN-152, KAN-533, KAN-536, KAN-537
 
 extension Notification.Name {
   static let scannerDidFail = Notification.Name("ScannerDidFail")
@@ -188,7 +188,7 @@ final class HomeViewModel: ObservableObject {
       ctx.insert(item)
       ctx.safeSave(context: "import-pending-item", itemId: item.id)
 
-      queue.enqueue(itemID: item.id, trigger: .newCapture)
+      _ = queue.enqueue(itemID: item.id, trigger: .newCapture)
       try? FileManager.default.removeItem(at: jsonURL)
 
       logger.info(
@@ -218,7 +218,7 @@ final class HomeViewModel: ObservableObject {
             url, importer: importer, deleteSource: deleteSource, modelContext: ctx,
             pipeline: pipeline)
         }
-      } else if let imgType = detectImageType(url: url) {
+      } else if detectImageType(url: url) != nil {
         // Import image files directly
         await importImageFile(
           url, deleteSource: deleteSource, modelContext: ctx, pipeline: pipeline)
@@ -279,7 +279,7 @@ final class HomeViewModel: ObservableObject {
     do {
       try await importService.storeAudio(sourceURL: tempURL, itemID: itemId, using: artifactStore)
       if deleteSource { try? FileManager.default.removeItem(at: url) }
-      processingQueue?.enqueue(itemID: itemId, trigger: .newCapture)
+      _ = processingQueue?.enqueue(itemID: itemId, trigger: .newCapture)
     } catch {
       AppLog.general.error(
         "HomeView: importAudioFile storeAudio failed — \(error.localizedDescription)")
@@ -302,7 +302,7 @@ final class HomeViewModel: ObservableObject {
         if let t = targetProjectForImport {
           try? ProjectService(context: modelContext).addItem(item.id, to: t.id)
         }
-        processingQueue?.enqueue(
+        _ = processingQueue?.enqueue(
           itemID: item.id, projectID: targetProjectForImport?.id, trigger: .newCapture)
       }
       if deleteSource { try? FileManager.default.removeItem(at: url) }
@@ -345,7 +345,7 @@ final class HomeViewModel: ObservableObject {
   private func importImageFile(
     _ url: URL, deleteSource: Bool, modelContext: ModelContext, pipeline: ContentPipelineService
   ) async {
-    guard let data = try? Data(contentsOf: url), let image = UIImage(data: data) else { return }
+    guard let data = try? Data(contentsOf: url), UIImage(data: data) != nil else { return }
     let itemService = KnowledgeItemService(context: modelContext)
     let title = url.lastPathComponent
     guard
@@ -475,7 +475,7 @@ struct HomeView: View {
         if let t = importVM.targetProjectForImport {
           try? ProjectService(context: modelContext).addItem(item.id, to: t.id)
         }
-        processingQueue.enqueue(
+        _ = processingQueue.enqueue(
           itemID: item.id, projectID: importVM.targetProjectForImport?.id, trigger: .newCapture)
         navigateToItem = item
         importVM.pendingImport = nil
@@ -546,7 +546,7 @@ struct HomeView: View {
           captureVM.scannerError = "Could not save photo. Please try again."
         }
         for item in items {
-          processingQueue.enqueue(itemID: item.id, trigger: .newCapture)
+          _ = processingQueue.enqueue(itemID: item.id, trigger: .newCapture)
         }
         capturedPhoto = nil
         navigateToItem = items.first
@@ -560,7 +560,7 @@ struct HomeView: View {
           captureVM.scannerError = "Could not save scanned document. Please try again."
         }
         for item in items {
-          processingQueue.enqueue(itemID: item.id, trigger: .newCapture)
+          _ = processingQueue.enqueue(itemID: item.id, trigger: .newCapture)
         }
         scannerVM.scannedImages = []
         navigateToItem = items.first
@@ -1061,11 +1061,12 @@ struct ScannerView: UIViewControllerRepresentable {
     Coordinator(self)
   }
 
-  final class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
+  final class Coordinator: NSObject, @MainActor VNDocumentCameraViewControllerDelegate {
     let parent: ScannerView
 
     init(_ parent: ScannerView) { self.parent = parent }
 
+    @MainActor
     func documentCameraViewController(
       _ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan
     ) {
@@ -1075,10 +1076,12 @@ struct ScannerView: UIViewControllerRepresentable {
       parent.dismiss()
     }
 
+    @MainActor
     func documentCameraViewControllerDidCancel(_ controller: VNDocumentCameraViewController) {
       parent.dismiss()
     }
 
+    @MainActor
     func documentCameraViewController(
       _ controller: VNDocumentCameraViewController, didFailWithError error: Error
     ) {
@@ -1205,13 +1208,20 @@ struct CameraCaptureView: UIViewControllerRepresentable {
       _ picker: UIImagePickerController,
       didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
     ) {
-      if let image = info[.originalImage] as? UIImage {
-        Task { @MainActor [weak self] in self?.parent.capturedImage = image }
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        if let image = info[.originalImage] as? UIImage {
+          parent.capturedImage = image
+        }
+        parent.dismiss()
       }
-      parent.dismiss()
     }
 
-    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { parent.dismiss() }
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+      Task { @MainActor [weak self] in
+        self?.parent.dismiss()
+      }
+    }
   }
 }
 
@@ -1257,21 +1267,9 @@ struct ProjectPickerForItemView: View {
 
   private func assignToProject(_ item: KnowledgeItem, project: Project) {
     let svc = ProjectService(context: modelContext)
-    if item.projectID == nil {
-      // Item has no project — move/assign
-      try? svc.addItem(item.id, to: project.id)
-    } else if item.projectID != project.id {
-      // Item already belongs to another project — create a copy
-      let newItem = KnowledgeItem(
-        type: item.type,
-        title: item.title + " (copy)",
-        bodyText: item.bodyText
-      )
-      newItem.projectID = project.id
-      modelContext.insert(newItem)
-      modelContext.safeSave(context: "assign-item-to-project", itemId: newItem.id)
-    }
-    processingQueue.enqueue(itemID: item.id, projectID: project.id, trigger: .projectAssignment)
+    try? svc.addItem(item.id, to: project.id)
+    _ = processingQueue.enqueue(
+      itemID: item.id, projectID: project.id, trigger: .projectAssignment)
   }
 }
 
