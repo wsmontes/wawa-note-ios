@@ -57,7 +57,7 @@ struct ProjectRiskRegisterView: View {
       }
     }
     .sheet(isPresented: $showNewTask) {
-      if let risk = selectedRisk {
+      if selectedRisk != nil {
         TaskEditorView(mode: .create(projectID: projectID))
       }
     }
