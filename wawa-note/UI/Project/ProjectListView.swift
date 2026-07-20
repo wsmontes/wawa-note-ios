@@ -94,11 +94,13 @@ struct ProjectListView: View {
       Text("No projects yet")
         .font(.title3)
         .fontWeight(.medium)
-      Text("Capture audio, scan documents, or create notes — then group related items into projects.")
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
-        .multilineTextAlignment(.center)
-        .padding(.horizontal, 40)
+      Text(
+        "Capture audio, scan documents, or create notes — then group related items into projects."
+      )
+      .font(.subheadline)
+      .foregroundStyle(.secondary)
+      .multilineTextAlignment(.center)
+      .padding(.horizontal, 40)
       Button("Create Project") {
         showNewProject = true
       }
