@@ -37,9 +37,9 @@ final class ProjectDerivedItemService {
     context.insert(item)
     try context.save()
     // Create edge linking task to project
-    try edgeService.create(fromID: item.id, toID: projectID, edgeType: .belongsTo)
+    _ = try edgeService.create(fromID: item.id, toID: projectID, edgeType: .belongsTo)
     if let source = sourceItemID {
-      try edgeService.create(fromID: source, toID: item.id, edgeType: .produced)
+      _ = try edgeService.create(fromID: source, toID: item.id, edgeType: .produced)
     }
     return item
   }
@@ -68,7 +68,7 @@ final class ProjectDerivedItemService {
     context.insert(item)
     try context.save()
     if let source = sourceItemID {
-      try edgeService.create(fromID: source, toID: item.id, edgeType: .produced)
+      _ = try edgeService.create(fromID: source, toID: item.id, edgeType: .produced)
     }
     return item
   }
@@ -124,7 +124,7 @@ final class ProjectDerivedItemService {
     )
     context.insert(item)
     // Create the actual GraphEdge alongside the derived item
-    try edgeService.create(
+    _ = try edgeService.create(
       fromID: fromDerivedID,
       toID: toDerivedID,
       edgeType: edgeType,

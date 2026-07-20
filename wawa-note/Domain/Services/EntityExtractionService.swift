@@ -27,7 +27,7 @@ final class EntityExtractionService {
       let entity = try entityService.findOrCreate(kind: kind, displayName: mention.name)
 
       // Edge: sourceItem mentions entity
-      try edgeService.create(
+      _ = try edgeService.create(
         fromID: sourceItemID,
         toID: entity.id,
         edgeType: .mentions,
@@ -44,7 +44,7 @@ final class EntityExtractionService {
       // Edge: sourceItem produced decision
       let decisionEntity = try entityService.findOrCreate(
         kind: .other, displayName: "Decision: \(decision.title)")
-      try edgeService.create(
+      _ = try edgeService.create(
         fromID: sourceItemID,
         toID: decisionEntity.id,
         edgeType: .produced,
@@ -67,7 +67,7 @@ final class EntityExtractionService {
     // Action items → tasks with provenance
     for action in analysis.actionItems {
       if let task = try? findOrCreateTask(from: action, sourceItemID: sourceItemID) {
-        try edgeService.create(
+        _ = try edgeService.create(
           fromID: sourceItemID,
           toID: task.id,
           edgeType: .produced,
@@ -84,7 +84,7 @@ final class EntityExtractionService {
       if !decision.sourceSegmentIds.isEmpty {
         let decisionEntity = try entityService.findOrCreate(
           kind: .other, displayName: "Decision: \(decision.title)")
-        try edgeService.create(
+        _ = try edgeService.create(
           fromID: decisionEntity.id,
           toID: sourceItemID,
           edgeType: .supports,
@@ -98,7 +98,7 @@ final class EntityExtractionService {
       if let firstTask = createdTaskIDs.first {
         let decisionEntity = try entityService.findOrCreate(
           kind: .other, displayName: "Decision: \(decision.title)")
-        try edgeService.create(
+        _ = try edgeService.create(
           fromID: decisionEntity.id,
           toID: firstTask,
           edgeType: .precedes,

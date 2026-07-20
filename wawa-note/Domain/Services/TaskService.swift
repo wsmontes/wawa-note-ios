@@ -47,12 +47,12 @@ final class TaskService {
     try context.save()
 
     if let source = sourceItemID {
-      try edgeService.create(
+      _ = try edgeService.create(
         fromID: source, toID: task.id, edgeType: .produced,
         provenanceItemID: source, provenanceSegmentIDs: sourceSegmentIDs)
     }
     if let projectID {
-      try edgeService.create(fromID: task.id, toID: projectID, edgeType: .belongsTo)
+      _ = try edgeService.create(fromID: task.id, toID: projectID, edgeType: .belongsTo)
     }
 
     return task

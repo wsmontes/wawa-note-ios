@@ -555,7 +555,7 @@ final class ProjectIngestionPipeline: ObservableObject {
           continue
         }
         let priority = t.priority.flatMap(TaskPriority.init(rawValue:)) ?? .medium
-        try? taskSvc.create(
+        _ = try? taskSvc.create(
           title: t.title, projectID: project.id, priority: priority,
           sourceItemID: newItem.id, confidence: t.confidence,
           createdBy: .llm
@@ -570,7 +570,7 @@ final class ProjectIngestionPipeline: ObservableObject {
         guard let toItem = findItem(byTitle: conn.to_title, in: allItems) else { continue }
 
         let edgeType = edgeType(from: conn.type)
-        try? edgeSvc.create(
+        _ = try? edgeSvc.create(
           fromID: fromItem.id, toID: toItem.id, edgeType: edgeType, provenanceItemID: newItem.id)
       }
     }
