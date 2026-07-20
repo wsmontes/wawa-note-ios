@@ -97,25 +97,36 @@ struct WawaNoteApp: App {
         "⚠️ Previous session ended abnormally — crash log available in Settings > Debug Logs")
     }
 
-    // DEBUG: Auto-transcribe stuck recorded items on launch.
-    // Finds items with status .recorded that have audio and enqueues them.
+    // DEBUG: Auto-transcribe stuck recorded/failed items on launch.
+    // Finds items with status .recorded or .failed that have audio and enqueues them.
     let queue = processingQueue
     let mc = modelContainer
     Task { @MainActor in
       let ctx = ModelContext(mc)
-      let descriptor = FetchDescriptor<KnowledgeItem>(
+      let recordedDescriptor = FetchDescriptor<KnowledgeItem>(
         predicate: #Predicate { $0.statusRaw == "recorded" && $0.audioFileRelativePath != nil }
       )
-      if let stuckItems = try? ctx.fetch(descriptor), !stuckItems.isEmpty {
+      let failedDescriptor = FetchDescriptor<KnowledgeItem>(
+        predicate: #Predicate { $0.statusRaw == "failed" && $0.audioFileRelativePath != nil }
+      )
+      let recordedItems = (try? ctx.fetch(recordedDescriptor)) ?? []
+      let failedItems = (try? ctx.fetch(failedDescriptor)) ?? []
+      let stuckItems = recordedItems + failedItems
+      if !stuckItems.isEmpty {
         AppLog.general.info(
-          "🚀 Auto-transcribe: found \(stuckItems.count) recorded item(s) — enqueuing for transcription"
+          "🚀 Auto-transcribe: found \(stuckItems.count) item(s) to transcribe (recorded=\(recordedItems.count) failed=\(failedItems.count))"
         )
         for item in stuckItems {
           let durStr =
             item.durationSeconds.map { "\(Int($0))s" } ?? "unknown"
           AppLog.general.info(
-            "🚀 Auto-transcribe: enqueuing '\(item.title)' (id=\(item.id.uuidString.prefix(8))) duration=\(durStr)"
+            "🚀 Auto-transcribe: enqueuing '\(item.title)' (id=\(item.id.uuidString.prefix(8))) duration=\(durStr) status=\(item.statusRaw)"
           )
+          // Reset failed items to recorded so the pipeline picks them up
+          if item.statusRaw == "failed" {
+            item.status = .recorded
+            item.lastErrorRaw = nil
+          }
           _ = queue.enqueue(itemID: item.id, trigger: .directUserAction, maxRetries: 5)
         }
       }
