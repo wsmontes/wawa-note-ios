@@ -599,7 +599,7 @@ final class ContentPipelineService: ObservableObject {
         do {
           for try await event in stream {
             switch event {
-            case .toolCallStarted(let name, let id, let args):
+            case .toolCallStarted(let name, _, let args):
               AppLog.provider.info("Pipeline agent tool [attempt \(attemptCount)]: \(name)")
               agentEvents.append(
                 PipelineAgentEvent(
@@ -616,7 +616,7 @@ final class ContentPipelineService: ObservableObject {
                 userInfo: [
                   "tool": name, "args": args, "events": agentEvents, "itemTitle": item.title,
                 ])
-            case .toolCallCompleted(let name, let id, let summary):
+            case .toolCallCompleted(let name, _, let summary):
               AppLog.provider.info(
                 "Pipeline agent result [attempt \(attemptCount)]: \(name) — \(summary)")
               agentEvents.append(
@@ -874,7 +874,7 @@ final class ContentPipelineService: ObservableObject {
       {
         let provider = try? ProviderRouter.resolveActive(context: modelContext)
         if let p = provider {
-          try? await EmbeddingPipelineService().ensureEmbedding(for: fresh, using: p)
+          await EmbeddingPipelineService().ensureEmbedding(for: fresh, using: p)
         }
       }
       // Index in Spotlight for system-wide search
@@ -3037,19 +3037,19 @@ final class FieldAuthorityService {
   }
 
   func markUserEdited(field: String, on model: some FieldProvidence) {
-    var m = model
+    let m = model
     m.provenance.mark(field: field, origin: .user)
     m.writeProvenance()
   }
 
   func markLLMEdited(field: String, on model: some FieldProvidence) {
-    var m = model
+    let m = model
     m.provenance.mark(field: field, origin: .llm)
     m.writeProvenance()
   }
 
   func markImportEdited(field: String, on model: some FieldProvidence) {
-    var m = model
+    let m = model
     m.provenance.mark(field: field, origin: .`import`)
     m.writeProvenance()
   }
@@ -3187,7 +3187,7 @@ final class SignalResolutionService {
     signal.resolvedByRaw = "user"
     signal.resolutionReason = reason
     context.safeSave(context: "signal-reject")
-    AgentMemoryStore.shared.write(
+    _ = AgentMemoryStore.shared.write(
       pattern: "rejected_\(signal.type)",
       strategy: "User rejected: \(signal.title.prefix(60))",
       itemType: signal.type, contentType: nil, language: nil)
@@ -3346,7 +3346,7 @@ final class VersioningService {
     var lastValues: [String: String?] = [:]
     for r in snapshotRecords.sorted(by: { $0.timestamp < $1.timestamp }) {
       lastValues["\(r.entityType):\(r.entityID.uuidString):\(r.field)"] =
-        r.newValue ?? r.previousValue
+        r.newValue
     }
     for (key, value) in lastValues {
       let parts = key.split(separator: ":")

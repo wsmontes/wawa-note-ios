@@ -117,7 +117,7 @@ final class ProjectConversionService {
     }
 
     // Create edge: item belongs to project
-    try edgeService.create(
+    _ = try edgeService.create(
       fromID: item.id,
       toID: project.id,
       edgeType: .belongsTo,
@@ -151,7 +151,7 @@ final class ProjectConversionService {
       personRefs["person:\(index)"] = person
 
       // Edge: item mentions person
-      try edgeService.create(
+      _ = try edgeService.create(
         fromID: item.id,
         toID: person.id,
         edgeType: .mentions,
@@ -166,7 +166,7 @@ final class ProjectConversionService {
       let entity = try entityService.findOrCreate(kind: kind, displayName: ce.displayName)
       entityRefs["entity:\(index)"] = entity
 
-      try edgeService.create(
+      _ = try edgeService.create(
         fromID: item.id,
         toID: entity.id,
         edgeType: .mentions,
@@ -184,7 +184,7 @@ final class ProjectConversionService {
         entities: entityRefs)
       guard let fromID, let toID else { continue }
       let edgeType = EdgeType(rawValue: ce.edgeType) ?? .relatesTo
-      try edgeService.create(
+      _ = try edgeService.create(
         fromID: fromID, toID: toID, edgeType: edgeType, provenanceItemID: item.id)
     }
 

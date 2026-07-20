@@ -107,7 +107,6 @@ final class ActiveProviderManager: @unchecked Sendable {
 
   func bestProviderFor(model: String, context: ModelContext) -> AIProviderConfigModel? {
     let providers = allProviders(context: context)
-    let config = AIConfigService.shared
 
     // Check each provider's config for the model
     for provider in providers {

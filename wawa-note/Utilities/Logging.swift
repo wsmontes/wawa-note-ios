@@ -156,7 +156,7 @@ final class FileLogService: @unchecked Sendable {
         return
       }
       defer { try? fh.close() }
-      try? fh.seekToEnd()
+      _ = try? fh.seekToEnd()
       try? fh.write(contentsOf: data)
       try? fh.synchronize()
     } else {

@@ -105,11 +105,9 @@ final class FileBrowserViewModel: ObservableObject {
 
   func rename(_ node: VFSNode, to newName: String) {
     guard let ctx = toolContext else { return }
-    let parentPath = node.path.split(separator: "/").dropLast().joined(separator: "/")
-    let newPath = "/\(parentPath)/\(newName)"
     // For items, update the title via metadata write
     if node.path.contains("/items/") || node.path.contains("/inbox/"),
-      let id = node.metadata.swiftDataID
+      node.metadata.swiftDataID != nil
     {
       let json = "{\"title\":\"\(newName.replacingOccurrences(of: "\"", with: "\\\""))\"}"
       do {
