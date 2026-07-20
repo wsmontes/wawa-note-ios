@@ -41,11 +41,6 @@ public final class AudioImportService: @unchecked Sendable {
     if (try? AVAudioPlayer(contentsOf: url)) != nil {
       return true
     }
-    // Try AVAsset with audio tracks
-    let asset = AVAsset(url: url)
-    if asset.isReadable, asset.tracks(withMediaType: .audio).first != nil {
-      return true
-    }
     // Try ExtAudioFile (covers opus, ogg, flac, and other formats AVAudioPlayer doesn't handle)
     var file: ExtAudioFileRef?
     let status = ExtAudioFileOpenURL(url as CFURL, &file)
