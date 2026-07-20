@@ -59,7 +59,10 @@ indirect enum JSONValue: Equatable, Hashable {
   func toFoundation() -> Any {
     switch self {
     case .string(let s): return s
-    case .number(let s): return (Double(s) ?? Int(s) ?? s) as Any
+    case .number(let s):
+      if let d = Double(s) { return d }
+      if let i = Int(s) { return i }
+      return s
     case .bool(let b): return b
     case .null: return NSNull()
     case .object(let fields):

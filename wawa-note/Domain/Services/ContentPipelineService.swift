@@ -2822,7 +2822,7 @@ enum JSSandbox {
     // Inject wawa helpers
     context.evaluateScript(Self.wawaHelpers)
 
-    final class JSBox {
+    final class JSBox: @unchecked Sendable {
       var result: JSValue?
       var error: String?
     }
