@@ -679,12 +679,12 @@ struct KnowledgeDetailView: View {
           ForEach(connectableItems.prefix(20)) { other in
             Button {
               let gsvc = GraphEdgeService(context: modelContext)
-              try? gsvc.create(
+              _ = try? gsvc.create(
                 fromID: item.id, toID: other.id,
                 edgeType: .relatesTo, weight: 1.0,
                 provenanceItemID: item.id, provenanceSegmentIDs: []
               )
-              try? gsvc.create(
+              _ = try? gsvc.create(
                 fromID: other.id, toID: item.id,
                 edgeType: .relatesTo, weight: 1.0,
                 provenanceItemID: item.id, provenanceSegmentIDs: []
@@ -2175,7 +2175,7 @@ struct KnowledgeDetailView: View {
     item.status = .recorded
     modelContext.safeSave(context: "manual-transcribe-enqueue", itemId: item.id)
 
-    queue.enqueue(itemID: item.id, projectID: item.projectID, trigger: .directUserAction)
+    _ = queue.enqueue(itemID: item.id, projectID: item.projectID, trigger: .directUserAction)
 
     // The pipeline posts .contentPipelineStageChanged + .pipelineCompleted
     // notifications. This view already observes both to update
@@ -2505,12 +2505,8 @@ struct KnowledgeDetailView: View {
     let label = pc["speaker_label"] as? String ?? "Unknown"
     let guess = pc["best_guess"] as? String ?? "Unknown"
 
-    // Build confirmation message for the agent
-    var confirmMsg: String
     switch answer {
     case "yes":
-      confirmMsg =
-        "✅ CONFIRMED: \(label) is \(guess). Update speakers.json to mark this as high confidence."
       // Update in-memory: move from pending to confirmed
       speakers["speakers"] =
         (speakers["speakers"] as? [[String: Any]] ?? []) + [
@@ -2521,11 +2517,8 @@ struct KnowledgeDetailView: View {
         ]
       pending.remove(at: index)
     case "no":
-      confirmMsg = "❌ REJECTED: \(label) is NOT \(guess). Remove this candidate and reconsider."
       pending.remove(at: index)
     default:  // rephrase
-      confirmMsg =
-        "❓ REPHRASE: The user wants you to reformulate the question about \(label). Use data from other confirmed speakers to improve."
       // Keep pending, add rephrase flag
       pending[index] = pc.merging(["rephrase": true]) { $1 }
     }
