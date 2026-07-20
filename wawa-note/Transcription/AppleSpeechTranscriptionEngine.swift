@@ -842,9 +842,23 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
       throw TranscriptionError.recognitionFailed("Decode produced empty output")
     }
 
-    AppLog.transcription.info(
-      "PCM decode complete: \(totalOutputFrames) frames @ \(Int(outputFormat.sampleRate))Hz → \(tempURL.lastPathComponent)"
-    )
+    // Validate: re-open the written file to ensure it's well-formed.
+    // Incremental writes via write(from:) advance the file pointer correctly,
+    // but a corrupt segment would produce a truncated/unreadable file.
+    do {
+      let checkFile = try AVAudioFile(forReading: tempURL)
+      guard checkFile.length > 0 else {
+        try? FileManager.default.removeItem(at: tempURL)
+        throw TranscriptionError.recognitionFailed("Decoded WAV is empty after write")
+      }
+      AppLog.transcription.info(
+        "PCM decode complete: \(totalOutputFrames) frames wrote=\(checkFile.length) @ \(Int(outputFormat.sampleRate))Hz → \(tempURL.lastPathComponent)"
+      )
+    } catch {
+      try? FileManager.default.removeItem(at: tempURL)
+      throw TranscriptionError.recognitionFailed(
+        "Decoded WAV validation failed: \(error.localizedDescription)")
+    }
     return tempURL
   }
 
