@@ -97,6 +97,30 @@ struct WawaNoteApp: App {
         "⚠️ Previous session ended abnormally — crash log available in Settings > Debug Logs")
     }
 
+    // DEBUG: Auto-transcribe stuck recorded items on launch.
+    // Finds items with status .recorded that have audio and enqueues them.
+    let queue = processingQueue
+    let mc = modelContainer
+    Task { @MainActor in
+      let ctx = ModelContext(mc)
+      let descriptor = FetchDescriptor<KnowledgeItem>(
+        predicate: #Predicate { $0.statusRaw == "recorded" && $0.audioFileRelativePath != nil }
+      )
+      if let stuckItems = try? ctx.fetch(descriptor), !stuckItems.isEmpty {
+        AppLog.general.info(
+          "🚀 Auto-transcribe: found \(stuckItems.count) recorded item(s) — enqueuing for transcription"
+        )
+        for item in stuckItems {
+          let durStr =
+            item.durationSeconds.map { "\(Int($0))s" } ?? "unknown"
+          AppLog.general.info(
+            "🚀 Auto-transcribe: enqueuing '\(item.title)' (id=\(item.id.uuidString.prefix(8))) duration=\(durStr)"
+          )
+          _ = queue.enqueue(itemID: item.id, trigger: .directUserAction, maxRetries: 5)
+        }
+      }
+    }
+
     // Attempt recovery from audio interruptions when app returns to foreground
     notificationTokens.tokens.append(
       NotificationCenter.default.addObserver(
