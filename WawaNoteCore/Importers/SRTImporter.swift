@@ -20,7 +20,7 @@ public final class SRTImporter: FormatImporter, @unchecked Sendable {
 
   public func importFromURL(_ url: URL) async throws -> ImportResult {
     let text = try String(contentsOf: url, encoding: .utf8)
-    var warnings: [String] = []
+    let warnings: [String] = []
 
     var segments: [TranscriptSegment] = []
     let itemId = UUID()

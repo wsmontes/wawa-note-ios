@@ -7,7 +7,7 @@ public final class ImportRouter {
   private let importers: [any FormatImporter]
 
   public init(importers: [any FormatImporter]) {
-    self.importers = importers.sorted { ($0.priority ?? 0) > ($1.priority ?? 0) }
+    self.importers = importers.sorted { $0.priority > $1.priority }
   }
 
   public func importer(for url: URL) -> (any FormatImporter)? {
