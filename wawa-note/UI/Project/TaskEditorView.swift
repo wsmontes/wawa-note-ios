@@ -129,7 +129,7 @@ struct TaskEditorView: View {
     switch mode {
     case .create(let projectID):
       guard let pid = projectID else { return }
-      try? service.createTask(
+      _ = try? service.createTask(
         title: finalTitle,
         projectID: pid,
         sourceItemID: sourceID,

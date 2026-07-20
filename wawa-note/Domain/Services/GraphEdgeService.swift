@@ -94,7 +94,6 @@ final class GraphEdgeService {
   /// Used to persist edge reinforcements from project ingestion.
   func reinforce(fromID: UUID, toID: UUID) throws {
     // Find all edges between these nodes, reinforce the one with highest weight
-    let fromTypeRaw = EdgeType.relatesTo.rawValue
     var descriptor = FetchDescriptor<GraphEdge>(
       predicate: #Predicate { $0.fromID == fromID && $0.toID == toID }
     )

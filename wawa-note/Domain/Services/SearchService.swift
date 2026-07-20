@@ -163,7 +163,7 @@ final class SearchService {
     }
 
     // Calendar event ID match (strong signal — exact same event)
-    if let ctxEventID = context.calendarEventTitle,  // using title as proxy
+    if context.calendarEventTitle != nil,
       item.calendarEventIdentifier != nil
     {
       // Item was matched to a calendar event — slightly higher relevance

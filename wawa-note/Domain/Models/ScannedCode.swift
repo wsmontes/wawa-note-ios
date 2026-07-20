@@ -120,9 +120,9 @@ struct ScanSession: Codable, Sendable {
   }
 
   mutating func add(_ code: ScannedCode) {
-    var c = code
+    let c = code
     // Re-index
-    var updated = ScannedCode(
+    let updated = ScannedCode(
       value: c.value,
       type: c.type,
       symbology: c.symbology,
