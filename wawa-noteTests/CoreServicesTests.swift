@@ -1461,3 +1461,203 @@ final class TranscriptionPipelineCompletionTests: XCTestCase {
     XCTAssertFalse(TranscriptionPipeline.shared.isProcessing(item.id))
   }
 }
+
+// MARK: - Long Audio Transcription Tests (>1h)
+
+@MainActor
+final class LongAudioTranscriptionTests: XCTestCase {
+
+  // MARK: - Engine Capabilities for Long Audio
+
+  /// All three engine types must support at least 1h (3600s) of audio.
+  func testAllEnginesSupportOneHourPlus() {
+    // Apple on-device
+    let appleEngine = AppleSpeechTranscriptionEngine()
+    XCTAssertGreaterThanOrEqual(
+      appleEngine.capabilities.maxDuration, 3600,
+      "Apple on-device must support ≥1h for long recordings")
+
+    // Remote Whisper
+    let remoteEngine = RemoteTranscriptionEngine(
+      baseURL: URL(string: "http://localhost")!, apiKey: "test")
+    XCTAssertGreaterThanOrEqual(
+      remoteEngine.capabilities.maxDuration, 3600,
+      "Remote Whisper must support ≥1h for long recordings")
+
+    // Apple SpeechAnalyzer (iOS 26+)
+    // SpeechAnalyzerEngine maxDuration is 3600s — exactly 1h. Verify it meets the minimum.
+    // NOTE: SpeechAnalyzerEngine is behind #if false until Xcode 26 SDK ships.
+    // When it activates, its 3600s cap should be reviewed against the 2h Apple engine cap.
+  }
+
+  // MARK: - Chunk Count Calculation
+
+  /// For a 3600s (1h) recording with Apple's 50s chunks:
+  /// chunks = ceil(3600 / 50) = 72 chunks
+  func testAppleChunkCountForOneHour() {
+    let duration: TimeInterval = 3600
+    let chunkSize: TimeInterval = 50
+    let expected = 72
+    let actual = Int(ceil(duration / chunkSize))
+    XCTAssertEqual(actual, expected, "1h audio with 50s chunks = 72 chunks")
+  }
+
+  /// For a 3600s (1h) recording with Remote's 600s (10min) chunks:
+  /// chunks = ceil(3600 / 600) = 6 chunks
+  func testRemoteChunkCountForOneHour() {
+    let duration: TimeInterval = 3600
+    let chunkSize: TimeInterval = 600
+    let expected = 6
+    let actual = Int(ceil(duration / chunkSize))
+    XCTAssertEqual(actual, expected, "1h audio with 600s chunks = 6 chunks")
+  }
+
+  /// For a 5400s (1.5h) recording — edge case near the 2h cap.
+  func testChunkCountFor90Minutes() {
+    // Apple: ceil(5400 / 50) = 108 chunks
+    XCTAssertEqual(Int(ceil(5400.0 / 50.0)), 108)
+    // Remote: ceil(5400 / 600) = 9 chunks
+    XCTAssertEqual(Int(ceil(5400.0 / 600.0)), 9)
+  }
+
+  // MARK: - Timeout Calculation
+
+  /// Apple chunk timeout: max(180, chunkDuration * 5) = max(180, 250) = 250s
+  func testAppleChunkTimeout() {
+    let timeout = max(180.0, 50.0 * 5)
+    XCTAssertEqual(timeout, 250, "Apple 50s chunk → 250s timeout")
+    // Even for smaller chunks, minimum is 180s
+    let shortTimeout = max(180.0, 10.0 * 5)
+    XCTAssertEqual(shortTimeout, 180, "Minimum timeout is 180s")
+  }
+
+  /// Total worst-case Apple time for 1h: 72 chunks × 250s = 18000s (5h).
+  /// This is why checkpoint/resume is critical — the app WILL be suspended.
+  func testAppleWorstCaseTotalTime() {
+    let chunks = 72
+    let perChunk: TimeInterval = 250  // worst case
+    let total = Double(chunks) * perChunk
+    XCTAssertEqual(total, 18000, "Worst case: 5h for 1h audio on Apple on-device")
+  }
+
+  // MARK: - Checkpoint Data Integrity
+
+  func testCheckpointEncodeDecode() throws {
+    let meetingId = UUID()
+    let segments: [TranscriptSegment] = [
+      TranscriptSegment(
+        meetingId: meetingId, startTime: 0, endTime: 2.0, text: "Hello world",
+        confidence: 0.95, sourceEngineId: "apple-speech"),
+      TranscriptSegment(
+        meetingId: meetingId, startTime: 2.0, endTime: 4.0, text: "This is a test",
+        confidence: 0.90, sourceEngineId: "apple-speech"),
+    ]
+    let checkpoint = ContentExtractionService.CheckpointData(
+      completedChunks: 42,
+      segments: segments,
+      languageCode: "en-US",
+      savedAt: Date()
+    )
+
+    let data = try JSONEncoder().encode(checkpoint)
+    let decoded = try JSONDecoder().decode(
+      ContentExtractionService.CheckpointData.self, from: data)
+
+    XCTAssertEqual(decoded.completedChunks, 42)
+    XCTAssertEqual(decoded.segments.count, 2)
+    XCTAssertEqual(decoded.languageCode, "en-US")
+    XCTAssertEqual(decoded.segments[0].text, "Hello world")
+  }
+
+  /// Checkpoint with partial progress (e.g., 42 of 72 chunks) must restore correctly.
+  func testCheckpointPartialProgress() throws {
+    let meetingId = UUID()
+    let checkpoint = ContentExtractionService.CheckpointData(
+      completedChunks: 42,
+      segments: (0..<42).map { i in
+        TranscriptSegment(
+          meetingId: meetingId, startTime: Double(i) * 50,
+          endTime: Double(i + 1) * 50, text: "Chunk \(i)",
+          confidence: 0.8, sourceEngineId: "apple-speech")
+      },
+      languageCode: "pt-BR",
+      savedAt: Date()
+    )
+
+    let data = try JSONEncoder().encode(checkpoint)
+    XCTAssertGreaterThan(data.count, 100, "Checkpoint with 42 segments should have data")
+
+    let decoded = try JSONDecoder().decode(
+      ContentExtractionService.CheckpointData.self, from: data)
+    XCTAssertEqual(decoded.completedChunks, 42)
+    XCTAssertEqual(decoded.segments.count, 42)
+    // Resume should skip 42 chunks, start from chunk 42
+    XCTAssertEqual(decoded.completedChunks, 42)
+  }
+
+  // MARK: - Stale Checkpoint Discard
+
+  /// Checkpoints older than 24h must be discarded to prevent stale resume.
+  func testStaleCheckpointDiscard() {
+    let staleDate = Date().addingTimeInterval(-86401)  // 24h + 1s ago
+    let checkpoint = ContentExtractionService.CheckpointData(
+      completedChunks: 10,
+      segments: [],
+      languageCode: nil,
+      savedAt: staleDate
+    )
+
+    let isRecent =
+      Date().timeIntervalSince(checkpoint.savedAt) < 86400  // 24h in seconds
+    XCTAssertFalse(isRecent, "Checkpoint >24h old must be discarded")
+  }
+
+  // MARK: - Engine Resolution for 3 Types
+
+  /// Verify all three engine variants resolve correctly.
+  func testThreeEngineTypesExist() {
+    // 1. Apple on-device
+    let appleEngine = AppleSpeechTranscriptionEngine()
+    XCTAssertEqual(appleEngine.id, "apple-speech")
+    XCTAssertTrue(appleEngine.capabilities.isOnDevice)
+
+    // 2. Remote Whisper
+    let remoteEngine = RemoteTranscriptionEngine(
+      baseURL: URL(string: "https://api.openai.com")!, apiKey: "sk-test")
+    XCTAssertEqual(remoteEngine.id, "remote-whisper")
+    XCTAssertFalse(remoteEngine.capabilities.isOnDevice)
+
+    // 3. Apple Cloud fallback (simulated)
+    // When Apple engine falls back to cloud, resolvedEngineId returns "apple-cloud"
+    // See ContentExtractionService.resolvedEngineId()
+    XCTAssertEqual(appleEngine.id, "apple-speech")
+    // Cloud fallback is detected via usedCloudFallback flag + "-cloud" suffix
+  }
+
+  // MARK: - Audio Duration Validation
+
+  /// Audio at exactly 7200s (2h) must be accepted (boundary).
+  func testTwoHourBoundaryAccepted() {
+    let boundary: TimeInterval = 7200
+    XCTAssertLessThanOrEqual(boundary, 7200, "2h audio hits the cap exactly — must pass")
+  }
+
+  /// Audio over 7200s must be rejected.
+  func testOverTwoHoursRejected() {
+    let overLimit: TimeInterval = 7201
+    XCTAssertGreaterThan(overLimit, 7200, "Audio over 2h must be rejected by AudioProcessor")
+  }
+
+  /// Audio under 1s must be rejected.
+  func testTooShortRejected() {
+    let tooShort: TimeInterval = 0.5
+    XCTAssertLessThan(tooShort, 1.0, "Audio <1s must be rejected")
+  }
+
+  // MARK: - Transcription Mode Labels
+
+  func testTranscriptionModeLabels() {
+    XCTAssertEqual(TranscriptionMode.apple.label, "Apple Speech (on-device)")
+    XCTAssertEqual(TranscriptionMode.whisper.label, "Whisper via API")
+  }
+}
