@@ -2,7 +2,7 @@ import SwiftData
 import SwiftUI
 import WawaNoteCore
 
-// Related JIRA: KAN-533
+// Related JIRA: KAN-533, KAN-546
 
 private enum ReprocessMode: CustomStringConvertible {
   case transcribeOnly
@@ -155,7 +155,7 @@ struct KnowledgeDetailView: View {
             item.status = .queuedForTranscription
             item.transcriptionEngineId = nil
             modelContext.safeSave(context: "retry-from-error-banner", itemId: item.id)
-            processingQueue.enqueue(itemID: item.id, trigger: .directUserAction)
+            _ = processingQueue.enqueue(itemID: item.id, trigger: .directUserAction)
             isTranscribing = true
           }
           .buttonStyle(.borderedProminent)
@@ -1136,7 +1136,7 @@ struct KnowledgeDetailView: View {
             item.status = .analyzing
             modelContext.safeSave(context: "approve-and-analyze", itemId: item.id)
             // Re-queue for analysis now that user approved
-            processingQueue.enqueue(
+            _ = processingQueue.enqueue(
               itemID: item.id, projectID: item.projectID, trigger: .directUserAction)
           } label: {
             Label("Approve & Analyze", systemImage: "checkmark.circle.fill")
@@ -1150,7 +1150,7 @@ struct KnowledgeDetailView: View {
             try? FileManager.default.removeItem(at: dir.appendingPathComponent("transcript.json"))
             item.status = .recorded
             modelContext.safeSave(context: "re-extract-item", itemId: item.id)
-            processingQueue.enqueue(
+            _ = processingQueue.enqueue(
               itemID: item.id, projectID: item.projectID, trigger: .newCapture)
           } label: {
             Label("Re-extract", systemImage: "arrow.counterclockwise")
@@ -2386,7 +2386,7 @@ struct KnowledgeDetailView: View {
     // pipeline owns the canonical transcription + analysis flow.
     let trigger: QueueTrigger =
       (doTranscribe && !doAnalyze) ? .directUserAction : .directUserAction
-    processingQueue.enqueue(itemID: item.id, projectID: item.projectID, trigger: trigger)
+    _ = processingQueue.enqueue(itemID: item.id, projectID: item.projectID, trigger: trigger)
     // Pipeline will drive the UI via .contentPipelineStageChanged notification
     AppLog.provider.info(
       "🔍 reprocessItem: enqueued mode=\(mode) for \(item.id.uuidString.prefix(8))")
@@ -2541,7 +2541,7 @@ struct KnowledgeDetailView: View {
     // Enqueue re-analysis with confirmation context
     item.analysisProviderId = nil
     modelContext.safeSave(context: "confirm-speaker-reanalysis", itemId: item.id)
-    processingQueue.enqueue(
+    _ = processingQueue.enqueue(
       itemID: item.id, projectID: item.projectID,
       trigger: .directUserAction)
     AppLog.provider.info(

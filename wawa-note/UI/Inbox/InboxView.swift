@@ -2,7 +2,7 @@ import SwiftData
 import SwiftUI
 import WawaNoteCore
 
-// Related JIRA: KAN-152, KAN-533
+// Related JIRA: KAN-152, KAN-533, KAN-546
 
 struct InboxView: View {
   @Environment(\.modelContext) private var modelContext
@@ -199,7 +199,7 @@ struct InboxView: View {
               } else if item.status == .failed {
                 // Failed items can be retried directly from the inbox
                 Button {
-                  processingQueue.enqueue(
+                  _ = processingQueue.enqueue(
                     itemID: item.id, projectID: item.projectID, trigger: .directUserAction)
                 } label: {
                   Label("Retry", systemImage: "arrow.clockwise")
@@ -584,7 +584,7 @@ struct InboxView: View {
     let projectID = project.id
 
     try? ProjectService(context: modelContext).addItem(itemID, to: projectID)
-    processingQueue.enqueue(itemID: itemID, projectID: projectID, trigger: .projectAssignment)
+    _ = processingQueue.enqueue(itemID: itemID, projectID: projectID, trigger: .projectAssignment)
 
     showFolderPicker = nil
     navigateToProject = project

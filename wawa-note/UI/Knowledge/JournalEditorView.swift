@@ -2,6 +2,8 @@ import SwiftData
 import SwiftUI
 import WawaNoteCore
 
+// Related JIRA: KAN-546
+
 struct JournalEditorView: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(\.modelContext) private var modelContext
@@ -206,7 +208,7 @@ struct JournalEditorView: View {
         item.fieldProvenanceJSON = prov.encode()
         modelContext.safeSave(context: "create-journal-entry", itemId: item.id)
         if item.bodyText != nil {
-          processingQueue.enqueue(itemID: item.id, trigger: .newCapture)
+          _ = processingQueue.enqueue(itemID: item.id, trigger: .newCapture)
         }
       }
 

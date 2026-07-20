@@ -2,6 +2,8 @@ import SwiftData
 import SwiftUI
 import WawaNoteCore
 
+// Related JIRA: KAN-546
+
 struct PromoteToProjectSheet: View {
   let item: KnowledgeItem
   let onComplete: (Project) -> Void
@@ -411,7 +413,7 @@ struct PromoteToProjectSheet: View {
     )
     do {
       let project = try makeService().executeConversion(from: item, preview: filteredPreview)
-      processingQueue.enqueue(itemID: item.id, trigger: .newCapture)
+      _ = processingQueue.enqueue(itemID: item.id, trigger: .newCapture)
       dismiss()
       onComplete(project)
     } catch {
