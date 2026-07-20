@@ -101,7 +101,7 @@ struct ProjectTimelineView: View {
       }
     }
     .task { loadTimeline() }
-    .onChange(of: zoomLevel) { _ in loadTimeline() }
+    .onChange(of: zoomLevel) { loadTimeline() }
   }
 
   // MARK: Filter Bar

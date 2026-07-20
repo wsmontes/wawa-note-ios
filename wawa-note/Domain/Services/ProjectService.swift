@@ -119,34 +119,30 @@ final class ProjectService {
       )
       if let existing, !existing.isEmpty { continue }
 
-      do {
-        let body = TaskBody(
-          description: task.notes,
-          sourceSegmentIDs: task.sourceSegmentIDList,
-          aiGenerated: task.createdBy != .user,
-          suggestedByItemID: task.sourceItemID
-        )
-        let bodyData = try? JSONEncoder().encode(body)
-        let bodyStr = bodyData.flatMap { String(data: $0, encoding: .utf8) }
+      let body = TaskBody(
+        description: task.notes,
+        sourceSegmentIDs: task.sourceSegmentIDList,
+        aiGenerated: task.createdBy != .user,
+        suggestedByItemID: task.sourceItemID
+      )
+      let bodyData = try? JSONEncoder().encode(body)
+      let bodyStr = bodyData.flatMap { String(data: $0, encoding: .utf8) }
 
-        let item = ProjectDerivedItem(
-          projectID: pid,
-          sourceItemID: task.sourceItemID,
-          type: .task,
-          title: task.title,
-          bodyJSON: bodyStr,
-          status: ProjectDerivedStatus(rawValue: task.statusRaw),
-          priority: TaskPriority(rawValue: task.priorityRaw),
-          ownerName: task.ownerName,
-          dueAt: task.dueAt,
-          confidence: task.confidence,
-          createdAt: task.createdAt,
-          updatedAt: task.updatedAt
-        )
-        context.insert(item)
-      } catch {
-        AppLog.general.error("Migration: failed to migrate task \(task.title): \(error)")
-      }
+      let item = ProjectDerivedItem(
+        projectID: pid,
+        sourceItemID: task.sourceItemID,
+        type: .task,
+        title: task.title,
+        bodyJSON: bodyStr,
+        status: ProjectDerivedStatus(rawValue: task.statusRaw),
+        priority: TaskPriority(rawValue: task.priorityRaw),
+        ownerName: task.ownerName,
+        dueAt: task.dueAt,
+        confidence: task.confidence,
+        createdAt: task.createdAt,
+        updatedAt: task.updatedAt
+      )
+      context.insert(item)
     }
 
     // Migrate AgentSuggestions
@@ -171,44 +167,40 @@ final class ProjectService {
       )
       if let existing, !existing.isEmpty { continue }
 
-      do {
-        let body = SignalBody(
-          signalType: signal.type,
-          description: signal.body ?? "",
-          suggestedAction: nil,
-          impactScore: signal.impactScore,
-          urgencyScore: signal.urgencyScore
-        )
-        let bodyData = try? JSONEncoder().encode(body)
-        let bodyStr = bodyData.flatMap { String(data: $0, encoding: .utf8) }
+      let body = SignalBody(
+        signalType: signal.type,
+        description: signal.body ?? "",
+        suggestedAction: nil,
+        impactScore: signal.impactScore,
+        urgencyScore: signal.urgencyScore
+      )
+      let bodyData = try? JSONEncoder().encode(body)
+      let bodyStr = bodyData.flatMap { String(data: $0, encoding: .utf8) }
 
-        let derivedStatus: ProjectDerivedStatus = {
-          switch signal.status {
-          case "visible": return .visible
-          case "seen", "acknowledged": return .acknowledged
-          case "approved", "transformed": return .resolved
-          default: return .dismissed
-          }
-        }()
+      let derivedStatus: ProjectDerivedStatus = {
+        switch signal.status {
+        case "visible": return .visible
+        case "seen", "acknowledged": return .acknowledged
+        case "approved", "transformed": return .resolved
+        default: return .dismissed
+        }
+      }()
 
-        let item = ProjectDerivedItem(
-          projectID: pid,
-          sourceItemID: signal.sourceItemID,
-          type: .signal,
-          title: signal.title,
-          bodyJSON: bodyStr,
-          status: derivedStatus,
-          confidence: signal.confidence,
-          isCritical: signal.isCritical,
-          createdAt: signal.createdAt,
-          updatedAt: signal.createdAt,
-          resolvedAt: signal.resolvedAt,
-          resolutionReason: signal.resolutionReason
-        )
-        context.insert(item)
-      } catch {
-        AppLog.general.error("Migration: failed to migrate signal \(signal.title): \(error)")
-      }
+      let item = ProjectDerivedItem(
+        projectID: pid,
+        sourceItemID: signal.sourceItemID,
+        type: .signal,
+        title: signal.title,
+        bodyJSON: bodyStr,
+        status: derivedStatus,
+        confidence: signal.confidence,
+        isCritical: signal.isCritical,
+        createdAt: signal.createdAt,
+        updatedAt: signal.createdAt,
+        resolvedAt: signal.resolvedAt,
+        resolutionReason: signal.resolutionReason
+      )
+      context.insert(item)
     }
 
     do {
