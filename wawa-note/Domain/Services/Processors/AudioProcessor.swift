@@ -19,7 +19,11 @@ final class AudioProcessor: ContentProcessor {
   // MARK: - ContentProcessor
 
   func extract(from item: KnowledgeItem, context: ModelContext) async -> String? {
+    AppLog.transcription.info(
+      "AP: extract starting — item=\(item.id.uuidString.prefix(8)) type=\(item.type.rawValue)")
+
     guard !Task.isCancelled else {
+      AppLog.transcription.info("AP: cancelled before start")
       fail(item, context: context, error: .taskCancelled)
       return nil
     }
@@ -30,9 +34,12 @@ final class AudioProcessor: ContentProcessor {
     let audioURL: URL
     if FileManager.default.fileExists(atPath: sandboxURL.path) {
       audioURL = sandboxURL
+      AppLog.transcription.info("AP: using sandbox audio URL")
     } else if FileManager.default.fileExists(atPath: sharedURL.path) {
       audioURL = sharedURL
+      AppLog.transcription.info("AP: using shared container audio URL")
     } else {
+      AppLog.transcription.error("AP: audio file not found at either path")
       fail(item, context: context, error: .audioFileNotFound)
       return nil
     }
@@ -40,12 +47,15 @@ final class AudioProcessor: ContentProcessor {
     // Validate audio
     let fileSize =
       (try? FileManager.default.attributesOfItem(atPath: audioURL.path)[.size] as? Int) ?? 0
+    AppLog.transcription.info("AP: audio size=\(fileSize) bytes")
     guard fileSize > 4096 else {
+      AppLog.transcription.error("AP: audio too small (\(fileSize) bytes)")
       fail(item, context: context, error: .audioTooSmall)
       return nil
     }
 
     let duration = await audioDuration(url: audioURL)
+    AppLog.transcription.info("AP: audio duration=\(String(format: "%.1f", duration))s")
     guard duration >= 1.0 else {
       fail(item, context: context, error: .audioTooShort)
       return nil
@@ -56,36 +66,49 @@ final class AudioProcessor: ContentProcessor {
     }
 
     // Resolve engine (hop to MainActor for ContentExtractionService isolation)
+    AppLog.transcription.info("AP: resolving engine...")
     let engineOpt = await MainActor.run { ContentExtractionService.resolveEngine(context: context) }
     guard var engine = engineOpt else {
+      AppLog.transcription.error("AP: no engine available")
       fail(item, context: context, error: .noEngineAvailable)
       return nil
     }
+    AppLog.transcription.info("AP: engine resolved — id=\(engine.id)")
 
     // Check availability
+    AppLog.transcription.info("AP: checking availability...")
     let availability = engine.checkAvailability()
     switch availability {
-    case .available: break
+    case .available:
+      AppLog.transcription.info("AP: engine available")
     case .permissionDenied:
+      AppLog.transcription.error("AP: permission denied")
       fail(item, context: context, error: .speechPermissionDenied)
       return nil
     case .modelMissing(let locale):
+      AppLog.transcription.error("AP: model missing for \(locale.identifier)")
       fail(item, context: context, error: .modelNotInstalled(locale.identifier))
       return nil
     case .hardwareUnsupported:
+      AppLog.transcription.error("AP: hardware unsupported")
       fail(item, context: context, error: .noEngineAvailable)
       return nil
     case .localeUnsupported:
+      AppLog.transcription.error("AP: locale unsupported")
       fail(item, context: context, error: .noEngineAvailable)
       return nil
     case .failed(let msg):
+      AppLog.transcription.error("AP: engine failed — \(msg)")
       fail(item, context: context, error: .engineError(msg))
       return nil
     }
 
     do {
+      AppLog.transcription.info("AP: preparing engine...")
       try await engine.prepareIfNeeded()
+      AppLog.transcription.info("AP: engine ready")
     } catch {
+      AppLog.transcription.error("AP: prepare failed — \(error.localizedDescription)")
       fail(item, context: context, error: .engineError(error.localizedDescription))
       return nil
     }
