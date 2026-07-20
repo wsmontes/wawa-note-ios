@@ -310,13 +310,26 @@ final class ProcessingQueueService: ObservableObject {
 
   private func beginBackgroundTask() {
     backgroundTaskCount += 1
+    // Only request a system background task when the app is NOT in the
+    // foreground. iOS kills apps that hold background tasks for >30s while
+    // in the foreground — long transcriptions would trigger this timeout.
+    // When the app is visible, we rely on the user keeping it open.
     guard backgroundTaskID == .invalid else { return }
+    guard UIApplication.shared.applicationState != .active else {
+      AppLog.debug("pipeline", "Skipping background task — app is in foreground")
+      return
+    }
     backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "WawaQueue") {
       [weak self] in
+      // Background task expiring — cancel active work to prevent iOS from
+      // killing the app with a background task watchdog violation.
       Task { @MainActor [weak self] in
+        AppLog.warn("pipeline", "Background task expiring — cancelling active jobs")
+        for (_, task) in self?.activeTasks ?? [:] { task.cancel() }
         self?.endBackgroundTask()
       }
     }
+    AppLog.debug("pipeline", "Started background task for transcription")
   }
 
   private func endBackgroundTask() {

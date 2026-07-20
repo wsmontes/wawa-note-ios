@@ -916,9 +916,15 @@ final class ContentPipelineService: ObservableObject {
 
   private func beginBackgroundTask() {
     backgroundTaskCount += 1
+    // Only request a system background task when the app is NOT in the
+    // foreground. Long transcriptions would trigger the 30s watchdog timeout
+    // and get the app killed if a background task is held while visible.
     guard backgroundTaskID == .invalid else { return }
+    guard UIApplication.shared.applicationState != .active else { return }
     backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "WawaPipeline") {
       [weak self] in
+      // Background task expiring — cancel active work to prevent system kill.
+      self?.activeJobs.values.forEach { $0.cancel() }
       self?.endBackgroundTask()
     }
   }

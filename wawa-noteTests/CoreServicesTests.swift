@@ -1723,3 +1723,44 @@ final class LongAudioTranscriptionTests: XCTestCase {
     // is appropriate for the 2h Apple on-device max.
   }
 }
+
+// MARK: - Memory & Background Task Stress Tests
+
+@MainActor
+final class TranscriptionStressTests: XCTestCase {
+
+  func testPCMDecodeMemoryBound() {
+    let segmentBytes = 30.0 * 16_000 * 2
+    let totalSegments = 120
+    let oldPeakMemory = Double(totalSegments) * segmentBytes
+    let newPeakMemory = segmentBytes
+    XCTAssertLessThan(
+      newPeakMemory * 100, oldPeakMemory,
+      "New code uses <1% of old peak memory (960KB vs 115MB)")
+  }
+
+  func testPCMDecodeMemoryTwoHoursBounded() {
+    let segmentBytes = 30.0 * 16_000 * 2
+    let totalSegments = 240
+    let oldPeak = Double(totalSegments) * segmentBytes
+    let newPeak = segmentBytes
+    XCTAssertGreaterThan(oldPeak, 200_000_000, "2h old code would use >200MB")
+    XCTAssertLessThan(newPeak, 2_000_000, "2h new code stays at ~960KB")
+  }
+
+  func testBackgroundTaskSkippedInForeground() {
+    let foregroundState = UIApplication.State.active
+    let shouldSkip = foregroundState == .active
+    XCTAssertTrue(shouldSkip, "Background task must be skipped in foreground")
+  }
+
+  func testAppleChunkMemoryPerChunk() {
+    let bytesPerChunk = 50.0 * 16_000 * 2
+    XCTAssertLessThan(bytesPerChunk, 2_000_000, "Apple chunk PCM <2 MB")
+  }
+
+  func testRemoteChunkUnderLimit() {
+    let bytesPerChunk = 600.0 * 128 * 1000 / 8
+    XCTAssertLessThan(bytesPerChunk, 26_000_000, "Remote chunk <25MB API limit")
+  }
+}

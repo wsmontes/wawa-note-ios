@@ -765,14 +765,23 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
     }
 
     // Read and convert in segments to avoid loading the entire file into RAM.
-    // A 1-hour AAC file decoded to 16kHz mono Int16 is ~115 MB — manageable
-    // as a single output, but the intermediate Float32 buffer at the source
-    // sample rate can be 4-8x larger. Process in 30-second segments.
+    // A 1-hour AAC file decoded to 16kHz mono Int16 is ~115 MB. Instead of
+    // accumulating all output buffers in memory, write each segment to disk
+    // immediately via a reusable output file to keep the memory footprint
+    // bounded at ~2 MB (one 30s decode segment).
     let segmentDuration: AVAudioFramePosition = AVAudioFramePosition(inputFormat.sampleRate * 30)
     inputFile.framePosition = 0
 
     var totalOutputFrames: AVAudioFrameCount = 0
-    var outputBuffers: [AVAudioPCMBuffer] = []
+
+    // Create the output file upfront and write segments incrementally.
+    let tempURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("pcm_\(UUID().uuidString).wav")
+    let outputFile = try AVAudioFile(
+      forWriting: tempURL,
+      settings: outputFormat.settings,
+      commonFormat: .pcmFormatInt16,
+      interleaved: false)
 
     while inputFile.framePosition < inputFile.length {
       let remaining = inputFile.length - inputFile.framePosition
@@ -809,25 +818,14 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
         throw TranscriptionError.recognitionFailed("Decode segment produced empty output")
       }
 
-      outputBuffers.append(outputBuf)
+      // Write this segment immediately to keep memory bounded.
+      try outputFile.write(from: outputBuf)
       totalOutputFrames += outputBuf.frameLength
     }
 
     guard totalOutputFrames > 0 else {
+      try? FileManager.default.removeItem(at: tempURL)
       throw TranscriptionError.recognitionFailed("Decode produced empty output")
-    }
-
-    // Write all converted segments to a single output file
-    let tempURL = FileManager.default.temporaryDirectory
-      .appendingPathComponent("pcm_\(UUID().uuidString).wav")
-    let outputFile = try AVAudioFile(
-      forWriting: tempURL,
-      settings: outputFormat.settings,
-      commonFormat: .pcmFormatInt16,
-      interleaved: false)
-
-    for buffer in outputBuffers {
-      try outputFile.write(from: buffer)
     }
 
     AppLog.transcription.info(
