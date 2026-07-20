@@ -1,5 +1,7 @@
 import Foundation
 
+// Related JIRA: KAN-546
+
 // MARK: - Dynamic JSON Value Tree
 
 /// Recursive JSON value that preserves the full structure for form-based editing.

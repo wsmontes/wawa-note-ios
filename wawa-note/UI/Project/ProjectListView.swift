@@ -2,7 +2,7 @@ import SwiftData
 import SwiftUI
 import WawaNoteCore
 
-// Related JIRA: KAN-152, KAN-533
+// Related JIRA: KAN-152, KAN-533, KAN-546
 
 enum ProjectSortOrder: CaseIterable { case recent, name, created }
 

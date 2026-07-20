@@ -2,6 +2,8 @@ import SwiftData
 import SwiftUI
 import WawaNoteCore
 
+// Related JIRA: KAN-546
+
 struct TaskEditorView: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(\.modelContext) private var modelContext

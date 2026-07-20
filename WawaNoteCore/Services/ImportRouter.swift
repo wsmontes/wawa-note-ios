@@ -2,6 +2,8 @@ import Foundation
 import OSLog
 import UniformTypeIdentifiers
 
+// Related JIRA: KAN-546
+
 public final class ImportRouter {
   private let logger = Logger(subsystem: "com.wawa-note.core", category: "ImportRouter")
   private let importers: [any FormatImporter]

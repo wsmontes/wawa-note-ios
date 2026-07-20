@@ -6,7 +6,7 @@ import SwiftData
 import UIKit
 import WawaNoteCore
 
-// Related JIRA: KAN-533, KAN-538
+// Related JIRA: KAN-533, KAN-538, KAN-546
 
 // MARK: - Pipeline Agent Templates
 

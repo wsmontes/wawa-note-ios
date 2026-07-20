@@ -2,6 +2,8 @@ import CoreSpotlight
 import Foundation
 import WawaNoteCore
 
+// Related JIRA: KAN-546
+
 struct SearchResult: Identifiable {
   let id = UUID()
   let itemID: UUID

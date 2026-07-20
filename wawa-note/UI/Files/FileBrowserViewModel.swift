@@ -3,6 +3,8 @@ import SwiftData
 import SwiftUI
 import WawaNoteCore
 
+// Related JIRA: KAN-546
+
 /// View model for the file browser. Manages VFS navigation state and file operations.
 @MainActor
 final class FileBrowserViewModel: ObservableObject {

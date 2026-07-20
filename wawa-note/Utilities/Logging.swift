@@ -2,6 +2,8 @@ import Foundation
 import OSLog
 import SwiftData
 
+// Related JIRA: KAN-546
+
 // MARK: - OSLog
 
 enum AppLog {

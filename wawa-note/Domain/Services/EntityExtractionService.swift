@@ -3,6 +3,8 @@ import OSLog
 import SwiftData
 import WawaNoteCore
 
+// Related JIRA: KAN-546
+
 @MainActor
 final class EntityExtractionService {
   private let context: ModelContext

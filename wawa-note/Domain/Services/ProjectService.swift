@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 import WawaNoteCore
 
-// Related JIRA: KAN-152, KAN-533
+// Related JIRA: KAN-152, KAN-533, KAN-546
 
 @MainActor
 final class ProjectService {

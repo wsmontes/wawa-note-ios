@@ -1,6 +1,8 @@
 import Foundation
 import UniformTypeIdentifiers
 
+// Related JIRA: KAN-546
+
 public final class ICSImporter: FormatImporter, @unchecked Sendable {
   public init() {}
   public let formatIdentifier = "ics"

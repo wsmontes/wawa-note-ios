@@ -3,6 +3,8 @@ import AudioToolbox
 import OSLog
 import UniformTypeIdentifiers
 
+// Related JIRA: KAN-546
+
 public struct ImportMetadata {
   public let duration: TimeInterval
   public let format: String

@@ -2,6 +2,8 @@ import SwiftData
 import SwiftUI
 import WawaNoteCore
 
+// Related JIRA: KAN-546
+
 // MARK: - DEPRECATED: Subsumed by file browser with type filter (2026-06-18)
 struct RiskItem: Identifiable {
   let id = UUID()

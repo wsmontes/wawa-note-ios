@@ -2,6 +2,8 @@ import SwiftData
 import SwiftUI
 import WawaNoteCore
 
+// Related JIRA: KAN-546
+
 // MARK: - Enriched Timeline Models
 
 enum TimelineEventKind: String, CaseIterable {

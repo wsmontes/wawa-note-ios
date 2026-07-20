@@ -2,6 +2,8 @@ import Foundation
 import SwiftData
 import WawaNoteCore
 
+// Related JIRA: KAN-546
+
 @MainActor
 final class GraphEdgeService {
   private let context: ModelContext

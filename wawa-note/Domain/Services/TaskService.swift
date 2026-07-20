@@ -2,6 +2,8 @@ import Foundation
 import SwiftData
 import WawaNoteCore
 
+// Related JIRA: KAN-546
+
 @MainActor
 final class TaskService {
   private let context: ModelContext

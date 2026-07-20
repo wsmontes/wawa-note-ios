@@ -8,6 +8,8 @@ import Vision
 import VisionKit
 import WawaNoteCore
 
+// Related JIRA: KAN-546
+
 // Related JIRA: KAN-152, KAN-533, KAN-536, KAN-537
 
 extension Notification.Name {

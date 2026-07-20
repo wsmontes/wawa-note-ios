@@ -2,6 +2,8 @@ import Foundation
 import SwiftData
 import WawaNoteCore
 
+// Related JIRA: KAN-546
+
 // MARK: - Scanned Code Model
 
 /// Represents a single barcode/QR code scan with full metadata.

@@ -2,6 +2,8 @@ import Foundation
 import SwiftData
 import WawaNoteCore
 
+// Related JIRA: KAN-546
+
 struct ConversionPreview: Codable, Sendable {
   let projectName: String
   let tasks: [ConversionTask]

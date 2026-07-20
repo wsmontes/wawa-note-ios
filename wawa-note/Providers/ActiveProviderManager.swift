@@ -1,6 +1,8 @@
 import Foundation
 import SwiftData
 
+// Related JIRA: KAN-546
+
 extension Notification.Name {
   /// Posted when the active AI provider changes (connected, switched, or removed).
   static let activeProviderChanged = Notification.Name("ActiveProviderChanged")
