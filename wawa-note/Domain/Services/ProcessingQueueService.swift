@@ -49,7 +49,8 @@ final class ProcessingQueueService: ObservableObject {
     itemID: UUID,
     projectID: UUID? = nil,
     trigger: QueueTrigger = .newCapture,
-    priority: Int? = nil
+    priority: Int? = nil,
+    maxRetries: Int? = nil
   ) -> QueueEntry {
     AppLog.event(
       "pipeline",
@@ -67,9 +68,12 @@ final class ProcessingQueueService: ObservableObject {
       priority
       ?? QueuePriorityService.shared.computePriority(
         itemID: itemID, projectID: projectID, trigger: trigger)
+    // Long audio (30min+) needs more retries — each retry resumes from
+    // checkpoint so forward progress is preserved.
+    let effectiveMaxRetries = maxRetries ?? 2
     let entry = QueueEntry(
       itemID: itemID, projectID: projectID, status: .queued,
-      priority: computedPriority)
+      priority: computedPriority, maxRetries: effectiveMaxRetries)
     entries.append(entry)
     sortEntries()
     processNext()

@@ -995,21 +995,27 @@ final class RecordingCoordinator: ObservableObject {
               "Enqueuing recovered item \(itemId.uuidString.prefix(8)) for pipeline processing")
             // A playable consolidated M4A does not need to be re-encoded on
             // every recovery. Rebuild only when it is absent or unreadable.
+            var audioWasRepaired = false
             if let m = try? FileArtifactStore().readRecordingManifest(for: itemId) {
               let audioURL = FileArtifactStore().audioFileURL(for: itemId)
               if Self.m4aNeedsRepair(at: audioURL) {
                 await AudioSegmentConcatenator.concatenate(manifest: m, meetingId: itemId)
+                audioWasRepaired = true
               }
             }
-            // Clear any stale checkpoint from the previous transcription attempt.
-            // The repaired/restored audio may differ in duration from the original,
-            // making the old checkpoint indices invalid.
-            let checkpointURL = FileArtifactStore().meetingDirectoryURL(for: itemId)
-              .appendingPathComponent("transcript_checkpoint.json")
-            if FileManager.default.fileExists(atPath: checkpointURL.path) {
-              try? FileManager.default.removeItem(at: checkpointURL)
-              AppLog.audio.info(
-                "Cleared stale checkpoint for recovered item \(itemId.uuidString.prefix(8))")
+            // Only clear checkpoints when the audio was actually repaired.
+            // A repaired/restored M4A may differ in duration from the original,
+            // making old checkpoint chunk indices invalid. When the audio wasn't
+            // touched, the checkpoint is still valid — keep it so long
+            // transcriptions can resume from the last completed chunk.
+            if audioWasRepaired {
+              let checkpointURL = FileArtifactStore().meetingDirectoryURL(for: itemId)
+                .appendingPathComponent("transcript_checkpoint.json")
+              if FileManager.default.fileExists(atPath: checkpointURL.path) {
+                try? FileManager.default.removeItem(at: checkpointURL)
+                AppLog.audio.info(
+                  "Cleared stale checkpoint for repaired item \(itemId.uuidString.prefix(8))")
+              }
             }
             guard let queue = capturedQueue else {
               AppLog.audio.error(
