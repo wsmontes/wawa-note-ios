@@ -112,23 +112,32 @@ struct WawaNoteApp: App {
       let recordedItems = (try? ctx.fetch(recordedDescriptor)) ?? []
       let failedItems = (try? ctx.fetch(failedDescriptor)) ?? []
       let stuckItems = recordedItems + failedItems
+      // Log what we found for diagnosis
+      let allWithAudio =
+        (try? ctx.fetch(
+          FetchDescriptor<KnowledgeItem>(
+            predicate: #Predicate { $0.audioFileRelativePath != nil }
+          ))) ?? []
+      let statusCounts = Dictionary(grouping: allWithAudio, by: { $0.statusRaw })
+      let statusSummary = statusCounts.map { "\($0.key):\($0.value.count)" }.sorted().joined(
+        separator: " ")
+      AppLog.general.info(
+        "🚀 AT: totalAudio=\(allWithAudio.count) statuses=[\(statusSummary)]"
+      )
       if !stuckItems.isEmpty {
-        AppLog.general.info(
-          "🚀 Auto-transcribe: found \(stuckItems.count) item(s) to transcribe (recorded=\(recordedItems.count) failed=\(failedItems.count))"
-        )
         for item in stuckItems {
-          let durStr =
-            item.durationSeconds.map { "\(Int($0))s" } ?? "unknown"
+          let durStr = item.durationSeconds.map { "\(Int($0))s" } ?? "unknown"
           AppLog.general.info(
             "🚀 Auto-transcribe: enqueuing '\(item.title)' (id=\(item.id.uuidString.prefix(8))) duration=\(durStr) status=\(item.statusRaw)"
           )
-          // Reset failed items to recorded so the pipeline picks them up
           if item.statusRaw == "failed" {
             item.status = .recorded
             item.lastErrorRaw = nil
           }
           _ = queue.enqueue(itemID: item.id, trigger: .directUserAction, maxRetries: 5)
         }
+      } else {
+        AppLog.general.info("🚀 Auto-transcribe: no items need transcription")
       }
     }
 
