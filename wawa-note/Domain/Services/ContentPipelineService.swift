@@ -2822,22 +2822,25 @@ enum JSSandbox {
     // Inject wawa helpers
     context.evaluateScript(Self.wawaHelpers)
 
-    var jsResult: JSValue?
-    var jsError: String?
+    final class JSBox {
+      var result: JSValue?
+      var error: String?
+    }
+    let box = JSBox()
     let semaphore = DispatchSemaphore(value: 0)
     DispatchQueue.global().async {
-      jsResult = context.evaluateScript(code)
+      box.result = context.evaluateScript(code)
       if let exc = context.exception {
         let line = exc.objectForKeyedSubscript("line")?.toInt32() ?? 0
-        jsError = "Line \(line): \(exc.toString() ?? "unknown")"
+        box.error = "Line \(line): \(exc.toString() ?? "unknown")"
       }
       semaphore.signal()
     }
     if semaphore.wait(timeout: .now() + timeout) == .timedOut {
       return Result(output: "", logs: bridge.logs, error: "Timed out after \(timeout)s.")
     }
-    let output = jsResult?.toString() ?? "undefined"
-    return Result(output: output, logs: bridge.logs, error: jsError)
+    let output = box.result?.toString() ?? "undefined"
+    return Result(output: output, logs: bridge.logs, error: box.error)
   }
 
   // MARK: Built-in JS libraries
