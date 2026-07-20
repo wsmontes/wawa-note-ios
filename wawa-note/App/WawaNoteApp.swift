@@ -124,6 +124,18 @@ struct WawaNoteApp: App {
       AppLog.general.info(
         "🚀 AT: totalAudio=\(allWithAudio.count) statuses=[\(statusSummary)]"
       )
+      // Write detailed diagnostic to app container for reading via devicectl
+      var diagLines: [String] = []
+      for item in allWithAudio {
+        let dur = item.durationSeconds.map { "\(Int($0))s" } ?? "nil"
+        diagLines.append(
+          "id=\(item.id.uuidString.prefix(8)) status=\(item.statusRaw) title='\(item.title)' dur=\(dur)"
+        )
+      }
+      diagLines.append("actionable=\(stuckItems.count)")
+      let diagURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
+        .first!.appendingPathComponent("at_diag.txt")
+      try? diagLines.joined(separator: "\n").write(to: diagURL, atomically: true, encoding: .utf8)
       if !stuckItems.isEmpty {
         for item in stuckItems {
           let durStr = item.durationSeconds.map { "\(Int($0))s" } ?? "unknown"
