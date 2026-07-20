@@ -496,6 +496,11 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
       }
 
       var recognitionTask: SFSpeechRecognitionTask?
+      // Prevent processing thousands of error callbacks from the framework.
+      // When the local speech service is unavailable (error 1101), SFSpeechRecognizer
+      // may invoke this callback repeatedly in a tight loop (~160K/sec). Without this
+      // guard, the log volume triggers system quarantine and the app is killed.
+      var hasHandledFirstError = false
 
       // iOS 17/18 on-device bug: SFSpeechRecognizer discards previous
       // transcription after pauses (~1.5-2s), treating pause boundaries as
@@ -526,6 +531,13 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
       recognitionTask = recognizer.recognitionTask(with: request) { result, error in
         if let error {
+          // Guard: process only the first error. SFSpeechRecognizer may invoke
+          // this callback thousands of times per second when the local speech
+          // service is unavailable (kAFAssistantErrorDomain 1101). Processing
+          // every callback floods the log and triggers system quarantine.
+          guard !hasHandledFirstError else { return }
+          hasHandledFirstError = true
+
           timeoutWorkItem.cancel()
           let nsError = error as NSError
           AppLog.transcription.error(
@@ -552,6 +564,8 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             let cloudTask = recognizer.recognitionTask(with: cloudRequest) {
               cloudResult, cloudError in
               if let cloudError {
+                // Guard against repeated error callbacks on cloud path too.
+                // The framework may still invoke this handler multiple times.
                 let cloudNSError = cloudError as NSError
                 AppLog.transcription.error(
                   "Cloud fallback also failed: \(cloudNSError.domain)/\(cloudNSError.code)")
