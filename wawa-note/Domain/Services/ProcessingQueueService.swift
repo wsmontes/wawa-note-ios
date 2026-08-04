@@ -3,6 +3,8 @@ import SwiftData
 import UIKit
 import WawaNoteCore
 
+// Related JIRA: KAN-546
+
 // MARK: - Processing Queue Service
 
 @MainActor
@@ -14,8 +16,7 @@ final class ProcessingQueueService: ObservableObject {
   let maxConcurrentJobs = 2
 
   private var activeTasks: [UUID: Task<Void, Never>] = [:]
-  private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
-  private var backgroundTaskCount = 0
+  private let backgroundTask = BackgroundTaskManager()
   private var pipeline: ContentPipelineService?
 
   /// Maximum completed/failed entries to keep before auto-pruning.
@@ -88,7 +89,7 @@ final class ProcessingQueueService: ObservableObject {
       activeTasks[entryID]?.cancel()
       activeTasks[entryID] = nil
       activeJobCount = max(0, activeJobCount - 1)
-      endBackgroundTask()
+      backgroundTask.end()
     }
     entry.status = .cancelled
     entry.completedAt = Date()
@@ -110,7 +111,7 @@ final class ProcessingQueueService: ObservableObject {
       }
     }
     activeJobCount = 0
-    endBackgroundTask()
+    backgroundTask.end()
   }
 
   func resumeQueue() {
@@ -136,7 +137,7 @@ final class ProcessingQueueService: ObservableObject {
     for (_, task) in activeTasks { task.cancel() }
     activeTasks.removeAll()
     activeJobCount = 0
-    endBackgroundTask()
+    backgroundTask.end()
     entries.removeAll { $0.status == .queued || $0.status == .processing }
   }
 
@@ -222,7 +223,7 @@ final class ProcessingQueueService: ObservableObject {
     next.status = .processing
     next.startedAt = Date()
     activeJobCount += 1
-    beginBackgroundTask()
+    backgroundTask.begin("WawaQueue")
 
     let entryID = next.id
     let itemID = next.itemID
@@ -233,10 +234,17 @@ final class ProcessingQueueService: ObservableObject {
           itemID: itemID,
           projectID: next.projectID
         )
-        // Terminal state guarantee ensures pipeline reaches .failed, .analyzed,
-        // or .pendingReview on every exit path. No need to double-check.
+        // processEntry never throws — failures set item.status = .failed
+        // internally. Check the item's actual status to decide whether the
+        // job succeeded or failed, so the retry/backoff machinery engages.
+        let didFail: Bool = await {
+          let ctx = ModelContext(pipeline.container)
+          let item = try? KnowledgeItemService(context: ctx).fetchItem(id: itemID)
+          return item?.status == .failed
+        }()
         await MainActor.run { [weak self] in
-          self?.finishJob(entryID, failed: false, error: nil)
+          self?.finishJob(
+            entryID, failed: didFail, error: didFail ? "Transcription pipeline failed" : nil)
         }
       } catch {
         await MainActor.run { [weak self] in
@@ -266,7 +274,7 @@ final class ProcessingQueueService: ObservableObject {
         )
         activeTasks[entryID] = nil
         activeJobCount = max(0, activeJobCount - 1)
-        endBackgroundTask()
+        backgroundTask.end()
         sortEntries()
         Task { @MainActor in
           try? await Task.sleep(nanoseconds: UInt64(backoffSeconds) * 1_000_000_000)
@@ -291,7 +299,7 @@ final class ProcessingQueueService: ObservableObject {
     }
     activeTasks[entryID] = nil
     activeJobCount = max(0, activeJobCount - 1)
-    endBackgroundTask()
+    backgroundTask.end()
     sortEntries()
     autoPrune()
     processNext()
@@ -306,37 +314,52 @@ final class ProcessingQueueService: ObservableObject {
     }
   }
 
-  // MARK: - Background task
+  // Background task management delegated to shared BackgroundTaskManager
+  // (defined at bottom of this file). Replaces 5 hand-rolled copies across
+  // the codebase with a single @MainActor utility.
+}
 
-  private func beginBackgroundTask() {
-    backgroundTaskCount += 1
-    // Only request a system background task when the app is NOT in the
-    // foreground. iOS kills apps that hold background tasks for >30s while
-    // in the foreground — long transcriptions would trigger this timeout.
-    // When the app is visible, we rely on the user keeping it open.
-    guard backgroundTaskID == .invalid else { return }
-    guard UIApplication.shared.applicationState != .active else {
-      AppLog.debug("pipeline", "Skipping background task — app is in foreground")
-      return
-    }
-    backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "WawaQueue") {
-      [weak self] in
-      // Background task expiring — cancel active work to prevent iOS from
-      // killing the app with a background task watchdog violation.
+// MARK: - Shared Background Task Manager
+
+/// Centralized background-task lifetime management.
+///
+/// Replace the 5 hand-rolled copies of beginBackgroundTask/endBackgroundTask
+/// (ProcessingQueueService, ContentPipelineService, AudioSegmentConcatenator,
+/// ChatViewModel ×2) with a single @MainActor utility. New copies had already
+/// diverged — one wrapped the expiration handler in Task { @MainActor }, the
+/// other didn't. This utility ensures consistent behavior everywhere.
+///
+/// Usage:
+///   let bgTask = BackgroundTaskManager()
+///   bgTask.begin("WawaQueue")       // arms the system background task
+///   bgTask.end()                    // releases it
+///
+/// Expiration (30s watchdog): ends the task gracefully without cancelling
+/// in-flight work. Checkpoints save progress every chunk; work resumes when
+/// the app returns to foreground. Cancelling would consume a retry and may
+/// permanently fail long transcriptions.
+@MainActor
+final class BackgroundTaskManager {
+  private var taskID: UIBackgroundTaskIdentifier = .invalid
+  private var count = 0
+
+  func begin(_ name: String) {
+    count += 1
+    guard taskID == .invalid else { return }
+    taskID = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
       Task { @MainActor [weak self] in
-        AppLog.warn("pipeline", "Background task expiring — cancelling active jobs")
-        for (_, task) in self?.activeTasks ?? [:] { task.cancel() }
-        self?.endBackgroundTask()
+        AppLog.warn("pipeline", "Background task '\(name)' expiring — ending gracefully")
+        self?.end()
       }
     }
-    AppLog.debug("pipeline", "Started background task for transcription")
+    AppLog.debug("pipeline", "Started background task '\(name)'")
   }
 
-  private func endBackgroundTask() {
-    backgroundTaskCount -= 1
-    guard backgroundTaskCount <= 0, backgroundTaskID != .invalid else { return }
-    backgroundTaskCount = 0
-    UIApplication.shared.endBackgroundTask(backgroundTaskID)
-    backgroundTaskID = .invalid
+  func end() {
+    count -= 1
+    guard count <= 0, taskID != .invalid else { return }
+    count = 0
+    UIApplication.shared.endBackgroundTask(taskID)
+    taskID = .invalid
   }
 }

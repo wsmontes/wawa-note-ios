@@ -5,7 +5,7 @@ import SwiftUI
 import UserNotifications
 import WawaNoteCore
 
-// Related JIRA: KAN-70, KAN-533, KAN-534, KAN-535, KAN-543
+// Related JIRA: KAN-70, KAN-533, KAN-534, KAN-535, KAN-543, KAN-546
 
 @main
 struct WawaNoteApp: App {
@@ -97,61 +97,70 @@ struct WawaNoteApp: App {
         "⚠️ Previous session ended abnormally — crash log available in Settings > Debug Logs")
     }
 
-    // DEBUG: Auto-transcribe stuck recorded/failed items on launch.
-    // Finds items with status .recorded or .failed that have audio and enqueues them.
-    let queue = processingQueue
-    let mc = modelContainer
-    Task { @MainActor in
-      let ctx = ModelContext(mc)
-      let recordedDescriptor = FetchDescriptor<KnowledgeItem>(
-        predicate: #Predicate { $0.statusRaw == "recorded" && $0.audioFileRelativePath != nil }
-      )
-      let failedDescriptor = FetchDescriptor<KnowledgeItem>(
-        predicate: #Predicate { $0.statusRaw == "failed" && $0.audioFileRelativePath != nil }
-      )
-      let recordedItems = (try? ctx.fetch(recordedDescriptor)) ?? []
-      let failedItems = (try? ctx.fetch(failedDescriptor)) ?? []
-      let stuckItems = recordedItems + failedItems
-      // Log what we found for diagnosis
-      let allWithAudio =
-        (try? ctx.fetch(
-          FetchDescriptor<KnowledgeItem>(
-            predicate: #Predicate { $0.audioFileRelativePath != nil }
-          ))) ?? []
-      let statusCounts = Dictionary(grouping: allWithAudio, by: { $0.statusRaw })
-      let statusSummary = statusCounts.map { "\($0.key):\($0.value.count)" }.sorted().joined(
-        separator: " ")
-      AppLog.general.info(
-        "🚀 AT: totalAudio=\(allWithAudio.count) statuses=[\(statusSummary)]"
-      )
-      // Write detailed diagnostic to app container for reading via devicectl
-      var diagLines: [String] = []
-      for item in allWithAudio {
-        let dur = item.durationSeconds.map { "\(Int($0))s" } ?? "nil"
-        diagLines.append(
-          "id=\(item.id.uuidString.prefix(8)) status=\(item.statusRaw) title='\(item.title)' dur=\(dur)"
+    #if DEBUG
+      // DEBUG: Auto-transcribe stuck recorded/failed items on launch.
+      // Finds items with status .recorded or .failed that have audio and enqueues them.
+      // Gated behind #if DEBUG — does NOT run in Release/TestFlight builds.
+      // Production recovery is handled by cleanupOrphanedRecordings() above.
+      let queue = processingQueue
+      let mc = modelContainer
+      Task { @MainActor in
+        let ctx = ModelContext(mc)
+        let recordedDescriptor = FetchDescriptor<KnowledgeItem>(
+          predicate: #Predicate { $0.statusRaw == "recorded" && $0.audioFileRelativePath != nil }
         )
-      }
-      diagLines.append("actionable=\(stuckItems.count)")
-      let diagURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
-        .first!.appendingPathComponent("at_diag.txt")
-      try? diagLines.joined(separator: "\n").write(to: diagURL, atomically: true, encoding: .utf8)
-      if !stuckItems.isEmpty {
-        for item in stuckItems {
-          let durStr = item.durationSeconds.map { "\(Int($0))s" } ?? "unknown"
-          AppLog.general.info(
-            "🚀 Auto-transcribe: enqueuing '\(item.title)' (id=\(item.id.uuidString.prefix(8))) duration=\(durStr) status=\(item.statusRaw)"
+        let failedDescriptor = FetchDescriptor<KnowledgeItem>(
+          predicate: #Predicate { $0.statusRaw == "failed" && $0.audioFileRelativePath != nil }
+        )
+        let recordedItems = (try? ctx.fetch(recordedDescriptor)) ?? []
+        let failedItems = (try? ctx.fetch(failedDescriptor)) ?? []
+        let stuckItems = recordedItems + failedItems
+        // Log what we found for diagnosis
+        let allWithAudio =
+          (try? ctx.fetch(
+            FetchDescriptor<KnowledgeItem>(
+              predicate: #Predicate { $0.audioFileRelativePath != nil }
+            ))) ?? []
+        let statusCounts = Dictionary(grouping: allWithAudio, by: { $0.statusRaw })
+        let statusSummary = statusCounts.map { "\($0.key):\($0.value.count)" }.sorted().joined(
+          separator: " ")
+        AppLog.general.info(
+          "🚀 AT: totalAudio=\(allWithAudio.count) statuses=[\(statusSummary)]"
+        )
+        // Write detailed diagnostic to app container for reading via devicectl
+        var diagLines: [String] = []
+        for item in allWithAudio {
+          let dur = item.durationSeconds.map { "\(Int($0))s" } ?? "nil"
+          diagLines.append(
+            "id=\(item.id.uuidString.prefix(8)) status=\(item.statusRaw) title='\(item.title)' dur=\(dur)"
           )
-          if item.statusRaw == "failed" {
-            item.status = .recorded
-            item.lastErrorRaw = nil
-          }
-          _ = queue.enqueue(itemID: item.id, trigger: .directUserAction, maxRetries: 5)
         }
-      } else {
-        AppLog.general.info("🚀 Auto-transcribe: no items need transcription")
+        diagLines.append("actionable=\(stuckItems.count)")
+        let diagURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
+          .first!.appendingPathComponent("at_diag.txt")
+        try? diagLines.joined(separator: "\n").write(to: diagURL, atomically: true, encoding: .utf8)
+        if !stuckItems.isEmpty {
+          for item in stuckItems {
+            let durStr = item.durationSeconds.map { "\(Int($0))s" } ?? "unknown"
+            AppLog.general.info(
+              "🚀 Auto-transcribe: enqueuing '\(item.title)' (id=\(item.id.uuidString.prefix(8))) duration=\(durStr) status=\(item.statusRaw)"
+            )
+            if item.statusRaw == "failed" {
+              item.status = .recorded
+              item.lastErrorRaw = nil
+            }
+            _ = queue.enqueue(itemID: item.id, trigger: .directUserAction, maxRetries: 5)
+          }
+          // Save the context so the status reset (failed→recorded) persists.
+          // Without this, the mutation is discarded and the item stays .failed
+          // in the store, causing the auto-transcribe to re-enqueue it on every
+          // subsequent launch.
+          ctx.safeSave(context: "debug-auto-transcribe", itemId: nil)
+        } else {
+          AppLog.general.info("🚀 Auto-transcribe: no items need transcription")
+        }
       }
-    }
+    #endif
 
     // Attempt recovery from audio interruptions when app returns to foreground
     notificationTokens.tokens.append(

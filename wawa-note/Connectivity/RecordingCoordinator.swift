@@ -999,8 +999,27 @@ final class RecordingCoordinator: ObservableObject {
             if let m = try? FileArtifactStore().readRecordingManifest(for: itemId) {
               let audioURL = FileArtifactStore().audioFileURL(for: itemId)
               if Self.m4aNeedsRepair(at: audioURL) {
-                await AudioSegmentConcatenator.concatenate(manifest: m, meetingId: itemId)
-                audioWasRepaired = true
+                let ok = await AudioSegmentConcatenator.concatenate(manifest: m, meetingId: itemId)
+                // Only trust the repair if concatenate actually succeeded.
+                // A false return means the segments couldn't be reassembled
+                // (missing WAV files, disk full, corrupted data) — the M4A
+                // is still broken and the checkpoint must not be cleared.
+                audioWasRepaired = ok
+              }
+            } else {
+              // Manifest unreadable (corrupt, disk-full during atomic rotation,
+              // or missing after a crash mid-concatenation). Can't verify
+              // whether the checkpoint's chunk indices still match the M4A.
+              // Clear the checkpoint to prevent resume from a stale index
+              // that could silently skip new audio or produce a truncated
+              // transcript marked .transcribed.
+              let checkpointURL = FileArtifactStore().meetingDirectoryURL(for: itemId)
+                .appendingPathComponent("transcript_checkpoint.json")
+              if FileManager.default.fileExists(atPath: checkpointURL.path) {
+                try? FileManager.default.removeItem(at: checkpointURL)
+                AppLog.audio.info(
+                  "Cleared stale checkpoint — manifest unreadable for item \(itemId.uuidString.prefix(8))"
+                )
               }
             }
             // Only clear checkpoints when the audio was actually repaired.

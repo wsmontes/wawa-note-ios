@@ -109,7 +109,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
   /// Dynamic timeout: base 180s, scales with chunk duration. On-device recognition
   /// can be slow on older hardware; a fixed 120s timeout was causing failures on
   /// recordings > 30 min where even one slow chunk kills the whole transcription.
-  private static func timeoutForChunk(duration: TimeInterval) -> TimeInterval {
+  static func timeoutForChunk(duration: TimeInterval) -> TimeInterval {
     max(180, duration * 5)
   }
 
@@ -496,11 +496,18 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
       }
 
       var recognitionTask: SFSpeechRecognitionTask?
-      // Prevent processing thousands of error callbacks from the framework.
-      // When the local speech service is unavailable (error 1101), SFSpeechRecognizer
-      // may invoke this callback repeatedly in a tight loop (~160K/sec). Without this
-      // guard, the log volume triggers system quarantine and the app is killed.
-      var hasHandledFirstError = false
+      // Prevent processing thousands of duplicate error callbacks from the
+      // framework. When the local speech service is unavailable (error 1101),
+      // SFSpeechRecognizer may invoke this callback repeatedly in a tight loop
+      // (~160K/sec). Without this guard, the log volume triggers system quarantine
+      // and the app is killed.
+      //
+      // Unlike the old hasHandledFirstError Bool (which blocked ALL subsequent
+      // callbacks including the legitimate 216 cancellation error and any error
+      // arriving after partial results), we track only the error identity
+      // (domain:code). A different error — cancellation after cancel(), a new
+      // domain — is a distinct event and must be processed.
+      var handledErrorKeys = Set<String>()
 
       // iOS 17/18 on-device bug: SFSpeechRecognizer discards previous
       // transcription after pauses (~1.5-2s), treating pause boundaries as
@@ -531,15 +538,16 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
 
       recognitionTask = recognizer.recognitionTask(with: request) { result, error in
         if let error {
-          // Guard: process only the first error. SFSpeechRecognizer may invoke
-          // this callback thousands of times per second when the local speech
-          // service is unavailable (kAFAssistantErrorDomain 1101). Processing
-          // every callback floods the log and triggers system quarantine.
-          guard !hasHandledFirstError else { return }
-          hasHandledFirstError = true
+          let nsError = error as NSError
+          let errorKey = "\(nsError.domain):\(nsError.code)"
+
+          // Skip exact-duplicate error callbacks. Different errors (e.g.
+          // cancellation 216 after the initial 1101, or the cloud-fallback
+          // error after the on-device failure) must pass through.
+          guard !handledErrorKeys.contains(errorKey) else { return }
+          handledErrorKeys.insert(errorKey)
 
           timeoutWorkItem.cancel()
-          let nsError = error as NSError
           AppLog.transcription.error(
             "On-device recognition failed: \(nsError.domain)/\(nsError.code) — \(error.localizedDescription)"
           )
@@ -554,6 +562,29 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             // consuming CPU and memory for the full audio buffer duration.
             recognitionTask?.cancel()
             self.activeRecognitionTask = nil
+
+            // Re-arm timeout for the cloud fallback. The original timeout was
+            // cancelled above when the first on-device error arrived. Without
+            // re-arming, a hanging cloud task (flaky Wi-Fi, server stall) never
+            // resumes the continuation → transcribeDirect hangs forever.
+            // Declare cloudTask as a var before the timeout so it's captured
+            // by reference (like recognitionTask above), avoiding a circular
+            // reference between cloudTimeoutItem ↔ cloudTask.
+            var cloudTask: SFSpeechRecognitionTask?
+            let cloudTimeoutItem = DispatchWorkItem {
+              guard
+                tryResume({
+                  cloudTask?.cancel()
+                  continuation.resume(
+                    throwing: TranscriptionError.recognitionFailed(
+                      "Cloud fallback timed out after \(Int(timeout))s"))
+                })
+              else { return }
+            }
+            DispatchQueue.main.asyncAfter(
+              deadline: .now() + timeout, execute: cloudTimeoutItem)
+            var hasHandledCloudError = false
+
             let cloudRequest = SFSpeechURLRecognitionRequest(url: recognitionURL)
             cloudRequest.shouldReportPartialResults = false
             cloudRequest.addsPunctuation = true
@@ -561,11 +592,16 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
             if let ctx = self.buildContextualTerms() {
               cloudRequest.contextualStrings = ctx
             }
-            let cloudTask = recognizer.recognitionTask(with: cloudRequest) {
+            cloudTask = recognizer.recognitionTask(with: cloudRequest) {
               cloudResult, cloudError in
               if let cloudError {
-                // Guard against repeated error callbacks on cloud path too.
-                // The framework may still invoke this handler multiple times.
+                // Guard against repeated error callbacks on cloud path.
+                // The framework may invoke this handler thousands of times
+                // per second — same flood risk as the on-device path.
+                guard !hasHandledCloudError else { return }
+                hasHandledCloudError = true
+                cloudTimeoutItem.cancel()
+
                 let cloudNSError = cloudError as NSError
                 AppLog.transcription.error(
                   "Cloud fallback also failed: \(cloudNSError.domain)/\(cloudNSError.code)")
@@ -580,6 +616,7 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
                 return
               }
               guard let cloudResult = cloudResult, cloudResult.isFinal else { return }
+              cloudTimeoutItem.cancel()
               guard
                 tryResume({
                   self.usedCloudFallback = true
@@ -791,74 +828,89 @@ final class AppleSpeechTranscriptionEngine: TranscriptionEngine, @unchecked Send
     // Create the output file upfront and write segments incrementally.
     let tempURL = FileManager.default.temporaryDirectory
       .appendingPathComponent("pcm_\(UUID().uuidString).wav")
-    let outputFile = try AVAudioFile(
-      forWriting: tempURL,
-      settings: outputFormat.settings,
-      commonFormat: .pcmFormatInt16,
-      interleaved: false)
 
-    while inputFile.framePosition < inputFile.length {
-      let remaining = inputFile.length - inputFile.framePosition
-      let framesToRead = AVAudioFrameCount(min(segmentDuration, remaining))
-
-      guard
-        let inputBuf = AVAudioPCMBuffer(
-          pcmFormat: inputFormat, frameCapacity: framesToRead)
-      else {
-        throw TranscriptionError.recognitionFailed("Cannot allocate input buffer")
+    // Wrap writer in a local scope so it is deinitialized (and the WAV header
+    // finalized) before we re-open the file for validation. AVAudioFile patches
+    // the data-chunk-size field at close/deinit; re-opening before close reads
+    // an unfinalized header → length 0 or open failure.
+    // defer ensures the temp file is removed on any throw path (mid-loop
+    // decode error, write failure, validation failure) — prevents accumulating
+    // ~115MB orphaned WAV files on retry loops.
+    var didSucceed = false
+    defer {
+      if !didSucceed {
+        try? FileManager.default.removeItem(at: tempURL)
       }
-      try inputFile.read(into: inputBuf)
-
-      let ratio = outputFormat.sampleRate / inputFormat.sampleRate
-      let outputCapacity = AVAudioFrameCount(Double(inputBuf.frameLength) * ratio)
-      guard
-        let outputBuf = AVAudioPCMBuffer(
-          pcmFormat: outputFormat, frameCapacity: outputCapacity)
-      else {
-        throw TranscriptionError.recognitionFailed("Cannot allocate output buffer")
-      }
-
-      let inputState = AudioConverterInputState(buffer: inputBuf)
-      var convertError: NSError?
-      let status = converter.convert(to: outputBuf, error: &convertError) { _, outStatus in
-        inputState.nextBuffer(status: outStatus)
-      }
-
-      if let convertError { throw convertError }
-      guard status != .error else {
-        throw TranscriptionError.recognitionFailed("Audio conversion failed")
-      }
-      guard outputBuf.frameLength > 0 else {
-        throw TranscriptionError.recognitionFailed("Decode segment produced empty output")
-      }
-
-      // Write this segment immediately to keep memory bounded.
-      try outputFile.write(from: outputBuf)
-      totalOutputFrames += outputBuf.frameLength
     }
 
-    guard totalOutputFrames > 0 else {
-      try? FileManager.default.removeItem(at: tempURL)
-      throw TranscriptionError.recognitionFailed("Decode produced empty output")
+    do {
+      let outputFile = try AVAudioFile(
+        forWriting: tempURL,
+        settings: outputFormat.settings,
+        commonFormat: .pcmFormatInt16,
+        interleaved: false)
+
+      while inputFile.framePosition < inputFile.length {
+        let remaining = inputFile.length - inputFile.framePosition
+        let framesToRead = AVAudioFrameCount(min(segmentDuration, remaining))
+
+        guard
+          let inputBuf = AVAudioPCMBuffer(
+            pcmFormat: inputFormat, frameCapacity: framesToRead)
+        else {
+          throw TranscriptionError.recognitionFailed("Cannot allocate input buffer")
+        }
+        try inputFile.read(into: inputBuf)
+
+        let ratio = outputFormat.sampleRate / inputFormat.sampleRate
+        let outputCapacity = AVAudioFrameCount(Double(inputBuf.frameLength) * ratio)
+        guard
+          let outputBuf = AVAudioPCMBuffer(
+            pcmFormat: outputFormat, frameCapacity: outputCapacity)
+        else {
+          throw TranscriptionError.recognitionFailed("Cannot allocate output buffer")
+        }
+
+        let inputState = AudioConverterInputState(buffer: inputBuf)
+        var convertError: NSError?
+        let status = converter.convert(to: outputBuf, error: &convertError) { _, outStatus in
+          inputState.nextBuffer(status: outStatus)
+        }
+
+        if let convertError { throw convertError }
+        guard status != .error else {
+          throw TranscriptionError.recognitionFailed("Audio conversion failed")
+        }
+        guard outputBuf.frameLength > 0 else {
+          throw TranscriptionError.recognitionFailed("Decode segment produced empty output")
+        }
+
+        // Write this segment immediately to keep memory bounded.
+        try outputFile.write(from: outputBuf)
+        totalOutputFrames += outputBuf.frameLength
+      }
+
+      guard totalOutputFrames > 0 else {
+        throw TranscriptionError.recognitionFailed("Decode produced empty output")
+      }
+      // outputFile goes out of scope here → WAV header finalized.
     }
 
     // Validate: re-open the written file to ensure it's well-formed.
-    // Incremental writes via write(from:) advance the file pointer correctly,
-    // but a corrupt segment would produce a truncated/unreadable file.
+    // The writer has been deinitialized, so the WAV header is complete.
     do {
       let checkFile = try AVAudioFile(forReading: tempURL)
       guard checkFile.length > 0 else {
-        try? FileManager.default.removeItem(at: tempURL)
         throw TranscriptionError.recognitionFailed("Decoded WAV is empty after write")
       }
       AppLog.transcription.info(
         "PCM decode complete: \(totalOutputFrames) frames wrote=\(checkFile.length) @ \(Int(outputFormat.sampleRate))Hz → \(tempURL.lastPathComponent)"
       )
     } catch {
-      try? FileManager.default.removeItem(at: tempURL)
       throw TranscriptionError.recognitionFailed(
         "Decoded WAV validation failed: \(error.localizedDescription)")
     }
+    didSucceed = true
     return tempURL
   }
 

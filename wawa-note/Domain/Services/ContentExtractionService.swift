@@ -283,15 +283,29 @@ final class ContentExtractionService {
 
     // ── Checkpoint resume: load previous progress if available ──────
     let checkpoint = loadTranscriptionCheckpoint(for: item.id)
+    let currentEngineId = resolvedEngineId(eng)
     if let checkpoint {
-      AppLog.transcription.info(
-        "Found checkpoint for \(item.id.uuidString.prefix(8)): \(checkpoint.completedChunks) chunks done"
-      )
-      // Tell engine to skip already-transcribed chunks
-      eng.resumeFromChunk = checkpoint.completedChunks
-      // Seed previousText so deduplicateStart removes the chunk overlap
-      // at the resume boundary.
-      eng.resumePreviousText = checkpoint.segments.map(\.text).joined(separator: " ")
+      // Validate engine hasn't changed since checkpoint was written.
+      // Different engines use different chunk sizes (Apple 50s vs Remote 600s),
+      // so resumeFromChunk points to the wrong position after an engine switch.
+      // Legacy checkpoints (engineId=nil) are accepted for backward compat.
+      if let checkpointEngine = checkpoint.engineId,
+        checkpointEngine != currentEngineId
+      {
+        AppLog.transcription.warning(
+          "Discarding checkpoint — engine changed from \(checkpointEngine) to \(currentEngineId) for \(item.id.uuidString.prefix(8))"
+        )
+        removeTranscriptionCheckpoint(for: item.id)
+      } else {
+        AppLog.transcription.info(
+          "Found checkpoint for \(item.id.uuidString.prefix(8)): \(checkpoint.completedChunks) chunks done (engine=\(checkpoint.engineId ?? "legacy"))"
+        )
+        // Tell engine to skip already-transcribed chunks
+        eng.resumeFromChunk = checkpoint.completedChunks
+        // Seed previousText so deduplicateStart removes the chunk overlap
+        // at the resume boundary.
+        eng.resumePreviousText = checkpoint.segments.map(\.text).joined(separator: " ")
+      }
     }
 
     // Wire up checkpoint persistence: save partial transcript after each chunk.
@@ -299,12 +313,14 @@ final class ContentExtractionService {
     // but saveTranscriptionCheckpoint only does file I/O — no modelContext access.
     let itemID = item.id
     let fileStoreRef = fileStore
+    let checkpointEngineId = resolvedEngineId(eng)
     let checkpointSaver: (Transcript, Int) -> Void = { partialTranscript, completedChunks in
       let checkpoint = ContentExtractionService.CheckpointData(
         completedChunks: completedChunks,
         segments: partialTranscript.segments,
         languageCode: partialTranscript.languageCode,
-        savedAt: Date()
+        savedAt: Date(),
+        engineId: checkpointEngineId
       )
       do {
         try fileStoreRef.createMeetingDirectory(for: itemID)
@@ -405,6 +421,9 @@ final class ContentExtractionService {
     let segments: [TranscriptSegment]
     let languageCode: String?
     let savedAt: Date
+    /// Engine that produced this checkpoint ("apple-speech", "apple-cloud", "remote-whisper").
+    /// nil for legacy checkpoints written before this field existed.
+    let engineId: String?
   }
 
   nonisolated private func checkpointURL(for itemID: UUID) -> URL {

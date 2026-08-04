@@ -916,16 +916,24 @@ final class ContentPipelineService: ObservableObject {
 
   private func beginBackgroundTask() {
     backgroundTaskCount += 1
-    // Only request a system background task when the app is NOT in the
-    // foreground. Long transcriptions would trigger the 30s watchdog timeout
-    // and get the app killed if a background task is held while visible.
+    // Always request a system background task. Long transcriptions need to
+    // survive screen locks and brief backgrounding. iOS does NOT kill apps
+    // for holding a background task while in the foreground — the 30s
+    // watchdog only starts counting when the app actually enters the background.
     guard backgroundTaskID == .invalid else { return }
-    guard UIApplication.shared.applicationState != .active else { return }
     backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "WawaPipeline") {
       [weak self] in
-      // Background task expiring — cancel active work to prevent system kill.
-      self?.activeJobs.values.forEach { $0.cancel() }
-      self?.endBackgroundTask()
+      // Background task expiring — end gracefully without cancelling active
+      // work. Cancelling would lose in-progress transcription state and
+      // potentially fail the item permanently. Let iOS suspend naturally;
+      // checkpoints save progress every chunk and work resumes on foreground.
+      // Must hop to @MainActor: UIKit delivers the expiration callback on an
+      // arbitrary queue, but activeJobs is MainActor-isolated. Direct access
+      // races with the pipeline's insert/remove and risks EXC_BAD_ACCESS.
+      Task { @MainActor [weak self] in
+        AppLog.warn("pipeline", "Background task expiring — ending gracefully")
+        self?.endBackgroundTask()
+      }
     }
   }
 

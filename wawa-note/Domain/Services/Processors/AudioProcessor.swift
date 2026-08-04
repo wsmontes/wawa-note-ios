@@ -3,7 +3,7 @@ import Foundation
 @preconcurrency import SwiftData
 import WawaNoteCore
 
-// Related JIRA: KAN-XX
+// Related JIRA: KAN-546
 
 /// Extracts text from audio items via transcription.
 /// Handles all 17 error cases with structured ExtractionError codes.
