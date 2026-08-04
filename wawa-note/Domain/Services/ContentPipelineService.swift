@@ -136,8 +136,7 @@ final class ContentPipelineService: ObservableObject {
   @Published var pipelineStatus: PipelineProgress?
 
   private var activeJobs: [UUID: Task<Void, Never>] = [:]
-  private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
-  private var backgroundTaskCount = 0
+  private let backgroundTask = BackgroundTaskManager()
 
   init(modelContainer: ModelContainer) {
     self.modelContainer = modelContainer
@@ -198,7 +197,7 @@ final class ContentPipelineService: ObservableObject {
       var terminalStateReached = false
       defer {
         activeJobs[itemID] = nil
-        endBackgroundTask()
+        backgroundTask.end()
         if !terminalStateReached {
           // Pipeline exited without reaching a terminal state. Force .failed
           // so the user sees the failure instead of a permanently stuck item.
@@ -218,7 +217,7 @@ final class ContentPipelineService: ObservableObject {
         terminalStateReached = true
         return
       }
-      beginBackgroundTask()
+      backgroundTask.begin("WawaPipeline")
 
       guard let item = try? KnowledgeItemService(context: modelContext).fetchItem(id: itemID) else {
         AppLog.provider.error("ContentPipeline: item \(itemID) not found in store, aborting")
@@ -902,7 +901,7 @@ final class ContentPipelineService: ObservableObject {
     TranscriptionPipeline.shared.cancel(itemID)
     activeJobs[itemID]?.cancel()
     activeJobs[itemID] = nil
-    endBackgroundTask()
+    backgroundTask.end()
     // Roll back item status so UI doesn't stay stuck on "Analyzing..."
     let ctx = ModelContext(modelContainer)
     if let item = try? KnowledgeItemService(context: ctx).fetchItem(id: itemID) {
@@ -914,36 +913,9 @@ final class ContentPipelineService: ObservableObject {
     NotificationCenter.default.post(name: .pipelineCompleted, object: itemID.uuidString)
   }
 
-  private func beginBackgroundTask() {
-    backgroundTaskCount += 1
-    // Always request a system background task. Long transcriptions need to
-    // survive screen locks and brief backgrounding. iOS does NOT kill apps
-    // for holding a background task while in the foreground — the 30s
-    // watchdog only starts counting when the app actually enters the background.
-    guard backgroundTaskID == .invalid else { return }
-    backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "WawaPipeline") {
-      [weak self] in
-      // Background task expiring — end gracefully without cancelling active
-      // work. Cancelling would lose in-progress transcription state and
-      // potentially fail the item permanently. Let iOS suspend naturally;
-      // checkpoints save progress every chunk and work resumes on foreground.
-      // Must hop to @MainActor: UIKit delivers the expiration callback on an
-      // arbitrary queue, but activeJobs is MainActor-isolated. Direct access
-      // races with the pipeline's insert/remove and risks EXC_BAD_ACCESS.
-      Task { @MainActor [weak self] in
-        AppLog.warn("pipeline", "Background task expiring — ending gracefully")
-        self?.endBackgroundTask()
-      }
-    }
-  }
-
-  private func endBackgroundTask() {
-    backgroundTaskCount -= 1
-    guard backgroundTaskCount <= 0, backgroundTaskID != .invalid else { return }
-    backgroundTaskCount = 0
-    UIApplication.shared.endBackgroundTask(backgroundTaskID)
-    backgroundTaskID = .invalid
-  }
+  // Background task management delegated to shared BackgroundTaskManager
+  // (defined in ProcessingQueueService.swift). All 5 codebase copies now
+  // converge on the same @MainActor utility.
 }
 
 // MARK: - LensCatalogService

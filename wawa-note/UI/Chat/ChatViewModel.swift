@@ -469,24 +469,17 @@ final class ChatViewModel: ObservableObject {
       advisorModel: advModel)
 
     // Prevent the app from suspending the AgentLoop when backgrounded.
-    // beginBackgroundTask gives us ~30s to finish the current iteration
-    // and save progress before iOS suspends the app (see [#3]).
-    var bgTaskID: UIBackgroundTaskIdentifier = .invalid
-    bgTaskID = UIApplication.shared.beginBackgroundTask(withName: "chat.agentLoop") {
-      AppLog.event("chat", "Background task expiring — cancelling AgentLoop")
-      self.streamTask?.cancel()
-      if bgTaskID != .invalid {
-        UIApplication.shared.endBackgroundTask(bgTaskID)
-        bgTaskID = .invalid
-      }
-    }
+    // BackgroundTaskManager gives us ~30s to finish the current iteration
+    // and save progress before iOS suspends the app. On expiry, it ends
+    // gracefully without cancelling — the agent loop pauses naturally and
+    // resumes when the app returns to foreground.
+    let bgTask = BackgroundTaskManager()
+    bgTask.begin("chat.agentLoop")
 
     streamTask = Task { @MainActor [weak self] in
       guard let self else { return }
       defer {
-        if bgTaskID != .invalid {
-          UIApplication.shared.endBackgroundTask(bgTaskID)
-        }
+        bgTask.end()
       }
       do {
         let stream = loop.runStreaming(userMessage: text, history: messages, provider: provider)
@@ -841,24 +834,17 @@ final class ChatViewModel: ObservableObject {
       advisorModel: advModel)
 
     // Prevent the app from suspending the AgentLoop when backgrounded.
-    // beginBackgroundTask gives us ~30s to finish the current iteration
-    // and save progress before iOS suspends the app (see [#3]).
-    var bgTaskID: UIBackgroundTaskIdentifier = .invalid
-    bgTaskID = UIApplication.shared.beginBackgroundTask(withName: "chat.agentLoop") {
-      AppLog.event("chat", "Background task expiring — cancelling AgentLoop")
-      self.streamTask?.cancel()
-      if bgTaskID != .invalid {
-        UIApplication.shared.endBackgroundTask(bgTaskID)
-        bgTaskID = .invalid
-      }
-    }
+    // BackgroundTaskManager gives us ~30s to finish the current iteration
+    // and save progress before iOS suspends the app. On expiry, it ends
+    // gracefully without cancelling — the agent loop pauses naturally and
+    // resumes when the app returns to foreground.
+    let bgTask = BackgroundTaskManager()
+    bgTask.begin("chat.agentLoop")
 
     streamTask = Task { @MainActor [weak self] in
       guard let self else { return }
       defer {
-        if bgTaskID != .invalid {
-          UIApplication.shared.endBackgroundTask(bgTaskID)
-        }
+        bgTask.end()
       }
       do {
         let stream = loop.runStreaming(userMessage: text, history: messages, provider: provider)
