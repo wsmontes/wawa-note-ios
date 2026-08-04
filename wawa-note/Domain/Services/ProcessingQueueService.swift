@@ -237,8 +237,8 @@ final class ProcessingQueueService: ObservableObject {
         // processEntry never throws — failures set item.status = .failed
         // internally. Check the item's actual status to decide whether the
         // job succeeded or failed, so the retry/backoff machinery engages.
-        let didFail: Bool = await {
-          let ctx = ModelContext(pipeline.container)
+        let ctx = ModelContext(pipeline.container)
+        let didFail: Bool = {
           let item = try? KnowledgeItemService(context: ctx).fetchItem(id: itemID)
           return item?.status == .failed
         }()
