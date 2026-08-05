@@ -143,35 +143,87 @@ struct SendToMenu: View {
     }
   }
 
+  private func buildKnowledgeMarkdown(_ ki: KnowledgeItem) -> String {
+    var md = "# \(ki.title)\n\nType: \(ki.type.label)\nCreated: \(ki.createdAt.formatted())\n"
+    // Attempt to read analysis artifact if present
+    let store = FileArtifactStore()
+    let analysisURL = store.meetingDirectoryURL(for: ki.id).appendingPathComponent(
+      "analysis.json")
+    if FileManager.default.fileExists(atPath: analysisURL.path),
+      let data = try? Data(contentsOf: analysisURL),
+      let analysisStr = String(data: data, encoding: .utf8)
+    {
+      md += "\n## Analysis\n\n```json\n\(analysisStr)\n```\n"
+    }
+    return md
+  }
+
+  private func buildDerivedMarkdown(_ di: ProjectDerivedItem) -> String {
+    var md = "# \(di.title)\n\nType: \(di.type.rawValue)\n"
+    if let body = di.bodyJSON {
+      md += "\n\(body)\n"
+    }
+    return md
+  }
+
   private func exportMarkdown() {
-    var md = ""
+    let md: String
     switch item {
     case .knowledge(let ki):
-      md = "# \(ki.title)\n\nType: \(ki.type.label)\nCreated: \(ki.createdAt.formatted())\n"
-      // Attempt to read analysis artifact if present
-      let store = FileArtifactStore()
-      let analysisURL = store.meetingDirectoryURL(for: ki.id).appendingPathComponent(
-        "analysis.json")
-      if FileManager.default.fileExists(atPath: analysisURL.path),
-        let data = try? Data(contentsOf: analysisURL),
-        let analysisStr = String(data: data, encoding: .utf8)
-      {
-        md += "\n## Analysis\n\n```json\n\(analysisStr)\n```\n"
-      }
+      md = buildKnowledgeMarkdown(ki)
     case .derived(let di):
-      md = "# \(di.title)\n\nType: \(di.type.rawValue)\n"
-      if let body = di.bodyJSON {
-        md += "\n\(body)\n"
-      }
+      md = buildDerivedMarkdown(di)
     }
     presentShareSheet(md, type: .plainText)
   }
 
   private func exportPDF() {
-    // Render synthesis or item content as PDF using UIGraphicsPDFRenderer
-    // Deferred to implementation — requires PDF rendering pipeline
-    let text = "PDF export placeholder"
-    presentShareSheet(text, type: .plainText)
+    let text: String
+    switch item {
+    case .knowledge(let ki):
+      text = buildKnowledgeMarkdown(ki)
+    case .derived(let di):
+      text = buildDerivedMarkdown(di)
+    }
+    guard let pdfData = renderPDF(from: text) else {
+      AppLog.general.error("SendTo: PDF rendering failed")
+      return
+    }
+    let tempDir = FileManager.default.temporaryDirectory
+    let fileURL = tempDir.appendingPathComponent(
+      "wawa-export-\(UUID().uuidString.prefix(8)).pdf")
+    do {
+      try pdfData.write(to: fileURL, options: .atomic)
+    } catch {
+      AppLog.general.error("SendTo: PDF write failed: \(error.localizedDescription)")
+      return
+    }
+    let activityVC = UIActivityViewController(activityItems: [fileURL], applicationActivities: nil)
+    if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+      let root = scene.windows.first?.rootViewController
+    {
+      root.present(activityVC, animated: true)
+    }
+  }
+
+  private func renderPDF(from text: String) -> Data? {
+    let pageWidth: CGFloat = 612
+    let pageHeight: CGFloat = 792
+    let margin: CGFloat = 56
+    let textRect = CGRect(
+      x: margin, y: margin, width: pageWidth - 2 * margin, height: pageHeight - 2 * margin)
+
+    let format = UIGraphicsPDFRendererFormat()
+    let renderer = UIGraphicsPDFRenderer(
+      bounds: CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight), format: format)
+    return try? renderer.pdfData { ctx in
+      ctx.beginPage()
+      let attributes: [NSAttributedString.Key: Any] = [
+        .font: UIFont.systemFont(ofSize: 11),
+        .foregroundColor: UIColor.black,
+      ]
+      text.draw(in: textRect, withAttributes: attributes)
+    }
   }
 
   private func exportCSV() {
@@ -179,10 +231,12 @@ struct SendToMenu: View {
     var csv = "Type,Title,Status,Created\n"
     switch item {
     case .derived(let di):
+      let escapedTitle = di.title.replacingOccurrences(of: "\"", with: "\"\"")
       csv +=
-        "\(di.type.rawValue),\"\(di.title)\",\(di.statusRaw ?? ""),\(di.createdAt.ISO8601Format())\n"
+        "\(di.type.rawValue),\"\(escapedTitle)\",\(di.statusRaw ?? ""),\(di.createdAt.ISO8601Format())\n"
     case .knowledge(let ki):
-      csv += "\(ki.type.rawValue),\"\(ki.title)\",,\(ki.createdAt.ISO8601Format())\n"
+      let escapedTitle = ki.title.replacingOccurrences(of: "\"", with: "\"\"")
+      csv += "\(ki.type.rawValue),\"\(escapedTitle)\",,\(ki.createdAt.ISO8601Format())\n"
     }
     presentShareSheet(csv, type: .commaSeparatedText)
   }
@@ -208,7 +262,12 @@ struct SendToMenu: View {
     }
     let fileURL = tempDir.appendingPathComponent(
       "wawa-export-\(UUID().uuidString.prefix(8)).\(ext)")
-    try? content.write(to: fileURL, atomically: true, encoding: .utf8)
+    do {
+      try content.write(to: fileURL, atomically: true, encoding: .utf8)
+    } catch {
+      AppLog.general.error("SendTo: failed to write export file: \(error.localizedDescription)")
+      return
+    }
 
     let activityVC = UIActivityViewController(activityItems: [fileURL], applicationActivities: nil)
     if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,

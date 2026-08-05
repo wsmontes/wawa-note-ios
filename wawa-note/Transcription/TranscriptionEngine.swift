@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import Speech
 import WawaNoteCore
 
@@ -86,6 +87,11 @@ protocol TranscriptionEngine: Sendable {
   /// its onCheckpoint reference to prevent late checkpoints from racing with
   /// the final transcript write.
   mutating func finalize()
+
+  /// BCP-47 language hint sent to the Whisper API as the `language` parameter.
+  /// Prevents auto-detection from picking the wrong language on silent/noisy audio.
+  /// Set before transcribeFile(); nil means auto-detect (default).
+  var languageHint: String? { get set }
 }
 
 // MARK: - Default implementations
@@ -138,6 +144,11 @@ extension TranscriptionEngine {
   var resumePreviousText: String {
     get { "" }
     set { /* no-op for engines without resume support */  }
+  }
+
+  var languageHint: String? {
+    get { nil }
+    set { /* no-op for engines that don't need language hints */  }
   }
 
   mutating func finalize() {
@@ -217,5 +228,131 @@ enum TranscriptionLocaleProvider {
       .filter { configured.contains($0.identifier) }
       .map { ($0.identifier, displayName($0.identifier)) }
       .sorted { $0.1 < $1.1 }
+  }
+}
+
+// MARK: - TranscriptValidator
+
+/// Post-processing validation for transcript segments.
+///
+/// Filters out segments that match known hallucination patterns:
+/// - Non-English text when English is expected (CJK characters, etc.)
+/// - Repeated text loops (same text appearing >3 times consecutively)
+/// - Low-confidence segments (when confidence data is available)
+///
+/// Applied after transcription, before saving transcript.json.
+enum TranscriptValidator {
+  private static let logger = Logger(
+    subsystem: "com.wawa.note", category: "TranscriptValidator")
+
+  struct ValidationResult {
+    let kept: [TranscriptSegment]
+    let discarded: [TranscriptSegment]
+    let warnings: [String]
+  }
+
+  /// Validate transcript segments against hallucination heuristics.
+  /// - Parameters:
+  ///   - segments: Raw segments from the transcription engine
+  ///   - expectedLanguage: BCP-47 or plain name (e.g. "en", "english")
+  /// - Returns: ValidationResult with kept/discarded segments and warnings
+  static func validate(
+    _ segments: [TranscriptSegment], expectedLanguage: String
+  ) -> ValidationResult {
+    guard !segments.isEmpty else {
+      return ValidationResult(kept: [], discarded: [], warnings: [])
+    }
+
+    var kept: [TranscriptSegment] = []
+    var discarded: [TranscriptSegment] = []
+    var warnings: [String] = []
+
+    let isEnglishExpected = expectedLanguage.lowercased().hasPrefix("en")
+
+    // Build a run-length tracker for repetition detection
+    var repeatCount = 0
+    var lastText = ""
+
+    for segment in segments {
+      let text = segment.text.trimmingCharacters(in: .whitespaces)
+
+      // Rule 1: Skip empty segments
+      guard !text.isEmpty else {
+        discarded.append(segment)
+        continue
+      }
+
+      // Rule 2: CJK character detection for English-language transcripts
+      // Whisper sometimes hallucinates Japanese/Chinese text during silence
+      if isEnglishExpected && containsCJK(text) {
+        discarded.append(segment)
+        if warnings.count < 5 {
+          warnings.append(
+            "Discarded CJK segment: \"\(text.prefix(60))...\"")
+        }
+        continue
+      }
+
+      // Rule 3: Repetition loop detection
+      // Same text appearing >3 times consecutively is a hallucination pattern
+      if text == lastText {
+        repeatCount += 1
+        if repeatCount > 3 {
+          discarded.append(segment)
+          continue
+        }
+      } else {
+        repeatCount = 1
+        lastText = text
+      }
+
+      // Rule 4: Low confidence (only applies when confidence data is available)
+      if let confidence = segment.confidence, confidence < 0.3 {
+        discarded.append(segment)
+        if warnings.count < 5 {
+          warnings.append(
+            "Discarded low-confidence segment (confidence: \(String(format: "%.2f", confidence)))")
+        }
+        continue
+      }
+
+      kept.append(segment)
+    }
+
+    if !discarded.isEmpty {
+      logger.warning(
+        "TranscriptValidator: discarded \(discarded.count)/\(segments.count) segments (\(warnings.count) warning types)"
+      )
+      for warning in warnings {
+        logger.warning("  \(warning)")
+      }
+    }
+
+    return ValidationResult(kept: kept, discarded: discarded, warnings: warnings)
+  }
+
+  // MARK: - Helpers
+
+  /// Check if text contains CJK (Chinese/Japanese/Korean) characters.
+  private static func containsCJK(_ text: String) -> Bool {
+    for scalar in text.unicodeScalars {
+      switch scalar.value {
+      case 0x4E00...0x9FFF,  // CJK Unified Ideographs
+        0x3400...0x4DBF,  // CJK Extension A
+        0x3040...0x309F,  // Hiragana
+        0x30A0...0x30FF,  // Katakana
+        0xAC00...0xD7AF,  // Hangul Syllables
+        0x1100...0x11FF,  // Hangul Jamo
+        0x3000...0x303F,  // CJK Symbols
+        0xFF00...0xFFEF,  // Fullwidth Forms
+        0x3100...0x312F,  // Bopomofo
+        0x3300...0x33FF,  // CJK Compatibility
+        0xF900...0xFAFF:  // CJK Compatibility Ideographs
+        return true
+      default:
+        break
+      }
+    }
+    return false
   }
 }

@@ -14,23 +14,18 @@ import OSLog
 ///
 /// Unlike VADAudioChunker (which splits by fixed time), VADChunker
 /// splits by actual speech boundaries — smarter and more efficient.
-@MainActor
-struct VADChunker {
+struct VADChunker: Sendable {
   private let vad: VoiceActivityDetector
   private let maxChunkDuration: TimeInterval
   private let logger = Logger(subsystem: "com.wawa.note", category: "VADChunker")
 
   /// - Parameters:
-  ///   - maxChunkDuration: Maximum seconds per chunk (engine limit, e.g. 50s for Apple Speech)
+  ///   - maxChunkDuration: Maximum seconds per chunk (engine limit, e.g. 50s for Apple Speech, 600s for Remote Whisper)
   init(maxChunkDuration: TimeInterval = 50) {
+    // VoiceActivityDetector uses tuned defaults (speechThreshold: 0.03, silenceThreshold: 0.02,
+    // minSpeechDuration: 0.15) — no override needed.
     self.vad = VoiceActivityDetector()
     self.maxChunkDuration = maxChunkDuration
-    // Tune VAD for transcription pre-processing
-    vad.energyThreshold = 0.03
-    vad.minSpeechDuration = 0.5
-    vad.minSilenceDuration = 0.3
-    vad.preSpeechPad = 0.3
-    vad.postSpeechPad = 0.4
   }
 
   /// Split an audio file into speech-only chunks.
@@ -63,7 +58,7 @@ struct VADChunker {
 
     var chunks: [VADAudioChunk] = []
     for (idx, vadSeg) in merged.enumerated() {
-      let chunkURL = tempDir.appendingPathComponent("chunk_\(idx).caf")
+      let chunkURL = tempDir.appendingPathComponent("chunk_\(idx).wav")
       try writeChunk(
         from: url, startFrame: vadSeg.startFrame, frameCount: vadSeg.frameCount, format: format,
         to: chunkURL)
@@ -88,6 +83,7 @@ struct VADChunker {
   private func mergeShortSegments(_ segments: [VADAudioSegment], maxDuration: TimeInterval)
     -> [VADAudioSegment]
   {
+    guard !segments.isEmpty else { return [] }
     var merged: [VADAudioSegment] = []
     var current = segments[0]
 

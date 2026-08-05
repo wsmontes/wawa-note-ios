@@ -6,46 +6,43 @@ import OSLog
 
 /// Energy-based Voice Activity Detection for offline audio segmentation.
 ///
-/// Thresholds tuned with Meetily's anti-fragmentation parameters:
-/// - Speech threshold: 0.50 (prevents silence from leaking)
-/// - Silence threshold: 0.35 (allows natural pauses)
-/// - Min speech: 250ms (prevents Whisper-rejected <100ms fragments)
-/// - Redemption time: 2000ms (bridges natural pauses, was capped at 400ms)
+/// Thresholds tuned for real-world meeting audio:
+/// - Speech threshold: 0.03 (sensitive enough for quiet speech, high enough to reject room tone)
+/// - Silence threshold: 0.02 (hysteresis floor — prevents mid-word cutoffs)
+/// - Min speech: 150ms (captures short utterances, above Whisper's ~100ms minimum)
 /// - Pre-speech pad: 300ms (context before speech)
 /// - Post-speech pad: 400ms (context after speech)
 ///
 /// Reference: Meetily's `vad.rs` — ContinuousVadProcessor with Silero VAD.
 /// For ML-based VAD, convert Silero ONNX → CoreML via coremltools.
-@MainActor
-final class VoiceActivityDetector: ObservableObject {
+final class VoiceActivityDetector: Sendable {
   private let logger = Logger(subsystem: "com.wawa.note", category: "VAD")
 
   /// Positive speech threshold — RMS level above this is definitely speech.
-  /// Meetily default: 0.50 (higher = stricter, prevents false positives).
-  var speechThreshold: Float = 0.05
+  let speechThreshold: Float = 0.03
 
   /// Minimum duration (seconds) for a speech segment to be valid.
-  /// Meetily default: 250ms (prevents Whisper-rejected fragments <100ms).
-  var minSpeechDuration: TimeInterval = 0.25
+  let minSpeechDuration: TimeInterval = 0.15
 
   /// Minimum silence duration (seconds) to split segments.
-  /// Meetily default: 400ms (bridges natural pauses in speech).
-  var minSilenceDuration: TimeInterval = 0.4
+  let minSilenceDuration: TimeInterval = 0.4
 
   /// Pre-speech padding (seconds) — audio context added before speech starts.
-  /// Meetily default: 300ms. Applied during segment extraction.
-  var preSpeechPad: TimeInterval = 0.3
+  let preSpeechPad: TimeInterval = 0.3
 
   /// Post-speech padding (seconds) — audio context added after speech ends.
-  /// Meetily default: 400ms. Applied during segment extraction.
-  var postSpeechPad: TimeInterval = 0.4
+  let postSpeechPad: TimeInterval = 0.4
 
   /// Legacy energy threshold (kept for compatibility).
   /// Use `speechThreshold` instead.
   var energyThreshold: Float {
-    get { speechThreshold }
-    set { speechThreshold = newValue }
+    speechThreshold
   }
+
+  /// Silence threshold for hysteresis — below this is definitely silence.
+  /// Must be lower than speechThreshold. When in-speech, the detector stays
+  /// in-speech until RMS drops below this value, preventing mid-word cutoffs.
+  let silenceThreshold: Float = 0.02
 
   // MARK: - Detection Result
 
@@ -62,11 +59,26 @@ final class VoiceActivityDetector: ObservableObject {
 
   /// Detect speech segments using RMS energy threshold.
   /// Fast, works offline, no ML model needed.
+  ///
+  /// Memory guard: rejects files that would allocate >500 MB for the PCM buffer.
+  /// 2h mono 44.1kHz Float32 ≈ 1.27 GB — this method is intended for short
+  /// files only. For long recordings use a streaming/chunked VAD instead.
+  ///
+  /// Safe to call from any context.
   func detectSpeech(in audioURL: URL) throws -> [SpeechSegment] {
+
     let audioFile = try AVAudioFile(forReading: audioURL)
     let format = audioFile.processingFormat
     let totalFrames = AVAudioFrameCount(audioFile.length)
     let sampleRate = format.sampleRate
+
+    // Guard against OOM: 500 MB cap (~90 min 44.1kHz mono, or 45 min stereo)
+    let estimatedBytes =
+      UInt64(totalFrames) * UInt64(format.streamDescription.pointee.mBytesPerFrame)
+    let maxBytes: UInt64 = 500_000_000
+    guard estimatedBytes <= maxBytes else {
+      throw VADError.bufferAllocationFailed
+    }
 
     // Read entire file into buffer
     guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: totalFrames) else {
@@ -80,7 +92,7 @@ final class VoiceActivityDetector: ObservableObject {
 
     let frameLength = Int(buffer.frameLength)
     let windowSize = Int(sampleRate * 0.1)  // 100ms windows
-    let minSilenceFrames = Int(sampleRate * minSilenceDuration)
+    let minSilenceDurationFrames = Int(sampleRate * minSilenceDuration)
 
     var segments: [SpeechSegment] = []
     var speechStart: Int?
@@ -99,7 +111,11 @@ final class VoiceActivityDetector: ObservableObject {
         sumSquares += sample * sample
       }
       let rms = sqrt(sumSquares / Float(windowLength))
-      let isSpeech = rms > energyThreshold
+      // Hysteresis: use higher threshold to START speech, lower to END.
+      // This prevents mid-word cutoffs during quiet syllables while still
+      // rejecting background noise when no speech is present.
+      let threshold = (speechStart != nil) ? silenceThreshold : speechThreshold
+      let isSpeech = rms > threshold
 
       if isSpeech {
         if speechStart == nil {
@@ -113,14 +129,14 @@ final class VoiceActivityDetector: ObservableObject {
             silenceStart = i
           }
           let silenceDuration = i - (silenceStart ?? i)
-          if silenceDuration >= minSilenceFrames {
+          if silenceDuration >= minSilenceDurationFrames {
             let segmentDuration = Double(i - start) / sampleRate
             if segmentDuration >= minSpeechDuration {
               segments.append(
                 SpeechSegment(
                   startTime: Double(start) / sampleRate,
                   endTime: Double(i) / sampleRate,
-                  confidence: min(currentRMS / (energyThreshold * 5), 1.0),
+                  confidence: min(currentRMS / (speechThreshold * 5), 1.0),
                   rms: currentRMS
                 ))
             }
@@ -140,7 +156,7 @@ final class VoiceActivityDetector: ObservableObject {
           SpeechSegment(
             startTime: Double(start) / sampleRate,
             endTime: Double(frameLength) / sampleRate,
-            confidence: min(currentRMS / (energyThreshold * 5), 1.0),
+            confidence: min(currentRMS / (speechThreshold * 5), 1.0),
             rms: currentRMS
           ))
       }

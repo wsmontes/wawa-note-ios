@@ -2367,16 +2367,21 @@ enum ShellInterpreter {
     if let id = UUID(uuidString: target),
       let item = try? KnowledgeItemService(context: ctx.modelContext).fetchItem(id: id)
     {
+      let store = FileArtifactStore()
+      let analysis = try? store.readArtifact(
+        MeetingAnalysis.self, fileName: "analysis.json", meetingId: id)
+      let transcript = try? store.readArtifact(
+        Transcript.self, fileName: "transcript.json", meetingId: id)
       let output: String
       if format == "json" {
         let exporter = JSONExporter()
-        if let data = try? exporter.export(item: item, transcript: nil, analysis: nil) {
+        if let data = try? exporter.export(item: item, transcript: transcript, analysis: analysis) {
           output = String(data: data, encoding: .utf8) ?? ""
         } else {
           return shellErr("export: JSON export failed")
         }
       } else {
-        output = MarkdownExporter().export(item: item, transcript: nil, analysis: nil)
+        output = MarkdownExporter().export(item: item, transcript: transcript, analysis: analysis)
       }
       let dir = ctx.fileStore.exportsDirectoryURL(for: id)
       try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -2392,8 +2397,11 @@ enum ShellInterpreter {
       let pSvc = ProjectService(context: ctx.modelContext)
       let items = (try? pSvc.items(in: pid)) ?? []
       let tasks = (try? TaskService(context: ctx.modelContext).tasks(for: pid)) ?? []
+      let allEdges = (try? ctx.modelContext.fetch(FetchDescriptor<GraphEdge>())) ?? []
+      let itemIDs = Set(items.map(\.id))
+      let edges = allEdges.filter { itemIDs.contains($0.fromID) || itemIDs.contains($0.toID) }
       let output = ProjectExportService().exportMarkdown(
-        project: project, items: items, tasks: tasks, edges: [])
+        project: project, items: items, tasks: tasks, edges: edges)
       let dir = ctx.fileStore.exportsDirectoryURL(for: pid)
       try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
       let url = dir.appendingPathComponent("project_export.\(ext)")

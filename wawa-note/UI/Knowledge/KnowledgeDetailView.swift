@@ -421,8 +421,8 @@ struct KnowledgeDetailView: View {
 
             if hasExportableContent {
               Menu {
-                // Textual exports (when transcript/analysis available)
-                if transcript != nil || analysis != nil {
+                // Textual exports (when transcript, analysis, or body text available)
+                if transcript != nil || analysis != nil || (item.bodyText?.isEmpty == false) {
                   ShareLink(
                     "Markdown",
                     item: MarkdownExporter().export(
@@ -997,6 +997,7 @@ struct KnowledgeDetailView: View {
     transcript != nil || analysis != nil
       || item.type == .image || item.type == .note
       || item.type == .journalEntry || item.type == .webBookmark
+      || item.bodyText?.isEmpty == false
       || hasPlayableAudio
   }
 
@@ -2469,16 +2470,18 @@ struct KnowledgeDetailView: View {
     return String(format: "%02d:%02d", m, s)
   }
 
-  /// Get the first available extracted text for review (transcript, body, raw body).
+  /// Get the first available extracted text for review.
+  /// User-edited bodyText takes priority over the original transcript.json.
   private func extractionPreview() -> String? {
+    // User edits (saved to bodyText) take priority
+    if let body = item.bodyText, !body.trimmingCharacters(in: .whitespaces).isEmpty {
+      return body
+    }
     if let transcript = try? fileStore.readArtifact(
       Transcript.self, fileName: "transcript.json", meetingId: item.id)
     {
       let text = transcript.segments.map(\.text).joined(separator: " ")
       if !text.trimmingCharacters(in: .whitespaces).isEmpty { return text }
-    }
-    if let body = item.bodyText, !body.trimmingCharacters(in: .whitespaces).isEmpty {
-      return body
     }
     return nil
   }

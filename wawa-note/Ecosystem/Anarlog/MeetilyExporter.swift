@@ -31,12 +31,34 @@ struct MeetilyExporter {
   // MARK: - Export JSON
 
   /// Export a single KnowledgeItem as Meetily-compatible JSON.
+  /// When transcript/analysis are not provided, reads them from disk automatically.
   func exportJSON(
     item: KnowledgeItem,
-    transcript: String? = nil,
-    analysis: MeetingAnalysis? = nil
+    transcript transcriptParam: String? = nil,
+    analysis analysisParam: MeetingAnalysis? = nil
   ) throws -> Data {
     var json: [String: Any] = [:]
+
+    // Resolve transcript: use parameter, then disk, then bodyText
+    let transcriptText: String?
+    if let t = transcriptParam {
+      transcriptText = t
+    } else if let t = try? fileStore.readArtifact(
+      Transcript.self, fileName: "transcript.json", meetingId: item.id)
+    {
+      transcriptText = renderTranscript(t)
+    } else {
+      transcriptText = nil
+    }
+
+    // Resolve analysis: use parameter, then disk
+    let analysis: MeetingAnalysis?
+    if let a = analysisParam {
+      analysis = a
+    } else {
+      analysis = try? fileStore.readArtifact(
+        MeetingAnalysis.self, fileName: "analysis.json", meetingId: item.id)
+    }
 
     // Meeting metadata
     json["meeting"] = [
@@ -47,8 +69,8 @@ struct MeetilyExporter {
     ]
 
     // Transcript
-    if let transcriptText = transcript {
-      json["transcript"] = transcriptText
+    if let text = transcriptText {
+      json["transcript"] = text
     } else if let bodyText = item.bodyText {
       json["transcript"] = bodyText
     } else {

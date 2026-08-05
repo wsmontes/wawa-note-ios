@@ -181,9 +181,14 @@ struct ProjectHomeView: View {
 
   private func exportMarkdown() {
     let items = (try? ProjectService(context: modelContext).items(in: project.id)) ?? []
+    let allTasks = (try? modelContext.fetch(FetchDescriptor<TaskItem>())) ?? []
+    let tasks = allTasks.filter { $0.projectID == project.id }
+    let allEdges = (try? modelContext.fetch(FetchDescriptor<GraphEdge>())) ?? []
+    let itemIDs = Set(items.map(\.id))
+    let edges = allEdges.filter { itemIDs.contains($0.fromID) || itemIDs.contains($0.toID) }
     let exporter = ProjectExportService()
     let md = exporter.exportMarkdown(
-      project: project, items: items, tasks: [String](), edges: [GraphEdge]())
+      project: project, items: items, tasks: tasks, edges: edges)
     let vc = UIActivityViewController(activityItems: [md], applicationActivities: nil)
     if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
       let root = scene.windows.first?.rootViewController

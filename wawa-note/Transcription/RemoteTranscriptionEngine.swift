@@ -2,6 +2,7 @@ import AVFoundation
 import OSLog
 import WawaNoteCore
 
+// SAFETY: URLSession is thread-safe. API key immutable after init. No shared mutable state.
 final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable {
   let id = "remote-whisper"
   let displayName = "Whisper via API"
@@ -19,6 +20,8 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
   /// Last checkpoint segment text, seeded by ContentExtractionService so
   /// deduplicateStart correctly removes the chunk overlap at the resume boundary.
   var resumePreviousText: String = ""
+  /// BCP-47 language hint passed to Whisper API to prevent wrong-language hallucination.
+  var languageHint: String?
   private(set) var isCancelled = false
 
   var capabilities: TranscriptionCapabilities {
@@ -87,6 +90,9 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
   // MARK: - Transcribe
 
   func transcribeFile(_ audioFileURL: URL, meetingId: UUID) async throws -> Transcript {
+    // Issue 11 fix: if already cancelled before entry, throw immediately
+    // instead of resetting the flag and running a doomed transcription.
+    try Task.checkCancellation()
     isCancelled = false
 
     let durationSeconds = getDuration(audioFileURL)
@@ -98,7 +104,15 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
 
     if durationSeconds <= chunker.chunkDuration && mb < 25 {
       onProgress?(.transcribing(chunk: 1, totalChunks: 1))
-      return try await transcribeSingle(url: audioFileURL, prompt: nil, meetingId: meetingId)
+      let result = try await transcribeSingle(
+        url: audioFileURL, prompt: nil, meetingId: meetingId, language: languageHint)
+      let nonEmpty = result.segments.filter {
+        !$0.text.trimmingCharacters(in: .whitespaces).isEmpty
+      }
+      guard !nonEmpty.isEmpty else {
+        throw TranscriptionError.recognitionFailed("No speech detected")
+      }
+      return result
     }
 
     let total = Int(ceil(durationSeconds / chunker.chunkDuration))
@@ -157,7 +171,8 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
         }
         do {
           transcript = try await transcribeSingle(
-            url: chunk.url, prompt: prompt, meetingId: meetingId)
+            url: chunk.url, prompt: prompt, meetingId: meetingId,
+            language: languageHint)
           lastChunkError = nil
           break
         } catch TranscriptionError.cancelled {
@@ -165,6 +180,11 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
         } catch TranscriptionError.fileTooLarge {
           // Non-retryable: server rejected the file size
           throw TranscriptionError.fileTooLarge
+        } catch let te as TranscriptionError {
+          // Issue 14 fix: permanent errors (quotaExhausted, etc.) — never retry.
+          // lastChunkError is nil on the first attempt, so rethrow directly
+          // instead of force-casting (Round 2 fix).
+          throw te
         } catch {
           lastChunkError = error
           AppLog.transcription.warning(
@@ -230,6 +250,29 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
 
     allSegments = allSegments.filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
 
+    // Round 2 fix: when startIndex >= chunks.count (all chunks were completed
+    // in a prior run that crashed before transcript.json), the loop skipped
+    // everything. Return empty Transcript for AudioProcessor merge with
+    // the pre-run checkpoint snapshot. Same as AppleSpeech Issue 4 fix.
+    if allSegments.isEmpty && startIndex >= chunks.count {
+      AppLog.transcription.info(
+        "Remote: all \(chunks.count) chunks were pre-completed — returning checkpoint-based transcript"
+      )
+      return Transcript(
+        meetingId: meetingId,
+        languageCode: languageCode,
+        segments: [],
+        sourceEngineId: id
+      )
+    }
+
+    // S1 fix: empty transcript after filtering means no speech was detected.
+    // Throw instead of returning a zero-segment Transcript so the pipeline
+    // can distinguish silent audio from a successful transcription.
+    guard !allSegments.isEmpty else {
+      throw TranscriptionError.recognitionFailed("No speech detected")
+    }
+
     AppLog.transcription.info("Remote transcription complete: \(allSegments.count) segments")
     return Transcript(
       meetingId: allSegments.first?.meetingId,
@@ -247,9 +290,9 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
   private static let maxHTTPRetries = 2
   private static let baseDelayNs: UInt64 = 2_000_000_000  // 2 seconds
 
-  private func transcribeSingle(url: URL, prompt: String?, meetingId: UUID) async throws
-    -> Transcript
-  {
+  private func transcribeSingle(
+    url: URL, prompt: String?, meetingId: UUID, language: String? = nil
+  ) async throws -> Transcript {
     let endpoint = baseURL.appendingPathComponent("audio/transcriptions")
     let boundary = UUID().uuidString
     let model = AIConfigService.shared.modelFor(feature: "transcription")
@@ -259,7 +302,8 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
     let bodyURL = tempDir.appendingPathComponent("transcription_\(UUID().uuidString).body")
     defer { try? FileManager.default.removeItem(at: bodyURL) }
     try buildBodyFile(
-      audioURL: url, prompt: prompt, model: model, boundary: boundary, outputURL: bodyURL)
+      audioURL: url, prompt: prompt, model: model, boundary: boundary, outputURL: bodyURL,
+      language: language)
 
     var lastError: Error?
     for attempt in 0...Self.maxHTTPRetries {
@@ -295,6 +339,22 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
           let body = String(data: resData, encoding: .utf8) ?? "<no body>"
           AppLog.transcription.error("API returned \(http.statusCode): \(body.prefix(300))")
           if http.statusCode == 413 { throw TranscriptionError.fileTooLarge }
+          // Issue 14 fix: detect permanent quota/billing errors in 429 response.
+          // Only match the specific, well-known OpenAI/Groq quota keys.
+          // "billing" was too broad — it matched transient messages like
+          // "billing cycle rate limit" on non-OpenAI endpoints, and the
+          // hardcoded OpenAI URL was wrong for other providers.
+          // Throw .quotaExhausted so the chunk loop skips retries.
+          if http.statusCode == 429 {
+            let lowerBody = body.lowercased()
+            if lowerBody.contains("insufficient_quota")
+              || lowerBody.contains("credit_balance_exhausted")
+            {
+              throw TranscriptionError.quotaExhausted(
+                "Your transcription API account has no remaining credits. Add credits or switch to on-device transcription in Settings."
+              )
+            }
+          }
           // Retry on server errors (5xx), rate limits (429), and request timeout (408)
           if http.statusCode == 429 || http.statusCode == 408
             || (500...599).contains(http.statusCode)
@@ -373,6 +433,7 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
         lastError = error
         if case .fileTooLarge = error { throw error }  // don't retry
         if case .cancelled = error { throw error }  // don't retry
+        if case .quotaExhausted = error { throw error }  // Issue 14: permanent, don't retry
       } catch let error as URLError {
         lastError = error
         // Network errors are retryable: timeout, connection lost, not connected
@@ -404,7 +465,8 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
   // MARK: - Multipart to temp file (streaming — no full-file RAM load)
 
   private func buildBodyFile(
-    audioURL: URL, prompt: String?, model: String, boundary: String, outputURL: URL
+    audioURL: URL, prompt: String?, model: String, boundary: String, outputURL: URL,
+    language: String? = nil, temperature: Float? = 0.0
   ) throws {
     guard let output = OutputStream(url: outputURL, append: false) else {
       throw NSError(
@@ -458,6 +520,24 @@ final class RemoteTranscriptionEngine: TranscriptionEngine, @unchecked Sendable 
       try write("--\(boundary)\(lb)")
       try write("Content-Disposition: form-data; name=\"prompt\"\(lb)\(lb)")
       try write("\(prompt)\(lb)")
+    }
+
+    // Language hint: prevents Whisper from auto-detecting the wrong language
+    // and hallucinating text in other languages on silent/noisy audio.
+    // Only send valid ISO-639-1 codes (2-letter); Whisper sometimes returns
+    // non-standard codes like "nynorsk" which the API rejects.
+    if let language, !language.isEmpty, language.count == 2 {
+      try write("--\(boundary)\(lb)")
+      try write("Content-Disposition: form-data; name=\"language\"\(lb)\(lb)")
+      try write("\(language)\(lb)")
+    }
+
+    // Temperature: explicit 0 eliminates sampling randomness, reducing hallucination.
+    // OpenAI defaults to 0 but other providers (Groq) have different defaults.
+    if let temp = temperature {
+      try write("--\(boundary)\(lb)")
+      try write("Content-Disposition: form-data; name=\"temperature\"\(lb)\(lb)")
+      try write("\(String(format: "%.1f", temp))\(lb)")
     }
 
     let filename = audioURL.lastPathComponent

@@ -216,16 +216,25 @@ struct ProjectExportService {
   // MARK: - Tasks CSV export
 
   func exportTasksCSV(tasks: [TaskItem]) -> String {
+    let iso = ISO8601DateFormatter()
     var csv = "Title,Status,Priority,Owner,Due Date,Source Item,Created\n"
     for task in tasks {
-      let title = task.title.replacingOccurrences(of: "\"", with: "\"\"")
-      csv += "\"\(title)\",\(task.status.rawValue),\(task.priority.rawValue),"
-      csv +=
-        "\(task.ownerName ?? ""),\(task.dueAt?.formatted(date: .abbreviated, time: .omitted) ?? ""),"
-      csv +=
-        "\(task.sourceItemID?.uuidString.prefix(8) ?? ""),\(task.createdAt.formatted(date: .abbreviated, time: .shortened))\n"
+      let title = escapeCSV(task.title)
+      let owner = escapeCSV(task.ownerName ?? "")
+      let dueDate = task.dueAt.map { iso.string(from: $0) } ?? ""
+      let created = iso.string(from: task.createdAt)
+      let sourceId = task.sourceItemID?.uuidString.prefix(8) ?? ""
+      csv += "\(title),\(task.status.rawValue),\(task.priority.rawValue),"
+      csv += "\(owner),\(dueDate),\(sourceId),\(created)\n"
     }
     return csv
+  }
+
+  private func escapeCSV(_ field: String) -> String {
+    if field.contains(",") || field.contains("\"") || field.contains("\n") {
+      return "\"\(field.replacingOccurrences(of: "\"", with: "\"\""))\""
+    }
+    return field
   }
 
   // MARK: - Helpers
@@ -1142,13 +1151,14 @@ final class InstanceExportService {
     else { return nil }
 
     var srt = ""
-    for (index, segment) in transcript.segments.enumerated() {
-      let seq = index + 1
+    var sequence = 1
+    for segment in transcript.segments {
       let start = formatSRTTimestamp(segment.startTime)
       let end = formatSRTTimestamp(segment.endTime ?? segment.startTime + 5)
       let text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
       guard !text.isEmpty else { continue }
-      srt += "\(seq)\n\(start) --> \(end)\n\(text)\n\n"
+      srt += "\(sequence)\n\(start) --> \(end)\n\(text)\n\n"
+      sequence += 1
     }
     return srt.isEmpty ? nil : srt
   }
@@ -1179,7 +1189,8 @@ final class InstanceExportService {
     formatter.dateStyle = .medium
     vtt += "NOTE\nExported from Wawa Note — \(formatter.string(from: Date()))\n\n"
 
-    for (index, segment) in transcript.segments.enumerated() {
+    var cueNumber = 1
+    for segment in transcript.segments {
       let text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
       guard !text.isEmpty else { continue }
 
@@ -1187,7 +1198,7 @@ final class InstanceExportService {
       let end = formatVTTTimestamp(segment.endTime ?? segment.startTime + 5)
 
       // Optional cue identifier
-      let cueId = "\(index + 1)"
+      let cueId = "\(cueNumber)"
       vtt += "\(cueId)\n\(start) --> \(end)"
 
       // Add speaker if available
@@ -1198,6 +1209,7 @@ final class InstanceExportService {
         vtt += "\n\(text)"
       }
       vtt += "\n\n"
+      cueNumber += 1
     }
     return vtt.isEmpty ? nil : vtt
   }
